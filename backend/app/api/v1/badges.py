@@ -1,21 +1,28 @@
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
 from supabase import Client
 
-from app.core.auth import get_current_user
+from app.schemas import Badge, BadgeCreate, User
 from app.core.database import get_supabase
-from app.models.user import User
-from app.models.badge import Badge, UserBadge
-from app.schemas.badge import Badge as BadgeSchema, UserBadge as UserBadgeSchema
-from app.services.blockchain_service import BlockchainService
+from app.core.auth import get_current_active_user
 
 router = APIRouter()
 
-
-@router.get("/", response_model=List[BadgeSchema])
-async def get_all_badges(
+@router.post("/", response_model=Badge, status_code=201)
+async def create_badge(
+    badge: BadgeCreate,
     supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Create a new badge (admin-only in a real app)"""
+    response = supabase_client.table('badges').insert(badge.dict()).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+    return response.data[0]
+
+@router.get("/", response_model=List[Badge])
+async def get_all_badges(
+    supabase_client: Client = Depends(get_supabase)
 ):
     """Get all available badges"""
     response = supabase_client.table('badges').select('*').execute()
@@ -23,81 +30,46 @@ async def get_all_badges(
         raise HTTPException(status_code=400, detail=response.error.message)
     return response.data
 
-
-@router.get("/me", response_model=List[UserBadgeSchema])
-async def get_my_badges(
-    supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_user)
+@router.get("/{badge_id}", response_model=Badge)
+async def get_badge(
+    badge_id: int,
+    supabase_client: Client = Depends(get_supabase)
 ):
-    """Get current user's badges"""
-    response = supabase_client.table('user_badges').select('badges(*)').eq('user_id', current_user.id).execute()
+    """Get a badge by its ID"""
+    response = supabase_client.table('badges').select('*').eq('id', badge_id).single().execute()
+    if response.error:
+        raise HTTPException(status_code=404, detail="Badge not found")
+    return response.data
+
+@router.post("/award/{user_id}/{badge_id}", response_model=dict)
+async def award_badge_to_user(
+    user_id: str,
+    badge_id: int,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Award a badge to a user (admin-only in a real app)"""
+    award_data = {'user_id': user_id, 'badge_id': badge_id}
+    response = supabase_client.table('user_badges').insert(award_data).execute()
+    
+    if response.error:
+        if "duplicate key value" in response.error.message:
+            raise HTTPException(status_code=409, detail="User already has this badge")
+        raise HTTPException(status_code=400, detail=response.error.message)
+        
+    return {"message": "Badge awarded successfully"}
+
+@router.get("/user/{user_id}", response_model=List[Badge])
+async def get_user_badges(
+    user_id: str,
+    supabase_client: Client = Depends(get_supabase)
+):
+    """Get all badges for a specific user"""
+    response = supabase_client.table('user_badges').select('badges(*)').eq('user_id', user_id).execute()
     
     if response.error:
         raise HTTPException(status_code=400, detail=response.error.message)
         
-    # The result is a list of {'badges': {...}} dicts, so we extract the badge details.
     user_badges = [item['badges'] for item in response.data if item.get('badges')]
     
     return user_badges
-
-
-@router.post("/award/{badge_name}")
-async def award_badge(
-    badge_name: str,
-    supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_user)
-):
-    """Award a badge to current user (for testing/admin)"""
-    # Get badge
-    response = supabase_client.table('badges').select('*').eq('name', badge_name).single().execute()
-    if response.error:
-        raise HTTPException(status_code=404, detail="Badge not found")
-    badge = response.data
-    
-    # Check if user already has this badge
-    response = supabase_client.table('user_badges').select('*').eq('user_id', current_user.id).eq('badge_id', badge['id']).execute()
-    if response.data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User already has this badge"
-        )
-    
-    # Create blockchain NFT
-    blockchain_service = BlockchainService()
-    nft_result = await blockchain_service.create_badge_nft(
-        badge_name,
-        badge['description'],
-        badge['image_url'],
-        str(current_user.id)
-    )
-    
-    # Award badge
-    response = supabase_client.table('user_badges').insert({
-        'user_id': current_user.id,
-        'badge_id': badge['id'],
-        'blockchain_asset_id': nft_result.get("asset_id") if nft_result else None,
-        'transaction_id': nft_result.get("transaction_id") if nft_result else None
-    }).execute()
-    
-    if response.error:
-        raise HTTPException(status_code=400, detail=response.error.message)
-    
-    return {
-        "message": "Badge awarded successfully",
-        "badge": badge,
-        "blockchain_info": nft_result
-    }
-
-
-@router.get("/leaderboard")
-async def get_badge_leaderboard(
-    supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_user)
-):
-    """Get badge leaderboard"""
-    # This would require a more complex query to aggregate user badge counts
-    # For now, return a simple response
-    return {
-        "message": "Leaderboard feature coming soon",
-        "top_users": []
-    }

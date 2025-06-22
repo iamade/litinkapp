@@ -6,7 +6,6 @@ from supabase import Client
 from app.core.auth import get_current_user, get_current_author, get_current_active_user
 from app.core.database import get_supabase
 from app.schemas import Book, BookCreate, BookUpdate, User
-from app.models.book import Book as BookModel, Chapter, BookType, BookStatus
 from app.schemas.book import Book as BookSchema, Chapter as ChapterSchema, ChapterCreate
 from app.services.ai_service import AIService
 from app.services.file_service import FileService
