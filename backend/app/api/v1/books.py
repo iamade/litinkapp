@@ -1,12 +1,13 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
+from supabase import Client
 
-from app.core.auth import get_current_user, get_current_author
-from app.core.database import get_db
-from app.models.user import User
-from app.models.book import Book, Chapter, BookType, BookStatus
-from app.schemas.book import Book as BookSchema, BookCreate, BookUpdate, Chapter as ChapterSchema, ChapterCreate
+from app.core.auth import get_current_user, get_current_author, get_current_active_user
+from app.core.database import get_supabase
+from app.schemas import Book, BookCreate, BookUpdate, User
+from app.models.book import Book as BookModel, Chapter, BookType, BookStatus
+from app.schemas.book import Book as BookSchema, Chapter as ChapterSchema, ChapterCreate
 from app.services.ai_service import AIService
 from app.services.file_service import FileService
 
@@ -16,41 +17,44 @@ router = APIRouter()
 @router.get("/", response_model=List[BookSchema])
 async def get_books(
     book_type: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
+    supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_user)
 ):
     """Get published books"""
     book_type_enum = BookType(book_type) if book_type else None
-    books = await Book.get_published_books(db, book_type_enum)
-    return books
+    response = supabase_client.table('books').select('*').eq('status', 'PUBLISHED').eq('book_type', book_type_enum).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+    return response.data
 
 
 @router.get("/my-books", response_model=List[BookSchema])
 async def get_my_books(
-    db: AsyncSession = Depends(get_db),
+    supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_author)
 ):
     """Get books by current author"""
-    books = await Book.get_by_author(db, str(current_user.id))
-    return books
+    response = supabase_client.table('books').select('*').eq('author_id', current_user.id).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+    return response.data
 
 
 @router.get("/{book_id}", response_model=BookSchema)
 async def get_book(
-    book_id: str,
-    db: AsyncSession = Depends(get_db),
+    book_id: int,
+    supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_user)
 ):
     """Get book by ID"""
-    book = await Book.get_by_id(db, book_id)
-    if not book:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Book not found"
-        )
+    response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
+    if response.error:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    book = response.data
     
     # Check if user can access this book
-    if book.status != BookStatus.PUBLISHED and book.author_id != current_user.id:
+    if book['status'] != BookStatus.PUBLISHED and book['author_id'] != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -61,66 +65,68 @@ async def get_book(
 
 @router.post("/", response_model=BookSchema)
 async def create_book(
-    book_data: BookCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_author)
+    title: str = Form(...),
+    description: str = Form(...),
+    file: UploadFile = File(...),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
 ):
     """Create a new book"""
-    book = await Book.create(
-        db,
-        **book_data.dict(),
-        author_id=current_user.id
-    )
-    return book
+    file_service = FileService()
+    content = await file_service.process_book_file(file)
+    
+    book_data = {
+        "title": title,
+        "description": description,
+        "content": content,
+        "author_id": current_user['id']
+    }
+    
+    response = supabase_client.table('books').insert(book_data).execute()
+    
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+    
+    return response.data[0]
 
 
 @router.put("/{book_id}", response_model=BookSchema)
 async def update_book(
-    book_id: str,
-    book_data: BookUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_author)
+    book_id: int,
+    book_update: BookUpdate,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
 ):
     """Update book"""
-    book = await Book.get_by_id(db, book_id)
-    if not book:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Book not found"
-        )
+    # Verify the user is the author
+    response = supabase_client.table('books').select('author_id').eq('id', book_id).single().execute()
+    if response.error or not response.data or response.data['author_id'] != current_user['id']:
+        raise HTTPException(status_code=403, detail="Not authorized to update this book")
+        
+    update_data = book_update.dict(exclude_unset=True)
+    response = supabase_client.table('books').update(update_data).eq('id', book_id).execute()
+
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
     
-    if book.author_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    
-    # Update book fields
-    update_data = book_data.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(book, field, value)
-    
-    await db.commit()
-    await db.refresh(book)
-    return book
+    return response.data[0]
 
 
 @router.post("/{book_id}/chapters", response_model=ChapterSchema)
 async def create_chapter(
-    book_id: str,
+    book_id: int,
     chapter_data: ChapterCreate,
-    db: AsyncSession = Depends(get_db),
+    supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_author)
 ):
     """Create a new chapter"""
-    book = await Book.get_by_id(db, book_id)
-    if not book:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Book not found"
-        )
+    response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
+    if response.error:
+        raise HTTPException(status_code=404, detail="Book not found")
     
-    if book.author_id != current_user.id:
+    book = response.data
+    
+    if book['author_id'] != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -130,46 +136,46 @@ async def create_chapter(
     ai_service = AIService()
     ai_content = await ai_service.generate_chapter_content(
         chapter_data.content,
-        book.book_type,
-        book.difficulty
+        book['book_type'],
+        book['difficulty']
     )
     
     chapter = await Chapter.create(
-        db,
+        supabase_client,
         book_id=book_id,
         **chapter_data.dict(),
         ai_generated_content=ai_content
     )
     
     # Update book chapter count
-    book.total_chapters = len(await Chapter.get_by_book(db, book_id))
-    await db.commit()
+    response = supabase_client.table('books').update({'total_chapters': len(await Chapter.get_by_book(supabase_client, book_id))}).eq('id', book_id).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
     
     return chapter
 
 
 @router.get("/{book_id}/chapters", response_model=List[ChapterSchema])
 async def get_chapters(
-    book_id: str,
-    db: AsyncSession = Depends(get_db),
+    book_id: int,
+    supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_user)
 ):
     """Get chapters for a book"""
-    book = await Book.get_by_id(db, book_id)
-    if not book:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Book not found"
-        )
+    response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
+    if response.error:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    book = response.data
     
     # Check access permissions
-    if book.status != BookStatus.PUBLISHED and book.author_id != current_user.id:
+    if book['status'] != BookStatus.PUBLISHED and book['author_id'] != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
     
-    chapters = await Chapter.get_by_book(db, book_id)
+    chapters = await Chapter.get_by_book(supabase_client, book_id)
     return chapters
 
 
@@ -179,7 +185,7 @@ async def upload_book(
     title: str = "",
     book_type: str = "learning",
     difficulty: str = "medium",
-    db: AsyncSession = Depends(get_db),
+    supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_author)
 ):
     """Upload and process a book file"""
@@ -190,8 +196,8 @@ async def upload_book(
     content = await file_service.process_book_file(file)
     
     # Create book
-    book = await Book.create(
-        db,
+    book = await BookModel.create(
+        supabase_client,
         title=title or file.filename,
         author_name=current_user.display_name or current_user.email,
         author_id=current_user.id,
@@ -204,7 +210,7 @@ async def upload_book(
     
     for i, chapter_content in enumerate(chapters, 1):
         await Chapter.create(
-            db,
+            supabase_client,
             book_id=book.id,
             chapter_number=i,
             title=chapter_content["title"],
@@ -216,6 +222,51 @@ async def upload_book(
     # Update book
     book.total_chapters = len(chapters)
     book.estimated_duration = sum(ch.get("duration", 15) for ch in chapters)
-    await db.commit()
+    await supabase_client.table('books').update({'total_chapters': book.total_chapters, 'estimated_duration': book.estimated_duration}).eq('id', book.id).execute()
     
     return book
+
+
+@router.delete("/{book_id}", response_model=BookSchema)
+async def delete_book(
+    book_id: int,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Delete a book"""
+    # Verify the user is the author
+    response = supabase_client.table('books').select('author_id').eq('id', book_id).single().execute()
+    if response.error or not response.data or response.data['author_id'] != current_user['id']:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this book")
+
+    response = supabase_client.table('books').delete().eq('id', book_id).execute()
+    
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+        
+    return response.data[0]
+
+
+@router.post("/search", response_model=List[BookSchema])
+async def search_books(
+    query: str,
+    supabase_client: Client = Depends(get_supabase)
+):
+    """Search for books by title or description"""
+    response = supabase_client.table('books').select('*').text_search('fts', query).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+    return response.data
+
+
+@router.get("/recommendations/{user_id}", response_model=List[BookSchema])
+async def get_book_recommendations(
+    user_id: int,
+    supabase_client: Client = Depends(get_supabase)
+):
+    """Get book recommendations for a user (dummy implementation)"""
+    # This is a placeholder for a real recommendation engine
+    response = supabase_client.table('books').select('*').limit(5).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+    return response.data

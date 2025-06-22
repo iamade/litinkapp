@@ -1,9 +1,9 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from supabase import Client
 
-from app.core.auth import get_current_user
-from app.core.database import get_db
+from app.core.auth import get_current_active_user
+from app.core.database import get_supabase
 from app.models.user import User
 from app.models.quiz import Quiz, QuizAttempt
 from app.models.book import Chapter
@@ -13,87 +13,71 @@ from app.services.badge_service import BadgeService
 router = APIRouter()
 
 
-@router.post("/", response_model=QuizSchema)
+@router.post("/", response_model=QuizSchema, status_code=201)
 async def create_quiz(
     quiz_data: QuizCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    supabase_client: Client = Depends(get_supabase),
+    current_user: User = Depends(get_current_active_user)
 ):
-    """Create a new quiz"""
-    # Verify chapter exists and user has access
-    chapter = await Chapter.get_by_id(db, quiz_data.chapter_id)
-    if not chapter:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chapter not found"
-        )
-    
-    quiz = await Quiz.create(db, **quiz_data.dict())
-    return quiz
+    """Create a new quiz, usually linked to a book"""
+    quiz_dict = quiz_data.dict()
+    response = supabase_client.table('quizzes').insert(quiz_dict).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+    return response.data[0]
 
 
-@router.get("/chapter/{chapter_id}", response_model=List[QuizSchema])
-async def get_chapter_quizzes(
-    chapter_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+@router.get("/book/{book_id}", response_model=List[QuizSchema])
+async def get_quizzes_for_book(
+    book_id: int,
+    supabase_client: Client = Depends(get_supabase)
 ):
-    """Get quizzes for a chapter"""
-    quizzes = await Quiz.get_by_chapter(db, chapter_id)
-    return quizzes
-
-
-@router.post("/attempts", response_model=QuizAttemptSchema)
-async def submit_quiz_attempt(
-    attempt_data: QuizAttemptCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Submit a quiz attempt"""
-    # Calculate score
-    quiz = await Quiz.get_by_id(db, attempt_data.quiz_id)
-    if not quiz:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Quiz not found"
-        )
-    
-    # Create quiz attempt
-    attempt = await QuizAttempt.create(
-        db,
-        user_id=str(current_user.id),
-        **attempt_data.dict()
-    )
-    
-    # Check for badge eligibility
-    badge_service = BadgeService()
-    await badge_service.check_quiz_badges(db, current_user.id, attempt.score)
-    
-    return attempt
-
-
-@router.get("/attempts/me", response_model=List[QuizAttemptSchema])
-async def get_my_quiz_attempts(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Get current user's quiz attempts"""
-    attempts = await QuizAttempt.get_by_user(db, str(current_user.id))
-    return attempts
+    """Get all quizzes associated with a book"""
+    response = supabase_client.table('quizzes').select('*').eq('book_id', book_id).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+    return response.data
 
 
 @router.get("/{quiz_id}", response_model=QuizSchema)
 async def get_quiz(
-    quiz_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    quiz_id: int,
+    supabase_client: Client = Depends(get_supabase)
 ):
-    """Get quiz by ID"""
-    quiz = await Quiz.get_by_id(db, quiz_id)
-    if not quiz:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Quiz not found"
-        )
+    """Get a specific quiz by its ID"""
+    response = supabase_client.table('quizzes').select('*').eq('id', quiz_id).single().execute()
+    if response.error:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    return response.data
+
+
+@router.post("/attempt", response_model=QuizAttemptSchema, status_code=201)
+async def submit_quiz_attempt(
+    attempt: QuizAttemptCreate,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Submit a user's attempt at a quiz"""
+    attempt_data = attempt.dict()
+    attempt_data['user_id'] = current_user.id
     
-    return quiz
+    # Here you might add logic to calculate the score before saving.
+    # For simplicity, we assume the client calculates the score.
+    
+    response = supabase_client.table('quiz_attempts').insert(attempt_data).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+        
+    return response.data[0]
+
+
+@router.get("/attempts/user/{user_id}", response_model=List[QuizAttemptSchema])
+async def get_user_quiz_attempts(
+    user_id: int,
+    supabase_client: Client = Depends(get_supabase)
+):
+    """Get all quiz attempts for a specific user"""
+    response = supabase_client.table('quiz_attempts').select('*').eq('user_id', user_id).execute()
+    if response.error:
+        raise HTTPException(status_code=400, detail=response.error.message)
+    return response.data

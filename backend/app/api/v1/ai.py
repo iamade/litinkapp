@@ -1,40 +1,53 @@
 from typing import List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from supabase import Client
 
-from app.core.auth import get_current_user
-from app.core.database import get_db
+from app.core.auth import get_current_user, get_current_active_user
+from app.core.database import get_db, get_supabase
 from app.models.user import User
 from app.models.book import Chapter
 from app.services.ai_service import AIService
 from app.services.voice_service import VoiceService
 from app.services.video_service import VideoService
+from app.schemas import AIRequest, AIResponse, QuizGenerationRequest
 
 router = APIRouter()
 
 
-@router.post("/generate-quiz")
-async def generate_quiz(
-    chapter_id: str,
-    difficulty: str = "medium",
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+@router.post("/generate-text", response_model=AIResponse)
+async def generate_text(
+    request: AIRequest,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: User = Depends(get_current_active_user)
 ):
-    """Generate AI quiz for a chapter"""
-    chapter = await Chapter.get_by_id(db, chapter_id)
-    if not chapter:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chapter not found"
-        )
-    
-    ai_service = AIService()
-    quiz_questions = await ai_service.generate_quiz(
-        chapter.content,
-        difficulty
+    """Generate text using AI service"""
+    ai_service = AIService(db_session=supabase_client) # Pass client if needed
+    response = await ai_service.generate_text_content(request.prompt, request.context)
+    return AIResponse(text=response)
+
+
+@router.post("/generate-quiz", response_model=AIResponse)
+async def generate_quiz_from_book(
+    request: QuizGenerationRequest,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Generate a quiz from a book's content"""
+    # Fetch book content
+    book_response = supabase_client.table('books').select('content').eq('id', request.book_id).single().execute()
+    if book_response.error or not book_response.data:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+    book_content = book_response.data['content']
+
+    ai_service = AIService(db_session=supabase_client) # Pass client if needed
+    quiz_json = await ai_service.generate_quiz(
+        book_content,
+        request.num_questions,
+        request.difficulty
     )
-    
-    return {"questions": quiz_questions}
+    return AIResponse(text=quiz_json)
 
 
 @router.post("/generate-lesson")
