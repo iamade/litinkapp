@@ -121,7 +121,7 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
     return (
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
         <div className="text-center">
-          <Loader className="h-12 w-12 text-purple-600 mx-auto mb-4 animate-spin" />
+          <Loader className="h-12 w-12 text-indigo-600 mx-auto mb-4 animate-spin" />
           <h3 className="text-xl font-semibold text-gray-900 mb-2">Generating AI Quiz</h3>
           <p className="text-gray-600">Creating personalized questions based on your content...</p>
         </div>
@@ -136,16 +136,16 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
       <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
         <div className="text-center mb-6">
           <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 ${
-            score >= 80 ? 'bg-green-100' : score >= 60 ? 'bg-yellow-100' : 'bg-red-100'
+            score >= 80 ? 'bg-emerald-100' : score >= 60 ? 'bg-yellow-100' : 'bg-red-100'
           }`}>
             {score >= 80 ? (
-              <CheckCircle className="h-10 w-10 text-green-600" />
+              <CheckCircle className="h-10 w-10 text-emerald-600" />
             ) : (
               <XCircle className="h-10 w-10 text-red-600" />
             )}
           </div>
           <h3 className="text-2xl font-bold text-gray-900 mb-2">Quiz Complete!</h3>
-          <p className="text-4xl font-bold text-purple-600 mb-2">{score}%</p>
+          <p className="text-4xl font-bold text-indigo-600 mb-2">{score}%</p>
           <p className="text-gray-600">
             You got {answers.filter((answer, index) => answer === questions[index]?.correctAnswer).length} out of {questions.length} questions correct
           </p>
@@ -153,19 +153,19 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
 
         {/* Badge Award */}
         {(earnedBadge || generatingBadge) && (
-          <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl p-6 mb-6">
+          <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 rounded-xl p-6 mb-6">
             {generatingBadge ? (
               <div className="text-center">
-                <Loader className="h-8 w-8 text-purple-600 mx-auto mb-2 animate-spin" />
-                <p className="text-purple-800 font-medium">Minting your achievement badge...</p>
+                <Loader className="h-8 w-8 text-indigo-600 mx-auto mb-2 animate-spin" />
+                <p className="text-indigo-800 font-medium">Minting your achievement badge...</p>
               </div>
             ) : earnedBadge ? (
               <div className="text-center">
-                <Award className="h-12 w-12 text-purple-600 mx-auto mb-3" />
-                <h4 className="text-lg font-bold text-purple-900 mb-2">🎉 Badge Earned!</h4>
-                <p className="text-purple-800 font-medium">{earnedBadge.name}</p>
-                <p className="text-sm text-purple-600 mt-1">Blockchain-verified achievement</p>
-                <div className="mt-3 text-xs text-purple-600">
+                <Award className="h-12 w-12 text-indigo-600 mx-auto mb-3" />
+                <h4 className="text-lg font-bold text-indigo-900 mb-2">🎉 Badge Earned!</h4>
+                <p className="text-indigo-800 font-medium">{earnedBadge.name}</p>
+                <p className="text-sm text-indigo-600 mt-1">Blockchain-verified achievement</p>
+                <div className="mt-3 text-xs text-indigo-600">
                   Asset ID: {earnedBadge.assetId} | TX: {earnedBadge.transactionId?.substring(0, 8)}...
                 </div>
               </div>
@@ -185,7 +185,7 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
                     key={optionIndex}
                     className={`p-2 rounded text-sm ${
                       optionIndex === question.correctAnswer
-                        ? 'bg-green-100 text-green-800 border border-green-300'
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                         : optionIndex === answers[index]
                         ? 'bg-red-100 text-red-800 border border-red-300'
                         : 'bg-gray-50 text-gray-700'
@@ -205,7 +205,7 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
         <div className="flex space-x-4">
           <button
             onClick={resetQuiz}
-            className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 px-6 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 transition-all"
+            className="flex-1 bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-700 text-white py-3 px-6 rounded-full font-medium hover:shadow-lg transition-all"
           >
             Try Again
           </button>
@@ -233,7 +233,7 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2">
           <div 
-            className="bg-gradient-to-r from-purple-600 to-blue-600 h-2 rounded-full transition-all"
+            className="bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-700 h-2 rounded-full transition-all"
             style={{ width: `${((currentQuestion + 1) / questions.length) * 100}%` }}
           ></div>
         </div>
@@ -242,7 +242,7 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
       {/* Question */}
       <div className="mb-8">
         <div className="flex items-center mb-4">
-          <Brain className="h-6 w-6 text-purple-600 mr-2" />
+          <Brain className="h-6 w-6 text-indigo-600 mr-2" />
           <h3 className="text-xl font-bold text-gray-900">AI-Generated Question</h3>
         </div>
         <p className="text-lg text-gray-800 leading-relaxed">{currentQ.question}</p>
@@ -256,8 +256,8 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
             onClick={() => handleAnswerSelect(index)}
             className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
               selectedAnswer === index
-                ? 'border-purple-500 bg-purple-50 text-purple-900'
-                : 'border-gray-300 hover:border-purple-300 hover:bg-purple-50 text-gray-700'
+                ? 'border-indigo-500 bg-indigo-50 text-indigo-900'
+                : 'border-gray-300 hover:border-indigo-300 hover:bg-indigo-50 text-gray-700'
             }`}
           >
             <span className="font-medium text-gray-900 mr-3">
@@ -273,7 +273,7 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
         <button
           onClick={handleNextQuestion}
           disabled={selectedAnswer === null}
-          className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-8 py-3 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105"
+          className="bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-700 text-white px-8 py-3 rounded-full font-medium hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105"
         >
           {currentQuestion < questions.length - 1 ? 'Next Question' : 'Complete Quiz'}
         </button>
