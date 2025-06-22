@@ -121,6 +121,21 @@ export default function HomePage() {
             className="h-16 w-16 object-contain animate-bounce"
           />
         </div>
+        <div className="absolute top-20 right-10 opacity-20">
+          <a
+            href="https://bolt.new/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block"
+            title="Powered by Bolt"
+          >
+            <img 
+              src="/boltlogo.png" 
+              alt="Powered by Bolt" 
+              className="h-16 w-16 object-contain animate-bounce"
+            />
+          </a>
+        </div>
         <div className="absolute bottom-20 right-10 opacity-20">
           <Sparkles className="h-12 w-12 text-white animate-pulse" />
         </div>

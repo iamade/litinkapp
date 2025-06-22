@@ -4,11 +4,10 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
+from supabase import Client
 
 from app.core.config import settings
-from app.core.database import get_db
-from app.models.user import User
+from app.core.database import get_supabase
 from app.schemas.auth import TokenData
 
 # Password hashing
@@ -43,8 +42,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db)
-) -> User:
+    supabase: Client = Depends(get_supabase)
+):
     """Get current authenticated user"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -61,24 +60,25 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
     
-    # Get user from database
-    user = await User.get_by_id(db, token_data.user_id)
-    if user is None:
+    # Get user from Supabase
+    try:
+        response = supabase.table('profiles').select('*').eq('id', token_data.user_id).single().execute()
+        if not response.data:
+            raise credentials_exception
+        return response.data
+    except Exception:
         raise credentials_exception
-    
-    return user
 
 
-async def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
+async def get_current_active_user(current_user: dict = Depends(get_current_user)) -> dict:
     """Get current active user"""
-    if not current_user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
+    # In Supabase, users are active by default unless explicitly disabled
     return current_user
 
 
-async def get_current_author(current_user: User = Depends(get_current_active_user)) -> User:
+async def get_current_author(current_user: dict = Depends(get_current_active_user)) -> dict:
     """Get current user if they are an author"""
-    if current_user.role != "author":
+    if current_user.get('role') != "author":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"

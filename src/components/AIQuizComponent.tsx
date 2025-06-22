@@ -205,7 +205,7 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
         <div className="flex space-x-4">
           <button
             onClick={resetQuiz}
-            className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 px-6 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 transition-all"
+            className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 px-6 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 transition-all transform hover:scale-105"
           >
             Try Again
           </button>
