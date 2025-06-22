@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/litink
+      - DATABASE_URL=postgresql://postgres:litink123@db.vtuqaubejlzqjmieelyr.supabase.co:5432/litink
       - REDIS_URL=redis://redis:6379
     depends_on:
       - db
@@ -21,7 +21,7 @@ services:
     environment:
       POSTGRES_DB: litink
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: litink123
     ports:
       - "5432:5432"
     volumes:
@@ -38,7 +38,7 @@ services:
     build: .
     command: celery -A app.tasks.celery_app worker --loglevel=info
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/litink
+      - DATABASE_URL=postgresql+asyncpg://postgres.rsatunfeautnsltfvxse:litink123@aws-0-ca-central-1.pooler.supabase.com:5432/litink
       - REDIS_URL=redis://redis:6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0

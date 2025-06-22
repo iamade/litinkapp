@@ -21,11 +21,12 @@ class Settings(BaseSettings):
     ALLOWED_HOSTS: List[str] = ["http://localhost:3000", "http://localhost:5173", "https://localhost:5173"]
     
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/litink"
+    DATABASE_URL: str = "postgresql+asyncpg://postgres.rsatunfeautnsltfvxse:litink123@aws-0-ca-central-1.pooler.supabase.com:5432/litink"
     
     # Supabase
     SUPABASE_URL: Optional[str] = None
     SUPABASE_KEY: Optional[str] = None
+    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379"

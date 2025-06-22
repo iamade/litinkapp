@@ -27,6 +27,25 @@ FastAPI backend for the Litink AI-powered interactive book platform.
    docker-compose up -d
    ```
 
+
+# Start services
+docker-compose up -d
+```
+
+### From Supabase to Local:
+
+```bash
+# Stop services
+docker-compose down
+
+# Switch environment
+cp docker.env.local .env
+# Edit .env with your API keys
+
+# Start services
+docker-compose up -d
+```
+
 The API will be available at `http://localhost:8000`
 
 ### Manual Setup
