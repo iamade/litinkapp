@@ -65,7 +65,17 @@ async def get_current_user(
         response = supabase.table('profiles').select('*').eq('id', token_data.user_id).single().execute()
         if not response.data:
             raise credentials_exception
-        return response.data
+        
+        user_data = response.data
+        
+        # --- Data Correction ---
+        # The User schema expects 'display_name', which the DB provides.
+        # Add other missing fields required by the User schema.
+        user_data['is_active'] = True
+        user_data['is_verified'] = True
+        # -----------------------
+
+        return user_data
     except Exception:
         raise credentials_exception
 

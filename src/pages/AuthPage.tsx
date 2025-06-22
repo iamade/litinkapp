@@ -1,30 +1,39 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { Mail, Lock, User, UserCheck } from 'lucide-react';
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
+import { Mail, Lock, User, UserCheck } from "lucide-react";
+import { toast } from "react-hot-toast";
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [role, setRole] = useState<'author' | 'explorer'>('explorer');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [role, setRole] = useState<"author" | "explorer">("explorer");
   const [loading, setLoading] = useState(false);
-  const { signIn, signUp } = useAuth();
+  const { login, register } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    
+
     try {
       if (isLogin) {
-        await signIn(email, password);
+        await login(email, password);
+        toast.success("Logged in successfully!");
       } else {
-        await signUp(email, password, role);
+        await register(username, email, password, role);
+        toast.success("Account created successfully!");
       }
-      navigate('/dashboard');
+      navigate("/dashboard");
     } catch (error) {
-      console.error('Auth error:', error);
+      console.error("Auth error:", error);
+      if (error instanceof Error) {
+        toast.error(error.message);
+      } else {
+        toast.error("An unknown error occurred.");
+      }
     } finally {
       setLoading(false);
     }
@@ -35,20 +44,19 @@ export default function AuthPage() {
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
           <div className="flex justify-center">
-            <img 
-              src="/litink.png" 
-              alt="Litink Logo" 
+            <img
+              src="/litink.png"
+              alt="Litink Logo"
               className="h-20 w-20 object-contain"
             />
           </div>
           <h2 className="mt-6 text-3xl font-bold text-gray-900">
-            {isLogin ? 'Welcome back to Litink' : 'Join the Litink community'}
+            {isLogin ? "Welcome back to Litink" : "Join the Litink community"}
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            {isLogin 
-              ? 'Sign in to continue your reading journey' 
-              : 'Transform your reading experience with AI'
-            }
+            {isLogin
+              ? "Sign in to continue your reading journey"
+              : "Transform your reading experience with AI"}
           </p>
         </div>
 
@@ -62,11 +70,11 @@ export default function AuthPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => setRole('explorer')}
+                    onClick={() => setRole("explorer")}
                     className={`flex items-center justify-center px-4 py-3 rounded-xl border-2 transition-all ${
-                      role === 'explorer'
-                        ? 'border-purple-500 bg-purple-50 text-purple-700'
-                        : 'border-gray-300 hover:border-purple-300 text-gray-600'
+                      role === "explorer"
+                        ? "border-purple-500 bg-purple-50 text-purple-700"
+                        : "border-gray-300 hover:border-purple-300 text-gray-600"
                     }`}
                   >
                     <User className="h-5 w-5 mr-2" />
@@ -74,11 +82,11 @@ export default function AuthPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setRole('author')}
+                    onClick={() => setRole("author")}
                     className={`flex items-center justify-center px-4 py-3 rounded-xl border-2 transition-all ${
-                      role === 'author'
-                        ? 'border-purple-500 bg-purple-50 text-purple-700'
-                        : 'border-gray-300 hover:border-purple-300 text-gray-600'
+                      role === "author"
+                        ? "border-purple-500 bg-purple-50 text-purple-700"
+                        : "border-gray-300 hover:border-purple-300 text-gray-600"
                     }`}
                   >
                     <UserCheck className="h-5 w-5 mr-2" />
@@ -88,8 +96,35 @@ export default function AuthPage() {
               </div>
             )}
 
+            {!isLogin && (
+              <div>
+                <label
+                  htmlFor="username"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Username
+                </label>
+                <div className="mt-1 relative">
+                  <input
+                    id="username"
+                    name="username"
+                    type="text"
+                    required
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="appearance-none relative block w-full px-3 py-3 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-xl focus:outline-none focus:ring-purple-500 focus:border-purple-500 focus:z-10"
+                    placeholder="Choose a username"
+                  />
+                  <User className="h-5 w-5 text-gray-400 absolute left-3 top-3.5" />
+                </div>
+              </div>
+            )}
+
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700"
+              >
                 Email address
               </label>
               <div className="mt-1 relative">
@@ -97,6 +132,7 @@ export default function AuthPage() {
                   id="email"
                   name="email"
                   type="email"
+                  autoComplete="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -108,7 +144,10 @@ export default function AuthPage() {
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium text-gray-700"
+              >
                 Password
               </label>
               <div className="mt-1 relative">
@@ -116,6 +155,7 @@ export default function AuthPage() {
                   id="password"
                   name="password"
                   type="password"
+                  autoComplete={isLogin ? "current-password" : "new-password"}
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -131,7 +171,11 @@ export default function AuthPage() {
               disabled={loading}
               className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-xl text-white bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105"
             >
-              {loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Create Account')}
+              {loading
+                ? "Please wait..."
+                : isLogin
+                ? "Sign In"
+                : "Create Account"}
             </button>
           </form>
 
@@ -140,10 +184,9 @@ export default function AuthPage() {
               onClick={() => setIsLogin(!isLogin)}
               className="text-purple-600 hover:text-purple-500 text-sm font-medium"
             >
-              {isLogin 
-                ? "Don't have an account? Sign up" 
-                : 'Already have an account? Sign in'
-              }
+              {isLogin
+                ? "Don't have an account? Sign up"
+                : "Already have an account? Sign in"}
             </button>
           </div>
         </div>

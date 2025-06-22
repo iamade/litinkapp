@@ -1,159 +1,97 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
+import { apiClient } from "../lib/api";
 
 interface User {
   id: string;
   email: string;
-  role: 'author' | 'explorer';
-  displayName?: string;
+  username: string;
+  // Add other user properties from your backend's User schema
 }
 
 interface AuthContextType {
   user: User | null;
+  login: (email: string, password: string) => Promise<void>;
+  register: (
+    username: string,
+    email: string,
+    password: string,
+    role: "author" | "explorer"
+  ) => Promise<void>;
+  logout: () => void;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, role: 'author' | 'explorer') => Promise<void>;
-  signOut: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-}
-
-interface AuthProviderProps {
-  children: ReactNode;
-}
-
-export function AuthProvider({ children }: AuthProviderProps) {
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing session
-    const savedUser = localStorage.getItem('litink_user');
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-    setLoading(false);
+    const checkUser = async () => {
+      const token = localStorage.getItem("authToken");
+      if (token) {
+        try {
+          const profile = await apiClient.get<User>("/users/me");
+          setUser(profile);
+        } catch (error) {
+          console.error("Failed to fetch user profile", error);
+          localStorage.removeItem("authToken");
+        }
+      }
+      setLoading(false);
+    };
+    checkUser();
   }, []);
 
-  const signIn = async (email: string, password: string) => {
-    try {
-      // Call FastAPI backend for authentication
-      const response = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Authentication failed');
-      }
-
-      const data = await response.json();
-      
-      // Get user info
-      const userResponse = await fetch('/api/v1/auth/me', {
-        headers: {
-          'Authorization': `Bearer ${data.access_token}`,
-        },
-      });
-
-      if (!userResponse.ok) {
-        throw new Error('Failed to get user info');
-      }
-
-      const userData = await userResponse.json();
-      
-      const mockUser: User = {
-        id: userData.id,
-        email: userData.email,
-        role: userData.role,
-        displayName: userData.display_name || userData.email.split('@')[0]
-      };
-
-      setUser(mockUser);
-      localStorage.setItem('litink_user', JSON.stringify(mockUser));
-      localStorage.setItem('litink_token', data.access_token);
-    } catch (error) {
-      // Fallback to demo mode for development
-      console.warn('Backend auth failed, using demo mode:', error);
-      const isAuthor = email.toLowerCase().includes('author');
-      const mockUser: User = {
-        id: '1',
-        email,
-        role: isAuthor ? 'author' : 'explorer',
-        displayName: email.split('@')[0]
-      };
-      setUser(mockUser);
-      localStorage.setItem('litink_user', JSON.stringify(mockUser));
-    }
+  const login = async (email: string, password: string) => {
+    const { access_token } = await apiClient.post<{ access_token: string }>(
+      "/auth/login",
+      { email, password }
+    );
+    localStorage.setItem("authToken", access_token);
+    const profile = await apiClient.get<User>("/users/me");
+    setUser(profile);
   };
 
-  const signUp = async (email: string, password: string, role: 'author' | 'explorer') => {
-    try {
-      // Call FastAPI backend for registration
-      const response = await fetch('/api/v1/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password, role }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Registration failed');
-      }
-
-      const userData = await response.json();
-      
-      const mockUser: User = {
-        id: userData.id,
-        email: userData.email,
-        role: userData.role,
-        displayName: userData.display_name || userData.email.split('@')[0]
-      };
-
-      setUser(mockUser);
-      localStorage.setItem('litink_user', JSON.stringify(mockUser));
-    } catch (error) {
-      // Fallback to demo mode for development
-      console.warn('Backend registration failed, using demo mode:', error);
-      const mockUser: User = {
-        id: '1',
-        email,
-        role,
-        displayName: email.split('@')[0]
-      };
-      setUser(mockUser);
-      localStorage.setItem('litink_user', JSON.stringify(mockUser));
-    }
+  const register = async (
+    username: string,
+    email: string,
+    password: string,
+    role: "author" | "explorer"
+  ) => {
+    await apiClient.post("/auth/register", {
+      display_name: username,
+      email,
+      password,
+      role,
+    });
+    // After successful registration, log the user in
+    await login(email, password);
   };
 
-  const signOut = () => {
+  const logout = () => {
     setUser(null);
-    localStorage.removeItem('litink_user');
-    localStorage.removeItem('litink_token');
-  };
-
-  const value = {
-    user,
-    loading,
-    signIn,
-    signUp,
-    signOut
+    localStorage.removeItem("authToken");
   };
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{ user, login, register, logout, loading }}>
       {children}
     </AuthContext.Provider>
   );
-}
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
+};

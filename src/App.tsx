@@ -1,21 +1,23 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
-import Navbar from './components/Navbar';
-import HomePage from './pages/HomePage';
-import AuthPage from './pages/AuthPage';
-import Dashboard from './pages/Dashboard';
-import AuthorPanel from './pages/AuthorPanel';
-import LearningMode from './pages/LearningMode';
-import EntertainmentMode from './pages/EntertainmentMode';
-import Profile from './pages/Profile';
-import BookUpload from './pages/BookUpload';
-import BookView from './pages/BookView';
+import React from "react";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
+import { Toaster } from "react-hot-toast";
+import Navbar from "./components/Navbar";
+import HomePage from "./pages/HomePage";
+import AuthPage from "./pages/AuthPage";
+import Dashboard from "./pages/Dashboard";
+import AuthorPanel from "./pages/AuthorPanel";
+import LearningMode from "./pages/LearningMode";
+import EntertainmentMode from "./pages/EntertainmentMode";
+import Profile from "./pages/Profile";
+import BookUpload from "./pages/BookUpload";
+import BookView from "./pages/BookView";
 
 function App() {
   return (
     <AuthProvider>
       <Router>
+        <Toaster position="top-center" reverseOrder={false} />
         <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50">
           <Navbar />
           <Routes>
