@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { BookOpen, Brain, Sparkles, Users, ArrowRight, Play, Star, Award } from 'lucide-react';
+import { Brain, Sparkles, Users, ArrowRight, Play, Star, Award } from 'lucide-react';
 
 export default function HomePage() {
   const features = [
@@ -55,6 +55,14 @@ export default function HomePage() {
         <div className="absolute inset-0 bg-black/20"></div>
         
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <div className="flex justify-center mb-8">
+            <img 
+              src="/litink.png" 
+              alt="Litink Logo" 
+              className="h-24 w-24 object-contain"
+            />
+          </div>
+          
           <h1 className="text-4xl sm:text-5xl lg:text-7xl font-bold text-white mb-6 leading-tight">
             Reimagining Books as
             <span className="block bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
@@ -107,7 +115,11 @@ export default function HomePage() {
         
         {/* Floating Elements */}
         <div className="absolute top-20 left-10 opacity-20">
-          <BookOpen className="h-16 w-16 text-white animate-bounce" />
+          <img 
+            src="/litink.png" 
+            alt="Litink Logo" 
+            className="h-16 w-16 object-contain animate-bounce"
+          />
         </div>
         <div className="absolute bottom-20 right-10 opacity-20">
           <Sparkles className="h-12 w-12 text-white animate-pulse" />

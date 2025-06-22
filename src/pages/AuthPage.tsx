@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { BookOpen, Mail, Lock, User, UserCheck } from 'lucide-react';
+import { Mail, Lock, User, UserCheck } from 'lucide-react';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -35,7 +35,11 @@ export default function AuthPage() {
       <div className="max-w-md w-full space-y-8">
         <div className="text-center">
           <div className="flex justify-center">
-            <BookOpen className="h-16 w-16 text-purple-600" />
+            <img 
+              src="/litink.png" 
+              alt="Litink Logo" 
+              className="h-20 w-20 object-contain"
+            />
           </div>
           <h2 className="mt-6 text-3xl font-bold text-gray-900">
             {isLogin ? 'Welcome back to Litink' : 'Join the Litink community'}

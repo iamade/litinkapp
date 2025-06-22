@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { BookOpen, Menu, X, User, LogOut } from 'lucide-react';
+import { Menu, X, User, LogOut } from 'lucide-react';
 
 export default function Navbar() {
   const { user, signOut } = useAuth();
@@ -19,8 +19,12 @@ export default function Navbar() {
     <nav className="bg-white/90 backdrop-blur-lg border-b border-purple-100 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <Link to="/" className="flex items-center space-x-2">
-            <BookOpen className="h-8 w-8 text-purple-600" />
+          <Link to="/" className="flex items-center space-x-3">
+            <img 
+              src="/litink.png" 
+              alt="Litink Logo" 
+              className="h-10 w-10 object-contain"
+            />
             <span className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
               Litink
             </span>
