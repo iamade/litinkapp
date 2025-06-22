@@ -47,8 +47,23 @@ export default function Navbar() {
             ))}
           </div>
 
-          {/* Desktop Auth */}
+          {/* Desktop Auth and Bolt Badge */}
           <div className="hidden md:flex items-center space-x-4">
+            {/* Bolt Badge */}
+            <a
+              href="https://bolt.new/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center w-10 h-10 rounded-full hover:scale-110 transition-transform duration-200"
+              title="Powered by Bolt"
+            >
+              <img 
+                src="/boltlogo.png" 
+                alt="Powered by Bolt" 
+                className="w-8 h-8 object-contain"
+              />
+            </a>
+
             {user ? (
               <div className="flex items-center space-x-4">
                 <Link
@@ -91,7 +106,22 @@ export default function Navbar() {
           </div>
 
           {/* Mobile menu button */}
-          <div className="md:hidden">
+          <div className="md:hidden flex items-center space-x-2">
+            {/* Mobile Bolt Badge */}
+            <a
+              href="https://bolt.new/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center w-8 h-8 rounded-full hover:scale-110 transition-transform duration-200"
+              title="Powered by Bolt"
+            >
+              <img 
+                src="/boltlogo.png" 
+                alt="Powered by Bolt" 
+                className="w-6 h-6 object-contain"
+              />
+            </a>
+            
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="text-gray-700 hover:text-purple-600 transition-colors"
