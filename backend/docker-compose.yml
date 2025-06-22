@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres.rsatunfeautnsltfvxse:litink123@aws-0-ca-central-1.pooler.supabase.com:5432/litink
+      - DATABASE_URL=postgresql://postgres:litink123@db.vtuqaubejlzqjmieelyr.supabase.co:5432/litink
       - REDIS_URL=redis://redis:6379
     depends_on:
       - db
