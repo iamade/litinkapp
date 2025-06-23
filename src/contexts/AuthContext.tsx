@@ -10,7 +10,8 @@ import { apiClient } from "../lib/api";
 interface User {
   id: string;
   email: string;
-  username: string;
+  display_name: string;
+  role: "author" | "explorer";
   // Add other user properties from your backend's User schema
 }
 

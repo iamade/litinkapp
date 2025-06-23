@@ -21,6 +21,24 @@ export const apiClient = {
     return this.request<T>(endpoint, "DELETE");
   },
 
+  async upload<T>(endpoint: string, formData: FormData): Promise<T> {
+    const token = getAuthToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: "POST",
+      headers, // do not set Content-Type for FormData
+      body: formData,
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.detail || "An API error occurred");
+    }
+    return response.json();
+  },
+
   async request<T>(
     endpoint: string,
     method: string,

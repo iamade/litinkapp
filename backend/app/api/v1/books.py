@@ -62,7 +62,11 @@ async def get_book(
     return book
 
 
-@router.post("/", response_model=BookSchema)
+@router.post(
+    "/",
+    response_model=BookSchema,
+    tags=["Authors"]
+)
 async def create_book(
     title: str = Form(...),
     description: str = Form(...),
@@ -180,49 +184,65 @@ async def get_chapters(
 
 @router.post("/upload", response_model=BookSchema)
 async def upload_book(
-    file: UploadFile = File(...),
+    file: UploadFile = File(None),
+    text_content: str = Form(None),
     title: str = "",
     book_type: str = "learning",
     difficulty: str = "medium",
     supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_author)
+    current_user: dict = Depends(get_current_active_user)
 ):
-    """Upload and process a book file"""
+    """Upload and process a book file or raw text (supports .pdf, .docx, .txt, .epub)"""
     file_service = FileService()
     ai_service = AIService()
-    
-    # Process uploaded file
-    content = await file_service.process_book_file(file)
-    
-    # Create book
-    book = await BookModel.create(
-        supabase_client,
-        title=title or file.filename,
-        author_name=current_user.display_name or current_user.email,
-        author_id=current_user.id,
-        book_type=book_type,
-        difficulty=difficulty
-    )
-    
+
+    if file:
+        # Process uploaded file (including .epub)
+        content = await file_service.process_book_file(file)
+        book_title = title or file.filename
+    elif text_content:
+        content = text_content
+        book_title = title or "Untitled Book"
+    else:
+        raise HTTPException(status_code=400, detail="No file or text content provided.")
+
+    # Insert book into Supabase
+    book_data = {
+        "title": book_title,
+        "author_name": current_user.get('display_name') or current_user.get('email'),
+        "author_id": current_user['id'],
+        "book_type": book_type,
+        "difficulty": difficulty
+    }
+    response = supabase_client.table('books').insert(book_data).execute()
+    if response.error or not response.data:
+        raise HTTPException(status_code=400, detail=response.error.message if response.error else "Book creation failed.")
+    book = response.data[0]
+
     # Generate chapters using AI
-    chapters = await ai_service.generate_chapters_from_content(content, book.book_type)
-    
+    chapters = await ai_service.generate_chapters_from_content(content, book["book_type"])
+
     for i, chapter_content in enumerate(chapters, 1):
-        await Chapter.create(
-            supabase_client,
-            book_id=book.id,
-            chapter_number=i,
-            title=chapter_content["title"],
-            content=chapter_content["content"],
-            summary=chapter_content.get("summary"),
-            ai_generated_content=chapter_content.get("ai_content")
-        )
-    
+        chapter_data = {
+            "book_id": book["id"],
+            "chapter_number": i,
+            "title": chapter_content["title"],
+            "content": chapter_content["content"],
+            "summary": chapter_content.get("summary"),
+            "ai_generated_content": chapter_content.get("ai_content"),
+        }
+        response = supabase_client.table('chapters').insert(chapter_data).execute()
+        if response.error:
+            raise HTTPException(status_code=400, detail=response.error.message)
+
     # Update book
-    book.total_chapters = len(chapters)
-    book.estimated_duration = sum(ch.get("duration", 15) for ch in chapters)
-    await supabase_client.table('books').update({'total_chapters': book.total_chapters, 'estimated_duration': book.estimated_duration}).eq('id', book.id).execute()
-    
+    book["total_chapters"] = len(chapters)
+    book["estimated_duration"] = sum(ch.get("duration", 15) for ch in chapters)
+    supabase_client.table('books').update({
+        'total_chapters': book["total_chapters"],
+        'estimated_duration': book["estimated_duration"]
+    }).eq('id', book["id"]).execute()
+
     return book
 
 

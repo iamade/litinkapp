@@ -1,25 +1,70 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { 
-  BookOpen, 
-  Brain, 
-  Sparkles, 
-  Upload, 
-  Award, 
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
+import { userService } from "../services/userService";
+import {
+  BookOpen,
+  Brain,
+  Sparkles,
+  Upload,
+  Award,
   TrendingUp,
   Clock,
-  Star
-} from 'lucide-react';
+  Star,
+} from "lucide-react";
+
+interface UserProfile {
+  id: string;
+  email: string;
+  display_name: string;
+  role: "author" | "explorer";
+  avatar_url?: string;
+  bio?: string;
+}
+
+interface UserStats {
+  books_read: number;
+  total_time_hours: number;
+  badges_earned: number;
+  quizzes_taken: number;
+  average_quiz_score: number;
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [stats, setStats] = useState<UserStats | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState({
+    display_name: "",
+    avatar_url: "",
+    bio: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    userService.getProfile().then((data: UserProfile) => setProfile(data));
+    userService.getStats().then((data: UserStats) => setStats(data));
+  }, [user]);
+
+  useEffect(() => {
+    if (profile) {
+      setForm({
+        display_name: profile.display_name || "",
+        avatar_url: profile.avatar_url || "",
+        bio: profile.bio || "",
+      });
+    }
+  }, [profile]);
 
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <p className="text-xl text-gray-600 mb-4">Please sign in to access your dashboard</p>
+          <p className="text-xl text-gray-600 mb-4">
+            Please sign in to access your dashboard
+          </p>
           <Link
             to="/auth"
             className="bg-purple-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-purple-700 transition-colors"
@@ -31,55 +76,158 @@ export default function Dashboard() {
     );
   }
 
+  const handleEdit = () => setEditMode(true);
+  const handleCancel = () => setEditMode(false);
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+  };
+  const handleSave = async () => {
+    setSaving(true);
+    await userService.updateProfile(form);
+    setEditMode(false);
+    setSaving(false);
+    const updated = (await userService.getProfile()) as UserProfile;
+    setProfile(updated);
+  };
+
   const recentBooks = [
     {
       id: 1,
-      title: 'Introduction to AI',
-      author: 'Dr. Sarah Chen',
+      title: "Introduction to AI",
+      author: "Dr. Sarah Chen",
       progress: 75,
-      type: 'learning',
-      lastRead: '2 hours ago'
+      type: "learning",
+      lastRead: "2 hours ago",
     },
     {
       id: 2,
-      title: 'The Mystery of Echo Valley',
-      author: 'Marcus Johnson',
+      title: "The Mystery of Echo Valley",
+      author: "Marcus Johnson",
       progress: 45,
-      type: 'entertainment',
-      lastRead: '1 day ago'
+      type: "entertainment",
+      lastRead: "1 day ago",
     },
     {
       id: 3,
-      title: 'Modern Web Development',
-      author: 'Alex Rivera',
+      title: "Modern Web Development",
+      author: "Alex Rivera",
       progress: 90,
-      type: 'learning',
-      lastRead: '3 hours ago'
-    }
+      type: "learning",
+      lastRead: "3 hours ago",
+    },
   ];
 
   const achievements = [
-    { title: 'First Steps', description: 'Complete your first lesson', icon: Star, earned: true },
-    { title: 'Bookworm', description: 'Read 5 books this month', icon: BookOpen, earned: true },
-    { title: 'AI Explorer', description: 'Try all AI features', icon: Brain, earned: false },
-    { title: 'Story Master', description: 'Complete 3 interactive stories', icon: Sparkles, earned: false }
+    {
+      title: "First Steps",
+      description: "Complete your first lesson",
+      icon: Star,
+      earned: true,
+    },
+    {
+      title: "Bookworm",
+      description: "Read 5 books this month",
+      icon: BookOpen,
+      earned: true,
+    },
+    {
+      title: "AI Explorer",
+      description: "Try all AI features",
+      icon: Brain,
+      earned: false,
+    },
+    {
+      title: "Story Master",
+      description: "Complete 3 interactive stories",
+      icon: Sparkles,
+      earned: false,
+    },
   ];
 
   return (
     <div className="min-h-screen py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Welcome back, {user.displayName}!
-          </h1>
-          <p className="text-gray-600">
-            {user.role === 'author' 
-              ? 'Ready to create amazing interactive content?' 
-              : 'Continue your learning and exploration journey.'
-            }
-          </p>
+        <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              Welcome back, {profile?.display_name || user.display_name}!
+            </h1>
+            <p className="text-gray-600">
+              {user.role === "author"
+                ? "Ready to create amazing interactive content?"
+                : "Continue your learning and exploration journey."}
+            </p>
+          </div>
+          <div className="mt-4 md:mt-0 flex space-x-2">
+            <button
+              onClick={handleEdit}
+              className="px-4 py-2 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition-all"
+            >
+              Edit Profile
+            </button>
+          </div>
         </div>
+        {editMode && (
+          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 mb-8 max-w-xl mx-auto">
+            <h2 className="text-xl font-bold mb-4">Edit Profile</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Display Name
+                </label>
+                <input
+                  type="text"
+                  name="display_name"
+                  value={form.display_name}
+                  onChange={handleChange}
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Avatar URL
+                </label>
+                <input
+                  type="text"
+                  name="avatar_url"
+                  value={form.avatar_url}
+                  onChange={handleChange}
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Bio
+                </label>
+                <textarea
+                  name="bio"
+                  value={form.bio}
+                  onChange={handleChange}
+                  className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                  rows={3}
+                />
+              </div>
+              <div className="flex space-x-3 mt-4">
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="px-4 py-2 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-all disabled:opacity-50"
+                >
+                  {saving ? "Saving..." : "Save"}
+                </button>
+                <button
+                  onClick={handleCancel}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
@@ -89,7 +237,9 @@ export default function Dashboard() {
           >
             <Brain className="h-12 w-12 text-green-600 mb-4 group-hover:scale-110 transition-transform" />
             <h3 className="font-semibold text-gray-900 mb-2">Learning Mode</h3>
-            <p className="text-sm text-gray-600">Interactive tutorials & quizzes</p>
+            <p className="text-sm text-gray-600">
+              Interactive tutorials & quizzes
+            </p>
           </Link>
 
           <Link
@@ -98,19 +248,23 @@ export default function Dashboard() {
           >
             <Sparkles className="h-12 w-12 text-purple-600 mb-4 group-hover:scale-110 transition-transform" />
             <h3 className="font-semibold text-gray-900 mb-2">Entertainment</h3>
-            <p className="text-sm text-gray-600">Interactive stories & adventures</p>
+            <p className="text-sm text-gray-600">
+              Interactive stories & adventures
+            </p>
           </Link>
 
-          {user.role === 'author' && (
-            <Link
-              to="/upload"
-              className="group bg-gradient-to-br from-yellow-50 to-orange-50 p-6 rounded-2xl border border-yellow-100 hover:border-yellow-200 transition-all transform hover:scale-105 hover:shadow-lg"
-            >
-              <Upload className="h-12 w-12 text-orange-600 mb-4 group-hover:scale-110 transition-transform" />
-              <h3 className="font-semibold text-gray-900 mb-2">Upload Book</h3>
-              <p className="text-sm text-gray-600">Create AI-powered content</p>
-            </Link>
-          )}
+          <Link
+            to="/upload"
+            className="group bg-gradient-to-br from-yellow-50 to-orange-50 p-6 rounded-2xl border border-yellow-100 hover:border-yellow-200 transition-all transform hover:scale-105 hover:shadow-lg"
+          >
+            <Upload className="h-12 w-12 text-orange-600 mb-4 group-hover:scale-110 transition-transform" />
+            <h3 className="font-semibold text-gray-900 mb-2">Upload Book</h3>
+            <p className="text-sm text-gray-600">
+              {user.role === "author"
+                ? "Create AI-powered content as the book owner"
+                : "Upload a book (ownership will not be assigned to you)"}
+            </p>
+          </Link>
 
           <Link
             to="/profile"
@@ -131,7 +285,7 @@ export default function Dashboard() {
                   <Clock className="h-6 w-6 text-purple-600 mr-2" />
                   Continue Reading
                 </h2>
-                <Link 
+                <Link
                   to="/learn"
                   className="text-purple-600 hover:text-purple-700 text-sm font-medium"
                 >
@@ -145,18 +299,20 @@ export default function Dashboard() {
                     key={book.id}
                     className="flex items-center space-x-4 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors group cursor-pointer"
                   >
-                    <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                      book.type === 'learning' 
-                        ? 'bg-gradient-to-br from-green-500 to-blue-600' 
-                        : 'bg-gradient-to-br from-purple-500 to-pink-600'
-                    }`}>
-                      {book.type === 'learning' ? (
+                    <div
+                      className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                        book.type === "learning"
+                          ? "bg-gradient-to-br from-green-500 to-blue-600"
+                          : "bg-gradient-to-br from-purple-500 to-pink-600"
+                      }`}
+                    >
+                      {book.type === "learning" ? (
                         <Brain className="h-6 w-6 text-white" />
                       ) : (
                         <Sparkles className="h-6 w-6 text-white" />
                       )}
                     </div>
-                    
+
                     <div className="flex-1 min-w-0">
                       <h3 className="font-semibold text-gray-900 group-hover:text-purple-600 transition-colors">
                         {book.title}
@@ -164,17 +320,17 @@ export default function Dashboard() {
                       <p className="text-sm text-gray-600">by {book.author}</p>
                       <p className="text-xs text-gray-500">{book.lastRead}</p>
                     </div>
-                    
+
                     <div className="text-right">
                       <div className="text-sm font-medium text-gray-900 mb-1">
                         {book.progress}%
                       </div>
                       <div className="w-16 bg-gray-200 rounded-full h-2">
-                        <div 
+                        <div
                           className={`h-2 rounded-full ${
-                            book.type === 'learning' 
-                              ? 'bg-gradient-to-r from-green-500 to-blue-600' 
-                              : 'bg-gradient-to-r from-purple-500 to-pink-600'
+                            book.type === "learning"
+                              ? "bg-gradient-to-r from-green-500 to-blue-600"
+                              : "bg-gradient-to-r from-purple-500 to-pink-600"
                           }`}
                           style={{ width: `${book.progress}%` }}
                         ></div>
@@ -197,15 +353,35 @@ export default function Dashboard() {
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Books Read</span>
-                  <span className="font-bold text-2xl text-purple-600">12</span>
+                  <span className="font-bold text-2xl text-purple-600">
+                    {stats?.books_read ?? "--"}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Hours Spent</span>
-                  <span className="font-bold text-2xl text-blue-600">45</span>
+                  <span className="font-bold text-2xl text-blue-600">
+                    {stats?.total_time_hours ?? "--"}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-600">Badges Earned</span>
-                  <span className="font-bold text-2xl text-green-600">8</span>
+                  <span className="font-bold text-2xl text-green-600">
+                    {stats?.badges_earned ?? "--"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Quizzes Taken</span>
+                  <span className="font-bold text-2xl text-yellow-600">
+                    {stats?.quizzes_taken ?? "--"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Avg. Quiz Score</span>
+                  <span className="font-bold text-2xl text-pink-600">
+                    {stats?.average_quiz_score
+                      ? stats.average_quiz_score.toFixed(1)
+                      : "--"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -218,30 +394,38 @@ export default function Dashboard() {
               </h2>
               <div className="space-y-3">
                 {achievements.map((achievement, index) => (
-                  <div 
+                  <div
                     key={index}
                     className={`flex items-center space-x-3 p-3 rounded-lg ${
-                      achievement.earned 
-                        ? 'bg-green-50 border border-green-200' 
-                        : 'bg-gray-50 border border-gray-200'
+                      achievement.earned
+                        ? "bg-green-50 border border-green-200"
+                        : "bg-gray-50 border border-gray-200"
                     }`}
                   >
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      achievement.earned 
-                        ? 'bg-green-500' 
-                        : 'bg-gray-400'
-                    }`}>
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                        achievement.earned ? "bg-green-500" : "bg-gray-400"
+                      }`}
+                    >
                       <achievement.icon className="h-4 w-4 text-white" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h4 className={`font-medium ${
-                        achievement.earned ? 'text-green-900' : 'text-gray-900'
-                      }`}>
+                      <h4
+                        className={`font-medium ${
+                          achievement.earned
+                            ? "text-green-900"
+                            : "text-gray-900"
+                        }`}
+                      >
                         {achievement.title}
                       </h4>
-                      <p className={`text-xs ${
-                        achievement.earned ? 'text-green-600' : 'text-gray-500'
-                      }`}>
+                      <p
+                        className={`text-xs ${
+                          achievement.earned
+                            ? "text-green-600"
+                            : "text-gray-500"
+                        }`}
+                      >
                         {achievement.description}
                       </p>
                     </div>

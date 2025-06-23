@@ -1,18 +1,24 @@
-import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { Menu, X, User, LogOut } from 'lucide-react';
+import React, { useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
+import { Menu, X, User, LogOut } from "lucide-react";
 
 export default function Navbar() {
-  const { user, signOut } = useAuth();
+  const { user, logout } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
+  const handleSignOut = () => {
+    logout();
+    navigate("/auth");
+  };
+
   const navItems = [
-    { path: '/', label: 'Home' },
-    { path: '/learn', label: 'Learn' },
-    { path: '/explore', label: 'Explore' },
-    ...(user?.role === 'author' ? [{ path: '/author', label: 'Create' }] : []),
+    { path: "/", label: "Home" },
+    { path: "/learn", label: "Learn" },
+    { path: "/explore", label: "Explore" },
+    ...(user?.role === "author" ? [{ path: "/author", label: "Create" }] : []),
   ];
 
   return (
@@ -20,9 +26,9 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <Link to="/" className="flex items-center space-x-3">
-            <img 
-              src="/litink.png" 
-              alt="Litink Logo" 
+            <img
+              src="/litink.png"
+              alt="Litink Logo"
               className="h-10 w-10 object-contain"
             />
             <span className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
@@ -38,8 +44,8 @@ export default function Navbar() {
                 to={item.path}
                 className={`text-sm font-medium transition-colors hover:text-purple-600 ${
                   location.pathname === item.path
-                    ? 'text-purple-600'
-                    : 'text-gray-700'
+                    ? "text-purple-600"
+                    : "text-gray-700"
                 }`}
               >
                 {item.label}
@@ -57,7 +63,7 @@ export default function Navbar() {
                 >
                   Dashboard
                 </Link>
-                {user.role === 'author' && (
+                {user.role === "author" && (
                   <Link
                     to="/author"
                     className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-2 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 transition-all transform hover:scale-105"
@@ -70,10 +76,10 @@ export default function Navbar() {
                   className="flex items-center space-x-2 text-sm font-medium text-gray-700 hover:text-purple-600 transition-colors"
                 >
                   <User className="h-4 w-4" />
-                  <span>{user.displayName}</span>
+                  <span>{user.display_name}</span>
                 </Link>
                 <button
-                  onClick={signOut}
+                  onClick={handleSignOut}
                   className="flex items-center space-x-2 text-sm font-medium text-gray-700 hover:text-red-600 transition-colors"
                 >
                   <LogOut className="h-4 w-4" />
@@ -96,7 +102,11 @@ export default function Navbar() {
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="text-gray-700 hover:text-purple-600 transition-colors"
             >
-              {isMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+              {isMenuOpen ? (
+                <X className="h-6 w-6" />
+              ) : (
+                <Menu className="h-6 w-6" />
+              )}
             </button>
           </div>
         </div>
@@ -112,14 +122,14 @@ export default function Navbar() {
                   onClick={() => setIsMenuOpen(false)}
                   className={`text-base font-medium transition-colors hover:text-purple-600 px-2 py-1 ${
                     location.pathname === item.path
-                      ? 'text-purple-600'
-                      : 'text-gray-700'
+                      ? "text-purple-600"
+                      : "text-gray-700"
                   }`}
                 >
                   {item.label}
                 </Link>
               ))}
-              
+
               {user ? (
                 <>
                   <Link
@@ -129,7 +139,7 @@ export default function Navbar() {
                   >
                     Dashboard
                   </Link>
-                  {user.role === 'author' && (
+                  {user.role === "author" && (
                     <Link
                       to="/author"
                       onClick={() => setIsMenuOpen(false)}
@@ -147,8 +157,9 @@ export default function Navbar() {
                   </Link>
                   <button
                     onClick={() => {
-                      signOut();
+                      logout();
                       setIsMenuOpen(false);
+                      navigate("/auth");
                     }}
                     className="text-base font-medium text-gray-700 hover:text-red-600 transition-colors text-left px-2 py-1"
                   >
