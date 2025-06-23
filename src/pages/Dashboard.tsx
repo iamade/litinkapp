@@ -3,14 +3,12 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { userService } from "../services/userService";
 import {
-  BookOpen,
   Brain,
   Sparkles,
   Upload,
   Award,
   TrendingUp,
   Clock,
-  Star,
 } from "lucide-react";
 
 interface UserProfile {
@@ -30,6 +28,148 @@ interface UserStats {
   average_quiz_score: number;
 }
 
+interface Book {
+  id: string;
+  title: string;
+  author_name: string;
+  book_type: string;
+  difficulty: string;
+  cover_image_path?: string;
+  status: "PROCESSING" | "GENERATING" | "READY" | "FAILED";
+  progress: number;
+  total_steps: number;
+  progress_message?: string;
+  error_message?: string;
+}
+
+const BookCard = ({
+  book,
+  onRetry,
+}: {
+  book: Book;
+  onRetry: (bookId: string) => Promise<void>;
+}) => {
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    try {
+      await onRetry(book.id);
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
+  return (
+    <div className="border rounded-xl p-4 flex flex-col hover:shadow-lg transition-all transform hover:scale-105">
+      {book.cover_image_path && (
+        <img
+          src={
+            book.cover_image_path.startsWith("/")
+              ? book.cover_image_path
+              : `/uploads/${book.cover_image_path}`
+          }
+          alt={book.title}
+          className="h-40 w-full object-cover rounded mb-2"
+        />
+      )}
+      <div className="font-bold text-lg mb-1">{book.title}</div>
+      <div className="text-gray-600 text-sm mb-1">By {book.author_name}</div>
+      <div className="text-xs text-purple-600 mb-2">{book.book_type}</div>
+
+      {/* Progress and Status Section */}
+      <div className="mt-auto">
+        <div className="flex justify-between items-center mb-2">
+          <div className="text-gray-500 text-xs">{book.difficulty}</div>
+          {book.status === "PROCESSING" && (
+            <div className="flex items-center text-yellow-600">
+              <div className="animate-spin mr-2 h-4 w-4 border-2 border-yellow-600 rounded-full border-t-transparent"></div>
+              <span className="text-xs">Processing...</span>
+            </div>
+          )}
+          {book.status === "GENERATING" && (
+            <div className="flex items-center text-blue-600">
+              <div className="animate-spin mr-2 h-4 w-4 border-2 border-blue-600 rounded-full border-t-transparent"></div>
+              <span className="text-xs">Generating...</span>
+            </div>
+          )}
+          {book.status === "READY" && (
+            <div className="flex items-center text-green-600">
+              <svg
+                className="w-4 h-4 mr-1"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              <span className="text-xs">Ready</span>
+            </div>
+          )}
+          {book.status === "FAILED" && (
+            <div className="flex items-center text-red-600">
+              <svg
+                className="w-4 h-4 mr-1"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+              <span className="text-xs">Failed</span>
+            </div>
+          )}
+        </div>
+
+        {/* Progress Bar */}
+        {(book.status === "PROCESSING" || book.status === "GENERATING") && (
+          <div className="w-full bg-gray-200 rounded-full h-1.5 mb-2">
+            <div
+              className="bg-blue-600 h-1.5 rounded-full transition-all duration-500"
+              style={{ width: `${(book.progress / book.total_steps) * 100}%` }}
+            ></div>
+          </div>
+        )}
+
+        {/* Progress Message */}
+        {book.progress_message && (
+          <div className="text-xs text-gray-600 mb-2">
+            {book.progress_message}
+          </div>
+        )}
+
+        {/* Error Message and Retry Button */}
+        {book.status === "FAILED" && (
+          <div className="mt-2">
+            {book.error_message && (
+              <div className="text-xs text-red-600 mb-2">
+                {book.error_message}
+              </div>
+            )}
+            <button
+              onClick={handleRetry}
+              disabled={isRetrying}
+              className="w-full px-3 py-1 bg-red-100 text-red-600 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors disabled:opacity-50"
+            >
+              {isRetrying ? "Retrying..." : "Retry Processing"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -41,12 +181,35 @@ export default function Dashboard() {
     bio: "",
   });
   const [saving, setSaving] = useState(false);
+  const [myBooks, setMyBooks] = useState<Book[]>([]);
+
+  // Function to fetch books
+  const fetchBooks = async () => {
+    const books = await userService.getMyBooks();
+    setMyBooks(books as Book[]);
+    return books;
+  };
 
   useEffect(() => {
     if (!user) return;
     userService.getProfile().then((data: UserProfile) => setProfile(data));
     userService.getStats().then((data: UserStats) => setStats(data));
+    fetchBooks();
   }, [user]);
+
+  // Auto-refresh books every 5 seconds if there are processing or generating books
+  useEffect(() => {
+    if (!myBooks.length) return;
+
+    const hasProcessingBooks = myBooks.some(
+      (book) => book.status === "PROCESSING" || book.status === "GENERATING"
+    );
+
+    if (!hasProcessingBooks) return;
+
+    const interval = setInterval(fetchBooks, 5000);
+    return () => clearInterval(interval);
+  }, [myBooks]);
 
   useEffect(() => {
     if (profile) {
@@ -92,59 +255,14 @@ export default function Dashboard() {
     setProfile(updated);
   };
 
-  const recentBooks = [
-    {
-      id: 1,
-      title: "Introduction to AI",
-      author: "Dr. Sarah Chen",
-      progress: 75,
-      type: "learning",
-      lastRead: "2 hours ago",
-    },
-    {
-      id: 2,
-      title: "The Mystery of Echo Valley",
-      author: "Marcus Johnson",
-      progress: 45,
-      type: "entertainment",
-      lastRead: "1 day ago",
-    },
-    {
-      id: 3,
-      title: "Modern Web Development",
-      author: "Alex Rivera",
-      progress: 90,
-      type: "learning",
-      lastRead: "3 hours ago",
-    },
-  ];
-
-  const achievements = [
-    {
-      title: "First Steps",
-      description: "Complete your first lesson",
-      icon: Star,
-      earned: true,
-    },
-    {
-      title: "Bookworm",
-      description: "Read 5 books this month",
-      icon: BookOpen,
-      earned: true,
-    },
-    {
-      title: "AI Explorer",
-      description: "Try all AI features",
-      icon: Brain,
-      earned: false,
-    },
-    {
-      title: "Story Master",
-      description: "Complete 3 interactive stories",
-      icon: Sparkles,
-      earned: false,
-    },
-  ];
+  const handleRetry = async (bookId: string) => {
+    try {
+      await userService.retryBookProcessing(bookId);
+      await fetchBooks();
+    } catch (error) {
+      console.error("Failed to retry book processing:", error);
+    }
+  };
 
   return (
     <div className="min-h-screen py-8">
@@ -294,19 +412,19 @@ export default function Dashboard() {
               </div>
 
               <div className="space-y-4">
-                {recentBooks.map((book) => (
+                {myBooks.map((book) => (
                   <div
                     key={book.id}
                     className="flex items-center space-x-4 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors group cursor-pointer"
                   >
                     <div
                       className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                        book.type === "learning"
+                        book.cover_image_path?.startsWith("/")
                           ? "bg-gradient-to-br from-green-500 to-blue-600"
                           : "bg-gradient-to-br from-purple-500 to-pink-600"
                       }`}
                     >
-                      {book.type === "learning" ? (
+                      {book.cover_image_path?.startsWith("/") ? (
                         <Brain className="h-6 w-6 text-white" />
                       ) : (
                         <Sparkles className="h-6 w-6 text-white" />
@@ -317,24 +435,9 @@ export default function Dashboard() {
                       <h3 className="font-semibold text-gray-900 group-hover:text-purple-600 transition-colors">
                         {book.title}
                       </h3>
-                      <p className="text-sm text-gray-600">by {book.author}</p>
-                      <p className="text-xs text-gray-500">{book.lastRead}</p>
-                    </div>
-
-                    <div className="text-right">
-                      <div className="text-sm font-medium text-gray-900 mb-1">
-                        {book.progress}%
-                      </div>
-                      <div className="w-16 bg-gray-200 rounded-full h-2">
-                        <div
-                          className={`h-2 rounded-full ${
-                            book.type === "learning"
-                              ? "bg-gradient-to-r from-green-500 to-blue-600"
-                              : "bg-gradient-to-r from-purple-500 to-pink-600"
-                          }`}
-                          style={{ width: `${book.progress}%` }}
-                        ></div>
-                      </div>
+                      <p className="text-sm text-gray-600">
+                        by {book.author_name}
+                      </p>
                     </div>
                   </div>
                 ))}
@@ -385,55 +488,42 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
-
-            {/* Achievements */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
-                <Award className="h-6 w-6 text-purple-600 mr-2" />
-                Achievements
-              </h2>
-              <div className="space-y-3">
-                {achievements.map((achievement, index) => (
-                  <div
-                    key={index}
-                    className={`flex items-center space-x-3 p-3 rounded-lg ${
-                      achievement.earned
-                        ? "bg-green-50 border border-green-200"
-                        : "bg-gray-50 border border-gray-200"
-                    }`}
-                  >
-                    <div
-                      className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                        achievement.earned ? "bg-green-500" : "bg-gray-400"
-                      }`}
-                    >
-                      <achievement.icon className="h-4 w-4 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4
-                        className={`font-medium ${
-                          achievement.earned
-                            ? "text-green-900"
-                            : "text-gray-900"
-                        }`}
-                      >
-                        {achievement.title}
-                      </h4>
-                      <p
-                        className={`text-xs ${
-                          achievement.earned
-                            ? "text-green-600"
-                            : "text-gray-500"
-                        }`}
-                      >
-                        {achievement.description}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
+        </div>
+
+        {/* Uploaded Books List */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 mb-8">
+          <h2 className="text-xl font-bold mb-4">Your Uploaded Books</h2>
+          {myBooks.length === 0 ? (
+            <div className="text-gray-500">No books uploaded yet.</div>
+          ) : (
+            <div className="space-y-8">
+              {Object.entries(
+                myBooks.reduce((acc, book) => {
+                  const type = book.book_type || "Other";
+                  return {
+                    ...acc,
+                    [type]: [...(acc[type] || []), book],
+                  };
+                }, {} as Record<string, Book[]>)
+              ).map(([bookType, books]) => (
+                <div key={bookType}>
+                  <h3 className="text-lg font-semibold mb-4 text-purple-600">
+                    {bookType}
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {books.map((book) => (
+                      <BookCard
+                        key={book.id}
+                        book={book}
+                        onRetry={handleRetry}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

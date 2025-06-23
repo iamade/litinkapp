@@ -2,6 +2,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from supabase import Client
+from postgrest.exceptions import APIError
+from enum import Enum
 
 from app.core.auth import get_current_user, get_current_author, get_current_active_user
 from app.core.database import get_supabase
@@ -10,47 +12,63 @@ from app.schemas.book import Book as BookSchema, Chapter as ChapterSchema, Chapt
 from app.services.ai_service import AIService
 from app.services.file_service import FileService
 
+
+class BookStatus(str, Enum):
+    DRAFT = "DRAFT"
+    PUBLISHED = "PUBLISHED"
+    ARCHIVED = "ARCHIVED"
+
+
+class UserBookStatus(str, Enum):
+    PROCESSING = "PROCESSING"      # Initial upload, file processing
+    GENERATING = "GENERATING"      # AI generating chapters/content
+    READY = "READY"               # AI processing complete
+    FAILED = "FAILED"             # Processing failed
+
+
 router = APIRouter()
 
 
 @router.get("/", response_model=List[BookSchema])
 async def get_books(
-    book_type: Optional[str] = None,
     supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_user)
 ):
-    """Get published books"""
-    book_type_enum = BookType(book_type) if book_type else None
-    response = supabase_client.table('books').select('*').eq('status', 'PUBLISHED').eq('book_type', book_type_enum).execute()
-    if response.error:
-        raise HTTPException(status_code=400, detail=response.error.message)
-    return response.data
+    """Get all books"""
+    try:
+        response = supabase_client.table('books').select('*').execute()
+        return response.data
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message)
 
 
-@router.get("/my-books", response_model=List[BookSchema])
+@router.get("/my-books", response_model=List[BookSchema], tags=["Authors"])
 async def get_my_books(
     supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_author)
 ):
     """Get books by current author"""
-    response = supabase_client.table('books').select('*').eq('author_id', current_user.id).execute()
-    if response.error:
-        raise HTTPException(status_code=400, detail=response.error.message)
-    return response.data
+    try:
+        response = supabase_client.table('books').select('*').eq('author_id', current_user.id).execute()
+        return response.data
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message)
 
 
 @router.get("/{book_id}", response_model=BookSchema)
 async def get_book(
-    book_id: int,
+    book_id: str,
     supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_user)
 ):
     """Get book by ID"""
-    response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
-    if response.error:
+    try:
+        response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
+        book = response.data
+    except APIError as e:
         raise HTTPException(status_code=404, detail="Book not found")
-    
-    book = response.data
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
     
     # Check if user can access this book
     if book['status'] != BookStatus.PUBLISHED and book['author_id'] != current_user.id:
@@ -85,49 +103,53 @@ async def create_book(
         "author_id": current_user['id']
     }
     
-    response = supabase_client.table('books').insert(book_data).execute()
-    
-    if response.error:
-        raise HTTPException(status_code=400, detail=response.error.message)
-    
-    return response.data[0]
+    try:
+        response = supabase_client.table('books').insert(book_data).execute()
+        if not response.data:
+            raise HTTPException(status_code=400, detail="Book creation failed.")
+        return response.data[0]
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message)
 
 
 @router.put("/{book_id}", response_model=BookSchema)
 async def update_book(
-    book_id: int,
+    book_id: str,
     book_update: BookUpdate,
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
     """Update book"""
-    # Verify the user is the author
-    response = supabase_client.table('books').select('author_id').eq('id', book_id).single().execute()
-    if response.error or not response.data or response.data['author_id'] != current_user['id']:
+    try:
+        response = supabase_client.table('books').select('author_id').eq('id', book_id).single().execute()
+        if not response.data or response.data['author_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to update this book")
+    except APIError as e:
         raise HTTPException(status_code=403, detail="Not authorized to update this book")
         
     update_data = book_update.dict(exclude_unset=True)
-    response = supabase_client.table('books').update(update_data).eq('id', book_id).execute()
-
-    if response.error:
-        raise HTTPException(status_code=400, detail=response.error.message)
-    
-    return response.data[0]
+    try:
+        response = supabase_client.table('books').update(update_data).eq('id', book_id).execute()
+        return response.data[0]
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message)
 
 
 @router.post("/{book_id}/chapters", response_model=ChapterSchema)
 async def create_chapter(
-    book_id: int,
+    book_id: str,
     chapter_data: ChapterCreate,
     supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_author)
 ):
     """Create a new chapter"""
-    response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
-    if response.error:
+    try:
+        response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
+        book = response.data
+    except APIError as e:
         raise HTTPException(status_code=404, detail="Book not found")
-    
-    book = response.data
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
     
     if book['author_id'] != current_user.id:
         raise HTTPException(
@@ -143,33 +165,39 @@ async def create_chapter(
         book['difficulty']
     )
     
-    chapter = await Chapter.create(
-        supabase_client,
-        book_id=book_id,
-        **chapter_data.dict(),
-        ai_generated_content=ai_content
-    )
+    # Insert chapter
+    chapter_insert = chapter_data.dict()
+    chapter_insert['book_id'] = book_id
+    chapter_insert['ai_generated_content'] = ai_content
+    try:
+        response = supabase_client.table('chapters').insert(chapter_insert).execute()
+        chapter = response.data[0]
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message)
     
     # Update book chapter count
-    response = supabase_client.table('books').update({'total_chapters': len(await Chapter.get_by_book(supabase_client, book_id))}).eq('id', book_id).execute()
-    if response.error:
-        raise HTTPException(status_code=400, detail=response.error.message)
+    try:
+        response = supabase_client.table('books').update({'total_chapters': len(await Chapter.get_by_book(supabase_client, book_id))}).eq('id', book_id).execute()
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message)
     
     return chapter
 
 
 @router.get("/{book_id}/chapters", response_model=List[ChapterSchema])
 async def get_chapters(
-    book_id: int,
+    book_id: str,
     supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_user)
 ):
     """Get chapters for a book"""
-    response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
-    if response.error:
+    try:
+        response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
+        book = response.data
+    except APIError as e:
         raise HTTPException(status_code=404, detail="Book not found")
-    
-    book = response.data
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
     
     # Check access permissions
     if book['status'] != BookStatus.PUBLISHED and book['author_id'] != current_user.id:
@@ -192,78 +220,165 @@ async def upload_book(
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Upload and process a book file or raw text (supports .pdf, .docx, .txt, .epub)"""
-    file_service = FileService()
-    ai_service = AIService()
-
-    if file:
-        # Process uploaded file (including .epub)
-        content = await file_service.process_book_file(file)
-        book_title = title or file.filename
-    elif text_content:
-        content = text_content
-        book_title = title or "Untitled Book"
-    else:
-        raise HTTPException(status_code=400, detail="No file or text content provided.")
-
-    # Insert book into Supabase
-    book_data = {
-        "title": book_title,
-        "author_name": current_user.get('display_name') or current_user.get('email'),
-        "author_id": current_user['id'],
-        "book_type": book_type,
-        "difficulty": difficulty
-    }
-    response = supabase_client.table('books').insert(book_data).execute()
-    if response.error or not response.data:
-        raise HTTPException(status_code=400, detail=response.error.message if response.error else "Book creation failed.")
-    book = response.data[0]
-
-    # Generate chapters using AI
-    chapters = await ai_service.generate_chapters_from_content(content, book["book_type"])
-
-    for i, chapter_content in enumerate(chapters, 1):
-        chapter_data = {
-            "book_id": book["id"],
-            "chapter_number": i,
-            "title": chapter_content["title"],
-            "content": chapter_content["content"],
-            "summary": chapter_content.get("summary"),
-            "ai_generated_content": chapter_content.get("ai_content"),
+    """Upload and process a book file or raw text"""
+    try:
+        file_service = FileService()
+        ai_service = AIService()
+        
+        # Initial book data with PROCESSING status
+        book_data = {
+            "title": title or (file.filename if file else "Untitled Book"),
+            "author_name": current_user['display_name'] or current_user['email'],
+            "author_id": current_user['id'],
+            "book_type": book_type,
+            "difficulty": difficulty,
+            "status": UserBookStatus.PROCESSING.value,
+            "error_message": None,
+            "progress": 0,
+            "total_steps": 4  # File processing, Text extraction, AI generation, Chapter creation
         }
-        response = supabase_client.table('chapters').insert(chapter_data).execute()
-        if response.error:
-            raise HTTPException(status_code=400, detail=response.error.message)
+        
+        # Create book record
+        response = supabase_client.table('books').insert(book_data).execute()
+        if not response.data:
+            raise Exception("Book creation failed")
+        book = response.data[0]
+        
+        try:
+            # Step 1: Process file
+            supabase_client.table('books').update({
+                "progress": 1,
+                "progress_message": "Processing uploaded file..."
+            }).eq('id', book["id"]).execute()
+            
+            extracted = None
+            content = None
+            if file:
+                extracted = await file_service.process_book_file(file)
+                content = extracted["text"]
+                if extracted.get("author"):
+                    book_data["author_name"] = extracted["author"]
+                if extracted.get("cover_image_path"):
+                    book_data["cover_image_path"] = extracted["cover_image_path"]
+            elif text_content:
+                content = text_content
+            else:
+                raise Exception("No file or text content provided")
+            
+            # Step 2: Extract text and metadata
+            supabase_client.table('books').update({
+                "progress": 2,
+                "progress_message": "Extracting text and metadata..."
+            }).eq('id', book["id"]).execute()
+            
+            # Update to GENERATING status before AI processing
+            supabase_client.table('books').update({
+                "status": UserBookStatus.GENERATING.value,
+                "progress": 3,
+                "progress_message": "Generating AI content..."
+            }).eq('id', book["id"]).execute()
+            
+            # Step 3: Generate chapters
+            chapters = []
+            if extracted and extracted.get("chapters"):
+                chapters = extracted["chapters"]
+            else:
+                # Generate chapters using AI
+                ai_chapters = await ai_service.generate_chapters_from_content(content, book_type)
+                chapters = [{"title": ch["title"], "content": ch["content"]} for ch in ai_chapters]
+            
+            # Step 4: Create chapters
+            supabase_client.table('books').update({
+                "progress": 4,
+                "progress_message": "Creating chapters..."
+            }).eq('id', book["id"]).execute()
+            
+            for idx, chapter in enumerate(chapters, 1):
+                chapter_data = {
+                    "book_id": book["id"],
+                    "title": chapter["title"],
+                    "content": chapter.get("content", ""),
+                    "chapter_number": idx
+                }
+                supabase_client.table('chapters').insert(chapter_data).execute()
+            
+            # Update book with success status
+            supabase_client.table('books').update({
+                "status": UserBookStatus.READY.value,
+                "progress": 4,
+                "progress_message": "Book processing complete!",
+                "total_chapters": len(chapters)
+            }).eq('id', book["id"]).execute()
+            
+            return book
+            
+        except Exception as e:
+            # Update book with error status
+            error_message = str(e)
+            supabase_client.table('books').update({
+                "status": UserBookStatus.FAILED.value,
+                "error_message": error_message,
+                "progress_message": "Processing failed. Click retry to try again."
+            }).eq('id', book["id"]).execute()
+            raise Exception(error_message)
+            
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-    # Update book
-    book["total_chapters"] = len(chapters)
-    book["estimated_duration"] = sum(ch.get("duration", 15) for ch in chapters)
-    supabase_client.table('books').update({
-        'total_chapters': book["total_chapters"],
-        'estimated_duration': book["estimated_duration"]
-    }).eq('id', book["id"]).execute()
 
-    return book
+@router.post("/{book_id}/retry", response_model=BookSchema)
+async def retry_book_processing(
+    book_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Retry processing a failed book"""
+    try:
+        # Check if book exists and belongs to user
+        response = supabase_client.table('books').select('*').eq('id', book_id).eq('author_id', current_user['id']).execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Book not found")
+        book = response.data[0]
+        
+        # Only allow retry for failed books
+        if book['status'] != UserBookStatus.FAILED.value:
+            raise HTTPException(status_code=400, detail="Can only retry failed books")
+        
+        # Reset book status and progress
+        supabase_client.table('books').update({
+            "status": UserBookStatus.PROCESSING.value,
+            "error_message": None,
+            "progress": 0,
+            "progress_message": "Restarting book processing..."
+        }).eq('id', book_id).execute()
+        
+        # TODO: Implement actual retry logic here
+        # For now, just return the updated book
+        return book
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.delete("/{book_id}", response_model=BookSchema)
 async def delete_book(
-    book_id: int,
+    book_id: str,
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
     """Delete a book"""
-    # Verify the user is the author
-    response = supabase_client.table('books').select('author_id').eq('id', book_id).single().execute()
-    if response.error or not response.data or response.data['author_id'] != current_user['id']:
+    try:
+        response = supabase_client.table('books').select('author_id').eq('id', book_id).single().execute()
+        if not response.data or response.data['author_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this book")
+    except APIError as e:
         raise HTTPException(status_code=403, detail="Not authorized to delete this book")
 
-    response = supabase_client.table('books').delete().eq('id', book_id).execute()
-    
-    if response.error:
-        raise HTTPException(status_code=400, detail=response.error.message)
-        
-    return response.data[0]
+    try:
+        response = supabase_client.table('books').delete().eq('id', book_id).execute()
+        return response.data[0]
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message)
 
 
 @router.post("/search", response_model=List[BookSchema])
@@ -272,10 +387,11 @@ async def search_books(
     supabase_client: Client = Depends(get_supabase)
 ):
     """Search for books by title or description"""
-    response = supabase_client.table('books').select('*').text_search('fts', query).execute()
-    if response.error:
-        raise HTTPException(status_code=400, detail=response.error.message)
-    return response.data
+    try:
+        response = supabase_client.table('books').select('*').text_search('fts', query).execute()
+        return response.data
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message)
 
 
 @router.get("/recommendations/{user_id}", response_model=List[BookSchema])
@@ -285,7 +401,8 @@ async def get_book_recommendations(
 ):
     """Get book recommendations for a user (dummy implementation)"""
     # This is a placeholder for a real recommendation engine
-    response = supabase_client.table('books').select('*').limit(5).execute()
-    if response.error:
-        raise HTTPException(status_code=400, detail=response.error.message)
-    return response.data
+    try:
+        response = supabase_client.table('books').select('*').limit(5).execute()
+        return response.data
+    except APIError as e:
+        raise HTTPException(status_code=400, detail=e.message)

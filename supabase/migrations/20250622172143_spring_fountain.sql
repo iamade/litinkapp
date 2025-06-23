@@ -19,3 +19,10 @@ INSERT INTO badges (name, description, image_url, criteria, rarity, points) VALU
 
 -- Note: Sample books and chapters will be created through the application
 -- when authors upload content, as they require user authentication
+
+-- Add new columns for book processing status tracking
+ALTER TABLE books 
+ADD COLUMN IF NOT EXISTS error_message TEXT,
+ADD COLUMN IF NOT EXISTS progress INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS total_steps INTEGER DEFAULT 4,
+ADD COLUMN IF NOT EXISTS progress_message TEXT;
