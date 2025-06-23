@@ -228,7 +228,6 @@ async def upload_book(
         # Initial book data with PROCESSING status
         book_data = {
             "title": title or (file.filename if file else "Untitled Book"),
-            "author_name": current_user['display_name'] or current_user['email'],
             "author_id": current_user['id'],
             "book_type": book_type,
             "difficulty": difficulty,
@@ -256,10 +255,14 @@ async def upload_book(
             if file:
                 extracted = await file_service.process_book_file(file)
                 content = extracted["text"]
+                # Update book with extracted metadata
+                update_data = {}
                 if extracted.get("author"):
-                    book_data["author_name"] = extracted["author"]
+                    update_data["author_name"] = extracted["author"]
                 if extracted.get("cover_image_path"):
-                    book_data["cover_image_path"] = extracted["cover_image_path"]
+                    update_data["cover_image_path"] = extracted["cover_image_path"]
+                if update_data:
+                    supabase_client.table('books').update(update_data).eq('id', book["id"]).execute()
             elif text_content:
                 content = text_content
             else:

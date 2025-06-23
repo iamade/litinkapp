@@ -37,7 +37,7 @@ class FileService:
         """Extract text, author, cover image, and chapters from PDF file"""
         author = None
         cover_image_path = None
-        chapters: List[str] = []
+        chapters: List[Dict[str, str]] = []
         text = ""
         
         # Extract author and text using PyPDF2
@@ -79,7 +79,7 @@ class FileService:
             # 1. First try TOC
             toc = doc.get_toc()
             if toc:
-                chapters = [entry[1] for entry in toc if entry[1]]
+                chapters = [{"title": entry[1], "content": ""} for entry in toc if entry[1]]
             else:
                 # 2. If no TOC, analyze text formatting
                 potential_chapters = []
@@ -104,7 +104,7 @@ class FileService:
                                     if text and len(text) < 100 and (
                                         (is_bold or is_large) and (starts_with_chapter or has_number_prefix)
                                     ):
-                                        potential_chapters.append(text)
+                                        potential_chapters.append({"title": text, "content": ""})
 
                 if potential_chapters:
                     chapters = potential_chapters
@@ -116,8 +116,9 @@ class FileService:
                         r"CHAPTER\s+[A-Z0-9]+[:\s\-]+[A-Za-z0-9 ,.'\-]+"
                     ]
                     for pattern in chapter_patterns:
-                        chapters = re.findall(pattern, text)
-                        if chapters:
+                        found_chapters = re.findall(pattern, text)
+                        if found_chapters:
+                            chapters = [{"title": title.strip(), "content": ""} for title in found_chapters]
                             break
 
         except Exception as e:
