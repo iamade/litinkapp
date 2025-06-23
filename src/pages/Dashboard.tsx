@@ -401,7 +401,7 @@ export default function Dashboard() {
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold text-gray-900 flex items-center">
                   <Clock className="h-6 w-6 text-purple-600 mr-2" />
-                  Continue Reading
+                  Start Learning
                 </h2>
                 <Link
                   to="/learn"

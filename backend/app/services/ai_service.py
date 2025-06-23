@@ -95,49 +95,57 @@ class AIService:
             return self._get_mock_lesson(topic)
     
     async def generate_chapters_from_content(self, content: str, book_type: str) -> List[Dict[str, Any]]:
-        """Generate chapters from book content"""
+        """Generate chapters from book content without hardcoding chapter count"""
         if not self.client:
             return self._get_mock_chapters(book_type)
-        
+
         try:
             prompt = f"""
-            Break this content into logical chapters for a {book_type} book:
-            
-            {content[:3000]}
-            
-            Return JSON format:
-            {{
-                "chapters": [
-                    {{
-                        "title": "Chapter title",
-                        "content": "Chapter content",
-                        "summary": "Brief summary",
-                        "duration": 15,
-                        "ai_content": {{
-                            "key_concepts": ["Concept 1", "Concept 2"],
-                            "learning_objectives": ["Objective 1", "Objective 2"]
-                        }}
-                    }}
-                ]
-            }}
-            """
-            
+    You are an expert at analyzing and structuring {book_type} books.
+
+    Your task is to:
+    - Break the input content into logical, well-structured **chapters**
+    - Use **natural topic boundaries**, not arbitrary text lengths
+    - Avoid over-segmenting (don’t create chapters that are too short or redundant)
+    - Only create a new chapter when there is a clear shift in theme or subject
+    - Return all output in **valid JSON** format like this:
+
+    {{
+    "chapters": [
+        {{
+        "title": "Chapter title",
+        "content": "Chapter content",
+        "summary": "Brief summary",
+        "duration": 15,
+        "ai_content": {{
+            "key_concepts": ["Concept 1", "Concept 2"],
+            "learning_objectives": ["Objective 1", "Objective 2"]
+        }}
+        }}
+    ]
+    }}
+
+    Here is the book content sample:
+    {content[:7000]}
+    """
+
             response = await self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4",  # Strongly recommended for structured output
                 messages=[
-                    {"role": "system", "content": f"You are an expert at structuring {book_type} content."},
+                    {"role": "system", "content": f"You are an expert at structuring {book_type} books."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=2000
+                temperature=0.5,
+                max_tokens=4000
             )
-            
+
             result = json.loads(response.choices[0].message.content)
             return result.get("chapters", [])
-            
+
         except Exception as e:
             print(f"AI service error: {e}")
             return self._get_mock_chapters(book_type)
+
     
     async def generate_chapter_content(self, content: str, book_type: str, difficulty: str) -> Dict[str, Any]:
         """Generate AI content for a chapter"""
