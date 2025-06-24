@@ -236,7 +236,7 @@ async def upload_book(
             detail="Either a file or text content must be provided.",
         )
 
-    file_service = FileService(db_client=supabase_client)
+    file_service = FileService()
     
     storage_path = None
     original_filename = None
@@ -295,7 +295,7 @@ async def get_book_status(
 ):
     """Get the processing status of a book by its ID."""
     try:
-        response = supabase_client.table('books').select('*').eq('id', book_id).eq('user_id', current_user['id']).single().execute()
+        response = supabase_client.table('books').select('*, chapters(*)').eq('id', book_id).eq('user_id', current_user['id']).single().execute()
         book = response.data
         if not book:
             raise HTTPException(status_code=404, detail="Book not found or you don't have access.")

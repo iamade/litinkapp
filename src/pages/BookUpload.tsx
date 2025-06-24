@@ -199,11 +199,8 @@ export default function BookUpload() {
                 "Book processing failed. Please try again."
             );
             setIsProcessing(false);
-          } else if (
-            updatedBook.status !== "QUEUED" &&
-            updatedBook.status !== "PROCESSING"
-          ) {
-            // Proceed to the next step if processing has moved to chapter generation or is ready
+          } else if (updatedBook.status === "READY") {
+            // Proceed to the next step only when the book is fully ready
             clearInterval(pollInterval);
 
             // Set editable chapters for review

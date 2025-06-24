@@ -16,9 +16,10 @@ import tempfile
 class FileService:
     """File processing service for book uploads"""
     
-    def __init__(self, db_client: Client):
+    def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
-        self.db = db_client
+        # Initialize a new Supabase client with the service role key for backend operations
+        self.db = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
         self.ai_service = AIService()
         os.makedirs(self.upload_dir, exist_ok=True)
     
