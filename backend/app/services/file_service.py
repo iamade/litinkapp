@@ -10,6 +10,7 @@ import re
 from supabase import create_client, Client
 from app.services.ai_service import AIService
 from app.schemas.book import BookCreate, ChapterCreate, BookUpdate
+import tempfile
 
 
 class FileService:
@@ -23,7 +24,8 @@ class FileService:
     
     def process_uploaded_book(
         self,
-        file: Optional[UploadFile],
+        storage_path: Optional[str],
+        original_filename: Optional[str],
         text_content: Optional[str],
         book_type: str,
         user_id: str,
@@ -44,8 +46,18 @@ class FileService:
             self.db.table("books").update(update_data).eq("id", book_id).execute()
 
             # 2. Extract content from file or use provided text
-            if file:
-                extracted_data = self.process_book_file(file)
+            if storage_path and original_filename:
+                # Download file from Supabase Storage to a temporary location
+                with tempfile.NamedTemporaryFile(delete=False, suffix=original_filename) as temp_file:
+                    file_content = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(path=storage_path)
+                    temp_file.write(file_content)
+                    temp_file_path = temp_file.name
+
+                extracted_data = self.process_book_file(temp_file_path, original_filename)
+                
+                # Clean up the temporary file
+                os.unlink(temp_file_path)
+
                 content = extracted_data.get("text", "")
                 author_name = extracted_data.get("author")
                 cover_path = extracted_data.get("cover_image_path")
@@ -121,19 +133,14 @@ class FileService:
             self.db.table("books").update(error_update).eq("id", book_id).execute()
             # Do not re-raise, as this is a background task
     
-    def process_book_file(self, file: UploadFile) -> Dict[str, Any]:
-        """Process uploaded book file and extract text, author, cover, chapters"""
-        file_path = os.path.join(self.upload_dir, file.filename)
-        with open(file_path, 'wb') as f:
-            content = file.file.read()
-            f.write(content)
-
-        if file.filename.endswith('.pdf'):
+    def process_book_file(self, file_path: str, filename: str) -> Dict[str, Any]:
+        """Process book file from its path and extract text, author, cover, chapters"""
+        if filename.endswith('.pdf'):
             return self._extract_pdf_info(file_path)
-        elif file.filename.endswith('.docx'):
+        elif filename.endswith('.docx'):
             text = self._extract_docx_text(file_path)
             return {"text": text, "author": None, "cover_image_path": None, "chapters": []}
-        elif file.filename.endswith('.txt'):
+        elif filename.endswith('.txt'):
             text = self._extract_txt_text(file_path)
             return {"text": text, "author": None, "cover_image_path": None, "chapters": []}
         else:

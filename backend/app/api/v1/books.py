@@ -7,6 +7,7 @@ from enum import Enum
 import shutil
 import fitz
 import os
+import aiofiles
 from pydantic import BaseModel
 from fastapi.responses import Response
 
@@ -237,9 +238,28 @@ async def upload_book(
 
     file_service = FileService(db_client=supabase_client)
     
+    storage_path = None
+    original_filename = None
+
+    if file:
+        original_filename = file.filename
+        # Define a unique path in Supabase Storage
+        storage_path = f"{current_user['id']}/{original_filename}"
+        
+        try:
+            # Read file content and upload to Supabase Storage
+            content = await file.read()
+            supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
+                path=storage_path,
+                file=content,
+                file_options={"content-type": file.content_type}
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to upload file to storage: {e}")
+
     # Create an initial book record so we can return an ID immediately
     initial_book_data = BookCreate(
-        title=file.filename if file else "Untitled Text",
+        title=original_filename if file else "Untitled Text",
         user_id=current_user["id"],
         book_type=book_type,
         status="QUEUED",
@@ -252,7 +272,8 @@ async def upload_book(
         # Add the processing task to the background
         background_tasks.add_task(
             file_service.process_uploaded_book,
-            file=file,
+            storage_path=storage_path,
+            original_filename=original_filename,
             text_content=text_content,
             book_type=book_type,
             user_id=current_user["id"],
