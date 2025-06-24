@@ -94,59 +94,70 @@ class AIService:
             print(f"AI service error: {e}")
             return self._get_mock_lesson(topic)
     
-    async def generate_chapters_from_content(self, content: str, book_type: str) -> List[Dict[str, Any]]:
-        """Generate chapters from book content without hardcoding chapter count"""
+    async def generate_chapters_from_content(
+        self, content: str, book_type: str
+    ) -> List[Dict[str, Any]]:
+        """Generate chapters from book content using a structured approach."""
         if not self.client:
             return self._get_mock_chapters(book_type)
 
         try:
-            prompt = f"""
-    You are an expert at analyzing and structuring {book_type} books.
+            # System prompt to set the context for the AI
+            system_prompt = f"""
+You are an expert editor specializing in {book_type} content. 
+Your task is to analyze the provided text and divide it into logical chapters. 
+Focus on identifying natural breaks in the narrative or subject matter.
+Return the output as a valid JSON object with a single key "chapters" that contains a list of chapter objects.
+Each chapter object must have 'title' and 'content' keys.
+"""
 
-    Your task is to:
-    - Break the input content into logical, well-structured **chapters**
-    - Use **natural topic boundaries**, not arbitrary text lengths
-    - Avoid over-segmenting (don’t create chapters that are too short or redundant)
-    - Only create a new chapter when there is a clear shift in theme or subject
-    - Return all output in **valid JSON** format like this:
+            # User prompt with the actual content
+            user_prompt = f"""
+Please process the following content and structure it into chapters:
 
-    {{
-    "chapters": [
-        {{
-        "title": "Chapter title",
-        "content": "Chapter content",
-        "summary": "Brief summary",
-        "duration": 15,
-        "ai_content": {{
-            "key_concepts": ["Concept 1", "Concept 2"],
-            "learning_objectives": ["Objective 1", "Objective 2"]
-        }}
-        }}
-    ]
-    }}
+--- CONTENT START ---
+{content[:15000]} 
+--- CONTENT END ---
 
-    Here is the book content sample:
-    {content[:7000]}
-    """
+Ensure the entire output is a single valid JSON object.
+"""
 
             response = await self.client.chat.completions.create(
-                model="gpt-4",  # Strongly recommended for structured output
+                model="gpt-3.5-turbo-1106",  # Optimized for JSON mode
                 messages=[
-                    {"role": "system", "content": f"You are an expert at structuring {book_type} books."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
                 ],
-                temperature=0.5,
-                max_tokens=4000
+                response_format={"type": "json_object"},
+                temperature=0.3,
             )
 
-            result = json.loads(response.choices[0].message.content)
+            response_content = response.choices[0].message.content
+            if not response_content:
+                raise ValueError("Received empty content from OpenAI API.")
+
+            result = json.loads(response_content)
+            
+            # Basic validation
+            if "chapters" not in result or not isinstance(result["chapters"], list):
+                raise ValueError("Invalid JSON structure received from AI.")
+
             return result.get("chapters", [])
 
+        except json.JSONDecodeError as e:
+            print(f"AI service JSON decoding error: {e}")
+            print(f"Invalid JSON received: {response_content}")
+            return self._get_mock_chapters(book_type)
         except Exception as e:
-            print(f"AI service error: {e}")
+            print(f"AI service error in generate_chapters_from_content: {e}")
             return self._get_mock_chapters(book_type)
 
-    
+    def generate_chapters_from_content_sync(
+        self, content: str, book_type: str
+    ) -> List[Dict[str, Any]]:
+        """Synchronous wrapper for generate_chapters_from_content."""
+        return asyncio.run(self.generate_chapters_from_content(content, book_type))
+
     async def generate_chapter_content(self, content: str, book_type: str, difficulty: str) -> Dict[str, Any]:
         """Generate AI content for a chapter"""
         if book_type == "learning":
@@ -304,3 +315,9 @@ class AIService:
     async def _generate_scene_descriptions(self, content: str) -> List[str]:
         """Generate scene descriptions"""
         return ["Scene 1: A mystical forest...", "Scene 2: An ancient castle..."]
+
+    async def generate_book_metadata(
+        self, content: str, title: Optional[str] = None
+    ) -> Dict[str, Any]:
+        # Implementation of generate_book_metadata method
+        pass

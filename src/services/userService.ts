@@ -33,4 +33,7 @@ export const userService = {
   retryBookProcessing: async (bookId: string) => {
     return apiClient.post(`/books/${bookId}/retry`, {});
   },
+  deleteBook: async (bookId: string) => {
+    return apiClient.delete(`/books/${bookId}`);
+  },
 };

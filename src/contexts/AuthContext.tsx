@@ -6,6 +6,7 @@ import {
   ReactNode,
 } from "react";
 import { apiClient } from "../lib/api";
+import { setOnTokenRefresh } from "../lib/api";
 
 interface User {
   id: string;
@@ -44,19 +45,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         } catch (error) {
           console.error("Failed to fetch user profile", error);
           localStorage.removeItem("authToken");
+          localStorage.removeItem("refreshToken");
         }
       }
       setLoading(false);
     };
     checkUser();
+    // Subscribe to token refreshes
+    setOnTokenRefresh(async () => {
+      try {
+        const profile = await apiClient.get<User>("/users/me");
+        setUser(profile);
+      } catch {
+        setUser(null);
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("refreshToken");
+      }
+    });
   }, []);
 
   const login = async (email: string, password: string) => {
-    const { access_token } = await apiClient.post<{ access_token: string }>(
-      "/auth/login",
-      { email, password }
-    );
+    const { access_token, refresh_token } = await apiClient.post<{
+      access_token: string;
+      refresh_token: string;
+    }>("/auth/login", { email, password });
     localStorage.setItem("authToken", access_token);
+    localStorage.setItem("refreshToken", refresh_token);
     const profile = await apiClient.get<User>("/users/me");
     setUser(profile);
   };
@@ -80,6 +94,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = () => {
     setUser(null);
     localStorage.removeItem("authToken");
+    localStorage.removeItem("refreshToken");
   };
 
   return (

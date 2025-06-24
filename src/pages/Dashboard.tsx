@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { userService } from "../services/userService";
 import {
@@ -10,6 +10,8 @@ import {
   TrendingUp,
   Clock,
 } from "lucide-react";
+import { toast } from "react-hot-toast";
+import { apiClient } from "../lib/api";
 
 interface UserProfile {
   id: string;
@@ -42,133 +44,45 @@ interface Book {
   error_message?: string;
 }
 
-const BookCard = ({
-  book,
-  onRetry,
+function DeleteModal({
+  open,
+  onClose,
+  onConfirm,
+  bookTitle,
 }: {
-  book: Book;
-  onRetry: (bookId: string) => Promise<void>;
-}) => {
-  const [isRetrying, setIsRetrying] = useState(false);
-
-  const handleRetry = async () => {
-    setIsRetrying(true);
-    try {
-      await onRetry(book.id);
-    } finally {
-      setIsRetrying(false);
-    }
-  };
-
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  bookTitle: string;
+}) {
+  if (!open) return null;
   return (
-    <div className="border rounded-xl p-4 flex flex-col hover:shadow-lg transition-all transform hover:scale-105">
-      {book.cover_image_path && (
-        <img
-          src={
-            book.cover_image_path.startsWith("/")
-              ? book.cover_image_path
-              : `/uploads/${book.cover_image_path}`
-          }
-          alt={book.title}
-          className="h-40 w-full object-cover rounded mb-2"
-        />
-      )}
-      <div className="font-bold text-lg mb-1">{book.title}</div>
-      <div className="text-gray-600 text-sm mb-1">By {book.author_name}</div>
-      <div className="text-xs text-purple-600 mb-2">{book.book_type}</div>
-
-      {/* Progress and Status Section */}
-      <div className="mt-auto">
-        <div className="flex justify-between items-center mb-2">
-          <div className="text-gray-500 text-xs">{book.difficulty}</div>
-          {book.status === "PROCESSING" && (
-            <div className="flex items-center text-yellow-600">
-              <div className="animate-spin mr-2 h-4 w-4 border-2 border-yellow-600 rounded-full border-t-transparent"></div>
-              <span className="text-xs">Processing...</span>
-            </div>
-          )}
-          {book.status === "GENERATING" && (
-            <div className="flex items-center text-blue-600">
-              <div className="animate-spin mr-2 h-4 w-4 border-2 border-blue-600 rounded-full border-t-transparent"></div>
-              <span className="text-xs">Generating...</span>
-            </div>
-          )}
-          {book.status === "READY" && (
-            <div className="flex items-center text-green-600">
-              <svg
-                className="w-4 h-4 mr-1"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-              <span className="text-xs">Ready</span>
-            </div>
-          )}
-          {book.status === "FAILED" && (
-            <div className="flex items-center text-red-600">
-              <svg
-                className="w-4 h-4 mr-1"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-              <span className="text-xs">Failed</span>
-            </div>
-          )}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+      <div className="bg-white rounded-xl shadow-lg p-8 max-w-sm w-full">
+        <h2 className="text-lg font-bold mb-4 text-gray-900">Delete Book</h2>
+        <p className="mb-6 text-gray-700">
+          Are you sure you want to delete{" "}
+          <span className="font-semibold">{bookTitle}</span>? This action cannot
+          be undone.
+        </p>
+        <div className="flex justify-end space-x-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+          >
+            Delete
+          </button>
         </div>
-
-        {/* Progress Bar */}
-        {(book.status === "PROCESSING" || book.status === "GENERATING") && (
-          <div className="w-full bg-gray-200 rounded-full h-1.5 mb-2">
-            <div
-              className="bg-blue-600 h-1.5 rounded-full transition-all duration-500"
-              style={{ width: `${(book.progress / book.total_steps) * 100}%` }}
-            ></div>
-          </div>
-        )}
-
-        {/* Progress Message */}
-        {book.progress_message && (
-          <div className="text-xs text-gray-600 mb-2">
-            {book.progress_message}
-          </div>
-        )}
-
-        {/* Error Message and Retry Button */}
-        {book.status === "FAILED" && (
-          <div className="mt-2">
-            {book.error_message && (
-              <div className="text-xs text-red-600 mb-2">
-                {book.error_message}
-              </div>
-            )}
-            <button
-              onClick={handleRetry}
-              disabled={isRetrying}
-              className="w-full px-3 py-1 bg-red-100 text-red-600 rounded-lg text-sm font-medium hover:bg-red-200 transition-colors disabled:opacity-50"
-            >
-              {isRetrying ? "Retrying..." : "Retry Processing"}
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
-};
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -181,12 +95,19 @@ export default function Dashboard() {
     bio: "",
   });
   const [saving, setSaving] = useState(false);
-  const [myBooks, setMyBooks] = useState<Book[]>([]);
+  const [allBooks, setAllBooks] = useState<Book[]>([]);
+  const navigate = useNavigate();
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [bookToDelete, setBookToDelete] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [retryingBookId, setRetryingBookId] = useState<string | null>(null);
 
-  // Function to fetch books
+  // Function to fetch all books
   const fetchBooks = async () => {
-    const books = await userService.getMyBooks();
-    setMyBooks(books as Book[]);
+    const books = await userService.getMyBooks(); // This actually calls /books (all books)
+    setAllBooks(books as Book[]);
     return books;
   };
 
@@ -199,17 +120,14 @@ export default function Dashboard() {
 
   // Auto-refresh books every 5 seconds if there are processing or generating books
   useEffect(() => {
-    if (!myBooks.length) return;
-
-    const hasProcessingBooks = myBooks.some(
+    if (!allBooks.length) return;
+    const hasProcessingBooks = allBooks.some(
       (book) => book.status === "PROCESSING" || book.status === "GENERATING"
     );
-
     if (!hasProcessingBooks) return;
-
     const interval = setInterval(fetchBooks, 5000);
     return () => clearInterval(interval);
-  }, [myBooks]);
+  }, [allBooks]);
 
   useEffect(() => {
     if (profile) {
@@ -255,12 +173,34 @@ export default function Dashboard() {
     setProfile(updated);
   };
 
-  const handleRetry = async (bookId: string) => {
+  const handleChapterRetry = async (bookId: string) => {
+    setRetryingBookId(bookId);
     try {
-      await userService.retryBookProcessing(bookId);
+      const bookWithChapters = await apiClient.post(
+        `/books/${bookId}/regenerate-chapters`,
+        {}
+      );
+      // Navigate to the upload page, passing the book data to resume at step 4
+      navigate("/upload", { state: { resumeBook: bookWithChapters } });
+    } catch (e: unknown) {
+      const error = e as Error;
+      toast.error(error.message || "Failed to retry chapter generation.");
+    } finally {
+      setRetryingBookId(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!bookToDelete) return;
+    try {
+      await userService.deleteBook(bookToDelete.id);
       await fetchBooks();
-    } catch (error) {
-      console.error("Failed to retry book processing:", error);
+      toast.success("Book deleted successfully!");
+    } catch {
+      toast.error("Failed to delete book.");
+    } finally {
+      setDeleteModalOpen(false);
+      setBookToDelete(null);
     }
   };
 
@@ -412,35 +352,86 @@ export default function Dashboard() {
               </div>
 
               <div className="space-y-4">
-                {myBooks.map((book) => (
-                  <div
-                    key={book.id}
-                    className="flex items-center space-x-4 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors group cursor-pointer"
-                  >
-                    <div
-                      className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                        book.cover_image_path?.startsWith("/")
-                          ? "bg-gradient-to-br from-green-500 to-blue-600"
-                          : "bg-gradient-to-br from-purple-500 to-pink-600"
-                      }`}
-                    >
-                      {book.cover_image_path?.startsWith("/") ? (
-                        <Brain className="h-6 w-6 text-white" />
-                      ) : (
-                        <Sparkles className="h-6 w-6 text-white" />
-                      )}
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900 group-hover:text-purple-600 transition-colors">
-                        {book.title}
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        by {book.author_name}
-                      </p>
-                    </div>
+                {allBooks.length === 0 ? (
+                  <div className="text-gray-500 text-center py-8">
+                    You have no books uploaded.
                   </div>
-                ))}
+                ) : (
+                  allBooks.map((book) => (
+                    <div
+                      key={book.id}
+                      className="flex items-center space-x-4 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors group"
+                    >
+                      <div
+                        className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                          book.book_type === "explore"
+                            ? "bg-gradient-to-br from-purple-500 to-pink-600"
+                            : "bg-gradient-to-br from-green-500 to-blue-600"
+                        }`}
+                      >
+                        {book.book_type === "explore" ? (
+                          <Sparkles className="h-6 w-6 text-white" />
+                        ) : (
+                          <Brain className="h-6 w-6 text-white" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-gray-900 group-hover:text-purple-600 transition-colors">
+                          {book.title}
+                        </h3>
+                        <p className="text-sm text-gray-600">
+                          by {book.author_name}
+                        </p>
+                        <div className="text-sm text-gray-500 mt-1">
+                          Status:{" "}
+                          <span
+                            className={`font-semibold ${
+                              book.status === "READY"
+                                ? "text-green-600"
+                                : book.status === "FAILED"
+                                ? "text-red-600"
+                                : "text-yellow-600"
+                            }`}
+                          >
+                            {book.status}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-col space-y-2 items-end">
+                        <button
+                          className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-200 transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                          onClick={() =>
+                            book.status === "READY" &&
+                            navigate(`/book/${book.id}`)
+                          }
+                          disabled={book.status !== "READY"}
+                        >
+                          View
+                        </button>
+                        {book.status === "GENERATING" && (
+                          <button
+                            className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-lg text-xs font-medium hover:bg-yellow-200 transition-colors"
+                            onClick={() => handleChapterRetry(book.id)}
+                            disabled={retryingBookId === book.id}
+                          >
+                            {retryingBookId === book.id
+                              ? "Retrying..."
+                              : "Retry"}
+                          </button>
+                        )}
+                        <button
+                          className="px-3 py-1 bg-red-100 text-red-700 rounded-lg text-xs font-medium hover:bg-red-200 transition-colors"
+                          onClick={() => {
+                            setBookToDelete({ id: book.id, title: book.title });
+                            setDeleteModalOpen(true);
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -490,42 +481,16 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-
-        {/* Uploaded Books List */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 mb-8">
-          <h2 className="text-xl font-bold mb-4">Your Uploaded Books</h2>
-          {myBooks.length === 0 ? (
-            <div className="text-gray-500">No books uploaded yet.</div>
-          ) : (
-            <div className="space-y-8">
-              {Object.entries(
-                myBooks.reduce((acc, book) => {
-                  const type = book.book_type || "Other";
-                  return {
-                    ...acc,
-                    [type]: [...(acc[type] || []), book],
-                  };
-                }, {} as Record<string, Book[]>)
-              ).map(([bookType, books]) => (
-                <div key={bookType}>
-                  <h3 className="text-lg font-semibold mb-4 text-purple-600">
-                    {bookType}
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {books.map((book) => (
-                      <BookCard
-                        key={book.id}
-                        book={book}
-                        onRetry={handleRetry}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
+      <DeleteModal
+        open={deleteModalOpen}
+        onClose={() => {
+          setDeleteModalOpen(false);
+          setBookToDelete(null);
+        }}
+        onConfirm={handleDelete}
+        bookTitle={bookToDelete?.title || ""}
+      />
     </div>
   );
 }

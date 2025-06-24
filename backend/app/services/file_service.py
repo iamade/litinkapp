@@ -7,37 +7,142 @@ import docx
 import fitz  # PyMuPDF
 from app.core.config import settings
 import re
+from supabase import create_client, Client
+from app.services.ai_service import AIService
+from app.schemas.book import BookCreate, ChapterCreate, BookUpdate
 
 
 class FileService:
     """File processing service for book uploads"""
     
-    def __init__(self):
+    def __init__(self, db_client: Client):
         self.upload_dir = settings.UPLOAD_DIR
+        self.db = db_client
+        self.ai_service = AIService()
         os.makedirs(self.upload_dir, exist_ok=True)
     
-    async def process_book_file(self, file: UploadFile) -> Dict[str, Any]:
+    def process_uploaded_book(
+        self,
+        file: Optional[UploadFile],
+        text_content: Optional[str],
+        book_type: str,
+        user_id: str,
+        book_id_to_update: str,
+    ) -> None:
+        """Orchestrates the entire book processing flow for a given book ID."""
+        
+        book_id = book_id_to_update
+
+        try:
+            # Update status to PROCESSING
+            update_data = {
+                "status": "PROCESSING",
+                "progress": 1,
+                "total_steps": 4,
+                "progress_message": "Extracting content...",
+            }
+            self.db.table("books").update(update_data).eq("id", book_id).execute()
+
+            # 2. Extract content from file or use provided text
+            if file:
+                extracted_data = self.process_book_file(file)
+                content = extracted_data.get("text", "")
+                author_name = extracted_data.get("author")
+                cover_path = extracted_data.get("cover_image_path")
+            else:
+                content = text_content
+                author_name = None
+                cover_path = None
+
+            if not content or content.isspace():
+                raise ValueError("Extracted content is empty.")
+
+            # Update book with extracted info and progress
+            update_data = {
+                "author_name": author_name,
+                "cover_image_path": cover_path.replace(self.upload_dir, "/uploads") if cover_path else None,
+                "status": "GENERATING",
+                "progress": 2,
+                "progress_message": "Generating chapters with AI...",
+            }
+            self.db.table("books").update(update_data).eq("id", book_id).execute()
+
+            # 3. Generate chapters using AI
+            chapters_data = self.ai_service.generate_chapters_from_content_sync(
+                content, book_type
+            )
+            if not chapters_data:
+                raise ValueError("AI failed to generate chapters.")
+
+            # Update book progress
+            update_data = {
+                "progress": 3,
+                "progress_message": "Saving chapters...",
+            }
+            self.db.table("books").update(update_data).eq("id", book_id).execute()
+
+            # 4. Save chapters to the database
+            for i, chap_data in enumerate(chapters_data):
+                chapter_create = ChapterCreate(
+                    book_id=book_id,
+                    chapter_number=i + 1,
+                    title=chap_data.get("title", f"Chapter {i+1}"),
+                    content=chap_data.get("content", "No content available."),
+                    # summary=chap_data.get("summary"),
+                    # estimated_duration=chap_data.get("duration"),
+                )
+                self.db.table("chapters").insert(chapter_create.dict()).execute()
+
+            # 5. Finalize book processing
+            final_update = {
+                "total_chapters": len(chapters_data),
+                "status": "READY",
+                "progress": 4,
+                "progress_message": "Book is ready!",
+            }
+            db_response = (
+                self.db.table("books")
+                .update(final_update)
+                .eq("id", book_id)
+                .execute()
+            )
+            
+            # Fetch the final book object with its chapters
+            final_book = self.db.table("books").select("*, chapters(*)").eq("id", book_id).single().execute()
+            return final_book.data
+
+        except Exception as e:
+            print(f"Error processing book {book_id}: {e}")
+            error_update = {
+                "status": "FAILED",
+                "progress_message": "An error occurred during processing.",
+                "error_message": str(e),
+            }
+            self.db.table("books").update(error_update).eq("id", book_id).execute()
+            # Do not re-raise, as this is a background task
+    
+    def process_book_file(self, file: UploadFile) -> Dict[str, Any]:
         """Process uploaded book file and extract text, author, cover, chapters"""
         file_path = os.path.join(self.upload_dir, file.filename)
-        async with aiofiles.open(file_path, 'wb') as f:
-            content = await file.read()
-            await f.write(content)
+        with open(file_path, 'wb') as f:
+            content = file.file.read()
+            f.write(content)
+
         if file.filename.endswith('.pdf'):
-            return await self._extract_pdf_info(file_path)
+            return self._extract_pdf_info(file_path)
         elif file.filename.endswith('.docx'):
-            text = await self._extract_docx_text(file_path)
+            text = self._extract_docx_text(file_path)
             return {"text": text, "author": None, "cover_image_path": None, "chapters": []}
         elif file.filename.endswith('.txt'):
-            text = await self._extract_txt_text(file_path)
+            text = self._extract_txt_text(file_path)
             return {"text": text, "author": None, "cover_image_path": None, "chapters": []}
         else:
             raise ValueError("Unsupported file format")
     
-    async def _extract_pdf_info(self, file_path: str) -> Dict[str, Any]:
-        """Extract text, author, cover image, and chapters from PDF file"""
+    def _extract_pdf_info(self, file_path: str) -> Dict[str, Any]:
+        """Extract text, author, cover image from PDF file"""
         author = None
         cover_image_path = None
-        chapters: List[Dict[str, str]] = []
         text = ""
         
         # Extract author and text using PyPDF2
@@ -54,8 +159,40 @@ class FileService:
                     author = pdf_reader.metadata.author
         except Exception as e:
             print(f"PDF extraction error: {e}")
-            
-        # Extract cover image and chapters using PyMuPDF
+        
+        # If author not found in metadata, try to extract from bold/large text in first 2 pages
+        if not author:
+            try:
+                doc = fitz.open(file_path)
+                for page_num in range(min(2, len(doc))):
+                    page = doc[page_num]
+                    blocks = page.get_text("dict")['blocks']
+                    for block in blocks:
+                        if 'lines' in block:
+                            for line in block['lines']:
+                                for span in line['spans']:
+                                    text_span = span['text'].strip()
+                                    is_bold = 'bold' in span['font'].lower() or span['flags'] & 2**4 != 0
+                                    is_large = span['size'] > 14  # Adjust threshold as needed
+                                    # Heuristic: bold or large text, not too long, not all caps
+                                    if text_span and (is_bold or is_large) and 3 < len(text_span) < 50 and not text_span.isupper():
+                                        # Prefer lines starting with 'by '
+                                        if text_span.lower().startswith('by '):
+                                            author = text_span[3:].strip()
+                                            break
+                                        # Or just take the first bold/large line as author
+                                        if not author:
+                                            author = text_span
+                                if author:
+                                    break
+                        if author:
+                            break
+                    if author:
+                        break
+            except Exception as e:
+                print(f"Author extraction from text failed: {e}")
+        
+        # Extract cover image using PyMuPDF
         try:
             doc = fitz.open(file_path)
             # Extract cover image from first 4 pages
@@ -74,64 +211,16 @@ class FileService:
                         cover_image_path = os.path.join(self.upload_dir, f"cover_{os.path.basename(file_path)}.png")
                         pix.save(cover_image_path)
                         break
-
-            # Try multiple methods to extract chapters
-            # 1. First try TOC
-            toc = doc.get_toc()
-            if toc:
-                chapters = [{"title": entry[1], "content": ""} for entry in toc if entry[1]]
-            else:
-                # 2. If no TOC, analyze text formatting
-                potential_chapters = []
-                for page_num in range(len(doc)):
-                    page = doc[page_num]
-                    blocks = page.get_text("dict")["blocks"]
-                    
-                    for block in blocks:
-                        if "lines" in block:
-                            for line in block["lines"]:
-                                for span in line["spans"]:
-                                    text = span["text"].strip()
-                                    # Check if this might be a chapter title:
-                                    # 1. Text is bold or larger than normal
-                                    # 2. Starts with common chapter indicators
-                                    # 3. Not too long (chapter titles are usually brief)
-                                    is_bold = "bold" in span["font"].lower() or span["flags"] & 2**4 != 0
-                                    is_large = span["size"] > 12  # Adjust threshold as needed
-                                    starts_with_chapter = any(text.lower().startswith(x) for x in ["chapter", "section", "part"])
-                                    has_number_prefix = bool(re.match(r"^\d+\.?\s+", text))
-                                    
-                                    if text and len(text) < 100 and (
-                                        (is_bold or is_large) and (starts_with_chapter or has_number_prefix)
-                                    ):
-                                        potential_chapters.append({"title": text, "content": ""})
-
-                if potential_chapters:
-                    chapters = potential_chapters
-                else:
-                    # 3. Fallback: look for chapter patterns in text
-                    chapter_patterns = [
-                        r"Chapter\s+\d+[:\s\-]+[A-Za-z0-9 ,.'\-]+",
-                        r"\d+\.\s+[A-Z][A-Za-z0-9 ,.'\-]+",
-                        r"CHAPTER\s+[A-Z0-9]+[:\s\-]+[A-Za-z0-9 ,.'\-]+"
-                    ]
-                    for pattern in chapter_patterns:
-                        found_chapters = re.findall(pattern, text)
-                        if found_chapters:
-                            chapters = [{"title": title.strip(), "content": ""} for title in found_chapters]
-                            break
-
         except Exception as e:
             print(f"PyMuPDF extraction error: {e}")
 
         return {
             "text": text,
             "author": author,
-            "cover_image_path": cover_image_path,
-            "chapters": chapters
+            "cover_image_path": cover_image_path
         }
     
-    async def _extract_docx_text(self, file_path: str) -> str:
+    def _extract_docx_text(self, file_path: str) -> str:
         """Extract text from DOCX file"""
         try:
             doc = docx.Document(file_path)
@@ -143,31 +232,33 @@ class FileService:
             print(f"DOCX extraction error: {e}")
             return "Error extracting DOCX content"
     
-    async def _extract_txt_text(self, file_path: str) -> str:
+    def _extract_txt_text(self, file_path: str) -> str:
         """Extract text from TXT file"""
         try:
-            async with aiofiles.open(file_path, 'r', encoding='utf-8') as file:
-                return await file.read()
+            with open(file_path, 'r', encoding='utf-8') as file:
+                return file.read()
         except Exception as e:
             print(f"TXT extraction error: {e}")
             return "Error extracting TXT content"
     
-    async def save_audio_file(self, audio_data: bytes, filename: str) -> str:
+    def save_audio_file(self, audio_data: bytes, filename: str) -> str:
         """Save audio file and return URL"""
         audio_path = os.path.join(self.upload_dir, "audio", filename)
         os.makedirs(os.path.dirname(audio_path), exist_ok=True)
         
-        async with aiofiles.open(audio_path, 'wb') as f:
-            await f.write(audio_data)
+        with open(audio_path, 'wb') as f:
+            f.write(audio_data)
         
-        return f"/uploads/audio/{filename}"
+        audio_url = f"/uploads/audio/{filename}"
+        return audio_url
     
-    async def save_video_file(self, video_data: bytes, filename: str) -> str:
+    def save_video_file(self, video_data: bytes, filename: str) -> str:
         """Save video file and return URL"""
         video_path = os.path.join(self.upload_dir, "video", filename)
         os.makedirs(os.path.dirname(video_path), exist_ok=True)
         
-        async with aiofiles.open(video_path, 'wb') as f:
-            await f.write(video_data)
+        with open(video_path, 'wb') as f:
+            f.write(video_data)
         
-        return f"/uploads/video/{filename}"
+        video_url = f"/uploads/video/{filename}"
+        return video_url

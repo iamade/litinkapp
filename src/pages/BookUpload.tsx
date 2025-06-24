@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useRef, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-hot-toast";
 import {
@@ -14,18 +14,40 @@ import {
 } from "lucide-react";
 import { apiClient } from "../lib/api";
 
+// Add interface for chapter structure
+interface Chapter {
+  title: string;
+  content: string;
+}
+
+// Add new type for editable chapters
+interface EditableChapter {
+  title: string;
+  content: string;
+}
+
 // Define Book type based on backend BookSchema
 interface Book {
   id: string;
   title: string;
-  author_name: string;
-  description: string;
-  // add other fields as needed
+  author_name: string | null;
+  description: string | null;
+  cover_image_url: string | null;
+  book_type: string;
+  difficulty: string;
+  tags: string[] | null;
+  language: string | null;
+  status: string;
+  total_chapters: number;
+  estimated_duration: number | string | null;
+  chapters: Chapter[] | null;
+  error_message?: string;
 }
 
 export default function BookUpload() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [step, setStep] = useState(1);
   const [uploadMethod, setUploadMethod] = useState<"file" | "text">("file");
   const [bookMode, setBookMode] = useState<"learning" | "entertainment">(
@@ -35,12 +57,81 @@ export default function BookUpload() {
   const [textContent, setTextContent] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiBook, setAiBook] = useState<Book | null>(null);
-  const [details, setDetails] = useState({
+  const [details, setDetails] = useState<{
+    title: string;
+    author_name: string;
+    description: string;
+    cover_image_url: string;
+    book_type: string;
+    difficulty: string;
+    tags: string[];
+    language: string;
+    estimated_duration: string;
+  }>({
     title: "",
     author_name: "",
     description: "",
+    cover_image_url: "",
+    book_type: "learning",
+    difficulty: "medium",
+    tags: [],
+    language: "en",
+    estimated_duration: "",
   });
   const [saving, setSaving] = useState(false);
+  const [authorNameError, setAuthorNameError] = useState("");
+  const [coverSource, setCoverSource] = useState<"upload" | "extract">(
+    "upload"
+  );
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string>("");
+  const [coverPage, setCoverPage] = useState<string>("");
+  const [coverError, setCoverError] = useState("");
+  const [tagInput, setTagInput] = useState("");
+  const [formError, setFormError] = useState("");
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  // New state for editable chapters
+  const [editableChapters, setEditableChapters] = useState<EditableChapter[]>(
+    []
+  );
+  const [savingChapters, setSavingChapters] = useState(false);
+  const [chapterError, setChapterError] = useState("");
+
+  useEffect(() => {
+    // Check if we are resuming a book from the dashboard
+    if (location.state?.resumeBook) {
+      const bookToResume = location.state.resumeBook as Book;
+
+      // Set the AI book object
+      setAiBook(bookToResume);
+
+      // Set the editable chapters
+      setEditableChapters(
+        (bookToResume.chapters as EditableChapter[])?.map((ch) => ({
+          title: ch.title,
+          content: ch.content,
+        })) || []
+      );
+
+      // Set book details
+      setDetails({
+        title: bookToResume.title || "",
+        author_name: bookToResume.author_name || "",
+        description: bookToResume.description || "",
+        cover_image_url: bookToResume.cover_image_url || "",
+        book_type: bookToResume.book_type || "learning",
+        difficulty: bookToResume.difficulty || "medium",
+        tags: bookToResume.tags || [],
+        language: bookToResume.language || "en",
+        estimated_duration: bookToResume.estimated_duration
+          ? String(bookToResume.estimated_duration)
+          : "",
+      });
+
+      // Jump to the chapter review step
+      setStep(4);
+    }
+  }, [location.state]);
 
   if (!user) {
     return (
@@ -75,6 +166,7 @@ export default function BookUpload() {
   const handleProcessAI = async () => {
     setIsProcessing(true);
     setAiBook(null);
+    setEditableChapters([]);
     try {
       const formData = new FormData();
       formData.append("book_type", bookMode);
@@ -89,32 +181,231 @@ export default function BookUpload() {
       }
       const book = (await apiClient.upload("/books/upload", formData)) as Book;
       setAiBook(book);
-      setDetails({
-        title: book.title || "",
-        author_name: book.author_name || "",
-        description: book.description || "",
-      });
-      setStep(4);
+
+      // Poll for status changes
+      const pollInterval = setInterval(async () => {
+        try {
+          const response = await apiClient.get<Book>(
+            `/books/${book.id}/status`
+          );
+          const updatedBook = response as Book;
+          setAiBook(updatedBook);
+
+          // Stop polling if the book processing has failed
+          if (updatedBook.status === "FAILED") {
+            clearInterval(pollInterval);
+            toast.error(
+              updatedBook.error_message ||
+                "Book processing failed. Please try again."
+            );
+            setIsProcessing(false);
+          } else if (updatedBook.status !== "QUEUED") {
+            // Proceed to the next step if processing has started (i.e., status is no longer QUEUED)
+            clearInterval(pollInterval);
+
+            // Set editable chapters for review
+            if (updatedBook.chapters) {
+              setEditableChapters(
+                updatedBook.chapters.map((ch: Chapter) => ({
+                  title: ch.title || "",
+                  content: ch.content || "",
+                }))
+              );
+            }
+            setDetails({
+              title: updatedBook.title || "",
+              author_name: updatedBook.author_name || "",
+              description: updatedBook.description || "",
+              cover_image_url: updatedBook.cover_image_url || "",
+              book_type: updatedBook.book_type || "learning",
+              difficulty: updatedBook.difficulty || "medium",
+              tags: updatedBook.tags || [],
+              language: updatedBook.language || "en",
+              estimated_duration: updatedBook.estimated_duration
+                ? String(updatedBook.estimated_duration)
+                : "",
+            });
+            setStep(4); // Go to chapter review step
+            setIsProcessing(false);
+          }
+        } catch (error) {
+          console.error("Error polling book status:", error);
+          clearInterval(pollInterval);
+          setIsProcessing(false);
+          toast.error("Could not get book status. Please check the dashboard.");
+        }
+      }, 2000); // Poll every 2 seconds
+
+      // Cleanup polling on component unmount
+      return () => clearInterval(pollInterval);
     } catch (e: unknown) {
       const error = e as Error;
       toast.error(error.message || "AI processing failed.");
-    } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // Step 4: Save Chapters (after user review)
+  const handleSaveChapters = async () => {
+    if (!aiBook) return;
+    setSavingChapters(true);
+    setChapterError("");
+    // Validate chapters
+    if (
+      !editableChapters.length ||
+      editableChapters.some((ch) => !ch.title.trim())
+    ) {
+      setChapterError("Each chapter must have a title.");
+      setSavingChapters(false);
+      return;
+    }
+    try {
+      await apiClient.post(
+        `/books/${aiBook.id}/save-chapters`,
+        editableChapters
+      );
+      setStep(5); // Proceed to Book Details
+      toast.success("Chapters saved! Now complete book details.");
+    } catch (e: unknown) {
+      const error = e as Error;
+      toast.error(error.message || "Failed to save chapters.");
+      setChapterError(error.message || "Failed to save chapters.");
+    } finally {
+      setSavingChapters(false);
     }
   };
 
   // Step 4: Save/Update Book Details
   const handleDetailsChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >
   ) => {
-    setDetails({ ...details, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setDetails((prev) => ({
+      ...prev,
+      [name]:
+        name === "tags"
+          ? value
+              .split(",")
+              .map((t: string) => t.trim())
+              .filter(Boolean)
+          : name === "estimated_duration"
+          ? value.replace(/[^0-9]/g, "")
+          : value,
+    }));
+  };
+
+  // Cover image upload handler
+  const handleCoverFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setCoverFile(file);
+      setCoverPreview(URL.createObjectURL(file));
+      setDetails((prev) => ({ ...prev, cover_image_url: "" }));
+    }
+  };
+
+  // Tag input handlers
+  const handleTagInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setTagInput(e.target.value);
+  };
+  const handleTagInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.key === "Enter" || e.key === ",") && tagInput.trim()) {
+      e.preventDefault();
+      if (!details.tags.includes(tagInput.trim())) {
+        setDetails((prev) => ({
+          ...prev,
+          tags: [...prev.tags, tagInput.trim()],
+        }));
+      }
+      setTagInput("");
+    }
+  };
+  const handleRemoveTag = (tag: string) => {
+    setDetails((prev) => ({
+      ...prev,
+      tags: prev.tags.filter((t) => t !== tag),
+    }));
+  };
+
+  // Cover image extraction handler
+  const handleExtractCover = async () => {
+    setCoverError("");
+    if (!coverPage || isNaN(Number(coverPage)) || Number(coverPage) < 1) {
+      setCoverError("Enter a valid page number");
+      return;
+    }
+    if (!aiBook) return;
+    try {
+      // Call backend endpoint to extract cover from page (implement this endpoint if not present)
+      const res = await apiClient.post<{ cover_image_url: string }>(
+        `/books/${aiBook.id}/extract-cover`,
+        { page: Number(coverPage) }
+      );
+      setDetails((prev) => ({ ...prev, cover_image_url: res.cover_image_url }));
+      setCoverPreview(res.cover_image_url);
+      setCoverError("");
+    } catch {
+      setCoverError("Failed to extract cover from page.");
+    }
+  };
+
+  // Cover image upload to backend
+  const uploadCoverImage = async () => {
+    if (!coverFile || !aiBook) return null;
+    const formData = new FormData();
+    formData.append("cover_image", coverFile);
+    try {
+      const res = await apiClient.upload<{ cover_image_url: string }>(
+        `/books/${aiBook.id}/upload-cover`,
+        formData
+      );
+      return res.cover_image_url;
+    } catch {
+      setCoverError("Failed to upload cover image.");
+      return null;
+    }
   };
 
   const handleSaveDetails = async () => {
     if (!aiBook) return;
+    setFormError("");
+    if (!details.title.trim()) {
+      setFormError("Title is required.");
+      return;
+    }
+    if (!details.author_name || !details.author_name.trim()) {
+      setAuthorNameError("Author name is required.");
+      return;
+    } else {
+      setAuthorNameError("");
+    }
+    if (!details.book_type) {
+      setFormError("Book type is required.");
+      return;
+    }
+    if (!details.difficulty) {
+      setFormError("Difficulty is required.");
+      return;
+    }
+    // Handle cover image upload if needed
+    let coverUrl = details.cover_image_url;
+    if (coverSource === "upload" && coverFile) {
+      const uploaded = await uploadCoverImage();
+      if (uploaded) coverUrl = uploaded;
+    }
+    // If extract, cover_image_url is already set by extract handler
     setSaving(true);
     try {
-      await apiClient.put(`/books/${aiBook.id}`, details);
+      const payload = {
+        ...details,
+        cover_image_url: coverUrl,
+        estimated_duration: details.estimated_duration
+          ? Number(details.estimated_duration)
+          : null,
+      };
+      await apiClient.put(`/books/${aiBook.id}`, payload);
       toast.success("Book details updated!");
       navigate("/dashboard");
     } catch (e: unknown) {
@@ -123,6 +414,34 @@ export default function BookUpload() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Chapter editing handlers
+  const handleChapterChange = (
+    idx: number,
+    field: keyof EditableChapter,
+    value: string
+  ) => {
+    setEditableChapters((prev) =>
+      prev.map((ch, i) => (i === idx ? { ...ch, [field]: value } : ch))
+    );
+  };
+  const handleAddChapter = () => {
+    setEditableChapters((prev) => [...prev, { title: "", content: "" }]);
+  };
+  const handleRemoveChapter = (idx: number) => {
+    setEditableChapters((prev) => prev.filter((_, i) => i !== idx));
+  };
+  const handleMoveChapter = (idx: number, direction: "up" | "down") => {
+    setEditableChapters((prev) => {
+      const arr = [...prev];
+      if (direction === "up" && idx > 0) {
+        [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
+      } else if (direction === "down" && idx < arr.length - 1) {
+        [arr[idx + 1], arr[idx]] = [arr[idx], arr[idx + 1]];
+      }
+      return arr;
+    });
   };
 
   const steps = [
@@ -143,6 +462,11 @@ export default function BookUpload() {
     },
     {
       number: 4,
+      title: "Chapter Review",
+      description: "Review and edit extracted chapters",
+    },
+    {
+      number: 5,
       title: "Book Details",
       description: "Edit and confirm book details",
     },
@@ -407,8 +731,102 @@ export default function BookUpload() {
             </div>
           )}
 
-          {/* Step 4: Book Details */}
+          {/* Step 4: Chapter Review */}
           {step === 4 && (
+            <div className="space-y-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">
+                Review & Edit Chapters
+              </h2>
+              <p className="text-gray-600 mb-4">
+                Review, edit, reorder, or add chapters. Only confirmed chapters
+                will be saved.
+              </p>
+              {chapterError && (
+                <div className="text-red-500 text-sm mb-2">{chapterError}</div>
+              )}
+              <div className="space-y-4">
+                {editableChapters.map((ch, idx) => (
+                  <div
+                    key={idx}
+                    className="border border-gray-200 rounded-xl p-4 bg-gray-50 relative"
+                  >
+                    <div className="flex items-center mb-2">
+                      <span className="font-semibold text-gray-700 mr-2">
+                        Chapter {idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        className="ml-2 text-xs text-blue-500 hover:underline"
+                        onClick={() => handleMoveChapter(idx, "up")}
+                        disabled={idx === 0}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        className="ml-1 text-xs text-blue-500 hover:underline"
+                        onClick={() => handleMoveChapter(idx, "down")}
+                        disabled={idx === editableChapters.length - 1}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        className="ml-2 text-xs text-red-500 hover:underline"
+                        onClick={() => handleRemoveChapter(idx)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      className="w-full border border-gray-300 rounded-xl px-3 py-2 mb-2"
+                      placeholder="Chapter Title"
+                      value={ch.title}
+                      onChange={(e) =>
+                        handleChapterChange(idx, "title", e.target.value)
+                      }
+                    />
+                    <textarea
+                      className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                      placeholder="Chapter Content"
+                      rows={4}
+                      value={ch.content}
+                      onChange={(e) =>
+                        handleChapterChange(idx, "content", e.target.value)
+                      }
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="mt-2 px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                  onClick={handleAddChapter}
+                >
+                  + Add Chapter
+                </button>
+              </div>
+              <div className="flex justify-between mt-8">
+                <button
+                  onClick={handleBack}
+                  className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
+                  disabled={savingChapters}
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleSaveChapters}
+                  disabled={savingChapters}
+                  className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
+                >
+                  {savingChapters ? "Saving..." : "Confirm Chapters"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5: Book Details */}
+          {step === 5 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">
                 Book Details
@@ -424,22 +842,32 @@ export default function BookUpload() {
                   <input
                     type="text"
                     name="title"
-                    value={details.title}
+                    value={details.title ?? ""}
                     onChange={handleDetailsChange}
                     className="w-full border border-gray-300 rounded-xl px-3 py-2"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Author Name
+                    Author Name{" "}
+                    {(!details.author_name || authorNameError) && (
+                      <span className="text-red-500">*</span>
+                    )}
                   </label>
                   <input
                     type="text"
                     name="author_name"
-                    value={details.author_name}
+                    value={details.author_name ?? ""}
                     onChange={handleDetailsChange}
-                    className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                    className={`w-full border rounded-xl px-3 py-2 ${
+                      authorNameError ? "border-red-500" : "border-gray-300"
+                    }`}
                   />
+                  {authorNameError && (
+                    <div className="text-xs text-red-500 mt-1">
+                      {authorNameError}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -447,26 +875,216 @@ export default function BookUpload() {
                   </label>
                   <textarea
                     name="description"
-                    value={details.description}
+                    value={details.description ?? ""}
                     onChange={handleDetailsChange}
                     className="w-full border border-gray-300 rounded-xl px-3 py-2"
                     rows={4}
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Cover Image
+                  </label>
+                  <div className="flex items-center space-x-4 mb-2">
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        checked={coverSource === "upload"}
+                        onChange={() => setCoverSource("upload")}
+                      />
+                      <span>Upload New Cover</span>
+                    </label>
+                    <label className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        checked={coverSource === "extract"}
+                        onChange={() => setCoverSource("extract")}
+                      />
+                      <span>Extract from PDF</span>
+                    </label>
+                  </div>
+
+                  {coverSource === "upload" && (
+                    <div className="p-4 border-2 border-dashed rounded-xl">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleCoverFileChange}
+                        ref={coverInputRef}
+                        className="hidden"
+                      />
+                      <div
+                        className="cursor-pointer"
+                        onClick={() => coverInputRef.current?.click()}
+                      >
+                        {coverPreview ? (
+                          <img
+                            src={coverPreview}
+                            alt="Cover preview"
+                            className="w-full h-auto rounded-lg"
+                          />
+                        ) : (
+                          <div className="text-center text-gray-500">
+                            <p>Click to upload a cover image</p>
+                            <p className="text-sm">(e.g., PNG, JPG, WEBP)</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {coverSource === "extract" && (
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Enter page number for cover"
+                        value={coverPage}
+                        onChange={(e) => setCoverPage(e.target.value)}
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                      />
+                      <button
+                        onClick={handleExtractCover}
+                        className="mt-2 bg-indigo-500 text-white px-4 py-2 rounded-xl"
+                      >
+                        Extract Cover
+                      </button>
+                    </div>
+                  )}
+                  {coverError && (
+                    <p className="text-red-500 text-sm mt-1">{coverError}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Book Type
+                  </label>
+                  <select
+                    name="book_type"
+                    value={details.book_type}
+                    onChange={handleDetailsChange}
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                  >
+                    <option value="learning">Learning</option>
+                    <option value="entertainment">Entertainment</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Difficulty
+                  </label>
+                  <select
+                    name="difficulty"
+                    value={details.difficulty}
+                    onChange={handleDetailsChange}
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                  >
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Hard</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Tags
+                  </label>
+                  <div className="flex flex-wrap gap-2 items-center border border-gray-300 rounded-xl px-3 py-2">
+                    {details.tags?.map((tag) => (
+                      <span
+                        key={tag}
+                        className="bg-gray-200 text-gray-800 px-2 py-1 rounded-full text-sm flex items-center"
+                      >
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTag(tag)}
+                          className="ml-2 text-red-500 hover:text-red-700"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      type="text"
+                      value={tagInput}
+                      onChange={handleTagInputChange}
+                      onKeyDown={handleTagInputKeyDown}
+                      placeholder="Add a tag and press Enter"
+                      className="flex-grow outline-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Language
+                  </label>
+                  <input
+                    type="text"
+                    name="language"
+                    value={details.language ?? ""}
+                    onChange={handleDetailsChange}
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Estimated Duration
+                  </label>
+                  <input
+                    type="text"
+                    name="estimated_duration"
+                    value={details.estimated_duration ?? ""}
+                    onChange={handleDetailsChange}
+                    className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                  />
+                </div>
+                {formError && (
+                  <div className="text-red-500 text-sm">{formError}</div>
+                )}
+                <div className="flex justify-between mt-6">
+                  <button
+                    onClick={() => setStep(4)}
+                    className="bg-gray-200 text-gray-800 px-6 py-2 rounded-xl"
+                  >
+                    Back to Chapters
+                  </button>
+                  <button
+                    onClick={handleSaveDetails}
+                    disabled={saving}
+                    className="bg-green-500 text-white px-6 py-2 rounded-xl disabled:bg-green-300"
+                  >
+                    {saving ? "Saving..." : "Save and Continue"}
+                  </button>
+                </div>
               </div>
-              <div className="flex justify-between mt-8">
+            </div>
+          )}
+
+          {step === 6 && (
+            <div className="text-center">
+              <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold mb-2">
+                Book Created Successfully!
+              </h2>
+              <p className="text-gray-600 mb-6">
+                Your book is now ready. You can view it in your library or start
+                a new one.
+              </p>
+              <div className="flex justify-center space-x-4">
                 <button
-                  onClick={handleBack}
-                  className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
+                  onClick={() => navigate("/dashboard")}
+                  className="bg-indigo-500 text-white px-6 py-2 rounded-xl"
                 >
-                  Back
+                  Go to Dashboard
                 </button>
                 <button
-                  onClick={handleSaveDetails}
-                  disabled={saving}
-                  className="px-8 py-4 bg-gradient-to-r from-green-600 to-blue-600 text-white rounded-xl font-semibold hover:from-green-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
+                  onClick={() => {
+                    setStep(1);
+                    setFile(null);
+                    setTextContent("");
+                    setAiBook(null);
+                  }}
+                  className="bg-gray-200 text-gray-800 px-6 py-2 rounded-xl"
                 >
-                  {saving ? "Saving..." : "Save & Finish"}
+                  Create Another Book
                 </button>
               </div>
             </div>

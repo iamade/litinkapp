@@ -27,7 +27,7 @@ class Chapter(ChapterBase):
 
 class BookBase(BaseModel):
     title: str
-    author_name: str
+    author_name: Optional[str] = None
     description: Optional[str] = None
     cover_image_url: Optional[str] = None
     book_type: str
@@ -37,27 +37,52 @@ class BookBase(BaseModel):
 
 
 class BookCreate(BookBase):
-    pass
+    user_id: str
+    status: str
+    book_type: str
 
 
 class BookUpdate(BaseModel):
     title: Optional[str] = None
+    author_name: Optional[str] = None
     description: Optional[str] = None
     cover_image_url: Optional[str] = None
+    book_type: Optional[str] = None
     difficulty: Optional[str] = None
     status: Optional[str] = None
     tags: Optional[List[str]] = None
+    language: Optional[str] = None
+    estimated_duration: Optional[int] = None
 
 
 class Book(BookBase):
     id: str
-    author_id: Optional[str] = None
+    user_id: Optional[str] = None
     status: str
     total_chapters: int
     estimated_duration: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     chapters: Optional[List[Chapter]] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChapterDraft(BaseModel):
+    title: str
+    content: str
+
+
+class BookWithDraftChapters(BookBase):
+    id: str
+    user_id: Optional[str] = None
+    status: str
+    total_chapters: int
+    estimated_duration: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+    chapters: Optional[List[ChapterDraft]] = None
 
     class Config:
         from_attributes = True

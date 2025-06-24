@@ -1,5 +1,5 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from supabase import Client
 from gotrue.errors import AuthApiError
 from postgrest.exceptions import APIError
@@ -89,7 +89,11 @@ async def login(
             data={"sub": auth_response.user.id}, expires_delta=access_token_expires
         )
         
-        return {"access_token": access_token, "token_type": "bearer"}
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "refresh_token": auth_response.session.refresh_token,
+        }
         
     except Exception as e:
         if isinstance(e, HTTPException):
@@ -111,12 +115,24 @@ async def get_current_user_info(
 
 @router.post("/refresh", response_model=Token)
 async def refresh_token(
-    current_user: dict = Depends(get_current_user)
+    refresh_token: str = Body(..., embed=True),
+    supabase: Client = Depends(get_supabase)
 ):
-    """Refresh access token"""
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": current_user["id"]}, expires_delta=access_token_expires
-    )
-    
-    return {"access_token": access_token, "token_type": "bearer"}
+    """Refresh access token using a refresh token"""
+    try:
+        response = supabase.auth.refresh_session(refresh_token)
+        if not response.session:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": response.user.id}, expires_delta=access_token_expires
+        )
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "refresh_token": response.session.refresh_token,
+        }
+    except AuthApiError as e:
+        raise HTTPException(status_code=401, detail=f"Could not refresh token: {e}")
