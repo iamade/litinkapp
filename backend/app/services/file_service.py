@@ -94,17 +94,26 @@ class FileService:
             }
             self.db.table("books").update(update_data).eq("id", book_id).execute()
 
-            # 4. Save chapters to the database
+            # 4. Save chapters to the database, with strict error checking
             for i, chap_data in enumerate(chapters_data):
-                chapter_create = ChapterCreate(
-                    book_id=book_id,
+                # First, validate the chapter data from the AI service
+                validated_chapter = ChapterCreate(
                     chapter_number=i + 1,
                     title=chap_data.get("title", f"Chapter {i+1}"),
                     content=chap_data.get("content", "No content available."),
-                    # summary=chap_data.get("summary"),
-                    # estimated_duration=chap_data.get("duration"),
                 )
-                self.db.table("chapters").insert(chapter_create.dict()).execute()
+
+                # Then, create the full payload for the database insert
+                insert_payload = validated_chapter.dict()
+                insert_payload['book_id'] = book_id
+
+                response = self.db.table("chapters").insert(insert_payload).execute()
+
+                # CRITICAL: If the insert call succeeds but returns no data, it's a silent failure.
+                # Raise an exception to force the book status to FAILED.
+                if not response.data:
+                    error_detail = getattr(response, 'error', 'No error details provided.')
+                    raise Exception(f"Failed to insert chapter {i+1}. The database returned no data. Details: {error_detail}")
 
             # 5. Finalize book processing
             final_update = {
