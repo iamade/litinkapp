@@ -56,82 +56,110 @@ class FileService:
                     temp_file_path = temp_file.name
 
                 extracted_data = self.process_book_file(temp_file_path, original_filename)
-                
-                # Clean up the temporary file
-                os.unlink(temp_file_path)
-
                 content = extracted_data.get("text", "")
                 author_name = extracted_data.get("author")
                 cover_path = extracted_data.get("cover_image_path")
-            else:
-                content = text_content
-                author_name = None
-                cover_path = None
 
-            if not content or content.isspace():
-                raise ValueError("Extracted content is empty.")
+                # --- TOC-based chapter extraction for PDF using real page numbers ---
+                chapters_data = None
+                if original_filename.lower().endswith('.pdf'):
+                    toc_chapters = self._extract_table_of_contents_with_pages(content)
+                    if toc_chapters and all('page' in ch and ch['page'] for ch in toc_chapters):
+                        doc = fitz.open(temp_file_path)
+                        chapter_texts = []
+                        for idx, ch in enumerate(toc_chapters):
+                            start_page = ch['page'] - 1  # 0-indexed
+                            end_page = toc_chapters[idx + 1]['page'] - 1 if idx + 1 < len(toc_chapters) else len(doc)
+                            text = ""
+                            for page_num in range(start_page, end_page):
+                                text += doc[page_num].get_text()
+                            chapter_texts.append({'title': ch['title'], 'content': text, 'number': ch['number']})
+                        # Use AI to summarize each chapter
+                        chapters_data = []
+                        book_title = self.db.table("books").select("title").eq("id", book_id).single().execute().data["title"]
+                        author = self.db.table("books").select("author_name").eq("id", book_id).single().execute().data["author_name"]
+                        for ch in chapter_texts:
+                            ai_summary = self.ai_service.generate_chapter_summary_sync(
+                                ch['content'], ch['title'], book_title, author
+                            )
+                            chapters_data.append({
+                                'title': f"Chapter {ch['number']}: {ch['title']}",
+                                'content': ai_summary,
+                                'summary': None,
+                                'number': ch['number']
+                            })
+                        chapters_data.sort(key=lambda x: x['number'])
+                else:
+                    content = text_content
+                    author_name = None
+                    cover_path = None
+                    chapters_data = None
 
-            # Update book with extracted info and progress
-            update_data = {
-                "author_name": author_name,
-                "cover_image_path": cover_path.replace(self.upload_dir, "/uploads") if cover_path else None,
-                "status": "GENERATING",
-                "progress": 2,
-                "progress_message": "Generating chapters with AI...",
-            }
-            self.db.table("books").update(update_data).eq("id", book_id).execute()
+                if not content or content.isspace():
+                    raise ValueError("Extracted content is empty.")
 
-            # 3. Generate chapters using AI with chunking
-            target_chapters = self._determine_target_chapters(content)
-            chapters_data = self.generate_chapters_with_chunking(content, book_type, target_chapters=target_chapters, book_id=book_id)
-            if not chapters_data or len(chapters_data) == 0:
-                raise ValueError("AI failed to generate chapters after chunking.")
+                # Update book with extracted info and progress
+                update_data = {
+                    "author_name": author_name,
+                    "cover_image_path": cover_path.replace(self.upload_dir, "/uploads") if cover_path else None,
+                    "status": "GENERATING",
+                    "progress": 2,
+                    "progress_message": "Generating chapters with AI...",
+                }
+                self.db.table("books").update(update_data).eq("id", book_id).execute()
 
-            # Update book progress
-            update_data = {
-                "progress": 3,
-                "progress_message": f"Saving {len(chapters_data)} chapters...",
-            }
-            self.db.table("books").update(update_data).eq("id", book_id).execute()
+                # 3. Generate chapters using AI with chunking (fallback if TOC fails)
+                if not chapters_data:
+                    target_chapters = self._determine_target_chapters(content)
+                    chapters_data = self.generate_chapters_with_chunking(content, book_type, target_chapters=target_chapters, book_id=book_id)
+                if not chapters_data or len(chapters_data) == 0:
+                    raise ValueError("AI failed to generate chapters after chunking.")
 
-            # 4. Save chapters to the database, with strict error checking
-            for i, chap_data in enumerate(chapters_data):
-                # First, validate the chapter data from the AI service
-                validated_chapter = ChapterCreate(
-                    chapter_number=i + 1,
-                    title=chap_data.get("title", f"Chapter {i+1}"),
-                    content=chap_data.get("content", "No content available."),
+                # Update book progress
+                update_data = {
+                    "progress": 3,
+                    "progress_message": f"Saving {len(chapters_data)} chapters...",
+                }
+                self.db.table("books").update(update_data).eq("id", book_id).execute()
+
+                # 4. Save chapters to the database, with strict error checking
+                for i, chap_data in enumerate(chapters_data):
+                    # First, validate the chapter data from the AI service
+                    validated_chapter = ChapterCreate(
+                        chapter_number=i + 1,
+                        title=chap_data.get("title", f"Chapter {i+1}"),
+                        content=chap_data.get("content", "No content available."),
+                    )
+
+                    # Then, create the full payload for the database insert
+                    insert_payload = validated_chapter.dict()
+                    insert_payload['book_id'] = book_id
+
+                    response = self.db.table("chapters").insert(insert_payload).execute()
+
+                    # CRITICAL: If the insert call succeeds but returns no data, it's a silent failure.
+                    # Raise an exception to force the book status to FAILED.
+                    if not response.data:
+                        error_detail = getattr(response, 'error', 'No error details provided.')
+                        raise Exception(f"Failed to insert chapter {i+1}. The database returned no data. Details: {error_detail}")
+
+                # 5. Finalize book processing
+                final_update = {
+                    "total_chapters": len(chapters_data),
+                    "status": "READY",
+                    "progress": 4,
+                    "progress_message": "Book is ready!",
+                }
+                db_response = (
+                    self.db.table("books")
+                    .update(final_update)
+                    .eq("id", book_id)
+                    .execute()
                 )
-
-                # Then, create the full payload for the database insert
-                insert_payload = validated_chapter.dict()
-                insert_payload['book_id'] = book_id
-
-                response = self.db.table("chapters").insert(insert_payload).execute()
-
-                # CRITICAL: If the insert call succeeds but returns no data, it's a silent failure.
-                # Raise an exception to force the book status to FAILED.
-                if not response.data:
-                    error_detail = getattr(response, 'error', 'No error details provided.')
-                    raise Exception(f"Failed to insert chapter {i+1}. The database returned no data. Details: {error_detail}")
-
-            # 5. Finalize book processing
-            final_update = {
-                "total_chapters": len(chapters_data),
-                "status": "READY",
-                "progress": 4,
-                "progress_message": "Book is ready!",
-            }
-            db_response = (
-                self.db.table("books")
-                .update(final_update)
-                .eq("id", book_id)
-                .execute()
-            )
-            
-            # Fetch the final book object with its chapters
-            final_book = self.db.table("books").select("*, chapters(*)").eq("id", book_id).single().execute()
-            return final_book.data
+                
+                # Fetch the final book object with its chapters
+                final_book = self.db.table("books").select("*, chapters(*)").eq("id", book_id).single().execute()
+                return final_book.data
 
         except Exception as e:
             print(f"Error processing book {book_id}: {e}")
