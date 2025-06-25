@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     MIN_CHUNK_SIZE: int = 1000     # Minimum chunk size in characters
     MAX_CHUNK_SIZE: int = 15000    # Maximum chunk size in characters
     AI_TIMEOUT_SECONDS: int = 30   # Timeout for AI API calls
-    MAX_CHAPTERS_PER_BOOK: int = 20  # Maximum chapters per book (more reasonable)
+    MAX_CHAPTERS_PER_BOOK: int = 50  # Increased to support books with up to 50 chapters
     
     class Config:
         env_file = ".env"

@@ -1054,3 +1054,18 @@ class FileService:
         estimated = min(estimated, settings.MAX_CHAPTERS_PER_BOOK)  # Maximum from config
         
         return estimated
+
+    def deduplicate_and_limit_chapters(self, chapters, max_chapters=50):
+        seen_titles = set()
+        unique_chapters = []
+        for ch in chapters:
+            title = ch['title'].strip().lower()
+            if title in seen_titles:
+                continue
+            if not ch['content'] or len(ch['content'].strip()) < 100:
+                continue  # skip empty/very short chapters
+            seen_titles.add(title)
+            unique_chapters.append(ch)
+            if len(unique_chapters) >= max_chapters:
+                break
+        return unique_chapters
