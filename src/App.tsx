@@ -12,16 +12,21 @@ import EntertainmentMode from "./pages/EntertainmentMode";
 import Profile from "./pages/Profile";
 import BookUpload from "./pages/BookUpload";
 import BookView from "./pages/BookView";
+import { setLoadingContextSetter } from "./lib/api";
 
 // Global Loading Context
-const LoadingContext = createContext({
+export const LoadingContext = createContext({
   setLoading: (v: boolean) => {},
   loading: false,
 });
 export const useLoading = () => useContext(LoadingContext);
 
-function LoadingProvider({ children }: { children: React.ReactNode }) {
+export function LoadingProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(false);
+  // Register the setter once
+  React.useEffect(() => {
+    setLoadingContextSetter(setLoading);
+  }, []);
   return (
     <LoadingContext.Provider value={{ loading, setLoading }}>
       {children}

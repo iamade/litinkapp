@@ -10,6 +10,7 @@ import os
 import aiofiles
 from pydantic import BaseModel
 from fastapi.responses import Response
+import io
 
 from app.core.auth import get_current_user, get_current_author, get_current_active_user
 from app.core.database import get_supabase
@@ -207,13 +208,14 @@ async def get_chapters(
         raise HTTPException(status_code=404, detail="Book not found")
     
     # Check access permissions
-    if book['status'] != BookStatus.PUBLISHED and book['user_id'] != current_user.id:
+    if book['status'] != BookStatus.PUBLISHED and book['user_id'] != current_user['id']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
     
-    chapters = await Chapter.get_by_book(supabase_client, book_id)
+    chapters_response = supabase_client.table('chapters').select('*').eq('book_id', book_id).execute()
+    chapters = chapters_response.data
     return chapters
 
 
@@ -461,13 +463,10 @@ async def extract_cover_from_page(
     current_user: dict = Depends(get_current_active_user)
 ):
     # Get book record
-    response = supabase_client.table("books").select("user_id").eq("id", book_id).single().execute()
+    response = supabase_client.table("books").select("user_id, title").eq("id", book_id).single().execute()
     if not response.data or response.data["user_id"] != current_user["id"]:
         raise HTTPException(status_code=403, detail="Not authorized to modify this book")
-    
     book = response.data
-    if not book or book['user_id'] != current_user['id']:
-        raise HTTPException(status_code=403, detail="Not authorized or book not found")
     file_path = os.path.join(settings.UPLOAD_DIR, book['title'])
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="Book file not found on server")
@@ -481,9 +480,19 @@ async def extract_cover_from_page(
             raise HTTPException(status_code=404, detail="No image found on that page")
         xref = images[0][0]
         pix = fitz.Pixmap(doc, xref)
-        cover_path = os.path.join(settings.UPLOAD_DIR, f"cover_{book_id}.png")
-        pix.save(cover_path)
-        cover_url = f"/uploads/cover_{book_id}.png"
+        # Save to in-memory buffer
+        img_buffer = io.BytesIO()
+        pix.save(img_buffer, format="png")
+        img_buffer.seek(0)
+        # Upload to Supabase Storage
+        storage_path = f"covers/cover_{book_id}.png"
+        supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
+            path=storage_path,
+            file=img_buffer.getvalue(),
+            file_options={"content-type": "image/png"}
+        )
+        # Construct public URL (assuming public bucket)
+        cover_url = f"/storage/v1/object/public/{settings.SUPABASE_BUCKET_NAME}/{storage_path}"
         supabase_client.table('books').update({"cover_image_url": cover_url}).eq('id', book_id).execute()
         return {"cover_image_url": cover_url}
     except Exception as e:
@@ -501,13 +510,15 @@ async def upload_cover_image(
     response = supabase_client.table("books").select("user_id").eq("id", book_id).single().execute()
     if not response.data or response.data["user_id"] != current_user["id"]:
         raise HTTPException(status_code=403, detail="Not authorized to modify this book")
-    
-    book = response.data
-    # Save file
-    cover_path = os.path.join(settings.UPLOAD_DIR, f"cover_{book_id}_upload.png")
-    with open(cover_path, "wb") as buffer:
-        shutil.copyfileobj(cover_image.file, buffer)
-    cover_url = f"/uploads/cover_{book_id}_upload.png"
+    # Read file into memory
+    img_bytes = await cover_image.read()
+    storage_path = f"covers/cover_{book_id}_upload.png"
+    supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
+        path=storage_path,
+        file=img_bytes,
+        file_options={"content-type": "image/png"}
+    )
+    cover_url = f"/storage/v1/object/public/{settings.SUPABASE_BUCKET_NAME}/{storage_path}"
     supabase_client.table('books').update({"cover_image_url": cover_url}).eq('id', book_id).execute()
     return {"cover_image_url": cover_url}
 

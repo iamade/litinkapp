@@ -48,51 +48,67 @@ async function refreshToken(): Promise<string | null> {
   }
 }
 
+let setLoading: ((v: boolean) => void) | null = null;
+export function setLoadingContextSetter(setter: (v: boolean) => void) {
+  setLoading = setter;
+}
+
+async function withLoading<T>(fn: () => Promise<T>): Promise<T> {
+  if (setLoading) setLoading(true);
+  try {
+    return await fn();
+  } finally {
+    if (setLoading) setLoading(false);
+  }
+}
+
 export const apiClient = {
   async get<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, "GET");
+    return withLoading(() => this.request<T>(endpoint, "GET"));
   },
 
   async post<T>(endpoint: string, body: unknown): Promise<T> {
-    return this.request<T>(endpoint, "POST", body);
+    return withLoading(() => this.request<T>(endpoint, "POST", body));
   },
 
   async put<T>(endpoint: string, body: unknown): Promise<T> {
-    return this.request<T>(endpoint, "PUT", body);
+    return withLoading(() => this.request<T>(endpoint, "PUT", body));
   },
 
   async delete<T>(endpoint: string): Promise<T> {
-    return this.request<T>(endpoint, "DELETE");
+    return withLoading(() => this.request<T>(endpoint, "DELETE"));
   },
 
   async upload<T>(endpoint: string, formData: FormData): Promise<T> {
-    const token = getAuthToken();
-    const headers: HeadersInit = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    let response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      method: "POST",
-      headers, // do not set Content-Type for FormData
-      body: formData,
-    });
-    if (response.status === 401) {
-      // Try refresh
-      const newToken = await refreshToken();
-      if (newToken) {
-        headers["Authorization"] = `Bearer ${newToken}`;
-        response = await fetch(`${API_BASE_URL}${endpoint}`, {
-          method: "POST",
-          headers,
-          body: formData,
-        });
+    return withLoading(async () => {
+      const token = getAuthToken();
+      const headers: HeadersInit = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
       }
-    }
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || "An API error occurred");
-    }
-    return response.json();
+      let response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: "POST",
+        headers, // do not set Content-Type for FormData
+        body: formData,
+      });
+      if (response.status === 401) {
+        // Try refresh
+        const newToken = await refreshToken();
+        if (newToken) {
+          headers["Authorization"] = `Bearer ${newToken}`;
+          response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: "POST",
+            headers,
+            body: formData,
+          });
+        }
+      }
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || "An API error occurred");
+      }
+      return response.json();
+    });
   },
 
   async request<T>(

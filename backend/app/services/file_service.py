@@ -540,9 +540,12 @@ class FileService:
     
     def _generate_chapters_from_toc(self, content: str, toc_chapters: list, book_type: str, book_id: str = None) -> list:
         """
-        Generate chapters based on actual TOC structure.
+        Generate chapters based on actual TOC structure, using focused AI summarization per chapter.
         """
         chapters = []
+        # Get book title and author for prompt context
+        book_title = self.db.table("books").select("title").eq("id", book_id).single().execute().data["title"] if book_id else ""
+        author = self.db.table("books").select("author_name").eq("id", book_id).single().execute().data["author_name"] if book_id else ""
         
         for i, toc_entry in enumerate(toc_chapters):
             chapter_num = toc_entry['number']
@@ -559,24 +562,15 @@ class FileService:
                 # Extract content for this chapter
                 chapter_content = self._extract_chapter_content(content, toc_entry, toc_chapters, i)
                 
-                # Generate AI content for this specific chapter
-                # Use the existing AI service method to generate content for this chapter
-                ai_chapters = self.ai_service.generate_chapters_from_content_sync(chapter_content, book_type)
-                
-                # Use the first chapter's content, or create a simple summary
-                if ai_chapters and len(ai_chapters) > 0:
-                    ai_content = ai_chapters[0].get('content', f"Content for {chapter_title}")
-                    # Ensure content is a string, not a list
-                    if isinstance(ai_content, list):
-                        ai_content = '\n'.join(ai_content) if ai_content else f"Content for {chapter_title}"
-                    elif not isinstance(ai_content, str):
-                        ai_content = str(ai_content) if ai_content else f"Content for {chapter_title}"
-                else:
-                    ai_content = f"Content for Chapter {chapter_num}: {chapter_title}"
+                # Generate AI summary for this specific chapter
+                ai_summary = self.ai_service.generate_chapter_summary_sync(
+                    chapter_content, chapter_title, book_title, author
+                )
                 
                 chapters.append({
                     'title': f"Chapter {chapter_num}: {chapter_title}",
-                    'content': ai_content,
+                    'content': ai_summary,
+                    'summary': None,  # Optionally, you can call AI again for a 1-2 sentence summary
                     'number': chapter_num
                 })
                 
@@ -586,6 +580,7 @@ class FileService:
                 chapters.append({
                     'title': f"Chapter {chapter_num}: {chapter_title}",
                     'content': f"Content for {chapter_title}",
+                    'summary': None,
                     'number': chapter_num
                 })
         

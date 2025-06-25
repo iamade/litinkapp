@@ -364,15 +364,19 @@ export default function Dashboard() {
                     >
                       <div
                         className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                          book.book_type === "explore"
+                          book.book_type === "entertainment"
                             ? "bg-gradient-to-br from-purple-500 to-pink-600"
-                            : "bg-gradient-to-br from-green-500 to-blue-600"
+                            : book.book_type === "learning"
+                            ? "bg-gradient-to-br from-green-500 to-blue-600"
+                            : "bg-gradient-to-br from-gray-400 to-gray-600"
                         }`}
                       >
-                        {book.book_type === "explore" ? (
+                        {book.book_type === "entertainment" ? (
                           <Sparkles className="h-6 w-6 text-white" />
-                        ) : (
+                        ) : book.book_type === "learning" ? (
                           <Brain className="h-6 w-6 text-white" />
+                        ) : (
+                          <span className="text-xs text-white">?</span>
                         )}
                       </div>
                       <div className="flex-1 min-w-0">

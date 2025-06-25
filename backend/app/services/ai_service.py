@@ -346,3 +346,40 @@ Ensure the entire output is a single valid JSON object.
     ) -> Dict[str, Any]:
         # Implementation of generate_book_metadata method
         pass
+
+    def generate_chapter_summary_sync(self, content: str, chapter_title: str, book_title: str, author: str) -> str:
+        """Generate a focused summary for a single chapter using a custom prompt."""
+        return asyncio.run(self._generate_chapter_summary(content, chapter_title, book_title, author))
+
+    async def _generate_chapter_summary(self, content: str, chapter_title: str, book_title: str, author: str) -> str:
+        if not self.client:
+            return f"Summary for {chapter_title}"
+        try:
+            prompt = f"""
+You are given the full text of {chapter_title} from the book '{book_title}' by {author}.
+Write a concise, clear summary of this chapter, focusing only on its main ideas and key points.
+Do not repeat content from other chapters.
+Do not include content from the introduction, preface, or appendices.
+Return only the summary text, not JSON.
+
+--- CHAPTER CONTENT START ---
+{content[:12000]}
+--- CHAPTER CONTENT END ---
+"""
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model="gpt-3.5-turbo-1106",
+                    messages=[
+                        {"role": "system", "content": "You are an expert editor and summarizer."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                    max_tokens=600,
+                ),
+                timeout=settings.AI_TIMEOUT_SECONDS
+            )
+            summary = response.choices[0].message.content.strip()
+            return summary
+        except Exception as e:
+            print(f"AIService error in generate_chapter_summary: {e}")
+            return f"Summary for {chapter_title}"
