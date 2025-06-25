@@ -2,16 +2,18 @@ import openai
 from typing import List, Dict, Any, Optional
 import json
 import asyncio
+import os
 from app.core.config import settings
-
-openai.api_key = settings.OPENAI_API_KEY
+from openai import AsyncOpenAI
 
 
 class AIService:
     """AI service for generating educational content"""
     
     def __init__(self):
-        self.client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
+        self.client = None
+        if settings.OPENAI_API_KEY:
+            self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     
     async def generate_quiz(self, content: str, difficulty: str = "medium") -> List[Dict[str, Any]]:
         """Generate quiz questions from content"""
@@ -122,17 +124,28 @@ Please process the following content and structure it into chapters:
 Ensure the entire output is a single valid JSON object.
 """
 
-            response = await self.client.chat.completions.create(
-                model="gpt-3.5-turbo-1106",  # Optimized for JSON mode
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.3,
+            # LOGGING: Print prompt and content length
+            print("[AIService] System prompt:\n", system_prompt)
+            print("[AIService] User prompt (first 500 chars):\n", user_prompt[:500])
+            print(f"[AIService] Content length: {len(content)} characters (truncated to 15000)")
+
+            # Add timeout to prevent hanging
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model="gpt-3.5-turbo-1106",  # Optimized for JSON mode
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.3,
+                ),
+                timeout=settings.AI_TIMEOUT_SECONDS  # Use configurable timeout
             )
 
             response_content = response.choices[0].message.content
+            # LOGGING: Print raw AI response
+            print("[AIService] Raw AI response:\n", response_content)
             if not response_content:
                 raise ValueError("Received empty content from OpenAI API.")
 
@@ -144,6 +157,9 @@ Ensure the entire output is a single valid JSON object.
 
             return result.get("chapters", [])
 
+        except asyncio.TimeoutError:
+            print("AI service request timed out after 30 seconds")
+            return self._get_mock_chapters(book_type)
         except json.JSONDecodeError as e:
             print(f"AI service JSON decoding error: {e}")
             print(f"Invalid JSON received: {response_content}")

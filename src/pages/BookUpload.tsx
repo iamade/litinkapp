@@ -42,6 +42,7 @@ interface Book {
   estimated_duration: number | string | null;
   chapters: Chapter[] | null;
   error_message?: string;
+  progress_message?: string;
 }
 
 export default function BookUpload() {
@@ -96,6 +97,7 @@ export default function BookUpload() {
   );
   const [savingChapters, setSavingChapters] = useState(false);
   const [chapterError, setChapterError] = useState("");
+  const [processingStatus, setProcessingStatus] = useState("");
 
   useEffect(() => {
     // Check if we are resuming a book from the dashboard
@@ -167,6 +169,7 @@ export default function BookUpload() {
     setIsProcessing(true);
     setAiBook(null);
     setEditableChapters([]);
+    setProcessingStatus("Initializing...");
     try {
       const formData = new FormData();
       formData.append("book_type", bookMode);
@@ -177,10 +180,12 @@ export default function BookUpload() {
       } else {
         toast.error("Please provide a file or text content.");
         setIsProcessing(false);
+        setProcessingStatus("");
         return;
       }
       const book = (await apiClient.upload("/books/upload", formData)) as Book;
       setAiBook(book);
+      setProcessingStatus("Uploading book...");
 
       // Poll for status changes
       const pollInterval = setInterval(async () => {
@@ -191,6 +196,31 @@ export default function BookUpload() {
           const updatedBook = response as Book;
           setAiBook(updatedBook);
 
+          // Update processing status based on book status
+          if (updatedBook.progress_message) {
+            setProcessingStatus(updatedBook.progress_message);
+          } else {
+            switch (updatedBook.status) {
+              case "QUEUED":
+                setProcessingStatus("Queued for processing...");
+                break;
+              case "PROCESSING":
+                setProcessingStatus("Extracting content...");
+                break;
+              case "GENERATING":
+                setProcessingStatus("Generating chapters with AI...");
+                break;
+              case "READY":
+                setProcessingStatus("Book is ready!");
+                break;
+              case "FAILED":
+                setProcessingStatus("Processing failed");
+                break;
+              default:
+                setProcessingStatus("Processing...");
+            }
+          }
+
           // Stop polling if the book processing has failed
           if (updatedBook.status === "FAILED") {
             clearInterval(pollInterval);
@@ -199,6 +229,7 @@ export default function BookUpload() {
                 "Book processing failed. Please try again."
             );
             setIsProcessing(false);
+            setProcessingStatus("");
           } else if (updatedBook.status === "READY") {
             // Proceed to the next step only when the book is fully ready
             clearInterval(pollInterval);
@@ -227,11 +258,13 @@ export default function BookUpload() {
             });
             setStep(4); // Go to chapter review step
             setIsProcessing(false);
+            setProcessingStatus("");
           }
         } catch (error) {
           console.error("Error polling book status:", error);
           clearInterval(pollInterval);
           setIsProcessing(false);
+          setProcessingStatus("");
           toast.error("Could not get book status. Please check the dashboard.");
         }
       }, 2000); // Poll every 2 seconds
@@ -242,6 +275,7 @@ export default function BookUpload() {
       const error = e as Error;
       toast.error(error.message || "AI processing failed.");
       setIsProcessing(false);
+      setProcessingStatus("");
     }
   };
 
@@ -710,6 +744,11 @@ export default function BookUpload() {
                     <span className="text-purple-600 font-medium">
                       Processing with AI...
                     </span>
+                    {processingStatus && (
+                      <span className="text-gray-600 text-sm mt-2 text-center max-w-md">
+                        {processingStatus}
+                      </span>
+                    )}
                   </div>
                 ) : (
                   <button

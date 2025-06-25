@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
     
+    # Book processing limits
+    MAX_CHUNKS_PER_BOOK: int = 50  # Maximum number of chunks to process per book
+    MIN_CHUNK_SIZE: int = 1000     # Minimum chunk size in characters
+    MAX_CHUNK_SIZE: int = 15000    # Maximum chunk size in characters
+    AI_TIMEOUT_SECONDS: int = 30   # Timeout for AI API calls
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
