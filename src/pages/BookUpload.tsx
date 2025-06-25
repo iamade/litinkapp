@@ -98,6 +98,7 @@ export default function BookUpload() {
   const [savingChapters, setSavingChapters] = useState(false);
   const [chapterError, setChapterError] = useState("");
   const [processingStatus, setProcessingStatus] = useState("");
+  const [processingFailed, setProcessingFailed] = useState(false);
 
   useEffect(() => {
     // Check if we are resuming a book from the dashboard
@@ -167,6 +168,7 @@ export default function BookUpload() {
   // Step 3: AI Processing
   const handleProcessAI = async () => {
     setIsProcessing(true);
+    setProcessingFailed(false);
     setAiBook(null);
     setEditableChapters([]);
     setProcessingStatus("Initializing...");
@@ -224,6 +226,7 @@ export default function BookUpload() {
           // Stop polling if the book processing has failed
           if (updatedBook.status === "FAILED") {
             clearInterval(pollInterval);
+            setProcessingFailed(true);
             toast.error(
               updatedBook.error_message ||
                 "Book processing failed. Please try again."
@@ -276,6 +279,95 @@ export default function BookUpload() {
       toast.error(error.message || "AI processing failed.");
       setIsProcessing(false);
       setProcessingStatus("");
+    }
+  };
+
+  // Retry processing for failed books
+  const handleRetryProcessing = async () => {
+    if (!aiBook) return;
+
+    setIsProcessing(true);
+    setProcessingFailed(false);
+    setProcessingStatus("Retrying processing...");
+
+    try {
+      // Call the retry endpoint
+      const retryResponse = await apiClient.post<Book>(
+        `/books/${aiBook.id}/retry`,
+        {}
+      );
+      const updatedBook = retryResponse as Book;
+      setAiBook(updatedBook);
+
+      // Start polling again
+      const pollInterval = setInterval(async () => {
+        try {
+          const response = await apiClient.get<Book>(
+            `/books/${aiBook.id}/status`
+          );
+          const bookStatus = response as Book;
+          setAiBook(bookStatus);
+
+          if (bookStatus.progress_message) {
+            setProcessingStatus(bookStatus.progress_message);
+          }
+
+          if (bookStatus.status === "FAILED") {
+            clearInterval(pollInterval);
+            setProcessingFailed(true);
+            toast.error(
+              bookStatus.error_message ||
+                "Processing failed again. Please try again."
+            );
+            setIsProcessing(false);
+            setProcessingStatus("");
+          } else if (bookStatus.status === "READY") {
+            clearInterval(pollInterval);
+
+            if (bookStatus.chapters) {
+              setEditableChapters(
+                bookStatus.chapters.map((ch: Chapter) => ({
+                  title: ch.title || "",
+                  content: ch.content || "",
+                }))
+              );
+            }
+
+            setDetails({
+              title: bookStatus.title || "",
+              author_name: bookStatus.author_name || "",
+              description: bookStatus.description || "",
+              cover_image_url: bookStatus.cover_image_url || "",
+              book_type: bookStatus.book_type || "learning",
+              difficulty: bookStatus.difficulty || "medium",
+              tags: bookStatus.tags || [],
+              language: bookStatus.language || "en",
+              estimated_duration: bookStatus.estimated_duration
+                ? String(bookStatus.estimated_duration)
+                : "",
+            });
+
+            setStep(4);
+            setIsProcessing(false);
+            setProcessingStatus("");
+            toast.success("Book processing completed successfully!");
+          }
+        } catch (error) {
+          console.error("Error polling book status:", error);
+          clearInterval(pollInterval);
+          setIsProcessing(false);
+          setProcessingStatus("");
+          toast.error("Could not get book status. Please check the dashboard.");
+        }
+      }, 2000);
+
+      return () => clearInterval(pollInterval);
+    } catch (e: unknown) {
+      const error = e as Error;
+      toast.error(error.message || "Failed to retry processing.");
+      setIsProcessing(false);
+      setProcessingStatus("");
+      setProcessingFailed(true);
     }
   };
 
@@ -749,6 +841,19 @@ export default function BookUpload() {
                         {processingStatus}
                       </span>
                     )}
+                  </div>
+                ) : processingFailed ? (
+                  <div className="flex flex-col items-center">
+                    <div className="text-red-500 text-sm mb-4 text-center max-w-md">
+                      Processing failed. Please check the error message above
+                      and try again.
+                    </div>
+                    <button
+                      onClick={handleRetryProcessing}
+                      className="px-8 py-4 bg-gradient-to-r from-red-600 to-orange-600 text-white rounded-xl font-semibold hover:from-red-700 hover:to-orange-700 transition-all text-lg"
+                    >
+                      Retry Processing
+                    </button>
                   </div>
                 ) : (
                   <button

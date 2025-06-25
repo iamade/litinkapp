@@ -345,6 +345,7 @@ async def regenerate_chapters(
 @router.post("/{book_id}/retry", response_model=BookSchema)
 async def retry_book_processing(
     book_id: str,
+    background_tasks: BackgroundTasks,
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
@@ -368,9 +369,30 @@ async def retry_book_processing(
             "progress_message": "Restarting book processing..."
         }).eq('id', book_id).execute()
         
-        # TODO: Implement actual retry logic here
-        # For now, just return the updated book
-        return book
+        # Restart the processing
+        file_service = FileService()
+        
+        # Get the book content and type
+        content = book.get('content', '')
+        book_type = book.get('book_type', 'learning')
+        
+        if not content:
+            raise HTTPException(status_code=400, detail="Book content not found, cannot retry processing")
+        
+        # Add the processing task to the background
+        background_tasks.add_task(
+            file_service.process_uploaded_book,
+            storage_path=None,  # Content is already extracted
+            original_filename=None,
+            text_content=content,
+            book_type=book_type,
+            user_id=current_user["id"],
+            book_id_to_update=book_id,
+        )
+        
+        # Return the updated book
+        updated_response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
+        return updated_response.data
         
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

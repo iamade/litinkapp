@@ -518,12 +518,155 @@ class FileService:
         except Exception as e:
             print(f"Error updating progress: {e}")
 
-    def generate_chapters_with_chunking(self, content: str, book_type: str, target_chapters: int = 12, max_retries: int = 2, book_id: str = None) -> list:
+    def generate_chapters_with_chunking(self, content: str, book_type: str, target_chapters: int = None, max_retries: int = 2, book_id: str = None) -> list:
         """
         Smart chunking that respects book structure and generates chapters.
         """
-        print(f"[Smart Chunking] Starting chapter generation for {book_type} book")
+        # Use configuration default if not provided
+        if target_chapters is None:
+            target_chapters = settings.DEFAULT_TARGET_CHAPTERS
+            
+        print(f"[Smart Chunking] Starting chapter generation for {book_type} book, target: {target_chapters} chapters")
         
+        # First, try to extract actual chapter structure from TOC
+        toc_chapters = self._extract_table_of_contents_with_pages(content)
+        if toc_chapters and len(toc_chapters) > 0:
+            print(f"[Smart Chunking] Found {len(toc_chapters)} chapters in TOC, using TOC structure")
+            return self._generate_chapters_from_toc(content, toc_chapters, book_type, book_id)
+        
+        # Fallback to chunking approach
+        print(f"[Smart Chunking] No TOC found, using chunking approach")
+        return self._generate_chapters_from_chunks(content, book_type, target_chapters, book_id)
+    
+    def _generate_chapters_from_toc(self, content: str, toc_chapters: list, book_type: str, book_id: str = None) -> list:
+        """
+        Generate chapters based on actual TOC structure.
+        """
+        chapters = []
+        
+        for i, toc_entry in enumerate(toc_chapters):
+            chapter_num = toc_entry['number']
+            chapter_title = toc_entry['title']
+            
+            # Update progress if book_id is provided
+            if book_id:
+                progress_percent = int((i / len(toc_chapters)) * 100)
+                self._update_book_progress(book_id, 2, f"Generating chapter {chapter_num}/{len(toc_chapters)} ({progress_percent}%)")
+            
+            print(f"[Smart Chunking] Generating Chapter {chapter_num}: {chapter_title}")
+            
+            try:
+                # Extract content for this chapter
+                chapter_content = self._extract_chapter_content(content, toc_entry, toc_chapters, i)
+                
+                # Generate AI content for this specific chapter
+                # Use the existing AI service method to generate content for this chapter
+                ai_chapters = self.ai_service.generate_chapters_from_content_sync(chapter_content, book_type)
+                
+                # Use the first chapter's content, or create a simple summary
+                if ai_chapters and len(ai_chapters) > 0:
+                    ai_content = ai_chapters[0].get('content', f"Content for {chapter_title}")
+                    # Ensure content is a string, not a list
+                    if isinstance(ai_content, list):
+                        ai_content = '\n'.join(ai_content) if ai_content else f"Content for {chapter_title}"
+                    elif not isinstance(ai_content, str):
+                        ai_content = str(ai_content) if ai_content else f"Content for {chapter_title}"
+                else:
+                    ai_content = f"Content for Chapter {chapter_num}: {chapter_title}"
+                
+                chapters.append({
+                    'title': f"Chapter {chapter_num}: {chapter_title}",
+                    'content': ai_content,
+                    'number': chapter_num
+                })
+                
+            except Exception as e:
+                print(f"[Smart Chunking] Error generating chapter {chapter_num}: {e}")
+                # Create fallback chapter
+                chapters.append({
+                    'title': f"Chapter {chapter_num}: {chapter_title}",
+                    'content': f"Content for {chapter_title}",
+                    'number': chapter_num
+                })
+        
+        # Sort by chapter number to ensure proper order
+        chapters.sort(key=lambda x: x['number'])
+        
+        # Final cleanup
+        chapters = self._finalize_chapters(chapters, len(chapters))
+        
+        return chapters
+    
+    def _extract_chapter_content(self, content: str, toc_entry: dict, all_toc_entries: list, current_index: int) -> str:
+        """
+        Extract content for a specific chapter based on TOC entry.
+        """
+        chapter_num = toc_entry['number']
+        chapter_title = toc_entry['title']
+        
+        # Find the start and end positions for this chapter
+        start_pos = self._find_chapter_start(content, chapter_num, chapter_title)
+        
+        # Find the end position (next chapter or end of content)
+        end_pos = len(content)
+        if current_index + 1 < len(all_toc_entries):
+            next_chapter = all_toc_entries[current_index + 1]
+            end_pos = self._find_chapter_start(content, next_chapter['number'], next_chapter['title'])
+        
+        # Extract the chapter content
+        chapter_content = content[start_pos:end_pos].strip()
+        
+        # If content is too short, try to find more content
+        if len(chapter_content) < 1000:
+            # Look for chapter content in a broader range
+            chapter_content = self._find_chapter_content_broad(content, chapter_num, chapter_title)
+        
+        return chapter_content
+    
+    def _find_chapter_start(self, content: str, chapter_num: int, chapter_title: str) -> int:
+        """
+        Find the start position of a chapter in the content.
+        """
+        # Look for chapter header patterns
+        patterns = [
+            rf'Chapter\s+{chapter_num}[:\s]+{re.escape(chapter_title)}',
+            rf'CHAPTER\s+{chapter_num}[:\s]+{re.escape(chapter_title)}',
+            rf'^{chapter_num}[:\s]+{re.escape(chapter_title)}',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content, re.IGNORECASE | re.MULTILINE)
+            if match:
+                return match.start()
+        
+        # If not found, return 0
+        return 0
+    
+    def _find_chapter_content_broad(self, content: str, chapter_num: int, chapter_title: str) -> str:
+        """
+        Find chapter content using a broader search approach.
+        """
+        # Look for any mention of the chapter
+        patterns = [
+            rf'Chapter\s+{chapter_num}',
+            rf'CHAPTER\s+{chapter_num}',
+            rf'^{chapter_num}[:\s]',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content, re.IGNORECASE | re.MULTILINE)
+            if match:
+                # Extract content from this point
+                start_pos = match.start()
+                end_pos = min(start_pos + 10000, len(content))  # Get up to 10k chars
+                return content[start_pos:end_pos].strip()
+        
+        return f"Content for Chapter {chapter_num}: {chapter_title}"
+    
+    def _generate_chapters_from_chunks(self, content: str, book_type: str, target_chapters: int, book_id: str = None) -> list:
+        """
+        Generate chapters using the chunking approach (fallback method).
+        """
         # Get smart chunks based on book structure
         chunks = self._split_content_into_chunks(content, target_chapters)
         print(f"[Smart Chunking] Split into {len(chunks)} chunks based on book structure")
@@ -572,6 +715,15 @@ class FileService:
                         'title': chunk_title,
                         'content': chunk_content[:2000] + "..." if len(chunk_content) > 2000 else chunk_content
                     }]
+                
+                # Ensure all chapter content is strings, not lists
+                for chapter in chapters:
+                    if 'content' in chapter:
+                        content = chapter['content']
+                        if isinstance(content, list):
+                            chapter['content'] = '\n'.join(content) if content else "No content available."
+                        elif not isinstance(content, str):
+                            chapter['content'] = str(content) if content else "No content available."
                 
                 # Add chunk context to chapter titles
                 for chapter in chapters:
@@ -622,6 +774,10 @@ class FileService:
         if not chapters:
             return chapters
         
+        # If chapters have 'number' field, sort by it first
+        if any('number' in chapter for chapter in chapters):
+            chapters.sort(key=lambda x: x.get('number', 0))
+        
         # Limit to target count or maximum allowed chapters
         max_chapters = min(target_count, settings.MAX_CHAPTERS_PER_BOOK)
         if len(chapters) > max_chapters:
@@ -629,8 +785,10 @@ class FileService:
             chapters = chapters[:max_chapters]
         
         # Clean up titles and ensure proper numbering
+        used_titles = set()
         for i, chapter in enumerate(chapters):
             # Clean the title
+            original_title = chapter['title']
             chapter['title'] = self._clean_chapter_title(chapter['title'])
             
             # Ensure title is not empty
@@ -641,9 +799,24 @@ class FileService:
             chapter['title'] = re.sub(r'\s*\.+\s*\d+\s*$', '', chapter['title'])
             chapter['title'] = re.sub(r'\s+', ' ', chapter['title']).strip()
             
-            # Ensure proper chapter numbering
+            # Ensure proper chapter numbering and prevent duplicates
             if not chapter['title'].startswith(f"Chapter {i+1}"):
-                chapter['title'] = f"Chapter {i+1}: {chapter['title']}"
+                # Check if this title is already used
+                normalized_title = chapter['title'].lower().strip()
+                if normalized_title in used_titles:
+                    # Create a unique title
+                    counter = 1
+                    while f"{chapter['title']} ({counter})".lower().strip() in used_titles:
+                        counter += 1
+                    chapter['title'] = f"Chapter {i+1}: {chapter['title']} ({counter})"
+                else:
+                    chapter['title'] = f"Chapter {i+1}: {chapter['title']}"
+                    used_titles.add(normalized_title)
+            else:
+                used_titles.add(chapter['title'].lower().strip())
+            
+            # Ensure chapter number is set correctly
+            chapter['number'] = i + 1
         
         return chapters
 
@@ -670,43 +843,117 @@ class FileService:
     def _determine_target_chapters(self, content: str) -> int:
         """
         Dynamically determine the target number of chapters from book content.
-        Uses a hybrid approach: TOC extraction -> content analysis -> AI fallback.
+        Uses TOC page numbers as the primary method for accurate chapter counting.
         """
         print("[Chapter Detection] Analyzing book content to determine target chapters...")
         
-        # Method 1: Extract from Table of Contents
-        toc_chapters = self._extract_table_of_contents(content)
+        # Method 1: Extract from Table of Contents using page numbers (most reliable)
+        toc_chapters = self._extract_table_of_contents_with_pages(content)
         if toc_chapters and len(toc_chapters) > 0:
-            target_count = len(toc_chapters)
-            print(f"[Chapter Detection] Found {target_count} chapters from Table of Contents")
-            return min(target_count, settings.MAX_CHAPTERS_PER_BOOK)
+            # Find the highest chapter number from TOC
+            max_chapter_num = max(toc_chapters, key=lambda x: x.get('number', 0)).get('number', 0)
+            if max_chapter_num and str(max_chapter_num).isdigit():
+                target_count = int(max_chapter_num)
+                print(f"[Chapter Detection] Found {target_count} chapters from TOC (highest chapter number: {max_chapter_num})")
+                return min(target_count, settings.MAX_CHAPTERS_PER_BOOK)
         
-        # Method 2: Content analysis - look for chapter patterns
-        chapter_patterns = self._find_chapter_patterns(content)
+        # Method 2: Look for chapter patterns in the first 20% of content (TOC area)
+        toc_area = content[:len(content)//5]  # First 20% of content
+        chapter_patterns = self._find_chapter_patterns_in_toc(toc_area)
         if chapter_patterns and len(chapter_patterns) > 0:
-            target_count = len(chapter_patterns)
-            print(f"[Chapter Detection] Found {target_count} chapters from content analysis")
-            return min(target_count, settings.MAX_CHAPTERS_PER_BOOK)
+            # Find the highest chapter number
+            max_chapter_num = 0
+            for pattern in chapter_patterns:
+                chapter_num = self._extract_chapter_number(pattern['title'])
+                if chapter_num and chapter_num > max_chapter_num:
+                    max_chapter_num = chapter_num
+            
+            if max_chapter_num > 0:
+                print(f"[Chapter Detection] Found {max_chapter_num} chapters from TOC patterns")
+                return min(max_chapter_num, settings.MAX_CHAPTERS_PER_BOOK)
         
-        # Method 3: Estimate based on content length and book type
+        # Method 3: Estimate based on content length (fallback)
         estimated_chapters = self._estimate_chapters_by_length(content)
         print(f"[Chapter Detection] Estimated {estimated_chapters} chapters based on content length")
         return min(estimated_chapters, settings.MAX_CHAPTERS_PER_BOOK)
     
-    def _find_chapter_patterns(self, content: str) -> list:
+    def _extract_table_of_contents_with_pages(self, content: str) -> list:
         """
-        Find chapter patterns in content using regex and text analysis.
+        Extract table of contents with page numbers for accurate chapter counting.
+        """
+        toc_entries = []
+        
+        # Enhanced patterns for TOC with page numbers
+        toc_patterns = [
+            # Pattern for "Chapter X: Title ... Page Y" or "Chapter X: Title ... Y"
+            r'(?:Chapter|CHAPTER)\s+(\d+)[:.\s]+([^...\n\r]+?)(?:\.{2,}|…)\s*(\d+)\s*$',
+            # Pattern for "X. Title ... Page Y" or "X. Title ... Y"
+            r'^(\d+)[:.\s]+([^...\n\r]+?)(?:\.{2,}|…)\s*(\d+)\s*$',
+            # Pattern for "Part X: Title ... Page Y"
+            r'(?:Part|Section)\s+(\d+)[:.\s]+([^...\n\r]+?)(?:\.{2,}|…)\s*(\d+)\s*$',
+            # Pattern without page numbers but with chapter numbers
+            r'(?:Chapter|CHAPTER)\s+(\d+)[:.\s]+([^\n\r]+?)\s*$',
+            r'^(\d+)[:.\s]+([^\n\r]+?)\s*$',
+        ]
+        
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if len(line) < 5:  # Skip very short lines
+                continue
+                
+            for pattern in toc_patterns:
+                match = re.search(pattern, line, re.IGNORECASE)
+                if match:
+                    groups = match.groups()
+                    if len(groups) >= 2:
+                        chapter_num = groups[0]
+                        title = groups[1].strip()
+                        page_num = groups[2] if len(groups) > 2 else None
+                        
+                        # Clean up the title
+                        title = self._clean_chapter_title(title)
+                        
+                        # Skip if title is too short or contains obvious artifacts
+                        if len(title) < 3 or self._is_title_artifact(title):
+                            continue
+                        
+                        # Validate chapter number
+                        if chapter_num.isdigit():
+                            toc_entries.append({
+                                'number': int(chapter_num),
+                                'title': title,
+                                'page': int(page_num) if page_num and page_num.isdigit() else None,
+                                'line': line
+                            })
+                        break
+        
+        # Sort by chapter number
+        toc_entries.sort(key=lambda x: x['number'])
+        
+        # Remove duplicates based on chapter number
+        unique_entries = []
+        seen_numbers = set()
+        for entry in toc_entries:
+            if entry['number'] not in seen_numbers:
+                seen_numbers.add(entry['number'])
+                unique_entries.append(entry)
+        
+        return unique_entries
+    
+    def _find_chapter_patterns_in_toc(self, content: str) -> list:
+        """
+        Find chapter patterns specifically in the TOC area of the content.
         """
         chapter_patterns = []
         
-        # Common chapter patterns
-        patterns = [
-            r'^Chapter\s+\d+[:\s]*(.+?)$',  # Chapter 1: Title
-            r'^CHAPTER\s+\d+[:\s]*(.+?)$',  # CHAPTER 1: Title
-            r'^\d+\.\s+(.+?)$',             # 1. Title
-            r'^Part\s+\d+[:\s]*(.+?)$',     # Part 1: Title
-            r'^Section\s+\d+[:\s]*(.+?)$',  # Section 1: Title
-            r'^Unit\s+\d+[:\s]*(.+?)$',     # Unit 1: Title
+        # Patterns specifically for TOC
+        toc_patterns = [
+            r'^Chapter\s+(\d+)[:.\s]*(.+?)$',  # Chapter 1: Title
+            r'^CHAPTER\s+(\d+)[:.\s]*(.+?)$',  # CHAPTER 1: Title
+            r'^(\d+)[:.\s]+(.+?)$',            # 1. Title
+            r'^Part\s+(\d+)[:.\s]*(.+?)$',     # Part 1: Title
+            r'^Section\s+(\d+)[:.\s]*(.+?)$',  # Section 1: Title
         ]
         
         lines = content.split('\n')
@@ -715,39 +962,47 @@ class FileService:
             if len(line) < 10 or len(line) > 200:  # Skip very short or very long lines
                 continue
                 
-            for pattern in patterns:
+            for pattern in toc_patterns:
                 match = re.match(pattern, line, re.IGNORECASE)
                 if match:
-                    title = match.group(1).strip() if len(match.groups()) > 0 else line
+                    chapter_num = match.group(1)
+                    title = match.group(2).strip() if len(match.groups()) > 1 else line
+                    
                     # Clean the title
                     title = re.sub(r'^\d+\.\s*', '', title)  # Remove leading numbers
                     title = re.sub(r'\s+', ' ', title).strip()  # Clean whitespace
                     
                     if title and len(title) > 3 and not self._is_title_artifact(title):
                         chapter_patterns.append({
+                            'number': chapter_num,
                             'title': title,
                             'line': line
                         })
                     break
         
-        # Remove duplicates and sort by appearance in text
-        unique_chapters = []
-        seen_titles = set()
-        for chapter in chapter_patterns:
-            normalized_title = self._normalize_title(chapter['title'])
-            if normalized_title not in seen_titles:
-                seen_titles.add(normalized_title)
-                unique_chapters.append(chapter)
-        
-        return unique_chapters
+        return chapter_patterns
     
-    def _normalize_title(self, title: str) -> str:
-        """Normalize title for duplicate detection."""
-        # Remove common prefixes and normalize
-        normalized = re.sub(r'^(Chapter|CHAPTER|Part|Section|Unit)\s+\d+[:\s]*', '', title, flags=re.IGNORECASE)
-        normalized = re.sub(r'^\d+\.\s*', '', normalized)
-        normalized = re.sub(r'\s+', ' ', normalized).strip().lower()
-        return normalized
+    def _extract_chapter_number(self, title: str) -> int:
+        """
+        Extract chapter number from title or line.
+        """
+        # Try to extract number from various patterns
+        patterns = [
+            r'Chapter\s+(\d+)',
+            r'CHAPTER\s+(\d+)',
+            r'^(\d+)[:.\s]',
+            r'Part\s+(\d+)',
+            r'Section\s+(\d+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, title, re.IGNORECASE)
+            if match:
+                num_str = match.group(1)
+                if num_str.isdigit():
+                    return int(num_str)
+        
+        return 0
     
     def _estimate_chapters_by_length(self, content: str) -> int:
         """
