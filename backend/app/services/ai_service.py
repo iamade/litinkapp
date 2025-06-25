@@ -109,6 +109,15 @@ class AIService:
 You are an expert editor specializing in {book_type} content. 
 Your task is to analyze the provided text and divide it into logical chapters. 
 Focus on identifying natural breaks in the narrative or subject matter.
+
+IMPORTANT GUIDELINES:
+1. Create 1-3 chapters from the provided content
+2. Each chapter should have a clear, descriptive title that reflects its content
+3. Avoid generic titles like "Introduction" or "Overview" - be specific
+4. Do NOT include page numbers, dots, or formatting artifacts in titles
+5. Keep titles concise but descriptive (5-15 words)
+6. Ensure each chapter has substantial content
+
 Return the output as a valid JSON object with a single key "chapters" that contains a list of chapter objects.
 Each chapter object must have 'title' and 'content' keys.
 """

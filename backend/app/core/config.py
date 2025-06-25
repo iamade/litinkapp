@@ -49,10 +49,11 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
     
     # Book processing limits
-    MAX_CHUNKS_PER_BOOK: int = 50  # Maximum number of chunks to process per book
+    MAX_CHUNKS_PER_BOOK: int = 50  # Back to original limit
     MIN_CHUNK_SIZE: int = 1000     # Minimum chunk size in characters
     MAX_CHUNK_SIZE: int = 15000    # Maximum chunk size in characters
     AI_TIMEOUT_SECONDS: int = 30   # Timeout for AI API calls
+    MAX_CHAPTERS_PER_BOOK: int = 20  # Maximum chapters per book (more reasonable)
     
     class Config:
         env_file = ".env"

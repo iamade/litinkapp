@@ -82,7 +82,7 @@ class FileService:
             self.db.table("books").update(update_data).eq("id", book_id).execute()
 
             # 3. Generate chapters using AI with chunking
-            target_chapters = 12
+            target_chapters = self._determine_target_chapters(content)
             chapters_data = self.generate_chapters_with_chunking(content, book_type, target_chapters=target_chapters, book_id=book_id)
             if not chapters_data or len(chapters_data) == 0:
                 raise ValueError("AI failed to generate chapters after chunking.")
@@ -283,12 +283,12 @@ class FileService:
     def _extract_table_of_contents(self, content: str) -> list:
         """Extract table of contents from book content."""
         toc_patterns = [
-            # Pattern for "Chapter X: Title" or "Part X: Title"
-            r'(?:Chapter|Part|Section)\s+(\d+)[:.\s]+([^\n]+)',
-            # Pattern for numbered chapters "1. Title" or "I. Title"
-            r'^(\d+|[IVX]+)[:.\s]+([^\n]+)',
-            # Pattern for "Contents" section
-            r'(?:Contents?|Table of Contents?)[\s\S]*?((?:Chapter|Part|Section)\s+\d+[:.\s]+[^\n]+(?:\n(?:Chapter|Part|Section)\s+\d+[:.\s]+[^\n]+)*)',
+            # Pattern for "Chapter X: Title" or "Part X: Title" (cleaner version)
+            r'(?:Chapter|Part|Section)\s+(\d+)[:.\s]+([^\n\r.]+?)(?:\s*\.+\s*\d+)?$',
+            # Pattern for numbered chapters "1. Title" or "I. Title" (cleaner version)
+            r'^(\d+|[IVX]+)[:.\s]+([^\n\r.]+?)(?:\s*\.+\s*\d+)?$',
+            # Pattern for "Contents" section with better extraction
+            r'(?:Contents?|Table of Contents?)[\s\S]*?((?:Chapter|Part|Section)\s+\d+[:.\s]+[^\n\r.]+?(?:\s*\.+\s*\d+)?(?:\n(?:Chapter|Part|Section)\s+\d+[:.\s]+[^\n\r.]+?(?:\s*\.+\s*\d+)?)*)',
         ]
         
         toc_entries = []
@@ -298,6 +298,14 @@ class FileService:
                 if len(match.groups()) >= 2:
                     number = match.group(1)
                     title = match.group(2).strip()
+                    
+                    # Clean up the title
+                    title = self._clean_chapter_title(title)
+                    
+                    # Skip if title is too short or contains obvious artifacts
+                    if len(title) < 3 or self._is_title_artifact(title):
+                        continue
+                    
                     toc_entries.append({
                         'number': number,
                         'title': title,
@@ -306,7 +314,70 @@ class FileService:
         
         # Sort by position in document
         toc_entries.sort(key=lambda x: x['start_pos'])
-        return toc_entries
+        
+        # Remove duplicates based on title similarity
+        unique_entries = []
+        for entry in toc_entries:
+            if not any(self._titles_similar(entry['title'], existing['title']) for existing in unique_entries):
+                unique_entries.append(entry)
+        
+        return unique_entries
+
+    def _clean_chapter_title(self, title: str) -> str:
+        """Clean up chapter title by removing artifacts and formatting."""
+        # Remove page numbers and dots at the end
+        title = re.sub(r'\s*\.+\s*\d+\s*$', '', title)
+        
+        # Remove extra whitespace and dots
+        title = re.sub(r'\s+', ' ', title)
+        title = re.sub(r'\.+', '.', title)
+        
+        # Remove common PDF artifacts
+        title = re.sub(r'[^\w\s\-:().]', '', title)
+        
+        # Clean up extra spaces
+        title = title.strip()
+        
+        return title
+
+    def _is_title_artifact(self, title: str) -> bool:
+        """Check if a title is likely a PDF artifact."""
+        # Check for common PDF artifacts
+        artifact_patterns = [
+            r'^\d+$',  # Just numbers
+            r'^[IVX]+$',  # Just roman numerals
+            r'^\s*\.+\s*$',  # Just dots
+            r'^\s*[^\w\s]+\s*$',  # Just punctuation
+            r'\.{3,}',  # Too many dots
+        ]
+        
+        for pattern in artifact_patterns:
+            if re.match(pattern, title):
+                return True
+        
+        return False
+
+    def _titles_similar(self, title1: str, title2: str) -> bool:
+        """Check if two titles are similar (to avoid duplicates)."""
+        # Normalize titles for comparison
+        norm1 = re.sub(r'\s+', ' ', title1.lower().strip())
+        norm2 = re.sub(r'\s+', ' ', title2.lower().strip())
+        
+        # Check if one is contained in the other
+        if norm1 in norm2 or norm2 in norm1:
+            return True
+        
+        # Check for high similarity (simple approach)
+        if len(norm1) > 10 and len(norm2) > 10:
+            # Count common words
+            words1 = set(norm1.split())
+            words2 = set(norm2.split())
+            common_words = words1.intersection(words2)
+            
+            if len(common_words) >= min(len(words1), len(words2)) * 0.7:
+                return True
+        
+        return False
 
     def _split_content_by_toc(self, content: str, toc_entries: list) -> list:
         """Split content by table of contents entries."""
@@ -458,7 +529,7 @@ class FileService:
         print(f"[Smart Chunking] Split into {len(chunks)} chunks based on book structure")
         
         # Limit the number of chunks to process to prevent excessive processing
-        max_chunks = min(len(chunks), settings.MAX_CHUNKS_PER_BOOK)
+        max_chunks = min(len(chunks), target_chapters * 2)  # Max 2x target chapters
         if len(chunks) > max_chunks:
             print(f"[Smart Chunking] Limiting processing to {max_chunks} chunks (from {len(chunks)})")
             chunks = chunks[:max_chunks]
@@ -507,11 +578,21 @@ class FileService:
                     if not chapter['title'].startswith(chunk_title):
                         chapter['title'] = f"{chunk_title}: {chapter['title']}"
                 
+                # Ensure unique chapter titles
+                used_titles = set()
+                for chapter in chapters:
+                    original_title = chapter['title']
+                    counter = 1
+                    while chapter['title'] in used_titles:
+                        chapter['title'] = f"{original_title} (Part {counter})"
+                        counter += 1
+                    used_titles.add(chapter['title'])
+                
                 all_chapters.extend(chapters)
                 print(f"[Smart Chunking] Generated {len(chapters)} chapters from chunk {idx+1}")
                 
-                # If we have enough chapters, stop processing
-                if len(all_chapters) >= target_chapters * 2:
+                # Stop early if we have enough chapters
+                if len(all_chapters) >= target_chapters:
                     print(f"[Smart Chunking] Reached target chapter count ({len(all_chapters)}), stopping early")
                     break
                 
@@ -526,12 +607,45 @@ class FileService:
         
         print(f"[Smart Chunking] Total chapters generated: {len(all_chapters)}")
         
+        # Final cleanup: ensure proper chapter numbering and clean titles
+        all_chapters = self._finalize_chapters(all_chapters, target_chapters)
+        
         # If we have too many chapters, try to consolidate
         if len(all_chapters) > target_chapters * 1.5:
             print(f"[Smart Chunking] Too many chapters ({len(all_chapters)}), consolidating...")
             all_chapters = self._consolidate_chapters(all_chapters, target_chapters)
         
         return all_chapters if all_chapters else self.ai_service._get_mock_chapters(book_type)
+
+    def _finalize_chapters(self, chapters: list, target_count: int) -> list:
+        """Final cleanup of chapters to ensure proper numbering and clean titles."""
+        if not chapters:
+            return chapters
+        
+        # Limit to target count or maximum allowed chapters
+        max_chapters = min(target_count, settings.MAX_CHAPTERS_PER_BOOK)
+        if len(chapters) > max_chapters:
+            print(f"[Smart Chunking] Limiting to {max_chapters} chapters (from {len(chapters)})")
+            chapters = chapters[:max_chapters]
+        
+        # Clean up titles and ensure proper numbering
+        for i, chapter in enumerate(chapters):
+            # Clean the title
+            chapter['title'] = self._clean_chapter_title(chapter['title'])
+            
+            # Ensure title is not empty
+            if not chapter['title'].strip():
+                chapter['title'] = f"Chapter {i+1}"
+            
+            # Remove any remaining page numbers or artifacts
+            chapter['title'] = re.sub(r'\s*\.+\s*\d+\s*$', '', chapter['title'])
+            chapter['title'] = re.sub(r'\s+', ' ', chapter['title']).strip()
+            
+            # Ensure proper chapter numbering
+            if not chapter['title'].startswith(f"Chapter {i+1}"):
+                chapter['title'] = f"Chapter {i+1}: {chapter['title']}"
+        
+        return chapters
 
     def _consolidate_chapters(self, chapters: list, target_count: int) -> list:
         """Consolidate chapters to reach target count."""
@@ -552,3 +666,113 @@ class FileService:
                 consolidated.append(merged_chapter)
         
         return consolidated[:target_count]
+
+    def _determine_target_chapters(self, content: str) -> int:
+        """
+        Dynamically determine the target number of chapters from book content.
+        Uses a hybrid approach: TOC extraction -> content analysis -> AI fallback.
+        """
+        print("[Chapter Detection] Analyzing book content to determine target chapters...")
+        
+        # Method 1: Extract from Table of Contents
+        toc_chapters = self._extract_table_of_contents(content)
+        if toc_chapters and len(toc_chapters) > 0:
+            target_count = len(toc_chapters)
+            print(f"[Chapter Detection] Found {target_count} chapters from Table of Contents")
+            return min(target_count, settings.MAX_CHAPTERS_PER_BOOK)
+        
+        # Method 2: Content analysis - look for chapter patterns
+        chapter_patterns = self._find_chapter_patterns(content)
+        if chapter_patterns and len(chapter_patterns) > 0:
+            target_count = len(chapter_patterns)
+            print(f"[Chapter Detection] Found {target_count} chapters from content analysis")
+            return min(target_count, settings.MAX_CHAPTERS_PER_BOOK)
+        
+        # Method 3: Estimate based on content length and book type
+        estimated_chapters = self._estimate_chapters_by_length(content)
+        print(f"[Chapter Detection] Estimated {estimated_chapters} chapters based on content length")
+        return min(estimated_chapters, settings.MAX_CHAPTERS_PER_BOOK)
+    
+    def _find_chapter_patterns(self, content: str) -> list:
+        """
+        Find chapter patterns in content using regex and text analysis.
+        """
+        chapter_patterns = []
+        
+        # Common chapter patterns
+        patterns = [
+            r'^Chapter\s+\d+[:\s]*(.+?)$',  # Chapter 1: Title
+            r'^CHAPTER\s+\d+[:\s]*(.+?)$',  # CHAPTER 1: Title
+            r'^\d+\.\s+(.+?)$',             # 1. Title
+            r'^Part\s+\d+[:\s]*(.+?)$',     # Part 1: Title
+            r'^Section\s+\d+[:\s]*(.+?)$',  # Section 1: Title
+            r'^Unit\s+\d+[:\s]*(.+?)$',     # Unit 1: Title
+        ]
+        
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if len(line) < 10 or len(line) > 200:  # Skip very short or very long lines
+                continue
+                
+            for pattern in patterns:
+                match = re.match(pattern, line, re.IGNORECASE)
+                if match:
+                    title = match.group(1).strip() if len(match.groups()) > 0 else line
+                    # Clean the title
+                    title = re.sub(r'^\d+\.\s*', '', title)  # Remove leading numbers
+                    title = re.sub(r'\s+', ' ', title).strip()  # Clean whitespace
+                    
+                    if title and len(title) > 3 and not self._is_title_artifact(title):
+                        chapter_patterns.append({
+                            'title': title,
+                            'line': line
+                        })
+                    break
+        
+        # Remove duplicates and sort by appearance in text
+        unique_chapters = []
+        seen_titles = set()
+        for chapter in chapter_patterns:
+            normalized_title = self._normalize_title(chapter['title'])
+            if normalized_title not in seen_titles:
+                seen_titles.add(normalized_title)
+                unique_chapters.append(chapter)
+        
+        return unique_chapters
+    
+    def _normalize_title(self, title: str) -> str:
+        """Normalize title for duplicate detection."""
+        # Remove common prefixes and normalize
+        normalized = re.sub(r'^(Chapter|CHAPTER|Part|Section|Unit)\s+\d+[:\s]*', '', title, flags=re.IGNORECASE)
+        normalized = re.sub(r'^\d+\.\s*', '', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized).strip().lower()
+        return normalized
+    
+    def _estimate_chapters_by_length(self, content: str) -> int:
+        """
+        Estimate number of chapters based on content length and typical chapter sizes.
+        """
+        content_length = len(content)
+        
+        # Typical chapter sizes (in characters) for different book types
+        # These are rough estimates based on common book structures
+        typical_chapter_sizes = {
+            'technical': 15000,    # Technical books often have longer chapters
+            'educational': 12000,  # Educational books
+            'fiction': 8000,       # Fiction books
+            'non-fiction': 10000,  # General non-fiction
+            'academic': 18000,     # Academic books
+        }
+        
+        # Default to educational if unknown
+        avg_chapter_size = typical_chapter_sizes.get('educational', 12000)
+        
+        # Calculate estimated chapters
+        estimated = max(1, content_length // avg_chapter_size)
+        
+        # Apply reasonable bounds
+        estimated = max(3, estimated)  # Minimum 3 chapters
+        estimated = min(estimated, settings.MAX_CHAPTERS_PER_BOOK)  # Maximum from config
+        
+        return estimated
