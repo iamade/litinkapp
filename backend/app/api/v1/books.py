@@ -79,7 +79,7 @@ async def get_book(
         raise HTTPException(status_code=404, detail="Book not found")
     
     # Check if user can access this book
-    if book['status'] != BookStatus.PUBLISHED and book['user_id'] != current_user.id:
+    if book['status'] != BookStatus.PUBLISHED and book['user_id'] != current_user['id']:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"

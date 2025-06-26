@@ -36,4 +36,10 @@ export const userService = {
   deleteBook: async (bookId: string) => {
     return apiClient.delete(`/books/${bookId}`);
   },
+  getBook: async (bookId: string) => {
+    return apiClient.get(`/books/${bookId}`);
+  },
+  getChapters: async (bookId: string) => {
+    return apiClient.get(`/books/${bookId}/chapters`);
+  },
 };

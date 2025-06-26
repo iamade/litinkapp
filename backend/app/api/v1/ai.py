@@ -18,8 +18,12 @@ async def generate_text(
 ):
     """Generate text using AI service"""
     ai_service = AIService()
-    response = await ai_service.generate_text_content(request.prompt, request.context)
-    return AIResponse(text=response)
+    # Map prompt to content, context to book_type, and use a default difficulty
+    content = request.prompt
+    book_type = request.context if request.context else "learning"
+    difficulty = "medium"
+    response = await ai_service.generate_chapter_content(content, book_type, difficulty)
+    return AIResponse(text=str(response))
 
 
 @router.post("/generate-quiz", response_model=AIResponse)
