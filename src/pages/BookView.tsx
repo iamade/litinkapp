@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { userService, deleteBook } from "../services/userService";
 import { videoService, VideoScene } from "../services/videoService";
 import { aiService } from "../services/aiService";
+import { useAuth } from "../contexts/AuthContext";
 
 interface Chapter {
   id: string;
@@ -21,10 +22,12 @@ interface Book {
   status: string;
   total_chapters: number;
   chapters: Chapter[];
+  user_id: string;
 }
 
 export default function BookView() {
   const { id } = useParams<{ id: string }>();
+  const { user: currentUser } = useAuth();
   const [book, setBook] = useState<Book | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
   const [videoStyle, setVideoStyle] = useState<"cartoon" | "realistic">(
@@ -119,6 +122,7 @@ export default function BookView() {
   };
 
   const handleDelete = async () => {
+    if (!book) return;
     if (
       !window.confirm(
         "Are you sure you want to delete this book? This action cannot be undone."
@@ -130,7 +134,7 @@ export default function BookView() {
       alert("Book deleted successfully");
       // Redirect or update UI (e.g., navigate to dashboard or remove from list)
       window.location.href = "/dashboard";
-    } catch (err) {
+    } catch {
       alert("Failed to delete book");
     }
   };
@@ -161,6 +165,9 @@ export default function BookView() {
       "An interactive fantasy adventure where your choices shape the story.";
   }
 
+  // Add this after you have both book and currentUser
+  const isOwner = book && currentUser && book.user_id === currentUser.id;
+
   if (isLoading) return <div className="p-8 text-center">Loading...</div>;
   if (!book)
     return <div className="p-8 text-center text-red-500">Book not found.</div>;
@@ -179,7 +186,7 @@ export default function BookView() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center space-x-4">
             <img
-              src={book.cover_image_url || bookData.image}
+              src={(book.cover_image_url || bookData.image || "") as string}
               alt={book.title}
               className="w-16 h-20 object-cover rounded-lg shadow-md"
             />

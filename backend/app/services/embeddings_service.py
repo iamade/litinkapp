@@ -13,7 +13,7 @@ class EmbeddingsService:
     def __init__(self, supabase_client: Client):
         self.db = supabase_client
         self.client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
-        self.embedding_model = "text-embedding-ada-002"  # 1536 dimensions
+        self.embedding_model = "text-embedding-3-small"  # 1536 dimensions
     
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for a text using OpenAI"""

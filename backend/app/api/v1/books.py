@@ -293,22 +293,26 @@ async def upload_book(
 async def get_book_status(
     book_id: str,
     supabase_client: Client = Depends(get_supabase),
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(get_current_active_user),
 ):
-    """Get the processing status of a book."""
+    """Get the processing status of a book by its ID."""
     try:
-        response = supabase_client.table("books").select("*, chapters(*)").eq("id", book_id).single().execute()
-        book_data = response.data
-        if not book_data:
-            raise HTTPException(status_code=404, detail="Book not found")
-
-        # You might want to add an ownership check here for security
-        if book_data['user_id'] != current_user['id']:
-            raise HTTPException(status_code=403, detail="Not authorized")
-
-        return book_data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # The ownership check is now handled by RLS, so we remove it from the query.
+        response = (
+            supabase_client.table("books")
+            .select("*, chapters(*)")
+            .eq("id", book_id)
+            .single()
+            .execute()
+        )
+        book = response.data
+        if not book:
+            raise HTTPException(
+                status_code=404, detail="Book not found or you don't have access."
+            )
+        return book
+    except APIError:
+        raise HTTPException(status_code=404, detail="Book not found.")
 
 
 @router.post("/{book_id}/regenerate-chapters", response_model=BookWithDraftChapters)

@@ -12,6 +12,7 @@ class ChapterBase(BaseModel):
 
 class ChapterCreate(ChapterBase):
     chapter_number: int
+    book_id: str
 
 
 class Chapter(ChapterBase):

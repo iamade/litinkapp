@@ -71,16 +71,17 @@ class FileService:
             
             # Create chapters in database
             for i, chapter_data in enumerate(chapters):
-                chapter_create = ChapterCreate(
-                    book_id=book_id_to_update,
-                    chapter_number=i + 1,
-                    title=chapter_data["title"],
-                    content=chapter_data["content"],
-                    summary=chapter_data.get("summary", "")
-                )
+                # Manually construct the insert data to ensure book_id is included
+                insert_data = {
+                    "book_id": book_id_to_update,
+                    "chapter_number": i + 1,
+                    "title": chapter_data["title"],
+                    "content": chapter_data["content"],
+                    "summary": chapter_data.get("summary", "")
+                }
                 
                 # Insert chapter
-                chapter_response = self.db.table("chapters").insert(chapter_create.dict()).execute()
+                chapter_response = self.db.table("chapters").insert(insert_data).execute()
                 chapter_id = chapter_response.data[0]["id"]
                 
                 # Create embeddings for the chapter
