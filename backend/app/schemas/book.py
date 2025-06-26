@@ -74,7 +74,11 @@ class ChapterDraft(BaseModel):
     content: str
 
 
-class BookWithDraftChapters(BookBase):
+class BookWithChapters(Book):
+    chapters: List[Chapter] = []
+
+
+class BookWithDraftChapters(Book):
     id: str
     user_id: Optional[str] = None
     status: str

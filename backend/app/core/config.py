@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     ELEVENLABS_API_KEY: Optional[str] = None
     TAVUS_API_KEY: Optional[str] = None
+    PLOTDRIVE_API_KEY: Optional[str] = None
     
     # Blockchain
     ALGORAND_TOKEN: Optional[str] = None

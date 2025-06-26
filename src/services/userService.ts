@@ -43,3 +43,14 @@ export const userService = {
     return apiClient.get(`/books/${bookId}/chapters`);
   },
 };
+
+export async function deleteBook(bookId: string) {
+  const response = await fetch(`/api/v1/books/${bookId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error("Failed to delete book");
+  }
+  return await response.json();
+}

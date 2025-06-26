@@ -15,7 +15,7 @@ import io
 from app.core.auth import get_current_user, get_current_author, get_current_active_user
 from app.core.database import get_supabase
 from app.schemas import Book, BookCreate, BookUpdate, User
-from app.schemas.book import Book as BookSchema, Chapter as ChapterSchema, ChapterCreate, BookWithDraftChapters
+from app.schemas.book import Book as BookSchema, Chapter as ChapterSchema, ChapterCreate, BookWithDraftChapters, BookWithChapters
 from app.services.ai_service import AIService
 from app.services.file_service import FileService
 from app.core.config import settings
@@ -63,15 +63,15 @@ async def get_my_books(
         raise HTTPException(status_code=400, detail=e.message)
 
 
-@router.get("/{book_id}", response_model=BookSchema)
+@router.get("/{book_id}", response_model=BookWithChapters)
 async def get_book(
     book_id: str,
     supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_user)
 ):
-    """Get book by ID"""
+    """Get book by ID with its chapters"""
     try:
-        response = supabase_client.table('books').select('*').eq('id', book_id).single().execute()
+        response = supabase_client.table('books').select('*, chapters(*)').eq('id', book_id).single().execute()
         book = response.data
     except APIError as e:
         raise HTTPException(status_code=404, detail="Book not found")
@@ -289,21 +289,26 @@ async def upload_book(
         raise HTTPException(status_code=500, detail=f"Failed to queue book processing: {e}")
 
 
-@router.get("/{book_id}/status", response_model=BookSchema)
+@router.get("/{book_id}/status", response_model=BookWithChapters)
 async def get_book_status(
     book_id: str,
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Get the processing status of a book by its ID."""
+    """Get the processing status of a book."""
     try:
-        response = supabase_client.table('books').select('*, chapters(*)').eq('id', book_id).eq('user_id', current_user['id']).single().execute()
-        book = response.data
-        if not book:
-            raise HTTPException(status_code=404, detail="Book not found or you don't have access.")
-        return book
-    except APIError:
-        raise HTTPException(status_code=404, detail="Book not found.")
+        response = supabase_client.table("books").select("*, chapters(*)").eq("id", book_id).single().execute()
+        book_data = response.data
+        if not book_data:
+            raise HTTPException(status_code=404, detail="Book not found")
+
+        # You might want to add an ownership check here for security
+        if book_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        return book_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{book_id}/regenerate-chapters", response_model=BookWithDraftChapters)
@@ -400,32 +405,39 @@ async def retry_book_processing(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.delete("/{book_id}", status_code=204)
+@router.delete("/{book_id}")
 async def delete_book(
     book_id: str,
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Delete a book, ensuring ownership."""
-    try:
-        # First, verify the user owns the book
-        response = supabase_client.table('books').select('user_id').eq('id', book_id).single().execute()
-        book_owner = response.data
-        
-        if not book_owner or book_owner['user_id'] != current_user['id']:
-            raise HTTPException(status_code=403, detail="Not authorized to delete this book")
-
-        # If authorized, proceed with deletion
-        supabase_client.table('books').delete().eq('id', book_id).execute()
-        
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-
-    except APIError as e:
-        # This will catch errors from the select query if the book doesn't exist
+    # 1. Get the book record to find the storage path and verify ownership
+    book_response = supabase_client.table("books").select("*").eq("id", book_id).single().execute()
+    if not book_response.data:
         raise HTTPException(status_code=404, detail="Book not found")
+    book = book_response.data
+
+    # 2. Only allow the owner to delete
+    if book["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this book")
+
+    # 3. Delete the file from Supabase Storage
+    # Construct storage path (adjust if your pattern is different)
+    storage_path = f"{current_user['id']}/{book['title']}"
+    try:
+        supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([storage_path])
     except Exception as e:
-        # Catch other potential errors
-        raise HTTPException(status_code=500, detail=str(e))
+        # Log the error but continue, as the book record should still be deleted
+        print(f"Warning: Could not delete file from storage: {e}")
+
+    # 4. Delete the book record from the database.
+    #    CASCADE DELETE will handle chapters and embeddings.
+    try:
+        supabase_client.table("books").delete().eq("id", book_id).execute()
+    except APIError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e.message}")
+
+    return {"message": "Book and all associated data deleted successfully"}
 
 
 @router.post("/search", response_model=List[BookSchema])

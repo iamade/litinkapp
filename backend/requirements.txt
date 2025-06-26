@@ -26,3 +26,4 @@ black==23.11.0
 isort==5.12.0
 flake8==6.1.0
 PyMuPDF==1.23.26
+numpy==1.26.4

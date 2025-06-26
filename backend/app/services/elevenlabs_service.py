@@ -1,0 +1,358 @@
+import httpx
+import asyncio
+import os
+from typing import List, Dict, Any, Optional
+from app.core.config import settings
+
+
+class ElevenLabsService:
+    """Enhanced ElevenLabs service for advanced audio features"""
+    
+    def __init__(self):
+        self.api_key = settings.ELEVENLABS_API_KEY
+        self.base_url = "https://api.elevenlabs.io/v1"
+        self.audio_dir = "uploads/audio"
+        
+        # Ensure audio directory exists
+        os.makedirs(self.audio_dir, exist_ok=True)
+    
+    async def generate_enhanced_speech(
+        self, 
+        text: str, 
+        voice_id: str,
+        emotion: str = "neutral",
+        speed: float = 1.0,
+        stability: float = 0.75,
+        similarity_boost: float = 0.75
+    ) -> Optional[str]:
+        """Generate enhanced speech with emotion and speed control"""
+        if not self.api_key:
+            return await self._mock_generate_speech(text, voice_id, emotion)
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/text-to-speech/{voice_id}",
+                    headers={
+                        "Accept": "audio/mpeg",
+                        "Content-Type": "application/json",
+                        "xi-api-key": self.api_key
+                    },
+                    json={
+                        "text": text,
+                        "model_id": "eleven_multilingual_v2",
+                        "voice_settings": {
+                            "stability": stability,
+                            "similarity_boost": similarity_boost,
+                            "style": self._get_emotion_style(emotion),
+                            "use_speaker_boost": True,
+                            "speaking_rate": speed
+                        }
+                    }
+                )
+                
+                if response.status_code == 200:
+                    # Save audio file
+                    audio_filename = f"speech_{hash(text)}_{voice_id}.mp3"
+                    audio_path = os.path.join(self.audio_dir, audio_filename)
+                    
+                    with open(audio_path, "wb") as f:
+                        f.write(response.content)
+                    
+                    return f"/uploads/audio/{audio_filename}"
+                else:
+                    print(f"ElevenLabs API error: {response.status_code}")
+                    return None
+                    
+        except Exception as e:
+            print(f"ElevenLabs service error: {e}")
+            return None
+    
+    async def generate_character_voice(
+        self,
+        text: str,
+        character_profile: Dict[str, Any],
+        scene_context: str = ""
+    ) -> Optional[str]:
+        """Generate character-specific voice with personality"""
+        if not self.api_key:
+            return await self._mock_generate_character_voice(text, character_profile)
+        
+        try:
+            # Get character voice settings
+            voice_settings = self._get_character_voice_settings(character_profile)
+            
+            # Enhance text with character personality
+            enhanced_text = await self._enhance_text_for_character(text, character_profile, scene_context)
+            
+            # Generate speech
+            return await self.generate_enhanced_speech(
+                text=enhanced_text,
+                voice_id=voice_settings["voice_id"],
+                emotion=voice_settings["emotion"],
+                speed=voice_settings["speed"],
+                stability=voice_settings["stability"],
+                similarity_boost=voice_settings["similarity_boost"]
+            )
+            
+        except Exception as e:
+            print(f"Error generating character voice: {e}")
+            return None
+    
+    async def generate_sound_effects(
+        self, 
+        effect_type: str, 
+        duration: int = 3,
+        intensity: float = 0.5
+    ) -> Optional[str]:
+        """Generate sound effects using ElevenLabs (if available) or return placeholder"""
+        try:
+            # For now, return placeholder sound effects
+            # In a real implementation, you might use ElevenLabs' sound generation features
+            # or integrate with other sound effect services
+            
+            effect_mapping = {
+                "ambient": "ambient_background",
+                "action": "action_sequence",
+                "emotional": "emotional_moment",
+                "transition": "scene_transition",
+                "magical": "magical_effect",
+                "nature": "nature_sounds"
+            }
+            
+            effect_name = effect_mapping.get(effect_type, "generic")
+            audio_filename = f"sfx_{effect_name}_{duration}s.mp3"
+            
+            # Return placeholder path - in real implementation, generate actual audio
+            return f"/uploads/audio/{audio_filename}"
+            
+        except Exception as e:
+            print(f"Error generating sound effects: {e}")
+            return None
+    
+    async def mix_audio_tracks(
+        self, 
+        main_audio_path: str, 
+        background_audio_path: Optional[str] = None,
+        sound_effects: List[str] = []
+    ) -> Optional[str]:
+        """Mix multiple audio tracks together"""
+        try:
+            # In a real implementation, you would use audio processing libraries
+            # like pydub or ffmpeg to mix the audio tracks
+            
+            # For now, return the main audio path
+            # This is a placeholder for actual audio mixing functionality
+            
+            if background_audio_path or sound_effects:
+                # Create mixed audio filename
+                mixed_filename = f"mixed_{hash(main_audio_path)}.mp3"
+                mixed_path = os.path.join(self.audio_dir, mixed_filename)
+                
+                # Placeholder: in real implementation, mix the audio files
+                # For now, just copy the main audio
+                import shutil
+                main_full_path = os.path.join(os.getcwd(), main_audio_path.lstrip('/'))
+                if os.path.exists(main_full_path):
+                    shutil.copy2(main_full_path, mixed_path)
+                    return f"/uploads/audio/{mixed_filename}"
+            
+            return main_audio_path
+            
+        except Exception as e:
+            print(f"Error mixing audio tracks: {e}")
+            return main_audio_path
+    
+    async def create_audio_narration(
+        self,
+        script: str,
+        narrator_style: str = "professional",
+        background_music: Optional[str] = None
+    ) -> Optional[str]:
+        """Create complete audio narration with background music"""
+        try:
+            # Get narrator voice settings
+            narrator_voice = self._get_narrator_voice_settings(narrator_style)
+            
+            # Generate main narration
+            narration_audio = await self.generate_enhanced_speech(
+                text=script,
+                voice_id=narrator_voice["voice_id"],
+                emotion=narrator_voice["emotion"],
+                speed=narrator_voice["speed"]
+            )
+            
+            if not narration_audio:
+                return None
+            
+            # Mix with background music if provided
+            if background_music:
+                mixed_audio = await self.mix_audio_tracks(
+                    main_audio_path=narration_audio,
+                    background_audio_path=background_music
+                )
+                return mixed_audio
+            
+            return narration_audio
+            
+        except Exception as e:
+            print(f"Error creating audio narration: {e}")
+            return None
+    
+    async def get_available_voices(self) -> List[Dict[str, Any]]:
+        """Get available voices with enhanced metadata"""
+        if not self.api_key:
+            return self._get_mock_voices()
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.base_url}/voices",
+                    headers={"xi-api-key": self.api_key}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    return [
+                        {
+                            "voice_id": voice["voice_id"],
+                            "name": voice["name"],
+                            "description": voice.get("description", ""),
+                            "category": voice.get("category", "general"),
+                            "labels": voice.get("labels", {}),
+                            "preview_url": voice.get("preview_url", ""),
+                            "personality": self._extract_personality(voice.get("labels", {}))
+                        }
+                        for voice in data.get("voices", [])
+                    ]
+                else:
+                    return self._get_mock_voices()
+                    
+        except Exception as e:
+            print(f"Error fetching voices: {e}")
+            return self._get_mock_voices()
+    
+    def _get_emotion_style(self, emotion: str) -> str:
+        """Map emotion to ElevenLabs style parameter"""
+        emotion_styles = {
+            "neutral": "neutral",
+            "happy": "cheerful",
+            "sad": "melancholic",
+            "angry": "intense",
+            "excited": "energetic",
+            "calm": "serene",
+            "mysterious": "mysterious",
+            "professional": "professional",
+            "friendly": "friendly",
+            "wise": "wise"
+        }
+        return emotion_styles.get(emotion, "neutral")
+    
+    def _get_character_voice_settings(self, character_profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Get voice settings based on character profile"""
+        personality = character_profile.get("personality", "neutral")
+        age = character_profile.get("age", "adult")
+        gender = character_profile.get("gender", "neutral")
+        
+        # Map character traits to voice settings
+        voice_mapping = {
+            "brave": {"emotion": "confident", "speed": 1.1, "stability": 0.8},
+            "wise": {"emotion": "wise", "speed": 0.9, "stability": 0.9},
+            "young": {"emotion": "excited", "speed": 1.2, "stability": 0.7},
+            "mysterious": {"emotion": "mysterious", "speed": 0.8, "stability": 0.8},
+            "friendly": {"emotion": "friendly", "speed": 1.0, "stability": 0.75}
+        }
+        
+        settings = voice_mapping.get(personality, {
+            "emotion": "neutral",
+            "speed": 1.0,
+            "stability": 0.75
+        })
+        
+        # Add voice ID based on character profile
+        settings["voice_id"] = self._get_voice_id_for_character(character_profile)
+        settings["similarity_boost"] = 0.75
+        
+        return settings
+    
+    def _get_voice_id_for_character(self, character_profile: Dict[str, Any]) -> str:
+        """Get appropriate voice ID for character"""
+        # In a real implementation, you would have a mapping of character types to voice IDs
+        # For now, return a default voice ID
+        return "default_voice_id"
+    
+    def _get_narrator_voice_settings(self, narrator_style: str) -> Dict[str, Any]:
+        """Get voice settings for narrator"""
+        style_mapping = {
+            "professional": {"emotion": "professional", "speed": 1.0, "voice_id": "narrator_professional"},
+            "storyteller": {"emotion": "mysterious", "speed": 0.9, "voice_id": "narrator_storyteller"},
+            "friendly": {"emotion": "friendly", "speed": 1.1, "voice_id": "narrator_friendly"},
+            "dramatic": {"emotion": "intense", "speed": 0.8, "voice_id": "narrator_dramatic"}
+        }
+        
+        return style_mapping.get(narrator_style, style_mapping["professional"])
+    
+    async def _enhance_text_for_character(
+        self, 
+        text: str, 
+        character_profile: Dict[str, Any], 
+        scene_context: str
+    ) -> str:
+        """Enhance text to match character personality"""
+        # In a real implementation, you might use AI to enhance the text
+        # For now, return the original text
+        return text
+    
+    def _extract_personality(self, labels: Dict[str, str]) -> str:
+        """Extract personality from voice labels"""
+        personality_indicators = ["accent", "age", "gender", "personality"]
+        for indicator in personality_indicators:
+            if indicator in labels:
+                return labels[indicator]
+        return "neutral"
+    
+    async def _mock_generate_speech(self, text: str, voice_id: str, emotion: str) -> str:
+        """Mock speech generation for development"""
+        await asyncio.sleep(1)
+        audio_filename = f"mock_speech_{hash(text)}.mp3"
+        return f"/uploads/audio/{audio_filename}"
+    
+    async def _mock_generate_character_voice(self, text: str, character_profile: Dict[str, Any]) -> str:
+        """Mock character voice generation for development"""
+        await asyncio.sleep(1)
+        character_name = character_profile.get("name", "character")
+        audio_filename = f"mock_{character_name}_{hash(text)}.mp3"
+        return f"/uploads/audio/{audio_filename}"
+    
+    def _get_mock_voices(self) -> List[Dict[str, Any]]:
+        """Return mock voice data"""
+        return [
+            {
+                "voice_id": "narrator_professional",
+                "name": "Professional Narrator",
+                "description": "Clear and authoritative voice for educational content",
+                "category": "narrator",
+                "personality": "professional"
+            },
+            {
+                "voice_id": "character_young",
+                "name": "Young Character",
+                "description": "Energetic and friendly voice for young characters",
+                "category": "character",
+                "personality": "friendly"
+            },
+            {
+                "voice_id": "character_wise",
+                "name": "Wise Character",
+                "description": "Deep and thoughtful voice for wise characters",
+                "category": "character",
+                "personality": "wise"
+            },
+            {
+                "voice_id": "character_mysterious",
+                "name": "Mysterious Character",
+                "description": "Enigmatic and intriguing voice for mysterious characters",
+                "category": "character",
+                "personality": "mysterious"
+            }
+        ] 
