@@ -3,6 +3,7 @@ import asyncio
 import os
 from typing import List, Dict, Any, Optional
 from app.core.config import settings
+import traceback
 
 
 class ElevenLabsService:
@@ -86,7 +87,8 @@ class ElevenLabsService:
                     return await self._mock_generate_speech(text, voice_id, emotion)
                     
         except Exception as e:
-            print(f"ElevenLabs service error: {e}")
+            print(f"❌ ElevenLabs generate_enhanced_speech error: {e}")
+            print(traceback.format_exc())
             # Fall back to mock generation
             print("Falling back to mock speech generation due to exception")
             return await self._mock_generate_speech(text, voice_id, emotion)
@@ -191,23 +193,18 @@ class ElevenLabsService:
             print(f"Error mixing audio tracks: {e}")
             return main_audio_path
     
-    async def create_audio_narration(
-        self,
-        script: str,
-        narrator_style: str = "professional",
-        background_music: Optional[str] = None
-    ) -> Optional[str]:
-        """Create complete audio narration with background music"""
+
+    async def create_audio_narration(self, text: str, narrator_style: str = "narration", background_music: Optional[str] = None) -> dict:
         try:
-            # Get narrator voice settings
-            narrator_voice = self._get_narrator_voice_settings(narrator_style)
+            # Use narrator_style to get voice settings
+            voice_settings = self._get_narrator_voice_settings(narrator_style)
             
             # Generate main narration
             narration_audio = await self.generate_enhanced_speech(
-                text=script,
-                voice_id=narrator_voice["voice_id"],
-                emotion=narrator_voice["emotion"],
-                speed=narrator_voice["speed"]
+                text=text,
+                voice_id=voice_settings["voice_id"],
+                emotion=voice_settings["emotion"],
+                speed=voice_settings["speed"]
             )
             
             if not narration_audio:
@@ -224,8 +221,10 @@ class ElevenLabsService:
             return narration_audio
             
         except Exception as e:
-            print(f"Error creating audio narration: {e}")
+            print(f"❌ ElevenLabs create_audio_narration error: {e}")
+            print(traceback.format_exc())
             return None
+
     
     async def get_available_voices(self) -> List[Dict[str, Any]]:
         """Get available voices with enhanced metadata"""

@@ -371,20 +371,34 @@ class VideoService:
             supabase_client=supabase_client
         )
     
+
     async def generate_entertainment_video(
         self,
         chapter_id: str,
         animation_style: str = "animated",
         supabase_client = None
     ) -> Optional[Dict[str, Any]]:
-        """Generate entertainment-style video for story content"""
-        return await self.generate_video_from_chapter(
-            chapter_id=chapter_id,
-            video_style=animation_style,
-            include_context=True,
-            include_audio_enhancement=True,
-            supabase_client=supabase_client
-        )
+        """Generate entertainment-style video for story content using RAG and OpenAI"""
+        try:
+            # 1. Get chapter context using RAG
+            chapter_context = await self.rag_service.get_chapter_with_context(
+                chapter_id=chapter_id,
+                include_adjacent=True,
+                use_vector_search=True
+            )
+
+            # 2. Generate script using OpenAI (not PlotDrive)
+            script = await self.rag_service.generate_video_script(
+                chapter_context=chapter_context,
+                video_style=animation_style
+            )
+
+            # 3. Continue with video/audio generation as before...
+            return await self._generate_real_video(script, animation_style)
+        except Exception as e:
+            print(f"Error in generate_entertainment_video: {e}")
+            return None
+
     
     async def get_available_avatars(self) -> List[Dict[str, Any]]:
         """Get available avatars"""
@@ -875,13 +889,13 @@ What an incredible adventure! Stay tuned for more from {book_title}.
             # Step 1: Generate video with Tavus API
             tavus_video = await self._generate_tavus_video(script, video_style)
             if not tavus_video:
-                print("Tavus video generation failed")
+                print("❌ Tavus video generation failed")
                 return None
             
             # Step 2: Generate audio with ElevenLabs
             elevenlabs_audio = await self._generate_elevenlabs_audio(script, video_style)
             if not elevenlabs_audio:
-                print("ElevenLabs audio generation failed, using video without custom audio")
+                print("⚠️  ElevenLabs audio unavailable, returning Tavus video only")
                 return tavus_video
             
             # Step 3: Merge video and audio
@@ -969,32 +983,28 @@ What an incredible adventure! Stay tuned for more from {book_title}.
             return None
 
     async def _generate_elevenlabs_audio(self, script: str, video_style: str) -> Optional[Dict[str, Any]]:
-        """Generate audio using ElevenLabs API"""
         try:
-            print(f"Generating audio with ElevenLabs for style: {video_style}")
-            
-            # Get voice ID based on style
-            voice_id = self._get_voice_id_for_style(video_style)
-            
-            # Generate audio narration
-            audio_url = await self.elevenlabs_service.create_audio_narration(
-                script=script[:1500],  # Limit for audio generation
-                narrator_style="professional" if video_style == "realistic" else "engaging"
-            )
-            
-            if audio_url:
-                return {
-                    "audio_url": audio_url,
-                    "voice_id": voice_id,
-                    "duration": 180
-                }
-            else:
-                print("ElevenLabs audio generation failed")
+            # Map video_style to narrator_style
+            narrator_style = self._map_video_style_to_narrator_style(video_style)
+            audio = await self.elevenlabs_service.create_audio_narration(text=script, narrator_style=narrator_style)
+            if not audio:
+                print("❌ ElevenLabs audio generation failed or returned None")
                 return None
-                
+            return audio
         except Exception as e:
-            print(f"Error generating ElevenLabs audio: {e}")
+            print(f"❌ Error in _generate_elevenlabs_audio: {e}")
             return None
+
+    def _map_video_style_to_narrator_style(self, video_style: str) -> str:
+        """Map video style to narrator style for ElevenLabs"""
+        style_map = {
+            "realistic": "professional",
+            "animated": "engaging",
+            "cartoon": "friendly",
+            "tutorial": "instructor",
+            "story": "narration"
+        }
+        return style_map.get(video_style, "narration")
 
     async def _try_alternative_video_creation(self, client, headers, script, video_style):
         """Try alternative methods to create videos with Tavus API"""
