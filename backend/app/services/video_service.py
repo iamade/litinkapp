@@ -482,6 +482,7 @@ class VideoService:
             "id": video_id,
             "title": scene_description,
             "description": "Video generation failed or timed out",
+            "video_url": None,
             "status": "error"
         }
     
@@ -840,19 +841,26 @@ class VideoService:
         book_title: str, 
         video_style: str
     ) -> str:
-        """Generate a learning-focused video script"""
+        """Generate a learning-focused video script using RAGService for richer AI content"""
         try:
-            # Create a structured learning script
-            script = f"""
+            # Use RAGService to get chapter context and generate script
+            chapter_context = {
+                'chapter': {'title': chapter_title, 'content': chapter_content},
+                'book': {'title': book_title, 'book_type': 'learning'},
+                'total_context': chapter_content
+            }
+            if self.rag_service:
+                return await self.rag_service.generate_video_script(chapter_context, video_style)
+            else:
+                # Fallback to basic template if RAGService is not available
+                script = f"""
 Welcome to {book_title}. In this chapter, we'll explore {chapter_title}.
 
 {chapter_content[:1000]}...
 
 This concludes our discussion of {chapter_title}. Remember to review the key concepts we've covered today.
-            """.strip()
-            
-            return script
-            
+                """.strip()
+                return script
         except Exception as e:
             print(f"Error generating learning script: {e}")
             return chapter_content[:500] + "..."
@@ -864,19 +872,26 @@ This concludes our discussion of {chapter_title}. Remember to review the key con
         book_title: str, 
         video_style: str
     ) -> str:
-        """Generate an entertainment-focused video script"""
+        """Generate an entertainment-focused video script using RAGService for richer AI content"""
         try:
-            # Create a more engaging, story-like script
-            script = f"""
+            # Use RAGService to get chapter context and generate script
+            chapter_context = {
+                'chapter': {'title': chapter_title, 'content': chapter_content},
+                'book': {'title': book_title, 'book_type': 'entertainment'},
+                'total_context': chapter_content
+            }
+            if self.rag_service:
+                return await self.rag_service.generate_video_script(chapter_context, video_style)
+            else:
+                # Fallback to basic template if RAGService is not available
+                script = f"""
 Join us for an exciting journey through {book_title}, as we dive into {chapter_title}.
 
 {chapter_content[:1000]}...
 
 What an incredible adventure! Stay tuned for more from {book_title}.
-            """.strip()
-            
-            return script
-            
+                """.strip()
+                return script
         except Exception as e:
             print(f"Error generating entertainment script: {e}")
             return chapter_content[:500] + "..."
@@ -899,18 +914,21 @@ What an incredible adventure! Stay tuned for more from {book_title}.
                 return tavus_video
             
             # Step 3: Merge video and audio
-            print("Merging Tavus video with ElevenLabs audio...")
-            merged_video = await self._merge_real_video_audio(
-                tavus_video["video_url"], 
-                elevenlabs_audio["audio_url"], 
-                f"AI-generated content in {video_style} style"
-            )
-            
-            if merged_video:
-                print("✅ Successfully merged Tavus video with ElevenLabs audio")
-                return merged_video
+            if tavus_video.get("video_url"):
+                print("Merging Tavus video with ElevenLabs audio...")
+                merged_video = await self._merge_real_video_audio(
+                    tavus_video["video_url"],
+                    elevenlabs_audio["audio_url"],
+                    f"AI-generated content in {video_style} style"
+                )
+                if merged_video:
+                    print("✅ Successfully merged Tavus video with ElevenLabs audio")
+                    return merged_video
+                else:
+                    print("Video merging failed, returning Tavus video only")
+                    return tavus_video
             else:
-                print("Video merging failed, returning Tavus video only")
+                print("⚠️  Tavus video URL not available, skipping audio merge.")
                 return tavus_video
                 
         except Exception as e:

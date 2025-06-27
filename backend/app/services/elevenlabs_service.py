@@ -59,7 +59,7 @@ class ElevenLabsService:
             
             print(f"ElevenLabs request - voice_id: {voice_id}, text_length: {len(text)}")
             
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     f"{self.base_url}/text-to-speech/{voice_id}",
                     headers={
