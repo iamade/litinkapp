@@ -183,7 +183,7 @@ Ensure the entire output is a single valid JSON object.
         """Synchronous wrapper for generate_chapters_from_content."""
         return asyncio.run(self.generate_chapters_from_content(content, book_type))
 
-    async def generate_chapter_content(self, content: str, book_type: str, difficulty: str) -> Dict[str, Any]:
+    async def generate_chapter_content(self, content: str, book_type: str, difficulty: str, rag_service=None) -> Dict[str, Any]:
         """Generate AI content for a chapter"""
         if book_type == "learning":
             return {
@@ -192,11 +192,20 @@ Ensure the entire output is a single valid JSON object.
                 "learning_objectives": await self._generate_learning_objectives(content)
             }
         else:  # entertainment
-            return {
-                "story_branches": await self._generate_story_branches(content),
-                "character_profiles": await self._generate_character_profiles(content),
-                "scene_descriptions": await self._generate_scene_descriptions(content)
-            }
+            # If rag_service is provided and content is a chapter_id, use the new scene description logic
+            if rag_service is not None and isinstance(content, str) and content.startswith("chapter_"):
+                return {
+                    "story_branches": await self._generate_story_branches(content),
+                    "character_profiles": await self._generate_character_profiles(content),
+                    "scene_descriptions": await self._generate_scene_descriptions(content, rag_service)
+                }
+            else:
+                # Fallback to old logic (may still error if _generate_scene_descriptions signature is wrong)
+                return {
+                    "story_branches": await self._generate_story_branches(content),
+                    "character_profiles": await self._generate_character_profiles(content),
+                    "scene_descriptions": await self._generate_scene_descriptions(content, rag_service) if rag_service else await self._generate_scene_descriptions(content, self)
+                }
     
     async def generate_summary(self, content: str) -> str:
         """Generate content summary"""

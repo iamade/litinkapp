@@ -394,7 +394,7 @@ class VideoService:
             )
 
             # 3. Generate scene descriptions using AI/RAG
-            scenes = await self.elevenlabs_service.ai_service._generate_scene_descriptions(
+            scenes = await self.rag_service.ai_service._generate_scene_descriptions(
                 chapter_id=chapter_id,
                 rag_service=self.rag_service
             )

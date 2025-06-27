@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { userService } from "../services/userService";
 import { videoService, VideoScene } from "../services/videoService";
+import { toast } from "react-hot-toast";
 
 interface Chapter {
   id: string;
@@ -100,7 +101,7 @@ export default function BookView() {
 
   const handleLegacyVideoGeneration = async () => {
     // Optionally show an error or fallback message, but do not use a mock video URL
-    alert("Video generation failed. Please try again later.");
+    toast.error("Video generation failed. Please try again later.");
   };
 
   const handleDeleteVideo = async () => {
@@ -123,10 +124,10 @@ export default function BookView() {
         delete newUrls[selectedChapter.id];
         return newUrls;
       });
-      alert("Video deleted successfully");
+      toast.success("Video deleted successfully");
     } catch (error) {
       console.error("Error deleting video:", error);
-      alert("Failed to delete video");
+      toast.error("Failed to delete video");
     }
   };
 
