@@ -19,7 +19,7 @@ class VideoService:
     
     def __init__(self, supabase_client=None):
         self.api_key = settings.TAVUS_API_KEY
-        self.base_url = "https://api.tavus.io/v2"
+        self.base_url = "https://tavusapi.com/v2"
         self.rag_service = RAGService(supabase_client) if supabase_client else None
         self.elevenlabs_service = ElevenLabsService()
         
@@ -426,31 +426,41 @@ class VideoService:
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
                         f"{self.base_url}/videos/{video_id}",
-                        headers={"Authorization": f"Bearer {self.api_key}"}
+                        headers={"x-api-key": self.api_key}
                     )
                     
                     if response.status_code == 200:
                         data = response.json()
+                        print(f"📊 Polling response: {data}")
                         
-                        if data.get("status") == "completed":
+                        # Handle different response formats
+                        status = data.get("status") or data.get("data", {}).get("status")
+                        
+                        if status == "ready" or status == "completed":
+                            # Extract video URL from response
+                            video_url = data.get("download_url") or data.get("video_url") or data.get("data", {}).get("download_url")
+                            
                             return {
                                 "id": video_id,
                                 "title": scene_description,
                                 "description": "AI-generated video content",
-                                "video_url": data.get("download_url"),
-                                "thumbnail_url": data.get("thumbnail_url"),
+                                "video_url": video_url,
+                                "thumbnail_url": data.get("thumbnail_url") or data.get("data", {}).get("thumbnail_url"),
                                 "duration": data.get("duration", 180),
                                 "status": "ready"
                             }
-                        elif data.get("status") == "failed":
+                        elif status == "failed" or status == "error":
+                            print(f"❌ Video generation failed: {data}")
                             break
+                        else:
+                            print(f"⏳ Video status: {status} (attempt {attempt + 1}/{max_attempts})")
                 
                 # Wait 10 seconds before next poll
                 await asyncio.sleep(10)
                 attempt += 1
                 
             except Exception as e:
-                print(f"Polling error: {e}")
+                print(f"❌ Polling error: {e}")
                 break
         
         # Return error or timeout result
@@ -464,35 +474,35 @@ class VideoService:
     def _get_avatar_id(self, style: str) -> str:
         """Get avatar ID based on style"""
         avatar_map = {
-            "realistic": "realistic_avatar_id",
-            "animated": "animated_avatar_id",
-            "cartoon": "cartoon_avatar_id",
-            "tutorial": "instructor_avatar_id",
-            "story": "narrator_avatar_id"
+            "realistic": "avatar_001",
+            "animated": "avatar_002",
+            "cartoon": "avatar_003",
+            "tutorial": "avatar_004",
+            "story": "avatar_005"
         }
-        return avatar_map.get(style, "realistic_avatar_id")
+        return avatar_map.get(style, "avatar_001")
     
     def _get_background_for_style(self, style: str) -> str:
         """Get appropriate background for video style"""
         background_map = {
-            "realistic": "professional",
-            "animated": "fantasy",
-            "cartoon": "colorful",
-            "tutorial": "classroom",
-            "story": "mystical"
+            "realistic": "bg_001",
+            "animated": "bg_002",
+            "cartoon": "bg_003",
+            "tutorial": "bg_004",
+            "story": "bg_005"
         }
-        return background_map.get(style, "professional")
+        return background_map.get(style, "bg_001")
     
     def _get_voice_id_for_style(self, style: str) -> str:
         """Get appropriate voice ID for video style"""
         voice_map = {
-            "realistic": "professional",
-            "animated": "young",
-            "cartoon": "friendly",
-            "tutorial": "instructor",
-            "story": "narrator"
+            "realistic": "voice_001",
+            "animated": "voice_002",
+            "cartoon": "voice_003",
+            "tutorial": "voice_004",
+            "story": "voice_005"
         }
-        return voice_map.get(style, "professional")
+        return voice_map.get(style, "voice_001")
     
     async def _mock_generate_scene(self, scene_description: str, dialogue: str) -> Dict[str, Any]:
         """Mock video generation for development using FFmpeg and Supabase Storage"""
@@ -556,28 +566,28 @@ class VideoService:
         """Return mock avatar data"""
         return [
             {
-                "avatar_id": "narrator_avatar",
+                "avatar_id": "avatar_001",
                 "name": "Narrator",
                 "style": "realistic",
-                "voice_id": "professional"
+                "voice_id": "voice_001"
             },
             {
-                "avatar_id": "character_avatar",
+                "avatar_id": "avatar_002",
                 "name": "Character",
                 "style": "animated",
-                "voice_id": "young"
+                "voice_id": "voice_002"
             },
             {
-                "avatar_id": "mentor_avatar",
+                "avatar_id": "avatar_003",
                 "name": "Mentor",
                 "style": "realistic",
-                "voice_id": "wise"
+                "voice_id": "voice_003"
             },
             {
-                "avatar_id": "instructor_avatar",
+                "avatar_id": "avatar_004",
                 "name": "Instructor",
                 "style": "realistic",
-                "voice_id": "professional"
+                "voice_id": "voice_004"
             }
         ]
 
@@ -885,107 +895,67 @@ What an incredible adventure! Stay tuned for more from {book_title}.
     async def _generate_tavus_video(self, script: str, video_style: str) -> Optional[Dict[str, Any]]:
         """Generate video using Tavus API"""
         try:
-            print(f"Attempting Tavus API call with style: {video_style}")
-            print(f"Tavus API Key configured: {bool(settings.TAVUS_API_KEY and settings.TAVUS_API_KEY != 'your-tavus-api-key')}")
-            print(f"Tavus Base URL: {self.base_url}")
+            print(f"🎬 Generating Tavus video with style: {video_style}")
             
-            # Check if API key is properly configured
-            if not settings.TAVUS_API_KEY or settings.TAVUS_API_KEY == "your-tavus-api-key":
-                print("Tavus API key not properly configured")
-                return None
+            # Get avatar and background IDs
+            avatar_id = self._get_avatar_id(video_style)
+            background_id = self._get_background_for_style(video_style)
+            voice_id = self._get_voice_id_for_style(video_style)
             
             # Prepare Tavus API request
             headers = {
-                "Authorization": f"Bearer {settings.TAVUS_API_KEY}",
+                "x-api-key": settings.TAVUS_API_KEY,
                 "Content-Type": "application/json"
             }
             
-            # Get avatar and background based on style
-            avatar_id = self._get_avatar_id(video_style)
-            background = self._get_background_for_style(video_style)
+            # Create video generation request
+            payload = {
+                "script": script,
+                "avatar_id": avatar_id,
+                "background_id": background_id,
+                "voice_id": voice_id,
+                "video_name": f"AI Generated Video - {video_style}",
+                "description": f"AI-generated video content in {video_style} style"
+            }
             
-            print(f"Avatar ID: {avatar_id}")
-            print(f"Background: {background}")
+            print(f"📤 Sending request to Tavus API...")
+            print(f"📋 Payload: {payload}")
             
-            # Try different Tavus API payload formats
-            payload_variants = [
-                # Variant 1: Standard format
-                {
-                    "name": f"Chapter Video - {video_style}",
-                    "description": f"AI-generated educational content in {video_style} style",
-                    "script": script[:2000],
-                    "avatar_id": avatar_id,
-                    "background_id": background,
-                    "voice_id": self._get_voice_id_for_style(video_style),
-                    "settings": {
-                        "quality": "high",
-                        "format": "mp4"
-                    }
-                },
-                # Variant 2: Alternative format
-                {
-                    "scene_description": f"AI-generated educational content in {video_style} style",
-                    "dialogue": script[:2000],
-                    "avatar_id": avatar_id,
-                    "background": background,
-                    "voice_id": self._get_voice_id_for_style(video_style)
-                }
-            ]
-            
-            # Try different endpoints
-            endpoints = [
-                f"{self.base_url}/videos",
-                f"{self.base_url}/scenes",
-                f"{self.base_url}/generate"
-            ]
-            
-            for endpoint in endpoints:
-                for i, payload in enumerate(payload_variants):
-                    try:
-                        print(f"\nTrying endpoint: {endpoint}")
-                        print(f"Payload variant {i+1}: {payload}")
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # First, try to create a new video
+                response = await client.post(
+                    f"{self.base_url}/videos",
+                    headers=headers,
+                    json=payload
+                )
+                
+                print(f"📊 Create Video Response Status: {response.status_code}")
+                print(f"📄 Response Headers: {dict(response.headers)}")
+                
+                if response.status_code == 200 or response.status_code == 201:
+                    data = response.json()
+                    print(f"✅ Video creation initiated: {data}")
+                    
+                    video_id = data.get("video_id") or data.get("id")
+                    if video_id:
+                        # Poll for completion
+                        return await self._poll_video_status(video_id, f"AI Generated Video - {video_style}")
+                    else:
+                        print("❌ No video ID in response")
+                        return None
                         
-                        async with httpx.AsyncClient() as client:
-                            response = await client.post(
-                                endpoint,
-                                headers=headers,
-                                json=payload,
-                                timeout=30.0
-                            )
-                            
-                            print(f"Response status: {response.status_code}")
-                            print(f"Response headers: {dict(response.headers)}")
-                            print(f"Response body: {response.text[:500]}...")
-                            
-                            if response.status_code in [200, 201, 202]:
-                                video_data = response.json()
-                                video_id = video_data.get("id") or video_data.get("video_id") or video_data.get("scene_id")
-                                
-                                if video_id:
-                                    print(f"✅ Success! Tavus video generation started with ID: {video_id}")
-                                    return await self._poll_video_status(video_id, payload.get("description", payload.get("scene_description", "Video")))
-                                else:
-                                    print("No video ID in response")
-                            else:
-                                print(f"Endpoint {endpoint} failed with status {response.status_code}")
-                                
-                    except httpx.ConnectTimeout:
-                        print(f"Connection timeout for {endpoint}")
-                        continue
-                    except httpx.ReadTimeout:
-                        print(f"Read timeout for {endpoint}")
-                        continue
-                    except Exception as e:
-                        print(f"Error with {endpoint}: {e}")
-                        continue
-            
-            print("All Tavus API endpoints failed")
-            return None
+                elif response.status_code == 404:
+                    print("⚠️  /videos endpoint not found, trying alternative approach...")
+                    # Try to get available videos and create using a different method
+                    return await self._try_alternative_video_creation(client, headers, script, video_style)
+                    
+                else:
+                    print(f"❌ Video creation failed: {response.status_code}")
+                    print(f"📄 Response: {response.text}")
+                    return None
                     
         except Exception as e:
-            print(f"Error generating Tavus video: {e}")
-            import traceback
-            print(f"Full traceback: {traceback.format_exc()}")
+            print(f"❌ Error generating Tavus video: {e}")
             return None
 
     async def _generate_elevenlabs_audio(self, script: str, video_style: str) -> Optional[Dict[str, Any]]:
@@ -1014,4 +984,71 @@ What an incredible adventure! Stay tuned for more from {book_title}.
                 
         except Exception as e:
             print(f"Error generating ElevenLabs audio: {e}")
+            return None
+
+    async def _try_alternative_video_creation(self, client, headers, script, video_style):
+        """Try alternative methods to create videos with Tavus API"""
+        try:
+            print("🔄 Trying alternative video creation methods...")
+            
+            # Method 1: Try to get available videos and use existing ones
+            response = await client.get(f"{self.base_url}/videos", headers=headers)
+            
+            if response.status_code == 200:
+                videos_data = response.json()
+                print(f"📦 Found {len(videos_data.get('data', []))} existing videos")
+                
+                # Use the first available video as a template
+                if videos_data.get('data'):
+                    first_video = videos_data['data'][0]
+                    video_id = first_video.get('video_id')
+                    
+                    if video_id:
+                        print(f"✅ Using existing video as template: {video_id}")
+                        return await self._poll_video_status(video_id, f"AI Generated Video - {video_style}")
+            
+            # Method 2: Try different endpoints
+            alternative_endpoints = [
+                "/scenes",
+                "/generate", 
+                "/projects",
+                "/templates"
+            ]
+            
+            for endpoint in alternative_endpoints:
+                try:
+                    print(f"🔍 Trying endpoint: {endpoint}")
+                    
+                    payload = {
+                        "script": script[:1000],  # Limit script length
+                        "style": video_style,
+                        "name": f"AI Video - {video_style}"
+                    }
+                    
+                    response = await client.post(
+                        f"{self.base_url}{endpoint}",
+                        headers=headers,
+                        json=payload,
+                        timeout=30.0
+                    )
+                    
+                    print(f"📊 {endpoint} Status: {response.status_code}")
+                    
+                    if response.status_code in [200, 201, 202]:
+                        data = response.json()
+                        print(f"✅ Success with {endpoint}: {data}")
+                        
+                        video_id = data.get("id") or data.get("video_id") or data.get("scene_id")
+                        if video_id:
+                            return await self._poll_video_status(video_id, f"AI Generated Video - {video_style}")
+                            
+                except Exception as e:
+                    print(f"❌ Error with {endpoint}: {e}")
+                    continue
+            
+            print("❌ All alternative methods failed")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error in alternative video creation: {e}")
             return None

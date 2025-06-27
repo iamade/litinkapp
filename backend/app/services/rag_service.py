@@ -1,5 +1,5 @@
 from typing import Dict, Any, List, Optional
-from supabase import Client
+from supabase import create_client
 from app.core.database import get_supabase
 from app.services.ai_service import AIService
 from app.services.plotdrive_service import PlotDriveService
@@ -9,7 +9,7 @@ from app.services.embeddings_service import EmbeddingsService
 class RAGService:
     """Retrieval Augmented Generation service for video content with PlotDrive integration"""
     
-    def __init__(self, supabase_client: Client):
+    def __init__(self, supabase_client=None):
         self.db = supabase_client
         self.ai_service = AIService()
         self.plotdrive_service = PlotDriveService()
