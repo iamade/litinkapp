@@ -37,6 +37,7 @@ export default function BookView() {
   );
   const [generating, setGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [scriptStyle, setScriptStyle] = useState<string>("screenplay");
 
   useEffect(() => {
     if (id) {
@@ -328,27 +329,33 @@ export default function BookView() {
                         <option value="cartoon">Cartoon Style</option>
                         <option value="realistic">Realistic Style</option>
                       </select>
-                      {book.book_type === "learning" ? (
-                        <button
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                          onClick={handleGenerateVideo}
-                          disabled={generating}
+                      <div className="mb-4">
+                        <label
+                          htmlFor="script-style"
+                          className="block text-sm font-medium text-gray-700 mb-1"
                         >
-                          {generating
-                            ? "Generating Tutorial..."
-                            : "Generate Tutorial"}
-                        </button>
-                      ) : (
-                        <button
-                          className="px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 disabled:opacity-50"
-                          onClick={handleGenerateVideo}
-                          disabled={generating}
+                          Script Style:
+                        </label>
+                        <select
+                          id="script-style"
+                          value={scriptStyle}
+                          onChange={(e) => setScriptStyle(e.target.value)}
+                          className="border rounded px-2 py-1"
                         >
-                          {generating
-                            ? "Generating Scene..."
-                            : "Generate Scene"}
-                        </button>
-                      )}
+                          <option value="screenplay">
+                            Screenplay (character dialog)
+                          </option>
+                          <option value="narration">Narration (prose)</option>
+                        </select>
+                      </div>
+                      {/* Place Generate Scene button directly under the dropdowns */}
+                      <button
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded mb-4"
+                        onClick={handleGenerateVideo}
+                        disabled={generating}
+                      >
+                        {generating ? "Generating..." : "Generate Scene"}
+                      </button>
                     </div>
                   </div>
                 </>

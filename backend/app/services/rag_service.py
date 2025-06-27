@@ -106,27 +106,34 @@ class RAGService:
     async def generate_video_script(
         self, 
         chapter_context: Dict[str, Any], 
-        video_style: str = "realistic"
+        video_style: str = "realistic",
+        script_style: str = "screenplay"
     ) -> str:
-        """Generate optimized video script from chapter context using the full RAG-enhanced prompt."""
+        """Generate optimized video script from chapter context using the full RAG-enhanced prompt. script_style can be 'screenplay' or 'narration'."""
         try:
             enhanced_context = chapter_context.get('total_context', chapter_context['chapter']['content'])
-            
-            prompt = self._get_script_generation_prompt(enhanced_context, video_style)
-            
+            prompt = self._get_script_generation_prompt(enhanced_context, video_style, script_style)
             print(f"[RAG DEBUG] AI Prompt for Video Script:\n{prompt}\n")
-
             script = await self.ai_service.generate_text_from_prompt(prompt)
             return script
         except Exception as e:
             print(f"Error generating video script: {e}")
             return ""
     
-    def _get_script_generation_prompt(self, context: str, video_style: str) -> str:
-        """Construct a prompt based on the full RAG-enhanced context."""
-        # Implement the logic to construct a prompt based on the full RAG-enhanced context
-        # This is a placeholder and should be replaced with the actual implementation
-        return f"Generated prompt based on the full RAG-enhanced context: {context}"
+    def _get_script_generation_prompt(self, context: str, video_style: str, script_style: str = "screenplay") -> str:
+        """Construct a prompt based on the full RAG-enhanced context and script_style."""
+        if script_style == "screenplay":
+            return f"""
+Given the following book and chapter context, generate a detailed screenplay script for a {video_style} style video. The script should include character names in ALL CAPS, dialogue, and scene descriptions in proper screenplay format. Use the context below:
+
+{context}
+"""
+        else:
+            return f"""
+Given the following book and chapter context, generate a detailed narration script (prose style, no character lines) for a {video_style} style video. Use the context below:
+
+{context}
+"""
     
     async def _generate_entertainment_script(self, chapter_context: Dict[str, Any], video_style: str) -> str:
         """Generate entertainment script using OpenAI only (no PlotDrive)."""

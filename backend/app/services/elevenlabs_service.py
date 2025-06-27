@@ -26,7 +26,7 @@ class ElevenLabsService:
         stability: float = 0.75,
         similarity_boost: float = 0.75
     ) -> Optional[str]:
-        """Generate enhanced speech with emotion and speed control"""
+        """Generate enhanced speech with emotion and speed control, upload to Supabase, and return public URL"""
         if not self.api_key:
             return await self._mock_generate_speech(text, voice_id, emotion)
         
@@ -78,7 +78,13 @@ class ElevenLabsService:
                     with open(audio_path, "wb") as f:
                         f.write(response.content)
                     
-                    return f"/uploads/audio/{audio_filename}"
+                    # Upload to Supabase and return public URL
+                    if hasattr(self, 'supabase_service') and self.supabase_service:
+                        public_url = await self.supabase_service.upload_file(audio_path)
+                        return public_url
+                    else:
+                        print("[AUDIO UPLOAD ERROR] No supabase_service available to upload audio file.")
+                        return None
                 else:
                     print(f"ElevenLabs API error: {response.status_code}")
                     print(f"Response content: {response.text}")
@@ -161,7 +167,7 @@ class ElevenLabsService:
         background_audio_path: Optional[str] = None,
         sound_effects: List[str] = []
     ) -> Optional[str]:
-        """Mix multiple audio tracks together"""
+        """Mix multiple audio tracks together, upload to Supabase, and return public URL"""
         try:
             # Handle case where main_audio_path is None
             if not main_audio_path:
@@ -185,7 +191,13 @@ class ElevenLabsService:
                 main_full_path = os.path.join(os.getcwd(), main_audio_path.lstrip('/'))
                 if os.path.exists(main_full_path):
                     shutil.copy2(main_full_path, mixed_path)
-                    return f"/uploads/audio/{mixed_filename}"
+                    # Upload to Supabase and return public URL
+                    if hasattr(self, 'supabase_service') and self.supabase_service:
+                        public_url = await self.supabase_service.upload_file(mixed_path)
+                        return public_url
+                    else:
+                        print("[AUDIO UPLOAD ERROR] No supabase_service available to upload mixed audio file.")
+                        return None
             
             return main_audio_path
             
