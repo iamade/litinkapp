@@ -337,9 +337,6 @@ Ensure the entire output is a single valid JSON object.
             }
         ]
     
-    async def _generate_scene_descriptions(self, content: str) -> List[str]:
-        """Generate scene descriptions"""
-        return ["Scene 1: A mystical forest...", "Scene 2: An ancient castle..."]
 
     async def generate_book_metadata(
         self, content: str, title: Optional[str] = None
@@ -383,3 +380,42 @@ Return only the summary text, not JSON.
         except Exception as e:
             print(f"AIService error in generate_chapter_summary: {e}")
             return f"Summary for {chapter_title}"
+
+    async def _generate_scene_descriptions(self, chapter_id: str, rag_service) -> List[str]:
+        """Generate scene descriptions using OpenAI and RAGService context."""
+        # Get chapter context using RAGService
+        chapter_context = await rag_service.get_chapter_with_context(
+            chapter_id=chapter_id,
+            include_adjacent=True,
+            use_vector_search=True
+        )
+        chapter = chapter_context['chapter']
+        book = chapter_context['book']
+        prompt = f"""
+Given the following book and chapter context, generate a list of detailed scene descriptions for a video adaptation. Each scene should be a concise, vivid description suitable for a video generator like Tavus.
+
+Book: {book['title']}
+Chapter: {chapter['title']}
+Content: {chapter_context['total_context']}
+
+Format:
+- Scene 1: ...
+- Scene 2: ...
+- ...
+
+Return only the list of scene descriptions.
+"""
+        response = await self.generate_chapter_content(
+            content=prompt,
+            book_type='entertainment',
+            difficulty='medium'
+        )
+        # Assume response is a list or parse if needed
+        if isinstance(response, list):
+            return response
+        elif isinstance(response, dict) and 'scene_descriptions' in response:
+            return response['scene_descriptions']
+        elif isinstance(response, str):
+            # Try to split by lines
+            return [line.strip('- ').strip() for line in response.split('\n') if line.strip()]
+        return []

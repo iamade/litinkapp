@@ -2,7 +2,6 @@ from typing import Dict, Any, List, Optional
 from supabase import create_client
 from app.core.database import get_supabase
 from app.services.ai_service import AIService
-from app.services.plotdrive_service import PlotDriveService
 from app.services.embeddings_service import EmbeddingsService
 
 
@@ -12,7 +11,6 @@ class RAGService:
     def __init__(self, supabase_client=None):
         self.db = supabase_client
         self.ai_service = AIService()
-        self.plotdrive_service = PlotDriveService()
         self.embeddings_service = EmbeddingsService(supabase_client)
     
     async def get_chapter_with_context(
@@ -272,28 +270,6 @@ Format as a narrative script with clear scene descriptions and dialogue.
                 'character_count': 1,
                 'enhancement_type': 'basic'
             }
-            
-            # Add PlotDrive metadata for entertainment content
-            if book['book_type'] == 'entertainment':
-                try:
-                    screenplay_result = await self.plotdrive_service.create_screenplay_script(
-                        story_content=chapter_context['total_context'],
-                        style=self._map_video_style_to_plotdrive(video_style),
-                        title=chapter['title'],
-                        book_title=book['title']
-                    )
-                    
-                    if screenplay_result and 'metadata' in screenplay_result:
-                        plotdrive_metadata = screenplay_result['metadata']
-                        metadata.update({
-                            'estimated_duration': plotdrive_metadata.get('estimated_duration', 180),
-                            'scene_count': plotdrive_metadata.get('scene_count', 1),
-                            'character_count': plotdrive_metadata.get('character_count', 1),
-                            'enhancement_type': 'plotdrive_screenplay'
-                        })
-                        
-                except Exception as e:
-                    print(f"Error getting PlotDrive metadata: {e}")
             
             return metadata
             

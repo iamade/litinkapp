@@ -387,13 +387,21 @@ class VideoService:
                 use_vector_search=True
             )
 
-            # 2. Generate script using OpenAI (not PlotDrive)
+            # 2. Generate script using OpenAI 
             script = await self.rag_service.generate_video_script(
                 chapter_context=chapter_context,
                 video_style=animation_style
             )
 
-            # 3. Continue with video/audio generation as before...
+            # 3. Generate scene descriptions using AI/RAG
+            scenes = await self.elevenlabs_service.ai_service._generate_scene_descriptions(
+                chapter_id=chapter_id,
+                rag_service=self.rag_service
+            )
+            # Optionally log or return scenes for debugging
+            print(f"Generated scene descriptions: {scenes}")
+
+            # 4. Continue with video/audio generation as before...
             return await self._generate_real_video(script, animation_style)
         except Exception as e:
             print(f"Error in generate_entertainment_video: {e}")
@@ -1000,11 +1008,11 @@ What an incredible adventure! Stay tuned for more from {book_title}.
         try:
             # Map video_style to narrator_style
             narrator_style = self._map_video_style_to_narrator_style(video_style)
-            audio = await self.elevenlabs_service.create_audio_narration(text=script, narrator_style=narrator_style)
-            if not audio:
+            audio_url = await self.elevenlabs_service.create_audio_narration(text=script, narrator_style=narrator_style)
+            if not audio_url:
                 print("❌ ElevenLabs audio generation failed or returned None")
                 return None
-            return audio
+            return {"audio_url": audio_url}
         except Exception as e:
             print(f"❌ Error in _generate_elevenlabs_audio: {e}")
             return None
