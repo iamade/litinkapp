@@ -13,6 +13,7 @@ import aiohttp
 from pathlib import Path
 from supabase.client import create_client, Client
 import base64
+import jwt
 
 
 class VideoService:
@@ -1166,14 +1167,22 @@ What an incredible adventure! Stay tuned for more from {book_title}.
 
     async def _generate_kling_video(self, script: str, video_style: str = "realistic") -> dict:
         """Generate a video using Kling AI API and return the video URL and metadata."""
-        # This implementation is based on the provided API documentation.
-        # It uses X-Access-Key-Id and X-Access-Key-Secret headers for authentication.
+        # Generate JWT for Bearer authentication as per Kling AI docs
+        headers_jwt = {
+            "alg": "HS256",
+            "typ": "JWT"
+        }
+        payload_jwt = {
+            "iss": self.kling_access_key_id,
+            "exp": int(time.time()) + 1800,  # 30 minutes from now
+            "nbf": int(time.time()) - 5       # valid 5 seconds ago
+        }
+        token = jwt.encode(payload_jwt, self.kling_access_key_secret, algorithm="HS256", headers=headers_jwt)
         headers = {
             "Content-Type": "application/json",
-            "X-Access-Key-Id": self.kling_access_key_id,
-            "X-Access-Key-Secret": self.kling_access_key_secret
+            "Authorization": f"Bearer {token}"
         }
-        
+        print(f"[KlingAI DEBUG] Using Authorization header: Bearer <JWT>")
         # Correct payload based on Kling AI documentation
         payload = {
             "model_name": "kling-v1",
@@ -1181,10 +1190,8 @@ What an incredible adventure! Stay tuned for more from {book_title}.
             "aspect_ratio": "16:9",
             "duration": "10"  # Must be a string, "5" or "10"
         }
-
         base_url = "https://api.klingai.com"
         create_url = f"{base_url}/v1/videos/text2video"
-
         async with httpx.AsyncClient() as client:
             try:
                 print(f"[KlingAI DEBUG] Sending request to {create_url} with headers: {list(headers.keys())}")
