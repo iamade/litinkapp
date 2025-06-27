@@ -414,17 +414,23 @@ Format:
 
 Return only the list of scene descriptions.
 """
-        response = await self.generate_chapter_content(
-            content=prompt,
-            book_type='entertainment',
-            difficulty='medium'
-        )
-        # Assume response is a list or parse if needed
-        if isinstance(response, list):
-            return response
-        elif isinstance(response, dict) and 'scene_descriptions' in response:
-            return response['scene_descriptions']
-        elif isinstance(response, str):
-            # Try to split by lines
-            return [line.strip('- ').strip() for line in response.split('\n') if line.strip()]
-        return []
+        if not self.client:
+            # Fallback for development/testing
+            return ["Scene 1: A mystical forest...", "Scene 2: An ancient castle..."]
+        try:
+            response = await self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that generates scene descriptions for video adaptation."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=512
+            )
+            content = response.choices[0].message.content
+            # Try to split by lines and clean up
+            scenes = [line.strip('- ').strip() for line in content.split('\n') if line.strip()]
+            return scenes
+        except Exception as e:
+            print(f"AIService error in _generate_scene_descriptions: {e}")
+            return []
