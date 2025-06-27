@@ -139,7 +139,7 @@ async def generate_entertainment_video(
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Generate entertainment video from chapter using RAG system with PlotDrive enhancement"""
+    """Generate entertainment video from chapter using RAG system with OpenAI enhancement"""
     try:
         # Verify chapter access
         chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()

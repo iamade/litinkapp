@@ -43,6 +43,7 @@ interface Book {
   chapters: Chapter[] | null;
   error_message?: string;
   progress_message?: string;
+  processing_time_seconds?: number;
 }
 
 export default function BookUpload() {
@@ -270,7 +271,7 @@ export default function BookUpload() {
           setProcessingStatus("");
           toast.error("Could not get book status. Please check the dashboard.");
         }
-      }, 2000); // Poll every 2 seconds
+      }, 7000); // Poll every 7 seconds
 
       // Cleanup polling on component unmount
       return () => clearInterval(pollInterval);
@@ -359,7 +360,7 @@ export default function BookUpload() {
           setProcessingStatus("");
           toast.error("Could not get book status. Please check the dashboard.");
         }
-      }, 2000);
+      }, 7000);
 
       return () => clearInterval(pollInterval);
     } catch (e: unknown) {
@@ -966,6 +967,13 @@ export default function BookUpload() {
                   {savingChapters ? "Saving..." : "Confirm Chapters"}
                 </button>
               </div>
+              {step === 4 &&
+                aiBook &&
+                aiBook.processing_time_seconds !== undefined && (
+                  <div className="mt-4 text-green-700 text-center text-sm font-medium">
+                    Processing time: {aiBook.processing_time_seconds} seconds
+                  </div>
+                )}
             </div>
           )}
 

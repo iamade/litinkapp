@@ -118,14 +118,14 @@ export default function Dashboard() {
     fetchBooks();
   }, [user]);
 
-  // Auto-refresh books every 5 seconds if there are processing or generating books
+  // Auto-refresh books every 7 seconds if there are processing or generating books
   useEffect(() => {
     if (!allBooks.length) return;
     const hasProcessingBooks = allBooks.some(
       (book) => book.status === "PROCESSING" || book.status === "GENERATING"
     );
     if (!hasProcessingBooks) return;
-    const interval = setInterval(fetchBooks, 5000);
+    const interval = setInterval(fetchBooks, 7000);
     return () => clearInterval(interval);
   }, [allBooks]);
 

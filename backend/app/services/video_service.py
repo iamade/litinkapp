@@ -432,7 +432,7 @@ class VideoService:
     
     async def _poll_video_status(self, video_id: str, scene_description: str) -> Dict[str, Any]:
         """Poll video generation status"""
-        max_attempts = 30  # 5 minutes max
+        max_attempts = 60  # 10 minutes max
         attempt = 0
         
         while attempt < max_attempts:
@@ -903,32 +903,28 @@ What an incredible adventure! Stay tuned for more from {book_title}.
             
             # Step 1: Generate video with Tavus API
             tavus_video = await self._generate_tavus_video(script, video_style)
-            if not tavus_video:
-                print("❌ Tavus video generation failed")
-                return None
-            
-            # Step 2: Generate audio with ElevenLabs
+            if not tavus_video or not tavus_video.get("video_url"):
+                print("❌ Tavus video generation failed or no video URL returned.")
+                return tavus_video  # Return the failed tavus_video object
+
+            # Step 2: Generate audio with ElevenLabs ONLY if Tavus video was successful
             elevenlabs_audio = await self._generate_elevenlabs_audio(script, video_style)
             if not elevenlabs_audio:
-                print("⚠️  ElevenLabs audio unavailable, returning Tavus video only")
-                return tavus_video
-            
-            # Step 3: Merge video and audio
-            if tavus_video.get("video_url"):
-                print("Merging Tavus video with ElevenLabs audio...")
-                merged_video = await self._merge_real_video_audio(
-                    tavus_video["video_url"],
-                    elevenlabs_audio["audio_url"],
-                    f"AI-generated content in {video_style} style"
-                )
-                if merged_video:
-                    print("✅ Successfully merged Tavus video with ElevenLabs audio")
-                    return merged_video
-                else:
-                    print("Video merging failed, returning Tavus video only")
-                    return tavus_video
+                print("⚠️  ElevenLabs audio unavailable, returning Tavus video only.")
+                return tavus_video  # Return the successful tavus_video (with its URL)
+
+            # Step 3: Merge video and audio (we know tavus_video.get("video_url") is not None here)
+            print("Merging Tavus video with ElevenLabs audio...")
+            merged_video = await self._merge_real_video_audio(
+                tavus_video["video_url"],
+                elevenlabs_audio["audio_url"],
+                f"AI-generated content in {video_style} style"
+            )
+            if merged_video:
+                print("✅ Successfully merged Tavus video with ElevenLabs audio")
+                return merged_video
             else:
-                print("⚠️  Tavus video URL not available, skipping audio merge.")
+                print("Video merging failed, returning Tavus video only")
                 return tavus_video
                 
         except Exception as e:

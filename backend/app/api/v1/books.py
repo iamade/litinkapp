@@ -296,9 +296,8 @@ async def get_book_status(
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user),
 ):
-    """Get the processing status of a book by its ID."""
+    """Get the processing status of a book by its ID, and output time from QUEUED to READY."""
     try:
-        # The ownership check is now handled by RLS, so we remove it from the query.
         response = (
             supabase_client.table("books")
             .select("*, chapters(*)")
@@ -311,6 +310,39 @@ async def get_book_status(
             raise HTTPException(
                 status_code=404, detail="Book not found or you don't have access."
             )
+        import datetime
+        from datetime import timezone
+        import time
+        # Track QUEUED timestamp
+        now_utc = datetime.datetime.now(timezone.utc)
+        updated = False
+        if book["status"] == "QUEUED":
+            if not book.get("queued_at"):
+                # Store the current time as queued_at
+                supabase_client.table("books").update({"queued_at": now_utc.isoformat()}).eq("id", book_id).execute()
+                book["queued_at"] = now_utc.isoformat()
+                updated = True
+        # If book is READY and has queued_at, calculate processing time
+        processing_time_seconds = None
+        if book["status"] == "READY" and book.get("queued_at"):
+            try:
+                queued_at = datetime.datetime.fromisoformat(book["queued_at"])
+                ready_at = book.get("ready_at")
+                if not ready_at:
+                    # Store the current time as ready_at
+                    supabase_client.table("books").update({"ready_at": now_utc.isoformat()}).eq("id", book_id).execute()
+                    ready_at = now_utc.isoformat()
+                    book["ready_at"] = ready_at
+                    updated = True
+                else:
+                    ready_at = book["ready_at"]
+                ready_at_dt = datetime.datetime.fromisoformat(ready_at)
+                processing_time_seconds = int((ready_at_dt - queued_at).total_seconds())
+            except Exception:
+                processing_time_seconds = None
+        # Return book with processing_time_seconds if available
+        if processing_time_seconds is not None:
+            book["processing_time_seconds"] = processing_time_seconds
         return book
     except APIError:
         raise HTTPException(status_code=404, detail="Book not found.")
