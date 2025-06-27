@@ -426,29 +426,49 @@ class VideoService:
                 raise Exception(f"Kling AI video generation failed: {kling_result.get('error')}")
             video_url = kling_result["video_url"]
             logs.append(f"[KLINGAI VIDEO] Video URL: {video_url}")
+            # Save KlingAI video metadata to DB
+            try:
+                kling_metadata = {
+                    "chapter_id": chapter_id,
+                    "video_url": video_url,
+                    "script": script,
+                    "character_details": character_details,
+                    "scene_prompt": scene_prompt,
+                    "created_at": int(time.time()),
+                    "source": "klingai"
+                }
+                if 'book' in chapter_context and 'id' in chapter_context['book']:
+                    kling_metadata["book_id"] = chapter_context['book']['id']
+                if 'user_id' in chapter_context.get('book', {}):
+                    kling_metadata["user_id"] = chapter_context['book']['user_id']
+                logs.append(f"[DB INSERT] Saving KlingAI video metadata: {kling_metadata}")
+                db_result_kling = self.supabase_service.table("videos").insert(kling_metadata).execute()
+                logs.append(f"[DB INSERT RESULT] {db_result_kling}")
+            except Exception as db_exc:
+                logs.append(f"[DB INSERT ERROR - KlingAI] {db_exc}")
             # Validate URLs before downloading
             def is_valid_url(url):
-                return isinstance(url, str) and url.startswith("http://") or url.startswith("https://")
-            if not is_valid_url(video_url):
-                logs.append(f"[ERROR] Invalid video_url: {video_url}")
-                raise Exception(f"Invalid video_url: {video_url}")
-            if not is_valid_url(mixed_audio_url):
-                logs.append(f"[AUDIO UPLOAD] Detected local/relative mixed_audio_url: {mixed_audio_url}")
-                if self.supabase_service:
-                    try:
-                        uploaded_url = await self.supabase_service.upload_file(mixed_audio_url)
-                        logs.append(f"[AUDIO UPLOAD] Uploaded audio public URL: {uploaded_url}")
-                        mixed_audio_url = uploaded_url
-                    except Exception as audio_upload_exc:
-                        logs.append(f"[AUDIO UPLOAD ERROR] {audio_upload_exc}")
-                        raise Exception(f"Failed to upload local audio file: {audio_upload_exc}")
-                else:
-                    logs.append(f"[AUDIO UPLOAD ERROR] No supabase_service available to upload local audio file: {mixed_audio_url}")
-                    raise Exception(f"No supabase_service available to upload local audio file: {mixed_audio_url}")
-            if not is_valid_url(mixed_audio_url):
-                logs.append(f"[ERROR] Invalid mixed_audio_url: {mixed_audio_url}")
-                raise Exception(f"Invalid mixed_audio_url: {mixed_audio_url}")
-            # 6. Download audio and video files
+                return isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))
+            # Ensure ElevenLabs audio is in Supabase Storage
+            if is_valid_url(mixed_audio_url) and "supabase.co" not in mixed_audio_url:
+                # Download and upload to Supabase
+                import tempfile, httpx, os
+                fd, temp_audio_path = tempfile.mkstemp(suffix=".mp3"); os.close(fd)
+                try:
+                    with httpx.Client() as client:
+                        r = client.get(mixed_audio_url)
+                        if r.status_code == 200:
+                            with open(temp_audio_path, 'wb') as f:
+                                f.write(r.content)
+                            # Upload to Supabase
+                            supabase_audio_url = await self._serve_video_from_supabase(temp_audio_path, f"audio_{int(time.time())}.mp3")
+                            logs.append(f"[AUDIO UPLOAD] Uploaded ElevenLabs audio to Supabase: {supabase_audio_url}")
+                            mixed_audio_url = supabase_audio_url
+                        else:
+                            logs.append(f"[AUDIO DOWNLOAD ERROR] {mixed_audio_url} status {r.status_code}")
+                except Exception as e:
+                    logs.append(f"[AUDIO DOWNLOAD ERROR] {e}")
+            # Download video and audio files
             import tempfile, os, subprocess, httpx
             async def download_file(url, suffix):
                 fd, path = tempfile.mkstemp(suffix=suffix)
@@ -460,6 +480,13 @@ class VideoService:
                 return path
             video_path = await download_file(video_url, ".mp4")
             audio_path = await download_file(mixed_audio_url, ".mp3")
+            # Check file existence
+            if not os.path.exists(video_path):
+                logs.append(f"[ERROR] Video file not found at {video_path}")
+                return {"error": "Video file not found", "logs": logs}
+            if not os.path.exists(audio_path):
+                logs.append(f"[ERROR] Audio file not found at {audio_path}")
+                return {"error": "Audio file not found", "logs": logs}
             # 7. Merge audio and video with FFmpeg
             merged_path = tempfile.mktemp(suffix="_merged.mp4")
             ffmpeg_cmd = [
@@ -475,49 +502,42 @@ class VideoService:
             proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
             logs.append(f"[FFMPEG OUT] {proc.stdout}")
             logs.append(f"[FFMPEG ERR] {proc.stderr}")
+            if not os.path.exists(merged_path):
+                logs.append(f"[ERROR] Merged video not found at {merged_path}")
+                return {"error": "Merged video not found", "logs": logs}
             # 8. Upload merged video to storage and return URL
-            merged_video_url = None
-            if self.supabase_service:
-                try:
-                    logs.append(f"[UPLOAD] Uploading merged video to storage: {merged_path}")
-                    merged_video_url = await self.supabase_service.upload_file(merged_path)
-                    logs.append(f"[UPLOAD] Merged video public URL: {merged_video_url}")
-                except Exception as upload_exc:
-                    logs.append(f"[UPLOAD ERROR] {upload_exc}")
-            # 9. Save video metadata to Supabase DB
-            video_db_record = None
+            merged_video_url = await self._serve_video_from_supabase(merged_path, f"merged_video_{int(time.time())}.mp4")
+            logs.append(f"[UPLOAD] Merged video public URL: {merged_video_url}")
+            # 9. Save merged video metadata to Supabase DB
             try:
-                if self.supabase_service:
-                    # Example: insert into 'videos' table
-                    metadata = {
-                        "chapter_id": chapter_id,
-                        "video_url": merged_video_url,
-                        "script": script,
-                        "character_details": character_details,
-                        "scene_prompt": scene_prompt,
-                        "created_at": int(time.time())
-                    }
-                    # If user_id or book_id is available in chapter_context, add them
-                    if 'book' in chapter_context and 'id' in chapter_context['book']:
-                        metadata["book_id"] = chapter_context['book']['id']
-                    if 'user_id' in chapter_context.get('book', {}):
-                        metadata["user_id"] = chapter_context['book']['user_id']
-                    logs.append(f"[DB INSERT] Saving video metadata: {metadata}")
-                    db_result = self.supabase_service.table("videos").insert(metadata).execute()
-                    logs.append(f"[DB INSERT RESULT] {db_result}")
-                    video_db_record = db_result.data if hasattr(db_result, 'data') else db_result
+                merged_metadata = {
+                    "chapter_id": chapter_id,
+                    "video_url": merged_video_url,
+                    "script": script,
+                    "character_details": character_details,
+                    "scene_prompt": scene_prompt,
+                    "created_at": int(time.time()),
+                    "source": "merged",
+                    "klingai_video_url": video_url
+                }
+                if 'book' in chapter_context and 'id' in chapter_context['book']:
+                    merged_metadata["book_id"] = chapter_context['book']['id']
+                if 'user_id' in chapter_context.get('book', {}):
+                    merged_metadata["user_id"] = chapter_context['book']['user_id']
+                logs.append(f"[DB INSERT] Saving merged video metadata: {merged_metadata}")
+                db_result_merged = self.supabase_service.table("videos").insert(merged_metadata).execute()
+                logs.append(f"[DB INSERT RESULT] {db_result_merged}")
             except Exception as db_exc:
-                logs.append(f"[DB INSERT ERROR] {db_exc}")
+                logs.append(f"[DB INSERT ERROR - Merged] {db_exc}")
             return {
-                "merged_video_path": merged_path,
                 "merged_video_url": merged_video_url,
+                "klingai_video_url": video_url,
                 "logs": logs,
                 "script": script,
                 "character_details": character_details,
                 "scene_prompt": scene_prompt,
-                "video_url": video_url,
-                "enhanced_audio_url": mixed_audio_url,
-                "video_db_record": video_db_record
+                "video_url": merged_video_url,
+                "enhanced_audio_url": mixed_audio_url
             }
         except Exception as e:
             logs.append(f"[ERROR] {e}")
