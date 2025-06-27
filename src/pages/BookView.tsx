@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { userService, deleteBook } from "../services/userService";
+import { userService } from "../services/userService";
 import { videoService, VideoScene } from "../services/videoService";
-import { aiService } from "../services/aiService";
-import { useAuth } from "../contexts/AuthContext";
 
 interface Chapter {
   id: string;
@@ -27,7 +25,6 @@ interface Book {
 
 export default function BookView() {
   const { id } = useParams<{ id: string }>();
-  const { user: currentUser } = useAuth();
   const [book, setBook] = useState<Book | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
   const [videoStyle, setVideoStyle] = useState<"cartoon" | "realistic">(
@@ -102,40 +99,34 @@ export default function BookView() {
   };
 
   const handleLegacyVideoGeneration = async () => {
-    if (!book || !selectedChapter) return;
-
-    let script = selectedChapter.content;
-    const platformStyle = book.book_type === "learning" ? "udemy" : "youtube";
-
-    if (book.book_type === "learning") {
-      script = await aiService.generateText(
-        `Rewrite the following chapter as a ${platformStyle}-style tutorial script for a ${videoStyle} video: ${selectedChapter.title}\n${selectedChapter.content}`
-      );
-    } else {
-      script = await aiService.generateText(
-        `Rewrite the following chapter as a ${platformStyle}-style animated scene script for a ${videoStyle} video: ${selectedChapter.title}\n${selectedChapter.content}`
-      );
-    }
-
-    const videoUrl = await videoService.generateVideo(script, videoStyle);
-    setVideoUrls((prev) => ({ ...prev, [selectedChapter.id]: videoUrl }));
+    // Optionally show an error or fallback message, but do not use a mock video URL
+    alert("Video generation failed. Please try again later.");
   };
 
-  const handleDelete = async () => {
-    if (!book) return;
+  const handleDeleteVideo = async () => {
+    if (!selectedChapter) return;
     if (
       !window.confirm(
-        "Are you sure you want to delete this book? This action cannot be undone."
+        "Are you sure you want to delete this video? You can regenerate it later."
       )
     )
       return;
     try {
-      await deleteBook(book.id);
-      alert("Book deleted successfully");
-      // Redirect or update UI (e.g., navigate to dashboard or remove from list)
-      window.location.href = "/dashboard";
-    } catch {
-      alert("Failed to delete book");
+      // Remove video from state
+      setVideoScenes((prev) => {
+        const newScenes = { ...prev };
+        delete newScenes[selectedChapter.id];
+        return newScenes;
+      });
+      setVideoUrls((prev) => {
+        const newUrls = { ...prev };
+        delete newUrls[selectedChapter.id];
+        return newUrls;
+      });
+      alert("Video deleted successfully");
+    } catch (error) {
+      console.error("Error deleting video:", error);
+      alert("Failed to delete video");
     }
   };
 
@@ -165,9 +156,6 @@ export default function BookView() {
       "An interactive fantasy adventure where your choices shape the story.";
   }
 
-  // Add this after you have both book and currentUser
-  const isOwner = book && currentUser && book.user_id === currentUser.id;
-
   if (isLoading) return <div className="p-8 text-center">Loading...</div>;
   if (!book)
     return <div className="p-8 text-center text-red-500">Book not found.</div>;
@@ -186,7 +174,11 @@ export default function BookView() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center space-x-4">
             <img
-              src={(book.cover_image_url || bookData.image || "") as string}
+              src={
+                book.cover_image_url !== null
+                  ? book.cover_image_url
+                  : bookData.image || ""
+              }
               alt={book.title}
               className="w-16 h-20 object-cover rounded-lg shadow-md"
             />
@@ -258,12 +250,25 @@ export default function BookView() {
                   {/* Video Section */}
                   {(currentVideoScene || currentVideoUrl) && (
                     <div className="p-6 border-b">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                        AI-Generated Video
-                      </h3>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900">
+                          AI-Generated Video
+                        </h3>
+                        <button
+                          onClick={handleDeleteVideo}
+                          className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600 transition-colors"
+                          title="Delete this video"
+                        >
+                          Delete Video
+                        </button>
+                      </div>
                       <div className="relative">
                         <video
-                          src={currentVideoScene?.video_url || currentVideoUrl}
+                          src={
+                            currentVideoScene?.video_url ||
+                            currentVideoUrl ||
+                            undefined
+                          }
                           poster={currentVideoScene?.thumbnail_url}
                           controls
                           className="w-full h-64 object-cover rounded-lg"
@@ -351,16 +356,6 @@ export default function BookView() {
           </div>
         </div>
       </div>
-
-      {/* Delete Button */}
-      {isOwner && (
-        <button
-          onClick={handleDelete}
-          className="bg-red-500 text-white px-4 py-2 rounded mt-4"
-        >
-          Delete Book
-        </button>
-      )}
     </div>
   );
 }

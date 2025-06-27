@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
 from contextlib import asynccontextmanager
@@ -46,6 +47,10 @@ security = HTTPBearer()
 
 # Include API routes
 app.include_router(api_router, prefix="/api/v1")
+
+# Uploads directory for generated content (fallback for local files)
+if os.path.exists(settings.UPLOAD_DIR):
+    app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
 
 @app.get("/")

@@ -110,7 +110,7 @@ class RAGService:
         chapter_context: Dict[str, Any], 
         video_style: str = "realistic"
     ) -> str:
-        """Generate optimized video script from chapter context with PlotDrive enhancement for entertainment"""
+        """Generate optimized video script from chapter context using OpenAI only (no PlotDrive)."""
         try:
             chapter = chapter_context['chapter']
             book = chapter_context['book']
@@ -130,57 +130,87 @@ Total Context:
 Video Style: {video_style}
 """
             
+            # Use different prompts based on book type
             if book['book_type'] == 'entertainment':
-                # Use PlotDrive for entertainment content
-                return await self._generate_entertainment_script(chapter_context, video_style)
-            else:
-                # Use AI service for learning content
                 prompt = f"""
-Create a video script for a {video_style} style tutorial video based on this educational content:
+Create a screenplay script for a {video_style} style video based on this entertainment content:
+
+{enhanced_context}
+
+The screenplay should:
+1. Be dramatic and engaging
+2. Include character dialogue and actions in proper screenplay format
+3. Be suitable for {video_style} video generation
+4. Be 2-3 minutes in duration
+5. Maintain the story's emotional impact
+
+Format as a proper screenplay with:
+- Character names in ALL CAPS
+- Dialogue indented under character names
+- Scene descriptions and actions
+- Clear character interactions
+
+Example format:
+NARRATOR
+    Welcome to the world of angel magic...
+
+SAGE
+    The ancient art of summoning requires...
+
+STUDENT
+    How do I begin?
+
+SAGE
+    First, you must understand...
+"""
+            else:
+                # For learning content, create a tutorial script
+                prompt = f"""
+Create a tutorial video script for a {video_style} style video based on this learning content:
 
 {enhanced_context}
 
 The script should:
-1. Be engaging and educational
-2. Break down complex concepts into digestible parts
-3. Include clear explanations and examples
-4. Be suitable for {video_style} video generation
-5. Be 2-3 minutes in duration
+1. Be educational and informative
+2. Include clear explanations and examples
+3. Be suitable for {video_style} video generation
+4. Be 2-3 minutes in duration
+5. Have a logical flow from introduction to conclusion
 
-Format the script as a narrative that can be directly used for video generation.
+Format as a tutorial script with:
+- INSTRUCTOR character for explanations
+- Clear section breaks
+- Examples and demonstrations
+- Engaging delivery
+
+Example format:
+INSTRUCTOR
+    Welcome to this tutorial on...
+
+    Today we'll learn about...
+
+    Let me show you how...
+
+    Here's an example...
+
+    Remember, the key points are...
 """
-                
-                response = await self.ai_service.generate_chapter_content(
-                    content=prompt,
-                    book_type=book['book_type'],
-                    difficulty=book.get('difficulty', 'medium')
-                )
-                
-                return str(response)
-                
+            
+            response = await self.ai_service.generate_chapter_content(
+                content=prompt,
+                book_type=book['book_type'],
+                difficulty=book.get('difficulty', 'medium')
+            )
+            return str(response)
         except Exception as e:
             print(f"Error generating video script: {e}")
             return chapter_context['chapter']['content']
     
     async def _generate_entertainment_script(self, chapter_context: Dict[str, Any], video_style: str) -> str:
-        """Generate enhanced story script using PlotDrive for entertainment content"""
+        """Generate entertainment script using OpenAI only (no PlotDrive)."""
         try:
             chapter = chapter_context['chapter']
             book = chapter_context['book']
-            
-            # Use PlotDrive to create screenplay-style script
-            screenplay_result = await self.plotdrive_service.create_screenplay_script(
-                story_content=chapter_context['total_context'],
-                style=self._map_video_style_to_plotdrive(video_style),
-                title=chapter['title'],
-                book_title=book['title']
-            )
-            
-            # If PlotDrive generation was successful, use it
-            if screenplay_result and 'script' in screenplay_result:
-                return screenplay_result['script']
-            
-            # Fallback to basic story script if PlotDrive fails
             prompt = f"""
 Create an engaging story script for a {video_style} style video based on this entertainment content:
 
@@ -197,15 +227,12 @@ The script should:
 
 Format as a narrative script with clear scene descriptions and dialogue.
 """
-            
             response = await self.ai_service.generate_chapter_content(
                 content=prompt,
                 book_type='entertainment',
                 difficulty='medium'
             )
-            
             return str(response)
-            
         except Exception as e:
             print(f"Error generating entertainment script: {e}")
             return chapter_context['chapter']['content']
@@ -298,4 +325,32 @@ Format as a narrative script with clear scene descriptions and dialogue.
             return {
                 'enhanced_content': chapter_context['total_context'],
                 'enhancement_type': 'basic'
-            } 
+            }
+    
+    async def generate_screenplay_with_openai(self, chapter_id: str, style: str = "cinematic") -> str:
+        """Generate a screenplay for entertainment using OpenAI (not PlotDrive)"""
+        chapter_context = await self.get_chapter_with_context(chapter_id, include_adjacent=True)
+        chapter = chapter_context['chapter']
+        book = chapter_context['book']
+        prompt = f"""
+Create an engaging screenplay for a {style} style video based on this entertainment content:
+
+Book: {book['title']}
+Chapter: {chapter['title']}
+Content: {chapter_context['total_context']}
+
+The screenplay should:
+1. Be dramatic and engaging
+2. Include character dialogue and actions
+3. Be suitable for {style} video generation
+4. Be 2-3 minutes in duration
+5. Maintain the story's emotional impact
+
+Format as a narrative script with clear scene descriptions and dialogue.
+"""
+        response = await self.ai_service.generate_chapter_content(
+            content=prompt,
+            book_type='entertainment',
+            difficulty='medium'
+        )
+        return str(response) 

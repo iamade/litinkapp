@@ -30,12 +30,11 @@ export const videoService = {
     includeContext: boolean = true
   ): Promise<VideoScene> => {
     const response = await apiClient.post<VideoScene>(
-      "/ai/generate-video-from-chapter",
-      {
-        chapter_id: chapterId,
-        video_style: videoStyle,
-        include_context: includeContext,
-      }
+      `/ai/generate-video-from-chapter?chapter_id=${encodeURIComponent(
+        chapterId
+      )}&video_style=${encodeURIComponent(
+        videoStyle
+      )}&include_context=${includeContext}`
     );
     return response;
   },
@@ -46,11 +45,9 @@ export const videoService = {
     tutorialStyle: string = "udemy"
   ): Promise<VideoScene> => {
     const response = await apiClient.post<VideoScene>(
-      "/ai/generate-tutorial-video",
-      {
-        chapter_id: chapterId,
-        tutorial_style: tutorialStyle,
-      }
+      `/ai/generate-tutorial-video?chapter_id=${encodeURIComponent(
+        chapterId
+      )}&tutorial_style=${encodeURIComponent(tutorialStyle)}`
     );
     return response;
   },
@@ -61,11 +58,9 @@ export const videoService = {
     animationStyle: string = "animated"
   ): Promise<VideoScene> => {
     const response = await apiClient.post<VideoScene>(
-      "/ai/generate-entertainment-video",
-      {
-        chapter_id: chapterId,
-        animation_style: animationStyle,
-      }
+      `/ai/generate-entertainment-video?chapter_id=${encodeURIComponent(
+        chapterId
+      )}&animation_style=${encodeURIComponent(animationStyle)}`
     );
     return response;
   },
@@ -76,42 +71,5 @@ export const videoService = {
       "/ai/video-avatars"
     );
     return response.avatars;
-  },
-
-  // Legacy methods for backward compatibility
-  generateStoryScene: async (
-    sceneDescription: string,
-    dialogue: string,
-    avatarConfig: AvatarConfig
-  ): Promise<VideoScene> => {
-    console.warn(
-      "Using legacy generateStoryScene method. Consider using generateVideoFromChapter instead."
-    );
-
-    // For now, return a mock response
-    return {
-      id: `scene_${Date.now()}`,
-      title: sceneDescription,
-      description: "AI-generated story scene (Legacy)",
-      video_url:
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-      thumbnail_url:
-        "https://images.pexels.com/photos/1029621/pexels-photo-1029621.jpeg?auto=compress&cs=tinysrgb&w=400",
-      duration: 180,
-      status: "ready",
-    };
-  },
-
-  // Mock functionality for development (fallback)
-  generateVideo: async (script: string, avatarId: string): Promise<string> => {
-    console.warn(
-      "Video service: Using mock video URL. Use generateVideoFromChapter for RAG-based generation."
-    );
-    console.log(
-      `Generating video for script: "${script}" with avatar: ${avatarId}`
-    );
-    // Simulate network delay
-    await new Promise((res) => setTimeout(res, 1500));
-    return "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
   },
 };

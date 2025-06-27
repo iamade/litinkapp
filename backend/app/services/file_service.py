@@ -12,10 +12,13 @@ from app.services.ai_service import AIService
 from app.schemas.book import BookCreate, ChapterCreate, BookUpdate
 import tempfile
 import math
+import hashlib
+import json
 
 
 class FileService:
     """File processing service for book uploads"""
+    MAX_CHAPTERS = 50
     
     def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
@@ -67,7 +70,7 @@ class FileService:
             }).eq("id", book_id_to_update).execute()
 
             # Extract chapters
-            chapters = self.extract_chapters(content, book_type)
+            chapters = await self.extract_chapters_with_ai_validation(content, book_type)
             
             # Create chapters in database
             for i, chapter_data in enumerate(chapters):
@@ -207,32 +210,71 @@ class FileService:
         else:
             return self.extract_entertainment_chapters(content)
 
+    def _is_duplicate_chapter(self, new_chapter: Dict[str, Any], existing_chapters: List[Dict[str, Any]], similarity_threshold: float = 0.8) -> bool:
+        """Check if a chapter is a duplicate based on title and content similarity"""
+        new_title = new_chapter["title"].strip().lower()
+        new_content = new_chapter["content"].strip()
+        
+        # Create a simple hash of the content for quick comparison
+        new_content_hash = hashlib.md5(new_content.encode()).hexdigest()
+        
+        for existing_chapter in existing_chapters:
+            existing_title = existing_chapter["title"].strip().lower()
+            existing_content = existing_chapter["content"].strip()
+            existing_content_hash = hashlib.md5(existing_content.encode()).hexdigest()
+            
+            # Check if titles are identical or very similar
+            if new_title == existing_title:
+                return True
+            
+            # Check if content is identical (same hash)
+            if new_content_hash == existing_content_hash:
+                return True
+            
+            # Check for very similar content (optional - more expensive)
+            if len(new_content) > 50 and len(existing_content) > 50:
+                # Simple similarity check based on content length and overlap
+                shorter_content = new_content if len(new_content) < len(existing_content) else existing_content
+                longer_content = existing_content if len(new_content) < len(existing_content) else new_content
+                
+                # If shorter content is mostly contained in longer content, it's likely a duplicate
+                if len(shorter_content) / len(longer_content) > similarity_threshold:
+                    # Check if there's significant overlap
+                    overlap_ratio = len(set(shorter_content.split()) & set(longer_content.split())) / len(set(shorter_content.split()))
+                    if overlap_ratio > similarity_threshold:
+                        return True
+        
+        return False
+
     def extract_learning_chapters(self, content: str) -> List[Dict[str, Any]]:
-        """Extract chapters for learning content"""
-        # Split by common learning content patterns
+        """Extract chapters for learning content (max 50) with duplicate filtering"""
         patterns = [
-            r'Chapter\s+\d+[:\s]*([^\n]+)',
+            r'CHAPTER\s+\d+\.?\s*([^\n]+)',  # CHAPTER 1. Introduction
+            r'Chapter\s+\d+\.?\s*([^\n]+)',  # Chapter 1. Introduction
+            r'CHAPTER\s+\d+[:\s]*([^\n]+)',  # CHAPTER 1: Introduction
+            r'Chapter\s+\d+[:\s]*([^\n]+)',  # Chapter 1: Introduction
             r'Lesson\s+\d+[:\s]*([^\n]+)',
             r'Unit\s+\d+[:\s]*([^\n]+)',
             r'Section\s+\d+[:\s]*([^\n]+)',
             r'Part\s+\d+[:\s]*([^\n]+)'
         ]
-        
         chapters = []
         lines = content.split('\n')
         current_chapter = {"title": "Introduction", "content": "", "summary": ""}
         
         for line in lines:
-            # Check if line matches any chapter pattern
+            if len(chapters) >= self.MAX_CHAPTERS:
+                break
             is_chapter_header = False
             for pattern in patterns:
                 match = re.match(pattern, line, re.IGNORECASE)
                 if match:
-                    # Save previous chapter if it has content
                     if current_chapter["content"].strip():
-                        chapters.append(current_chapter)
-                    
-                    # Start new chapter
+                        # Check for duplicates before adding
+                        if not self._is_duplicate_chapter(current_chapter, chapters):
+                            chapters.append(current_chapter)
+                            if len(chapters) >= self.MAX_CHAPTERS:
+                                break
                     current_chapter = {
                         "title": match.group(1).strip(),
                         "content": line + "\n",
@@ -240,15 +282,15 @@ class FileService:
                     }
                     is_chapter_header = True
                     break
-            
             if not is_chapter_header:
                 current_chapter["content"] += line + "\n"
         
-        # Add the last chapter
-        if current_chapter["content"].strip():
-            chapters.append(current_chapter)
+        # Add the last chapter if it has content and isn't a duplicate
+        if len(chapters) < self.MAX_CHAPTERS and current_chapter["content"].strip():
+            if not self._is_duplicate_chapter(current_chapter, chapters):
+                chapters.append(current_chapter)
         
-        # If no chapters found, create a single chapter
+        # Fallback if no chapters were extracted
         if not chapters:
             chapters = [{
                 "title": "Complete Content",
@@ -256,34 +298,37 @@ class FileService:
                 "summary": ""
             }]
         
-        return chapters
+        return chapters[:self.MAX_CHAPTERS]
 
     def extract_entertainment_chapters(self, content: str) -> List[Dict[str, Any]]:
-        """Extract chapters for entertainment content"""
-        # Split by common story patterns
+        """Extract chapters for entertainment content (max 50) with duplicate filtering"""
         patterns = [
-            r'Chapter\s+\d+[:\s]*([^\n]+)',
+            r'CHAPTER\s+\d+\.?\s*([^\n]+)',  # CHAPTER 1. Introduction to Angel Magic
+            r'Chapter\s+\d+\.?\s*([^\n]+)',  # Chapter 1. Introduction
+            r'CHAPTER\s+\d+[:\s]*([^\n]+)',  # CHAPTER 1: Introduction
+            r'Chapter\s+\d+[:\s]*([^\n]+)',  # Chapter 1: Introduction
             r'Scene\s+\d+[:\s]*([^\n]+)',
             r'Act\s+\d+[:\s]*([^\n]+)',
             r'Part\s+\d+[:\s]*([^\n]+)',
             r'Book\s+\d+[:\s]*([^\n]+)'
         ]
-        
         chapters = []
         lines = content.split('\n')
         current_chapter = {"title": "Prologue", "content": "", "summary": ""}
         
         for line in lines:
-            # Check if line matches any chapter pattern
+            if len(chapters) >= self.MAX_CHAPTERS:
+                break
             is_chapter_header = False
             for pattern in patterns:
                 match = re.match(pattern, line, re.IGNORECASE)
                 if match:
-                    # Save previous chapter if it has content
                     if current_chapter["content"].strip():
-                        chapters.append(current_chapter)
-                    
-                    # Start new chapter
+                        # Check for duplicates before adding
+                        if not self._is_duplicate_chapter(current_chapter, chapters):
+                            chapters.append(current_chapter)
+                            if len(chapters) >= self.MAX_CHAPTERS:
+                                break
                     current_chapter = {
                         "title": match.group(1).strip(),
                         "content": line + "\n",
@@ -291,15 +336,15 @@ class FileService:
                     }
                     is_chapter_header = True
                     break
-            
             if not is_chapter_header:
                 current_chapter["content"] += line + "\n"
         
-        # Add the last chapter
-        if current_chapter["content"].strip():
-            chapters.append(current_chapter)
+        # Add the last chapter if it has content and isn't a duplicate
+        if len(chapters) < self.MAX_CHAPTERS and current_chapter["content"].strip():
+            if not self._is_duplicate_chapter(current_chapter, chapters):
+                chapters.append(current_chapter)
         
-        # If no chapters found, create a single chapter
+        # Fallback if no chapters were extracted
         if not chapters:
             chapters = [{
                 "title": "Complete Story",
@@ -307,7 +352,7 @@ class FileService:
                 "summary": ""
             }]
         
-        return chapters
+        return chapters[:self.MAX_CHAPTERS]
 
     def extract_chapters_from_pdf_with_toc(self, file_path: str) -> Optional[List[Dict[str, Any]]]:
         """Extract chapters using PDF table of contents"""
@@ -353,3 +398,140 @@ class FileService:
         except Exception as e:
             print(f"Error extracting TOC from PDF: {e}")
             return None
+
+    def parse_book_structure(self, content: str) -> Dict[str, Any]:
+        """Parse book structure and separate front matter from chapters"""
+        lines = content.split('\n')
+        
+        # Define patterns for different book sections
+        front_matter_patterns = [
+            r'^Contents$',
+            r'^Table of Contents$',
+            r'^Preface$',
+            r'^Acknowledgments?$',
+            r'^Introduction$',
+            r'^Foreword$',
+            r'^Copyright',
+            r'^Library of Congress',
+            r'^ISBN',
+            r'^First Edition',
+            r'^Cover Design',
+            r'^Book Design',
+            r'^List of Illustrations',
+            r'^List of Figures'
+        ]
+        
+        chapter_patterns = [
+            r'^CHAPTER\s+\d+\.?\s*',
+            r'^Chapter\s+\d+\.?\s*'
+        ]
+        
+        sections = {
+            'front_matter': [],
+            'chapters': [],
+            'back_matter': []
+        }
+        
+        current_section = 'front_matter'
+        current_content = []
+        
+        for line in lines:
+            line_stripped = line.strip()
+            
+            # Check if this is a chapter header
+            is_chapter = any(re.match(pattern, line_stripped, re.IGNORECASE) for pattern in chapter_patterns)
+            
+            # Check if this is front matter
+            is_front_matter = any(re.match(pattern, line_stripped, re.IGNORECASE) for pattern in front_matter_patterns)
+            
+            if is_chapter:
+                # Save current content and switch to chapters
+                if current_content:
+                    sections[current_section].append('\n'.join(current_content))
+                current_section = 'chapters'
+                current_content = [line]
+            elif is_front_matter and current_section == 'front_matter':
+                # Continue in front matter
+                current_content.append(line)
+            else:
+                current_content.append(line)
+        
+        # Save the last section
+        if current_content:
+            sections[current_section].append('\n'.join(current_content))
+        
+        return sections
+
+    def extract_chapters_with_structure(self, content: str, book_type: str) -> List[Dict[str, Any]]:
+        """Extract chapters with proper book structure handling"""
+        # First parse the book structure
+        structure = self.parse_book_structure(content)
+        
+        # Extract chapters from the chapters section
+        if structure['chapters']:
+            chapter_content = '\n'.join(structure['chapters'])
+            return self.extract_chapters(chapter_content, book_type)
+        else:
+            # Fallback to original method if no structure found
+            return self.extract_chapters(content, book_type)
+
+    async def validate_chapters_with_ai(self, chapters: List[Dict[str, Any]], book_content: str, book_type: str) -> List[Dict[str, Any]]:
+        """Use AI to validate and improve chapter extraction"""
+        try:
+            if not self.ai_service.client:
+                print("AI service not available, skipping validation")
+                return chapters
+            
+            # Create a validation prompt
+            validation_prompt = f"""
+You are an expert book editor. Review the extracted chapters and validate their correctness.
+
+Book Type: {book_type}
+Total Book Content Length: {len(book_content)} characters
+
+EXTRACTED CHAPTERS:
+{json.dumps(chapters, indent=2)}
+
+VALIDATION TASKS:
+1. Check if chapters are properly separated (no overlap)
+2. Verify chapter titles match their content
+3. Ensure front matter (cover, TOC, preface) is not included in chapters
+4. Confirm each chapter has substantial, relevant content
+5. Identify any missing chapters or content
+
+If issues are found, provide corrected chapter structure.
+Return JSON with 'validated_chapters' array and 'issues' array.
+"""
+            
+            response = await self.ai_service.client.chat.completions.create(
+                model="gpt-3.5-turbo-1106",
+                messages=[
+                    {"role": "system", "content": "You are an expert book editor and content validator."},
+                    {"role": "user", "content": validation_prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            
+            if 'validated_chapters' in result and result['validated_chapters']:
+                print(f"AI validation found {len(result.get('issues', []))} issues")
+                return result['validated_chapters']
+            else:
+                print("AI validation returned no corrections, using original chapters")
+                return chapters
+                
+        except Exception as e:
+            print(f"AI validation failed: {e}")
+            return chapters
+
+    async def extract_chapters_with_ai_validation(self, content: str, book_type: str) -> List[Dict[str, Any]]:
+        """Extract chapters and validate with AI"""
+        # First extract chapters using regex
+        chapters = self.extract_chapters_with_structure(content, book_type)
+        
+        # Then validate with AI
+        validated_chapters = await self.validate_chapters_with_ai(chapters, content, book_type)
+        
+        return validated_chapters

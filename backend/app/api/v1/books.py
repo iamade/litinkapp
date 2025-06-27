@@ -1,6 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.services.embeddings_service import EmbeddingsService
 from supabase import Client
 from postgrest.exceptions import APIError
 from enum import Enum
@@ -507,8 +508,8 @@ async def extract_cover_from_page(
             file=img_buffer.getvalue(),
             file_options={"content-type": "image/png"}
         )
-        # Construct public URL (assuming public bucket)
-        cover_url = f"/storage/v1/object/public/{settings.SUPABASE_BUCKET_NAME}/{storage_path}"
+        # Get the correct public URL from Supabase
+        cover_url = supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).get_public_url(storage_path)
         supabase_client.table('books').update({"cover_image_url": cover_url}).eq('id', book_id).execute()
         return {"cover_image_url": cover_url}
     except Exception as e:
@@ -534,7 +535,8 @@ async def upload_cover_image(
         file=img_bytes,
         file_options={"content-type": "image/png"}
     )
-    cover_url = f"/storage/v1/object/public/{settings.SUPABASE_BUCKET_NAME}/{storage_path}"
+    # Get the correct public URL from Supabase
+    cover_url = supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).get_public_url(storage_path)
     supabase_client.table('books').update({"cover_image_url": cover_url}).eq('id', book_id).execute()
     return {"cover_image_url": cover_url}
 
@@ -557,9 +559,13 @@ async def save_user_chapters(
     if not response.data or response.data["user_id"] != current_user["id"]:
         raise HTTPException(status_code=403, detail="Not authorized to modify this book")
     
+     # Delete existing chapter embeddings for this book
+    supabase_client.table('chapter_embeddings').delete().eq('book_id', book_id).execute()
+    
     # Delete existing draft chapters for this book
     supabase_client.table('chapters').delete().eq('book_id', book_id).execute()
-    # Insert new chapters
+    # Insert new chapters and create embeddings
+    embeddings_service = EmbeddingsService(supabase_client)
     for idx, chapter in enumerate(chapters, 1):
         chapter_data = {
             "book_id": book_id,
@@ -567,7 +573,11 @@ async def save_user_chapters(
             "content": chapter.content,
             "chapter_number": idx
         }
-        supabase_client.table('chapters').insert(chapter_data).execute()
+        insert_response = supabase_client.table('chapters').insert(chapter_data).execute()
+        chapter_id = insert_response.data[0]['id']
+        # Create embeddings for the new chapter
+        await embeddings_service.create_chapter_embeddings(chapter_id, chapter.content)
+
     # Update total_chapters in books table
     supabase_client.table('books').update({"total_chapters": len(chapters)}).eq('id', book_id).execute()
     return {"message": "Chapters saved", "total_chapters": len(chapters)}

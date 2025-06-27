@@ -30,6 +30,34 @@ class ElevenLabsService:
             return await self._mock_generate_speech(text, voice_id, emotion)
         
         try:
+            # Validate input parameters
+            if not text or not text.strip():
+                print("Warning: Empty text provided to generate_enhanced_speech")
+                return None
+            
+            if not voice_id:
+                print("Warning: No voice_id provided to generate_enhanced_speech")
+                return None
+            
+            # Truncate text if too long (ElevenLabs has limits)
+            if len(text) > 2500:
+                text = text[:2500] + "..."
+                print(f"Warning: Text truncated to {len(text)} characters")
+            
+            request_data = {
+                "text": text,
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {
+                    "stability": stability,
+                    "similarity_boost": similarity_boost,
+                    "style": self._get_emotion_style(emotion),
+                    "use_speaker_boost": True,
+                    "speaking_rate": speed
+                }
+            }
+            
+            print(f"ElevenLabs request - voice_id: {voice_id}, text_length: {len(text)}")
+            
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self.base_url}/text-to-speech/{voice_id}",
@@ -38,17 +66,7 @@ class ElevenLabsService:
                         "Content-Type": "application/json",
                         "xi-api-key": self.api_key
                     },
-                    json={
-                        "text": text,
-                        "model_id": "eleven_multilingual_v2",
-                        "voice_settings": {
-                            "stability": stability,
-                            "similarity_boost": similarity_boost,
-                            "style": self._get_emotion_style(emotion),
-                            "use_speaker_boost": True,
-                            "speaking_rate": speed
-                        }
-                    }
+                    json=request_data
                 )
                 
                 if response.status_code == 200:
@@ -62,11 +80,16 @@ class ElevenLabsService:
                     return f"/uploads/audio/{audio_filename}"
                 else:
                     print(f"ElevenLabs API error: {response.status_code}")
-                    return None
+                    print(f"Response content: {response.text}")
+                    # Fall back to mock generation
+                    print("Falling back to mock speech generation")
+                    return await self._mock_generate_speech(text, voice_id, emotion)
                     
         except Exception as e:
             print(f"ElevenLabs service error: {e}")
-            return None
+            # Fall back to mock generation
+            print("Falling back to mock speech generation due to exception")
+            return await self._mock_generate_speech(text, voice_id, emotion)
     
     async def generate_character_voice(
         self,
@@ -132,12 +155,17 @@ class ElevenLabsService:
     
     async def mix_audio_tracks(
         self, 
-        main_audio_path: str, 
+        main_audio_path: Optional[str], 
         background_audio_path: Optional[str] = None,
         sound_effects: List[str] = []
     ) -> Optional[str]:
         """Mix multiple audio tracks together"""
         try:
+            # Handle case where main_audio_path is None
+            if not main_audio_path:
+                print("Warning: main_audio_path is None, cannot mix audio tracks")
+                return None
+            
             # In a real implementation, you would use audio processing libraries
             # like pydub or ffmpeg to mix the audio tracks
             
@@ -232,21 +260,27 @@ class ElevenLabsService:
             print(f"Error fetching voices: {e}")
             return self._get_mock_voices()
     
-    def _get_emotion_style(self, emotion: str) -> str:
-        """Map emotion to ElevenLabs style parameter"""
+    def _get_emotion_style(self, emotion: str) -> float:
+        """Map emotion to ElevenLabs style parameter (numeric value)"""
         emotion_styles = {
-            "neutral": "neutral",
-            "happy": "cheerful",
-            "sad": "melancholic",
-            "angry": "intense",
-            "excited": "energetic",
-            "calm": "serene",
-            "mysterious": "mysterious",
-            "professional": "professional",
-            "friendly": "friendly",
-            "wise": "wise"
+            "neutral": 0.5,
+            "happy": 0.8,
+            "sad": 0.2,
+            "angry": 0.9,
+            "excited": 0.8,
+            "calm": 0.3,
+            "mysterious": 0.6,
+            "professional": 0.5,
+            "friendly": 0.7,
+            "wise": 0.4,
+            "confident": 0.8,
+            "intense": 0.9,
+            "cheerful": 0.8,
+            "melancholic": 0.2,
+            "energetic": 0.8,
+            "serene": 0.3
         }
-        return emotion_styles.get(emotion, "neutral")
+        return emotion_styles.get(emotion, 0.5)
     
     def _get_character_voice_settings(self, character_profile: Dict[str, Any]) -> Dict[str, Any]:
         """Get voice settings based on character profile"""
@@ -277,17 +311,22 @@ class ElevenLabsService:
     
     def _get_voice_id_for_character(self, character_profile: Dict[str, Any]) -> str:
         """Get appropriate voice ID for character"""
-        # In a real implementation, you would have a mapping of character types to voice IDs
-        # For now, return a default voice ID
-        return "default_voice_id"
+        # Use a real ElevenLabs voice ID
+        # For now, use a common default voice ID
+        return "21m00Tcm4TlvDq8ikWAM"  # Rachel voice
     
     def _get_narrator_voice_settings(self, narrator_style: str) -> Dict[str, Any]:
         """Get voice settings for narrator"""
+        # Use a real ElevenLabs voice ID or fall back to mock
+        # Real ElevenLabs voice IDs are long alphanumeric strings
+        # For now, use a common default voice ID
+        default_voice_id = "21m00Tcm4TlvDq8ikWAM"  # Rachel voice
+        
         style_mapping = {
-            "professional": {"emotion": "professional", "speed": 1.0, "voice_id": "narrator_professional"},
-            "storyteller": {"emotion": "mysterious", "speed": 0.9, "voice_id": "narrator_storyteller"},
-            "friendly": {"emotion": "friendly", "speed": 1.1, "voice_id": "narrator_friendly"},
-            "dramatic": {"emotion": "intense", "speed": 0.8, "voice_id": "narrator_dramatic"}
+            "professional": {"emotion": "professional", "speed": 1.0, "voice_id": default_voice_id},
+            "storyteller": {"emotion": "mysterious", "speed": 0.9, "voice_id": default_voice_id},
+            "friendly": {"emotion": "friendly", "speed": 1.1, "voice_id": default_voice_id},
+            "dramatic": {"emotion": "intense", "speed": 0.8, "voice_id": default_voice_id}
         }
         
         return style_mapping.get(narrator_style, style_mapping["professional"])

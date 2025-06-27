@@ -135,7 +135,7 @@ async def generate_tutorial_video(
 @router.post("/generate-entertainment-video")
 async def generate_entertainment_video(
     chapter_id: str,
-    video_style: str = "cinematic",
+    animation_style: str = "cinematic",
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
@@ -157,7 +157,7 @@ async def generate_entertainment_video(
         video_service = VideoService(supabase_client)
         video_result = await video_service.generate_entertainment_video(
             chapter_id=chapter_id,
-            video_style=video_style,
+            animation_style=animation_style,
             supabase_client=supabase_client
         )
         
