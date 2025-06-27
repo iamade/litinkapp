@@ -249,34 +249,50 @@ class FileService:
     def extract_learning_chapters(self, content: str) -> List[Dict[str, Any]]:
         """Extract chapters for learning content (max 50) with duplicate filtering"""
         patterns = [
-            r'CHAPTER\s+\d+\.?\s*([^\n]+)',  # CHAPTER 1. Introduction
-            r'Chapter\s+\d+\.?\s*([^\n]+)',  # Chapter 1. Introduction
-            r'CHAPTER\s+\d+[:\s]*([^\n]+)',  # CHAPTER 1: Introduction
-            r'Chapter\s+\d+[:\s]*([^\n]+)',  # Chapter 1: Introduction
+            r'CHAPTER\s+\d+\.?\s*([^\n]+)',
+            r'Chapter\s+\d+\.?\s*([^\n]+)',
+            r'CHAPTER\s+\w+\s*([^\n]*)',
+            r'Chapter\s+\w+\s*([^\n]*)',
+            r'CHAPTER\s+\d+[:\s]*([^\n]+)',
+            r'Chapter\s+\d+[:\s]*([^\n]+)',
+            r'CHAPTER\s+\w+[:\s]*([^\n]+)',
+            r'Chapter\s+\w+[:\s]*([^\n]+)',
             r'Lesson\s+\d+[:\s]*([^\n]+)',
             r'Unit\s+\d+[:\s]*([^\n]+)',
             r'Section\s+\d+[:\s]*([^\n]+)',
-            r'Part\s+\d+[:\s]*([^\n]+)'
+            r'Part\s+\d+[:\s]*([^\n]+)',
+            r'CHAPTER\s+([A-Z]+)\b',
+            r'Chapter\s+([A-Z][a-z]+)\b',
         ]
         chapters = []
         lines = content.split('\n')
         current_chapter = {"title": "Introduction", "content": "", "summary": ""}
-        
-        for line in lines:
+        i = 0
+        while i < len(lines):
+            line = lines[i]
             if len(chapters) >= self.MAX_CHAPTERS:
                 break
             is_chapter_header = False
             for pattern in patterns:
                 match = re.match(pattern, line, re.IGNORECASE)
                 if match:
+                    # Look ahead for title if group(1) is empty
+                    title = match.group(1).strip() if match.lastindex and match.group(1).strip() else ""
+                    if not title:
+                        # Look ahead for next non-empty line
+                        j = i + 1
+                        while j < len(lines) and not lines[j].strip():
+                            j += 1
+                        if j < len(lines):
+                            title = lines[j].strip()
+                            i = j  # Skip the title line in the next iteration
                     if current_chapter["content"].strip():
-                        # Check for duplicates before adding
                         if not self._is_duplicate_chapter(current_chapter, chapters):
                             chapters.append(current_chapter)
                             if len(chapters) >= self.MAX_CHAPTERS:
                                 break
                     current_chapter = {
-                        "title": match.group(1).strip(),
+                        "title": title,
                         "content": line + "\n",
                         "summary": ""
                     }
@@ -284,53 +300,63 @@ class FileService:
                     break
             if not is_chapter_header:
                 current_chapter["content"] += line + "\n"
-        
-        # Add the last chapter if it has content and isn't a duplicate
+            i += 1
         if len(chapters) < self.MAX_CHAPTERS and current_chapter["content"].strip():
             if not self._is_duplicate_chapter(current_chapter, chapters):
                 chapters.append(current_chapter)
-        
-        # Fallback if no chapters were extracted
         if not chapters:
             chapters = [{
                 "title": "Complete Content",
                 "content": content,
                 "summary": ""
             }]
-        
         return chapters[:self.MAX_CHAPTERS]
 
     def extract_entertainment_chapters(self, content: str) -> List[Dict[str, Any]]:
         """Extract chapters for entertainment content (max 50) with duplicate filtering"""
         patterns = [
-            r'CHAPTER\s+\d+\.?\s*([^\n]+)',  # CHAPTER 1. Introduction to Angel Magic
-            r'Chapter\s+\d+\.?\s*([^\n]+)',  # Chapter 1. Introduction
-            r'CHAPTER\s+\d+[:\s]*([^\n]+)',  # CHAPTER 1: Introduction
-            r'Chapter\s+\d+[:\s]*([^\n]+)',  # Chapter 1: Introduction
+            r'CHAPTER\s+\d+\.?\s*([^\n]+)',
+            r'Chapter\s+\d+\.?\s*([^\n]+)',
+            r'CHAPTER\s+\w+\s*([^\n]*)',
+            r'Chapter\s+\w+\s*([^\n]*)',
+            r'CHAPTER\s+\d+[:\s]*([^\n]+)',
+            r'Chapter\s+\d+[:\s]*([^\n]+)',
+            r'CHAPTER\s+\w+[:\s]*([^\n]+)',
+            r'Chapter\s+\w+[:\s]*([^\n]+)',
             r'Scene\s+\d+[:\s]*([^\n]+)',
             r'Act\s+\d+[:\s]*([^\n]+)',
             r'Part\s+\d+[:\s]*([^\n]+)',
-            r'Book\s+\d+[:\s]*([^\n]+)'
+            r'Book\s+\d+[:\s]*([^\n]+)',
+            r'CHAPTER\s+([A-Z]+)\b',
+            r'Chapter\s+([A-Z][a-z]+)\b',
         ]
         chapters = []
         lines = content.split('\n')
         current_chapter = {"title": "Prologue", "content": "", "summary": ""}
-        
-        for line in lines:
+        i = 0
+        while i < len(lines):
+            line = lines[i]
             if len(chapters) >= self.MAX_CHAPTERS:
                 break
             is_chapter_header = False
             for pattern in patterns:
                 match = re.match(pattern, line, re.IGNORECASE)
                 if match:
+                    title = match.group(1).strip() if match.lastindex and match.group(1).strip() else ""
+                    if not title:
+                        j = i + 1
+                        while j < len(lines) and not lines[j].strip():
+                            j += 1
+                        if j < len(lines):
+                            title = lines[j].strip()
+                            i = j
                     if current_chapter["content"].strip():
-                        # Check for duplicates before adding
                         if not self._is_duplicate_chapter(current_chapter, chapters):
                             chapters.append(current_chapter)
                             if len(chapters) >= self.MAX_CHAPTERS:
                                 break
                     current_chapter = {
-                        "title": match.group(1).strip(),
+                        "title": title,
                         "content": line + "\n",
                         "summary": ""
                     }
@@ -338,20 +364,16 @@ class FileService:
                     break
             if not is_chapter_header:
                 current_chapter["content"] += line + "\n"
-        
-        # Add the last chapter if it has content and isn't a duplicate
+            i += 1
         if len(chapters) < self.MAX_CHAPTERS and current_chapter["content"].strip():
             if not self._is_duplicate_chapter(current_chapter, chapters):
                 chapters.append(current_chapter)
-        
-        # Fallback if no chapters were extracted
         if not chapters:
             chapters = [{
                 "title": "Complete Story",
                 "content": content,
                 "summary": ""
             }]
-        
         return chapters[:self.MAX_CHAPTERS]
 
     def extract_chapters_from_pdf_with_toc(self, file_path: str) -> Optional[List[Dict[str, Any]]]:
