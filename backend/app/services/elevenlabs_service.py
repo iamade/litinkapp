@@ -9,10 +9,12 @@ import traceback
 class ElevenLabsService:
     """Enhanced ElevenLabs service for advanced audio features"""
     
-    def __init__(self):
+    def __init__(self, supabase_client=None):
         self.api_key = settings.ELEVENLABS_API_KEY
         self.base_url = "https://api.elevenlabs.io/v1"
         self.audio_dir = "uploads/audio"
+        self.supabase_client = supabase_client
+        self.supabase_bucket_name = settings.SUPABASE_BUCKET_NAME
         
         # Ensure audio directory exists
         os.makedirs(self.audio_dir, exist_ok=True)
@@ -79,11 +81,19 @@ class ElevenLabsService:
                         f.write(response.content)
                     
                     # Upload to Supabase and return public URL
-                    if hasattr(self, 'supabase_service') and self.supabase_service:
-                        public_url = await self.supabase_service.upload_file(audio_path)
+                    if self.supabase_client:
+                        with open(audio_path, "rb") as f:
+                            file_content = f.read()
+                        storage_path = f"audio/{audio_filename}"
+                        self.supabase_client.storage.from_(self.supabase_bucket_name).upload(
+                            path=storage_path,
+                            file=file_content,
+                            file_options={"content-type": "audio/mpeg"}
+                        )
+                        public_url = self.supabase_client.storage.from_(self.supabase_bucket_name).get_public_url(storage_path)
                         return public_url
                     else:
-                        print("[AUDIO UPLOAD ERROR] No supabase_service available to upload audio file.")
+                        print("[AUDIO UPLOAD ERROR] No supabase_client available to upload audio file.")
                         return None
                 else:
                     print(f"ElevenLabs API error: {response.status_code}")
@@ -184,21 +194,26 @@ class ElevenLabsService:
                 # Create mixed audio filename
                 mixed_filename = f"mixed_{hash(main_audio_path)}.mp3"
                 mixed_path = os.path.join(self.audio_dir, mixed_filename)
-                
                 # Placeholder: in real implementation, mix the audio files
                 # For now, just copy the main audio
                 import shutil
                 main_full_path = os.path.join(os.getcwd(), main_audio_path.lstrip('/'))
                 if os.path.exists(main_full_path):
                     shutil.copy2(main_full_path, mixed_path)
-                    # Upload to Supabase and return public URL
-                    if hasattr(self, 'supabase_service') and self.supabase_service:
-                        public_url = await self.supabase_service.upload_file(mixed_path)
+                    if self.supabase_client:
+                        with open(mixed_path, "rb") as f:
+                            file_content = f.read()
+                        storage_path = f"audio/{mixed_filename}"
+                        self.supabase_client.storage.from_(self.supabase_bucket_name).upload(
+                            path=storage_path,
+                            file=file_content,
+                            file_options={"content-type": "audio/mpeg"}
+                        )
+                        public_url = self.supabase_client.storage.from_(self.supabase_bucket_name).get_public_url(storage_path)
                         return public_url
                     else:
-                        print("[AUDIO UPLOAD ERROR] No supabase_service available to upload mixed audio file.")
+                        print("[AUDIO UPLOAD ERROR] No supabase_client available to upload mixed audio file.")
                         return None
-            
             return main_audio_path
             
         except Exception as e:

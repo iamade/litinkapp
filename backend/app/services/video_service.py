@@ -22,20 +22,18 @@ class VideoService:
     def __init__(self, supabase_client=None):
         self.api_key = settings.TAVUS_API_KEY
         self.base_url = "https://tavusapi.com/v2"
-        self.rag_service = RAGService(supabase_client) if supabase_client else None
-        self.elevenlabs_service = ElevenLabsService()
         self.kling_access_key_id = settings.KLINGAI_ACCESS_KEY_ID
         self.kling_access_key_secret = settings.KLINGAI_ACCESS_KEY_SECRET
-        
+
         # Initialize Supabase client for storage
         if supabase_client:
             self.supabase = supabase_client
         else:
             self.supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
         self.supabase_service = self.supabase  # Alias for compatibility
-        
-        # Inject supabase_service into ElevenLabsService for audio uploads
-        self.elevenlabs_service.supabase_service = self.supabase_service
+
+        self.rag_service = RAGService(self.supabase)
+        self.elevenlabs_service = ElevenLabsService(self.supabase)
     
     async def generate_video_from_chapter(
         self,
