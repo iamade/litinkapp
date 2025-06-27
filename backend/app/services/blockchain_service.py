@@ -39,15 +39,25 @@ class BlockchainService:
     def _init_creator_account(self):
         """Initialize creator account"""
         try:
-            if settings.CREATOR_MNEMONIC:
+            if settings.CREATOR_MNEMONIC and settings.CREATOR_MNEMONIC != "your-creator-mnemonic":
+                # Validate mnemonic length
+                mnemonic_words = settings.CREATOR_MNEMONIC.split()
+                if len(mnemonic_words) != 25:
+                    print(f"⚠️  Invalid mnemonic length: {len(mnemonic_words)} words (expected 25)")
+                    print("🔄 Generating new account for development...")
+                    private_key, address = algosdk.account.generate_account()
+                    print(f"✅ Generated new creator account: {address}")
+                    return private_key
+                
                 return algosdk.mnemonic.to_private_key(settings.CREATOR_MNEMONIC)
             else:
                 # Generate new account for demo
                 private_key, address = algosdk.account.generate_account()
-                print(f"Generated new creator account: {address}")
+                print(f"✅ Generated new creator account: {address}")
                 return private_key
         except Exception as e:
-            print(f"Creator account initialization error: {e}")
+            print(f"❌ Creator account initialization error: {e}")
+            print("🔄 Falling back to mock mode...")
             return None
     
     async def create_badge_nft(

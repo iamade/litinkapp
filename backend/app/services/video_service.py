@@ -482,6 +482,17 @@ class VideoService:
         }
         return avatar_map.get(style, "avatar_001")
     
+    def _get_replica_id(self, style: str) -> str:
+        """Get replica ID based on style - replace with your actual replica IDs from Tavus"""
+        replica_map = {
+            "realistic": "rb17cf590e15",  # Replace with your actual replica ID
+            "animated": "rb17cf590e15",   # Replace with your actual replica ID
+            "cartoon": "rb17cf590e15",    # Replace with your actual replica ID
+            "tutorial": "rb17cf590e15",   # Replace with your actual replica ID
+            "story": "rb17cf590e15"       # Replace with your actual replica ID
+        }
+        return replica_map.get(style, "rb17cf590e15")  # Default replica ID
+    
     def _get_background_for_style(self, style: str) -> str:
         """Get appropriate background for video style"""
         background_map = {
@@ -897,10 +908,8 @@ What an incredible adventure! Stay tuned for more from {book_title}.
         try:
             print(f"🎬 Generating Tavus video with style: {video_style}")
             
-            # Get avatar and background IDs
-            avatar_id = self._get_avatar_id(video_style)
-            background_id = self._get_background_for_style(video_style)
-            voice_id = self._get_voice_id_for_style(video_style)
+            # Get replica ID based on style (these should be your actual replica IDs from Tavus)
+            replica_id = self._get_replica_id(video_style)
             
             # Prepare Tavus API request
             headers = {
@@ -908,21 +917,18 @@ What an incredible adventure! Stay tuned for more from {book_title}.
                 "Content-Type": "application/json"
             }
             
-            # Create video generation request
+            # Create video generation request with correct payload structure
             payload = {
+                "replica_id": replica_id,  # Required field
                 "script": script,
-                "avatar_id": avatar_id,
-                "background_id": background_id,
-                "voice_id": voice_id,
-                "video_name": f"AI Generated Video - {video_style}",
-                "description": f"AI-generated video content in {video_style} style"
+                "video_name": f"AI Generated Video - {video_style}"  # Optional field
             }
             
             print(f"📤 Sending request to Tavus API...")
             print(f"📋 Payload: {payload}")
             
             async with httpx.AsyncClient(timeout=60.0) as client:
-                # First, try to create a new video
+                # Create a new video
                 response = await client.post(
                     f"{self.base_url}/videos",
                     headers=headers,
@@ -944,9 +950,13 @@ What an incredible adventure! Stay tuned for more from {book_title}.
                         print("❌ No video ID in response")
                         return None
                         
+                elif response.status_code == 400:
+                    print(f"❌ Bad Request: {response.text}")
+                    # Try to get available replicas and use the first one
+                    return await self._try_with_available_replicas(client, headers, script, video_style)
+                    
                 elif response.status_code == 404:
                     print("⚠️  /videos endpoint not found, trying alternative approach...")
-                    # Try to get available videos and create using a different method
                     return await self._try_alternative_video_creation(client, headers, script, video_style)
                     
                 else:
@@ -1051,4 +1061,70 @@ What an incredible adventure! Stay tuned for more from {book_title}.
             
         except Exception as e:
             print(f"❌ Error in alternative video creation: {e}")
+            return None
+
+    async def _try_with_available_replicas(self, client, headers, script, video_style):
+        """Try to get available replicas and use the first one"""
+        try:
+            print("🔄 Trying to get available replicas...")
+            
+            # Try to get available replicas
+            response = await client.get(f"{self.base_url}/replicas", headers=headers)
+            
+            if response.status_code == 200:
+                replicas_data = response.json()
+                print(f"📦 Found {len(replicas_data.get('data', []))} available replicas")
+                
+                # Use the first available replica
+                if replicas_data.get('data'):
+                    first_replica = replicas_data['data'][0]
+                    replica_id = first_replica.get('replica_id') or first_replica.get('id')
+                    
+                    if replica_id:
+                        print(f"✅ Using available replica: {replica_id}")
+                        
+                        # Try video creation with this replica
+                        payload = {
+                            "replica_id": replica_id,
+                            "script": script,
+                            "video_name": f"AI Generated Video - {video_style}"
+                        }
+                        
+                        response = await client.post(
+                            f"{self.base_url}/videos",
+                            headers=headers,
+                            json=payload
+                        )
+                        
+                        if response.status_code in [200, 201]:
+                            data = response.json()
+                            video_id = data.get("video_id") or data.get("id")
+                            if video_id:
+                                return await self._poll_video_status(video_id, f"AI Generated Video - {video_style}")
+            
+            # If no replicas found, try with a default replica ID
+            print("⚠️  No replicas found, trying with default replica ID...")
+            default_payload = {
+                "replica_id": "rb17cf590e15",  # Default replica ID from your account
+                "script": script,
+                "video_name": f"AI Generated Video - {video_style}"
+            }
+            
+            response = await client.post(
+                f"{self.base_url}/videos",
+                headers=headers,
+                json=default_payload
+            )
+            
+            if response.status_code in [200, 201]:
+                data = response.json()
+                video_id = data.get("video_id") or data.get("id")
+                if video_id:
+                    return await self._poll_video_status(video_id, f"AI Generated Video - {video_style}")
+            
+            print("❌ Failed to create video with any replica")
+            return None
+            
+        except Exception as e:
+            print(f"❌ Error trying with available replicas: {e}")
             return None
