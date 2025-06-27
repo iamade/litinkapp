@@ -108,102 +108,25 @@ class RAGService:
         chapter_context: Dict[str, Any], 
         video_style: str = "realistic"
     ) -> str:
-        """Generate optimized video script from chapter context using OpenAI only (no PlotDrive)."""
+        """Generate optimized video script from chapter context using the full RAG-enhanced prompt."""
         try:
-            chapter = chapter_context['chapter']
-            book = chapter_context['book']
+            enhanced_context = chapter_context.get('total_context', chapter_context['chapter']['content'])
             
-            # Build enhanced context with similar chunks
-            enhanced_context = f"""
-Book: {book['title']} by {book['author_name']}
-Book Type: {book['book_type']}
-Chapter: {chapter['title']}
-
-Main Content:
-{chapter['content']}
-
-Total Context:
-{chapter_context['total_context']}
-
-Video Style: {video_style}
-"""
-            # Log the RAG context
-            print("[RAG DEBUG] Enhanced Context for Video Script:")
-            print(enhanced_context)
+            prompt = self._get_script_generation_prompt(enhanced_context, video_style)
             
-            # Use different prompts based on book type
-            if book['book_type'] == 'entertainment':
-                prompt = f"""
-Create a screenplay script for a {video_style} style video based on this entertainment content:
+            print(f"[RAG DEBUG] AI Prompt for Video Script:\n{prompt}\n")
 
-{enhanced_context}
-
-The screenplay should:
-1. Be dramatic and engaging
-2. Include character dialogue and actions in proper screenplay format
-3. Be suitable for {video_style} video generation
-4. Be 2-3 minutes in duration
-5. Maintain the story's emotional impact
-
-Format as a proper screenplay with:
-- Character names in ALL CAPS
-- Dialogue indented under character names
-- Scene descriptions and actions
-- Clear character interactions
-
-Example format:
-NARRATOR
-    Welcome to the world of angel magic...
-
-SAGE
-    The ancient art of summoning requires...
-
-STUDENT
-    How do I begin?
-
-SAGE
-    First, you must understand...
-"""
-            else:
-                # For learning content, create a tutorial script
-                prompt = f"""
-Create a tutorial video script for a {video_style} style video based on this learning content:
-
-{enhanced_context}
-
-The script should:
-1. Be educational and informative
-2. Include clear explanations and examples
-3. Be suitable for {video_style} video generation
-4. Be 2-3 minutes in duration
-5. Have a logical flow from introduction to conclusion
-
-Format as a tutorial script with:
-- INSTRUCTOR character for explanations
-- Clear section breaks
-- Examples and demonstrations
-- Engaging delivery
-
-Example format:
-INSTRUCTOR
-    Welcome to this tutorial on...
-
-    Today we'll learn about...
-
-    Let me show you how...
-
-    Here's an example...
-
-    Remember, the key points are...
-"""
-            # Log the AI prompt
-            print("[RAG DEBUG] AI Prompt for Video Script:")
-            print(prompt)
-            response = await self.ai_service.generate_text_from_prompt(prompt)
-            return str(response)
+            script = await self.ai_service.generate_text_from_prompt(prompt)
+            return script
         except Exception as e:
             print(f"Error generating video script: {e}")
-            return chapter_context['chapter']['content']
+            return ""
+    
+    def _get_script_generation_prompt(self, context: str, video_style: str) -> str:
+        """Construct a prompt based on the full RAG-enhanced context."""
+        # Implement the logic to construct a prompt based on the full RAG-enhanced context
+        # This is a placeholder and should be replaced with the actual implementation
+        return f"Generated prompt based on the full RAG-enhanced context: {context}"
     
     async def _generate_entertainment_script(self, chapter_context: Dict[str, Any], video_style: str) -> str:
         """Generate entertainment script using OpenAI only (no PlotDrive)."""

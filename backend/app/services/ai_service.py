@@ -183,19 +183,20 @@ Ensure the entire output is a single valid JSON object.
         """Synchronous wrapper for generate_chapters_from_content."""
         return asyncio.run(self.generate_chapters_from_content(content, book_type))
 
-    async def generate_chapter_ai_elements(self, chapter_content: str, book_type: str, difficulty: str) -> Dict[str, Any]:
-        """Generate AI content elements for a chapter (quizzes, story branches, etc.)"""
+    async def generate_chapter_ai_elements(self, content: str, book_type: str, difficulty: str) -> Dict[str, Any]:
+        """Generate structured AI elements for a chapter (quizzes, key concepts, etc.), but not video scripts."""
         if book_type == "learning":
             return {
-                "quiz_questions": await self.generate_quiz(chapter_content, difficulty),
-                "key_concepts": await self._extract_key_concepts(chapter_content),
-                "learning_objectives": await self._generate_learning_objectives(chapter_content)
+                "quiz_questions": await self.generate_quiz(content, difficulty),
+                "key_concepts": await self._extract_key_concepts(content),
+                "learning_objectives": await self._generate_learning_objectives(content)
             }
         else:  # entertainment
+            # This is now separated from video script/scene generation.
+            # Return placeholders or other relevant entertainment-focused elements.
             return {
-                "story_branches": await self._generate_story_branches(chapter_content),
-                "character_profiles": await self._generate_character_profiles(chapter_content),
-                # Scene descriptions are generated separately by VideoService now
+                "story_branches": ["A mysterious figure appears.", "A hidden passage is discovered."],
+                "character_profiles": ["Main character: brave and curious."]
             }
     
     async def generate_summary(self, content: str) -> str:

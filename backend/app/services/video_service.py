@@ -12,6 +12,7 @@ import aiofiles
 import aiohttp
 from pathlib import Path
 from supabase.client import create_client, Client
+import base64
 
 
 class VideoService:
@@ -1165,46 +1166,71 @@ What an incredible adventure! Stay tuned for more from {book_title}.
 
     async def _generate_kling_video(self, script: str, video_style: str = "realistic") -> dict:
         """Generate a video using Kling AI API and return the video URL and metadata."""
+        # This implementation is based on the provided API documentation.
+        # It uses X-Access-Key-Id and X-Access-Key-Secret headers for authentication.
         headers = {
-            # Remove Authorization header since KLINGAI_API_KEY is not used
             "Content-Type": "application/json",
             "X-Access-Key-Id": self.kling_access_key_id,
             "X-Access-Key-Secret": self.kling_access_key_secret
         }
+        
+        # Correct payload based on Kling AI documentation
         payload = {
-            "prompt": script,
-            "style": video_style,
-            "resolution": "1080p",
+            "model_name": "kling-v1",
+            "prompt": f"A {video_style} video of: {script}",
             "aspect_ratio": "16:9",
-            "duration": 60  # seconds, adjust as needed
+            "duration": "10"  # Must be a string, "5" or "10"
         }
+
+        base_url = "https://api.klingai.com"
+        create_url = f"{base_url}/v1/videos/text2video"
+
         async with httpx.AsyncClient() as client:
             try:
+                print(f"[KlingAI DEBUG] Sending request to {create_url} with headers: {list(headers.keys())}")
+                print(f"[KlingAI DEBUG] Sending payload: {payload}")
                 response = await client.post(
-                    "https://api.klingai.com/v1/video/generate", json=payload, headers=headers, timeout=60
+                    create_url, json=payload, headers=headers, timeout=60
                 )
                 response.raise_for_status()
                 data = response.json()
-                task_id = data.get("task_id")
+
+                task_id = data.get("data", {}).get("task_id")
                 if not task_id:
+                    print(f"[KlingAI ERROR] No task_id in response: {data}")
                     raise Exception("No task_id returned from Kling AI")
-                # Poll for video status
-                for _ in range(60):  # Poll up to 10 minutes (every 10s)
+                
+                print(f"[KlingAI DEBUG] Task created with ID: {task_id}")
+
+                poll_url = f"{create_url}/{task_id}"
+                for i in range(60):  # Poll for up to 10 minutes
                     await asyncio.sleep(10)
-                    poll_resp = await client.get(
-                        f"https://api.klingai.com/v1/video/status/{task_id}", headers=headers, timeout=30
-                    )
+                    print(f"[KlingAI DEBUG] Polling status for task {task_id} (attempt {i+1})")
+                    poll_resp = await client.get(poll_url, headers=headers, timeout=30)
                     poll_resp.raise_for_status()
                     poll_data = poll_resp.json()
-                    if poll_data.get("status") == "completed":
-                        return {
-                            "video_url": poll_data.get("video_url"),
-                            "task_id": task_id,
-                            "meta": poll_data
-                        }
-                    elif poll_data.get("status") == "failed":
-                        raise Exception(f"Kling AI video generation failed: {poll_data}")
+
+                    task_status = poll_data.get("data", {}).get("task_status")
+                    print(f"[KlingAI DEBUG] Task status: {task_status}")
+                    
+                    if task_status == "succeed":
+                        videos = poll_data.get("data", {}).get("task_result", {}).get("videos", [])
+                        if videos and videos[0].get("url"):
+                            video_url = videos[0]["url"]
+                            print(f"[KlingAI SUCCESS] Video generated: {video_url}")
+                            return {"video_url": video_url, "task_id": task_id, "meta": poll_data.get("data")}
+                        else:
+                            raise Exception(f"Kling AI task succeeded but no video URL found. Response: {poll_data}")
+                    
+                    elif task_status == "failed":
+                        error_msg = poll_data.get("data", {}).get("task_status_msg", "Unknown error")
+                        raise Exception(f"Kling AI video generation failed: {error_msg}")
+
                 raise Exception("Kling AI video generation timed out.")
+            except httpx.HTTPStatusError as e:
+                error_text = e.response.text
+                print(f"[KlingAI ERROR] HTTP Error: {e.response.status_code} - {error_text}")
+                return {"error": f"HTTP Error: {e.response.status_code} - {error_text}"}
             except Exception as e:
                 print(f"[KlingAI ERROR] {e}")
                 return {"error": str(e)}
