@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     AI_TIMEOUT_SECONDS: int = 30   # Timeout for AI API calls
     MAX_CHAPTERS_PER_BOOK: int = 50  # Increased to support books with up to 50 chapters
     
+    # Kling AI API key
+    # KLINGAI_API_KEY: str = os.getenv("KLINGAI_API_KEY", "")
+    KLINGAI_ACCESS_KEY_ID: str = os.getenv("KLINGAI_ACCESS_KEY_ID", "")
+    KLINGAI_ACCESS_KEY_SECRET: str = os.getenv("KLINGAI_ACCESS_KEY_SECRET", "")
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

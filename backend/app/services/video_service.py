@@ -22,6 +22,8 @@ class VideoService:
         self.base_url = "https://tavusapi.com/v2"
         self.rag_service = RAGService(supabase_client) if supabase_client else None
         self.elevenlabs_service = ElevenLabsService()
+        self.kling_access_key_id = settings.KLINGAI_ACCESS_KEY_ID
+        self.kling_access_key_secret = settings.KLINGAI_ACCESS_KEY_SECRET
         
         # Initialize Supabase client for storage
         if supabase_client:
@@ -386,26 +388,26 @@ class VideoService:
                 include_adjacent=True,
                 use_vector_search=True
             )
-
-            # 2. Generate script using OpenAI 
-            script = await self.rag_service.generate_video_script(
-                chapter_context=chapter_context,
-                video_style=animation_style
-            )
-
-            # 3. Generate scene descriptions using AI/RAG
+            # 2. Generate script using OpenAI
+            script = await self.rag_service.generate_video_script(chapter_context, animation_style)
+            # 3. Generate scene descriptions (already done above, if needed)
             scenes = await self.rag_service.ai_service._generate_scene_descriptions(
                 chapter_id=chapter_id,
                 rag_service=self.rag_service
             )
-            # Optionally log or return scenes for debugging
-            print(f"Generated scene descriptions: {scenes}")
-
-            # 4. Continue with video/audio generation as before...
-            return await self._generate_real_video(script, animation_style)
+            # 4. Generate video using Kling AI
+            kling_result = await self._generate_kling_video(script, animation_style)
+            if "video_url" not in kling_result:
+                raise Exception(f"Kling AI video generation failed: {kling_result.get('error')}")
+            return {
+                "video_url": kling_result["video_url"],
+                "script": script,
+                "scenes": scenes,
+                "kling_meta": kling_result.get("meta", {})
+            }
         except Exception as e:
-            print(f"Error in generate_entertainment_video: {e}")
-            return None
+            print(f"Error generating entertainment video: {e}")
+            return {"error": str(e)}
 
     
     async def get_available_avatars(self) -> List[Dict[str, Any]]:
@@ -1160,3 +1162,49 @@ What an incredible adventure! Stay tuned for more from {book_title}.
         except Exception as e:
             print(f"❌ Error trying with available replicas: {e}")
             return None
+
+    async def _generate_kling_video(self, script: str, video_style: str = "realistic") -> dict:
+        """Generate a video using Kling AI API and return the video URL and metadata."""
+        headers = {
+            # Remove Authorization header since KLINGAI_API_KEY is not used
+            "Content-Type": "application/json",
+            "X-Access-Key-Id": self.kling_access_key_id,
+            "X-Access-Key-Secret": self.kling_access_key_secret
+        }
+        payload = {
+            "prompt": script,
+            "style": video_style,
+            "resolution": "1080p",
+            "aspect_ratio": "16:9",
+            "duration": 60  # seconds, adjust as needed
+        }
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    "https://api.klingai.com/v1/video/generate", json=payload, headers=headers, timeout=60
+                )
+                response.raise_for_status()
+                data = response.json()
+                task_id = data.get("task_id")
+                if not task_id:
+                    raise Exception("No task_id returned from Kling AI")
+                # Poll for video status
+                for _ in range(60):  # Poll up to 10 minutes (every 10s)
+                    await asyncio.sleep(10)
+                    poll_resp = await client.get(
+                        f"https://api.klingai.com/v1/video/status/{task_id}", headers=headers, timeout=30
+                    )
+                    poll_resp.raise_for_status()
+                    poll_data = poll_resp.json()
+                    if poll_data.get("status") == "completed":
+                        return {
+                            "video_url": poll_data.get("video_url"),
+                            "task_id": task_id,
+                            "meta": poll_data
+                        }
+                    elif poll_data.get("status") == "failed":
+                        raise Exception(f"Kling AI video generation failed: {poll_data}")
+                raise Exception("Kling AI video generation timed out.")
+            except Exception as e:
+                print(f"[KlingAI ERROR] {e}")
+                return {"error": str(e)}

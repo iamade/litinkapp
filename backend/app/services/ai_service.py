@@ -183,29 +183,20 @@ Ensure the entire output is a single valid JSON object.
         """Synchronous wrapper for generate_chapters_from_content."""
         return asyncio.run(self.generate_chapters_from_content(content, book_type))
 
-    async def generate_chapter_content(self, content: str, book_type: str, difficulty: str, rag_service=None) -> Dict[str, Any]:
-        """Generate AI content for a chapter"""
+    async def generate_chapter_ai_elements(self, chapter_content: str, book_type: str, difficulty: str) -> Dict[str, Any]:
+        """Generate AI content elements for a chapter (quizzes, story branches, etc.)"""
         if book_type == "learning":
             return {
-                "quiz_questions": await self.generate_quiz(content, difficulty),
-                "key_concepts": await self._extract_key_concepts(content),
-                "learning_objectives": await self._generate_learning_objectives(content)
+                "quiz_questions": await self.generate_quiz(chapter_content, difficulty),
+                "key_concepts": await self._extract_key_concepts(chapter_content),
+                "learning_objectives": await self._generate_learning_objectives(chapter_content)
             }
         else:  # entertainment
-            # If rag_service is provided and content is a chapter_id, use the new scene description logic
-            if rag_service is not None and isinstance(content, str) and content.startswith("chapter_"):
-                return {
-                    "story_branches": await self._generate_story_branches(content),
-                    "character_profiles": await self._generate_character_profiles(content),
-                    "scene_descriptions": await self._generate_scene_descriptions(content, rag_service)
-                }
-            else:
-                # Fallback to old logic (may still error if _generate_scene_descriptions signature is wrong)
-                return {
-                    "story_branches": await self._generate_story_branches(content),
-                    "character_profiles": await self._generate_character_profiles(content),
-                    "scene_descriptions": await self._generate_scene_descriptions(content, rag_service) if rag_service else await self._generate_scene_descriptions(content, self)
-                }
+            return {
+                "story_branches": await self._generate_story_branches(chapter_content),
+                "character_profiles": await self._generate_character_profiles(chapter_content),
+                # Scene descriptions are generated separately by VideoService now
+            }
     
     async def generate_summary(self, content: str) -> str:
         """Generate content summary"""
@@ -390,6 +381,31 @@ Return only the summary text, not JSON.
             print(f"AIService error in generate_chapter_summary: {e}")
             return f"Summary for {chapter_title}"
 
+    async def generate_text_from_prompt(self, prompt: str) -> str:
+        """Generate text from a given prompt using OpenAI."""
+        if not self.client:
+            return "Mock AI response for: " + prompt[:100] # Return a mock response if client not available
+
+        try:
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model="gpt-3.5-turbo-1106", # Or a more capable model if needed
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=1500
+                ),
+                timeout=settings.AI_TIMEOUT_SECONDS
+            )
+            return response.choices[0].message.content.strip()
+        except asyncio.TimeoutError:
+            print("AI service request timed out in generate_text_from_prompt")
+            return "AI generation timed out."
+        except Exception as e:
+            print(f"AI service error in generate_text_from_prompt: {e}")
+            return "Error generating text."
+
     async def _generate_scene_descriptions(self, chapter_id: str, rag_service) -> List[str]:
         """Generate scene descriptions using OpenAI and RAGService context."""
         # Get chapter context using RAGService
@@ -400,6 +416,8 @@ Return only the summary text, not JSON.
         )
         chapter = chapter_context['chapter']
         book = chapter_context['book']
+        
+        # Construct the prompt using the total_context from RAG
         prompt = f"""
 Given the following book and chapter context, generate a list of detailed scene descriptions for a video adaptation. Each scene should be a concise, vivid description suitable for a video generator like Tavus.
 
@@ -408,29 +426,23 @@ Chapter: {chapter['title']}
 Content: {chapter_context['total_context']}
 
 Format:
-- Scene 1: ...
-- Scene 2: ...
-- ...
 
+Scene 1: ...
+Scene 2: ...
+...
 Return only the list of scene descriptions.
 """
-        if not self.client:
-            # Fallback for development/testing
-            return ["Scene 1: A mystical forest...", "Scene 2: An ancient castle..."]
-        try:
-            response = await self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant that generates scene descriptions for video adaptation."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=512
-            )
-            content = response.choices[0].message.content
-            # Try to split by lines and clean up
-            scenes = [line.strip('- ').strip() for line in content.split('\n') if line.strip()]
+        # Log the RAG context and AI prompt
+        print("[RAG DEBUG] Enhanced Context for Scene Descriptions:")
+        print(chapter_context['total_context'])
+        print("[RAG DEBUG] AI Prompt for Scene Descriptions:")
+        print(prompt)
+        # Directly call OpenAI with the constructed prompt
+        response_text = await self.generate_text_from_prompt(prompt)
+
+        # Parse the response text into a list of scenes
+        if response_text:
+            # Assuming scenes are line-separated, e.g., "- Scene 1: ..."
+            scenes = [line.strip('- ').strip() for line in response_text.split('\n') if line.strip()]
             return scenes
-        except Exception as e:
-            print(f"AIService error in _generate_scene_descriptions: {e}")
-            return []
+        return []

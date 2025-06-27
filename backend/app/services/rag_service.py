@@ -127,6 +127,9 @@ Total Context:
 
 Video Style: {video_style}
 """
+            # Log the RAG context
+            print("[RAG DEBUG] Enhanced Context for Video Script:")
+            print(enhanced_context)
             
             # Use different prompts based on book type
             if book['book_type'] == 'entertainment':
@@ -193,12 +196,10 @@ INSTRUCTOR
 
     Remember, the key points are...
 """
-            
-            response = await self.ai_service.generate_chapter_content(
-                content=prompt,
-                book_type=book['book_type'],
-                difficulty=book.get('difficulty', 'medium')
-            )
+            # Log the AI prompt
+            print("[RAG DEBUG] AI Prompt for Video Script:")
+            print(prompt)
+            response = await self.ai_service.generate_text_from_prompt(prompt)
             return str(response)
         except Exception as e:
             print(f"Error generating video script: {e}")
@@ -225,11 +226,10 @@ The script should:
 
 Format as a narrative script with clear scene descriptions and dialogue.
 """
-            response = await self.ai_service.generate_chapter_content(
-                content=prompt,
-                book_type='entertainment',
-                difficulty='medium'
-            )
+            # Log the AI prompt
+            print("[RAG DEBUG] AI Prompt for Entertainment Script:")
+            print(prompt)
+            response = await self.ai_service.generate_text_from_prompt(prompt)
             return str(response)
         except Exception as e:
             print(f"Error generating entertainment script: {e}")

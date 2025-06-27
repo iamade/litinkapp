@@ -168,7 +168,7 @@ async def create_chapter(
     
     # Generate AI content for the chapter
     ai_service = AIService()
-    ai_content = await ai_service.generate_chapter_content(
+    ai_content = await ai_service.generate_chapter_ai_elements(
         chapter_data.content,
         book['book_type'],
         book['difficulty']
