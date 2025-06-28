@@ -45,7 +45,7 @@ async def get_books(
 ):
     """Get books uploaded by the current user"""
     try:
-        response = supabase_client.table('books').select('*').eq('user_id', current_user.id).execute()
+        response = supabase_client.table('books').select('*').eq('user_id', current_user["id"]).execute()
         return response.data
     except APIError as e:
         raise HTTPException(status_code=400, detail=e.message)
