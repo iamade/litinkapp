@@ -1392,12 +1392,19 @@ Return as JSON with: script, character_details, scene_prompt
             return None
 
     async def _generate_tavus_video(self, script: str, video_style: str) -> Optional[Dict[str, Any]]:
-        """Generate video using Tavus API"""
+        """Generate video using Tavus API with enhanced error handling and logging"""
         try:
             print(f"🎬 Generating Tavus video with style: {video_style}")
+            print(f"📝 Script length: {len(script)} characters")
             
-            # Get replica ID based on style (these should be your actual replica IDs from Tavus)
+            # Validate API key
+            if not settings.TAVUS_API_KEY or settings.TAVUS_API_KEY == "your-tavus-api-key":
+                print("❌ Tavus API key not configured")
+                return None
+            
+            # Get replica ID based on style
             replica_id = self._get_replica_id(video_style)
+            print(f"🆔 Using replica ID: {replica_id}")
             
             # Prepare Tavus API request
             headers = {
@@ -1407,13 +1414,14 @@ Return as JSON with: script, character_details, scene_prompt
             
             # Create video generation request with correct payload structure
             payload = {
-                "replica_id": replica_id,  # Required field
+                "replica_id": replica_id,
                 "script": script,
-                "video_name": f"AI Generated Video - {video_style}"  # Optional field
+                "video_name": f"AI Generated Video - {video_style}"
             }
             
             print(f"📤 Sending request to Tavus API...")
-            print(f"📋 Payload: {payload}")
+            print(f"🌐 Endpoint: {self.base_url}/videos")
+            print(f"📋 Payload keys: {list(payload.keys())}")
             
             async with httpx.AsyncClient(timeout=60.0) as client:
                 # Create a new video
@@ -1426,34 +1434,70 @@ Return as JSON with: script, character_details, scene_prompt
                 print(f"📊 Create Video Response Status: {response.status_code}")
                 print(f"📄 Response Headers: {dict(response.headers)}")
                 
-                if response.status_code == 200 or response.status_code == 201:
-                    data = response.json()
-                    print(f"✅ Video creation initiated: {data}")
+                # Log the raw response for debugging
+                try:
+                    response_text = response.text
+                    print(f"📄 Raw Response: {response_text[:500]}...")  # First 500 chars
                     
-                    video_id = data.get("video_id") or data.get("id")
-                    if video_id:
-                        # Poll for completion
-                        return await self._poll_video_status(video_id, f"AI Generated Video - {video_style}")
-                    else:
-                        print("❌ No video ID in response")
+                    if response.status_code in [200, 201]:
+                        data = response.json()
+                        print(f"✅ Video creation initiated successfully")
+                        print(f"📊 Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                        
+                        # Extract video ID with multiple fallbacks
+                        video_id = (
+                            data.get("video_id") or 
+                            data.get("id") or 
+                            data.get("videoId") or
+                            data.get("video_id")
+                        )
+                        
+                        if video_id:
+                            print(f"🎯 Video ID extracted: {video_id}")
+                            # Poll for completion with enhanced logging
+                            return await self._poll_video_status_enhanced(video_id, f"AI Generated Video - {video_style}")
+                        else:
+                            print("❌ No video ID found in response")
+                            print(f"🔍 Available keys in response: {list(data.keys()) if isinstance(data, dict) else 'Response is not a dict'}")
+                            return None
+                            
+                    elif response.status_code == 400:
+                        print(f"❌ Bad Request (400): {response_text}")
+                        # Try to get available replicas and use the first one
+                        return await self._try_with_available_replicas(client, headers, script, video_style)
+                        
+                    elif response.status_code == 401:
+                        print(f"❌ Unauthorized (401): Check your Tavus API key")
                         return None
                         
-                elif response.status_code == 400:
-                    print(f"❌ Bad Request: {response.text}")
-                    # Try to get available replicas and use the first one
-                    return await self._try_with_available_replicas(client, headers, script, video_style)
-                    
-                elif response.status_code == 404:
-                    print("⚠️  /videos endpoint not found, trying alternative approach...")
-                    return await self._try_alternative_video_creation(client, headers, script, video_style)
-                    
-                else:
-                    print(f"❌ Video creation failed: {response.status_code}")
-                    print(f"📄 Response: {response.text}")
+                    elif response.status_code == 404:
+                        print("⚠️  /videos endpoint not found, trying alternative approach...")
+                        return await self._try_alternative_video_creation(client, headers, script, video_style)
+                        
+                    elif response.status_code == 429:
+                        print(f"❌ Rate Limited (429): Too many requests to Tavus API")
+                        return None
+                        
+                    else:
+                        print(f"❌ Video creation failed with status: {response.status_code}")
+                        print(f"📄 Error Response: {response_text}")
+                        return None
+                        
+                except json.JSONDecodeError as e:
+                    print(f"❌ Failed to parse JSON response: {e}")
+                    print(f"📄 Raw response text: {response.text}")
                     return None
                     
+        except httpx.TimeoutException:
+            print(f"⏰ Timeout while creating Tavus video")
+            return None
+        except httpx.RequestError as e:
+            print(f"❌ Network error while creating Tavus video: {e}")
+            return None
         except Exception as e:
-            print(f"❌ Error generating Tavus video: {e}")
+            print(f"❌ Unexpected error generating Tavus video: {e}")
+            import traceback
+            print(f"🔍 Full traceback: {traceback.format_exc()}")
             return None
 
     async def _generate_elevenlabs_audio(self, script: str, video_style: str, user_id: str = None) -> Optional[Dict[str, Any]]:
@@ -2532,3 +2576,174 @@ Return as JSON with: script, character_details, scene_prompt
         except Exception as e:
             print(f"❌ Error combining videos: {e}")
             return None
+
+    async def _poll_video_status_enhanced(self, video_id: str, scene_description: str) -> Dict[str, Any]:
+        """Enhanced polling for video completion status with detailed logging"""
+        try:
+            print(f"🔄 Enhanced polling for video completion: {video_id}")
+            
+            headers = {
+                "x-api-key": settings.TAVUS_API_KEY,
+                "Content-Type": "application/json"
+            }
+            
+            # Increase polling attempts and intervals for longer videos
+            max_attempts = 180  # 15 minutes with 5-second intervals
+            attempt = 0
+            last_status = None
+            last_progress = None
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                while attempt < max_attempts:
+                    attempt += 1
+                    
+                    try:
+                        print(f"📊 Polling attempt {attempt}/{max_attempts} for video {video_id}")
+                        
+                        response = await client.get(
+                            f"{self.base_url}/videos/{video_id}",
+                            headers=headers
+                        )
+                        
+                        print(f"📊 Polling response status: {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            try:
+                                data = response.json()
+                                print(f"📄 Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                                
+                                status = data.get("status", "unknown")
+                                progress = data.get("generation_progress", "0/100")
+                                
+                                # Log status changes
+                                if status != last_status:
+                                    print(f"🔄 Status changed from '{last_status}' to '{status}'")
+                                    last_status = status
+                                
+                                if progress != last_progress:
+                                    print(f"📈 Progress changed from '{last_progress}' to '{progress}'")
+                                    last_progress = progress
+                                
+                                if status == "completed":
+                                    print(f"✅ Video completed: {video_id}")
+                                    
+                                    # Try multiple URL fields
+                                    video_url = (
+                                        data.get("download_url") or 
+                                        data.get("video_url") or 
+                                        data.get("hosted_url") or
+                                        data.get("url")
+                                    )
+                                    
+                                    hosted_url = (
+                                        data.get("hosted_url") or 
+                                        data.get("video_url") or
+                                        data.get("download_url")
+                                    )
+                                    
+                                    print(f"🔗 Video URL found: {video_url}")
+                                    print(f"🌐 Hosted URL found: {hosted_url}")
+                                    
+                                    if video_url:
+                                        return {
+                                            "video_id": video_id,
+                                            "video_url": video_url,
+                                            "hosted_url": hosted_url,
+                                            "download_url": data.get("download_url"),
+                                            "duration": data.get("duration", 180),
+                                            "status": "completed",
+                                            "final_response": data
+                                        }
+                                    else:
+                                        print("⚠️ Video completed but no URL found")
+                                        print(f"🔍 Available URL fields: {[k for k, v in data.items() if 'url' in k.lower()]}")
+                                        return {
+                                            "video_id": video_id,
+                                            "hosted_url": hosted_url,
+                                            "status": "completed_no_download",
+                                            "final_response": data,
+                                            "error": "Video completed but no downloadable URL found"
+                                        }
+                                
+                                elif status == "failed":
+                                    error_msg = data.get("error", "Unknown error")
+                                    print(f"❌ Video generation failed: {video_id}")
+                                    print(f"📄 Error details: {error_msg}")
+                                    return {
+                                        "video_id": video_id,
+                                        "status": "failed",
+                                        "error": error_msg,
+                                        "final_response": data
+                                    }
+                                
+                                elif status in ["queued", "generating", "processing"]:
+                                    print(f"⏳ Video status: {status} (attempt {attempt}/{max_attempts}) - Progress: {progress}")
+                                    
+                                    # Wait longer between polls for generating status
+                                    wait_time = 10 if status == "generating" else 5
+                                    await asyncio.sleep(wait_time)
+                                    continue
+                                
+                                else:
+                                    print(f"⚠️ Unknown status: {status}")
+                                    print(f"📄 Full response data: {data}")
+                                    await asyncio.sleep(5)
+                                    continue
+                                    
+                            except json.JSONDecodeError as e:
+                                print(f"❌ Failed to parse JSON response: {e}")
+                                print(f"📄 Raw response: {response.text}")
+                                await asyncio.sleep(5)
+                                continue
+                        
+                        elif response.status_code == 404:
+                            print(f"❌ Video not found: {video_id}")
+                            return {
+                                "video_id": video_id,
+                                "status": "not_found",
+                                "error": "Video ID not found in Tavus system"
+                            }
+                        
+                        elif response.status_code == 401:
+                            print(f"❌ Unauthorized access to video: {video_id}")
+                            return {
+                                "video_id": video_id,
+                                "status": "unauthorized",
+                                "error": "Invalid API key or insufficient permissions"
+                            }
+                        
+                        else:
+                            print(f"❌ Polling failed with status: {response.status_code}")
+                            print(f"📄 Error response: {response.text}")
+                            await asyncio.sleep(5)
+                            continue
+                    
+                    except httpx.TimeoutException:
+                        print(f"⏰ Timeout on attempt {attempt}, retrying...")
+                        await asyncio.sleep(5)
+                        continue
+                    
+                    except Exception as e:
+                        print(f"❌ Error polling video on attempt {attempt}: {e}")
+                        await asyncio.sleep(5)
+                        continue
+            
+            # If we get here, we've exceeded max attempts
+            print(f"⏰ Video generation timed out after {max_attempts * 5} seconds")
+            return {
+                "video_id": video_id,
+                "status": "timeout",
+                "message": f"Video generation took longer than expected (max {max_attempts * 5} seconds)",
+                "last_status": last_status,
+                "last_progress": last_progress
+            }
+            
+        except Exception as e:
+            print(f"❌ Error in enhanced video polling: {e}")
+            import traceback
+            print(f"🔍 Full traceback: {traceback.format_exc()}")
+            return {
+                "video_id": video_id,
+                "status": "error",
+                "error": str(e)
+            }

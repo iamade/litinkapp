@@ -592,26 +592,36 @@ async def generate_realistic_video(
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Generate realistic video tutorial using RAG embeddings and Tavus"""
+    """Generate realistic video tutorial using RAG embeddings and Tavus with enhanced error handling"""
     try:
+        print(f"🎬 Starting realistic video generation for user: {current_user['id']}")
+        
         chapter_id = request.get("chapter_id")
         if not chapter_id:
+            print("❌ Missing chapter_id in request")
             raise HTTPException(status_code=400, detail="chapter_id is required")
+        
+        print(f"📖 Processing chapter: {chapter_id}")
         
         # Verify chapter access
         chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
         if not chapter_response.data:
+            print(f"❌ Chapter not found: {chapter_id}")
             raise HTTPException(status_code=404, detail="Chapter not found")
         
         chapter_data = chapter_response.data
         book_data = chapter_data['books']
         
+        print(f"📚 Book: {book_data.get('title', 'Unknown')} (Type: {book_data.get('book_type', 'Unknown')})")
+        
         # Check access permissions
         if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
+            print(f"❌ Access denied for chapter: {chapter_id}")
             raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
         
         # Check if this is a learning book
         if book_data['book_type'] != 'learning':
+            print(f"❌ Book type '{book_data['book_type']}' is not supported for realistic video")
             raise HTTPException(status_code=400, detail="Realistic video is only available for learning books")
         
         # Generate tutorial script using RAG and AI
@@ -638,11 +648,16 @@ async def generate_realistic_video(
         Do NOT include character names, scene descriptions, or cinematic elements.
         """
         
+        print(f"🤖 Generating tutorial script...")
+        
         # Generate tutorial script using AI
         tutorial_script = await ai_service.generate_tutorial_script(tutorial_prompt)
         
         if not tutorial_script:
+            print("❌ Failed to generate tutorial script")
             raise HTTPException(status_code=500, detail="Failed to generate tutorial script")
+        
+        print(f"✅ Tutorial script generated ({len(tutorial_script)} characters)")
         
         # Generate video using Tavus
         video_service = VideoService(supabase_client)
@@ -658,29 +673,46 @@ async def generate_realistic_video(
             "tavus_video_id": None,
             "script": tutorial_script,
             "duration": 180,
-            "status": "processing"
+            "status": "processing",
+            "error_message": None
         }
         
+        print(f"💾 Storing initial record in database...")
         db_result = supabase_client.table('learning_content').insert(initial_record).execute()
         content_id = db_result.data[0]['id'] if db_result.data else None
         
+        if not content_id:
+            print("❌ Failed to create database record")
+            raise HTTPException(status_code=500, detail="Failed to create database record")
+        
+        print(f"✅ Database record created with ID: {content_id}")
+        
         # Use Tavus directly with the tutorial script
+        print(f"🎬 Calling Tavus API for video generation...")
         tavus_result = await video_service._generate_tavus_video(tutorial_script, "realistic")
         
         if not tavus_result:
+            print("❌ Tavus video generation returned None")
             # Update record with failed status
             if content_id:
                 supabase_client.table('learning_content').update({
                     "status": "failed",
-                    "error_message": "Tavus video generation failed"
+                    "error_message": "Tavus video generation failed - no result returned"
                 }).eq("id", content_id).execute()
-            raise HTTPException(status_code=500, detail="Failed to generate realistic video")
+            raise HTTPException(status_code=500, detail="Failed to generate realistic video - Tavus returned no result")
+        
+        print(f"✅ Tavus API call completed")
+        print(f"📊 Tavus result status: {tavus_result.get('status', 'unknown')}")
         
         # Extract Tavus information
         tavus_video_id = tavus_result.get("video_id")
         tavus_url = tavus_result.get("hosted_url") or tavus_result.get("video_url")
         download_url = tavus_result.get("download_url")
         final_video_url = tavus_result.get("video_url")
+        
+        print(f"🆔 Tavus Video ID: {tavus_video_id}")
+        print(f"🌐 Tavus URL: {tavus_url}")
+        print(f"🔗 Final Video URL: {final_video_url}")
         
         # Update record with Tavus information
         update_data = {
@@ -694,6 +726,7 @@ async def generate_realistic_video(
             update_data["duration"] = tavus_result.get("duration", 180)
         
         if content_id:
+            print(f"💾 Updating database record with Tavus results...")
             supabase_client.table('learning_content').update(update_data).eq("id", content_id).execute()
         
         # Return response
@@ -708,11 +741,17 @@ async def generate_realistic_video(
             response_data["video_url"] = final_video_url
             response_data["duration"] = tavus_result.get("duration", 180)
         
+        print(f"✅ Realistic video generation completed successfully")
         return response_data
         
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
-        print(f"Error generating realistic video: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ Unexpected error generating realistic video: {e}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @router.get("/list-voices")
 async def list_voices(
