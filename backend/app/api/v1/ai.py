@@ -689,7 +689,7 @@ async def generate_realistic_video(
         
         # Use Tavus directly with the tutorial script
         print(f"🎬 Calling Tavus API for video generation...")
-        tavus_result = await video_service._generate_tavus_video(tutorial_script, "realistic")
+        tavus_result = await video_service._generate_tavus_video(tutorial_script, "realistic", content_id, supabase_client)
         
         if not tavus_result:
             print("❌ Tavus video generation returned None")
@@ -740,6 +740,11 @@ async def generate_realistic_video(
         if final_video_url:
             response_data["video_url"] = final_video_url
             response_data["duration"] = tavus_result.get("duration", 180)
+        elif tavus_url:
+            # If we have a hosted_url but no final video_url, the video is still processing
+            # but we can provide the hosted_url for immediate access
+            response_data["hosted_url"] = tavus_url
+            response_data["message"] = "Video is still processing. You can access it via the hosted URL or wait for completion."
         
         print(f"✅ Realistic video generation completed successfully")
         return response_data
@@ -951,3 +956,61 @@ async def combine_videos(
     except Exception as e:
         print(f"Error combining videos: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/combine-tavus-videos")
+async def combine_tavus_videos(
+    request: dict,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Combine Tavus video segments and process hosted_url"""
+    try:
+        print(f"🎬 Starting Tavus video combination for user: {current_user['id']}")
+        
+        content_id = request.get("content_id")
+        if not content_id:
+            print("❌ Missing content_id in request")
+            raise HTTPException(status_code=400, detail="content_id is required")
+        
+        print(f"📖 Processing content: {content_id}")
+        
+        # Verify content access
+        content_response = supabase_client.table('learning_content').select('*').eq('id', content_id).single().execute()
+        if not content_response.data:
+            print(f"❌ Content not found: {content_id}")
+            raise HTTPException(status_code=404, detail="Content not found")
+        
+        content_data = content_response.data
+        
+        # Check access permissions
+        if content_data['user_id'] != current_user['id']:
+            print(f"❌ Access denied for content: {content_id}")
+            raise HTTPException(status_code=403, detail="Not authorized to access this content")
+        
+        # Check if content has a Tavus URL
+        tavus_url = content_data.get('tavus_url')
+        if not tavus_url:
+            print(f"❌ No Tavus URL found for content: {content_id}")
+            raise HTTPException(status_code=400, detail="No Tavus URL found for this content")
+        
+        print(f"🌐 Tavus URL found: {tavus_url}")
+        
+        # Combine videos using the video service
+        video_service = VideoService(supabase_client)
+        result = await video_service.combine_tavus_videos(content_id, supabase_client)
+        
+        if not result:
+            print(f"❌ Failed to combine videos for content: {content_id}")
+            raise HTTPException(status_code=500, detail="Failed to combine videos")
+        
+        print(f"✅ Video combination completed successfully")
+        return result
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error combining Tavus videos: {e}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

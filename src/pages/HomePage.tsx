@@ -1,50 +1,65 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
-import { Brain, Sparkles, Users, ArrowRight, Play, Star, Award } from 'lucide-react';
+import React from "react";
+import { Link } from "react-router-dom";
+import {
+  Brain,
+  Sparkles,
+  Users,
+  ArrowRight,
+  Play,
+  Star,
+  Award,
+} from "lucide-react";
 
 export default function HomePage() {
   const features = [
     {
       icon: Brain,
-      title: 'AI-Powered Learning',
-      description: 'Transform any book into personalized interactive tutorials and smart quizzes powered by advanced AI.'
+      title: "AI-Powered Learning",
+      description:
+        "Transform any book into personalized interactive tutorials and smart quizzes powered by advanced AI.",
     },
     {
       icon: Sparkles,
-      title: 'Interactive Stories',
-      description: 'Convert novels into branching narrative experiences with voice-driven characters and AI-generated scenes.'
+      title: "Interactive Stories",
+      description:
+        "Convert novels into branching narrative experiences with voice-driven characters and AI-generated scenes.",
     },
     {
       icon: Award,
-      title: 'Verified Credentials',
-      description: 'Earn blockchain-verified badges and collect animated NFTs as you progress through your learning journey.'
+      title: "Verified Credentials",
+      description:
+        "Earn blockchain-verified badges and collect animated NFTs as you progress through your learning journey.",
     },
     {
       icon: Users,
-      title: 'Multi-Language Support',
-      description: 'Experience books in multiple languages with AI-powered narration and localized content.'
-    }
+      title: "Multi-Language Support",
+      description:
+        "Experience books in multiple languages with AI-powered narration and localized content.",
+    },
   ];
 
   const testimonials = [
     {
-      name: 'Sarah Chen',
-      role: 'Student',
-      content: 'LinkAI transformed how I study. The AI-generated quizzes help me retain information better than ever before.',
-      rating: 5
+      name: "Sarah Chen",
+      role: "Student",
+      content:
+        "LinkAI transformed how I study. The AI-generated quizzes help me retain information better than ever before.",
+      rating: 5,
     },
     {
-      name: 'Marcus Johnson',
-      role: 'Author',
-      content: 'As an author, seeing my books come alive as interactive experiences is incredible. My readers are more engaged than ever.',
-      rating: 5
+      name: "Marcus Johnson",
+      role: "Author",
+      content:
+        "As an author, seeing my books come alive as interactive experiences is incredible. My readers are more engaged than ever.",
+      rating: 5,
     },
     {
-      name: 'Elena Rodriguez',
-      role: 'Educator',
-      content: 'The learning mode has revolutionized my classroom. Students are excited about reading again.',
-      rating: 5
-    }
+      name: "Elena Rodriguez",
+      role: "Educator",
+      content:
+        "The learning mode has revolutionized my classroom. Students are excited about reading again.",
+      rating: 5,
+    },
   ];
 
   return (
@@ -53,28 +68,27 @@ export default function HomePage() {
       <section className="relative overflow-hidden py-20 lg:py-32">
         <div className="absolute inset-0 bg-gradient-to-br from-purple-600 via-blue-600 to-indigo-700 opacity-90"></div>
         <div className="absolute inset-0 bg-black/20"></div>
-        
+
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="flex justify-center mb-8">
-            <img 
-              src="/litink.png" 
-              alt="LinkAI Logo" 
-              className="h-24 w-24 object-contain"
-            />
+            <span className="text-6xl font-bold bg-gradient-to-r from-purple-400 via-blue-500 to-indigo-600 bg-clip-text text-transparent">
+              LitinkAI
+            </span>
           </div>
-          
+
           <h1 className="text-4xl sm:text-5xl lg:text-7xl font-bold text-white mb-6 leading-tight">
             Reimagining Books as
             <span className="block bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
               Living Experiences
             </span>
           </h1>
-          
+
           <p className="text-xl sm:text-2xl text-white/90 mb-12 max-w-3xl mx-auto leading-relaxed">
-            Transform any book into immersive AI-powered learning adventures or interactive entertainment experiences. 
-            The future of reading is here at LinkAI.com.
+            Transform any book into immersive AI-powered learning adventures or
+            interactive entertainment experiences. The future of reading is here
+            at LinkAI.com.
           </p>
-          
+
           <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
             <Link
               to="/auth"
@@ -83,7 +97,7 @@ export default function HomePage() {
               <span>Start Learning</span>
               <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
             </Link>
-            
+
             <Link
               to="/explore"
               className="group border-2 border-white text-white px-8 py-4 rounded-full font-bold text-lg hover:bg-white hover:text-purple-600 transition-all transform hover:scale-105 flex items-center space-x-2"
@@ -112,12 +126,12 @@ export default function HomePage() {
             </div>
           </div>
         </div>
-        
+
         {/* Floating Elements */}
         <div className="absolute top-20 left-10 opacity-20">
-          <img 
-            src="/litink.png" 
-            alt="LinkAI Logo" 
+          <img
+            src="/litink.png"
+            alt="LinkAI Logo"
             className="h-16 w-16 object-contain animate-bounce"
           />
         </div>
@@ -129,9 +143,9 @@ export default function HomePage() {
             className="block"
             title="Powered by Bolt"
           >
-            <img 
-              src="/boltlogo.png" 
-              alt="Powered by Bolt" 
+            <img
+              src="/boltlogo.png"
+              alt="Powered by Bolt"
               className="h-16 w-16 object-contain animate-bounce"
             />
           </a>
@@ -149,10 +163,11 @@ export default function HomePage() {
               Powerful Features for Every Reader
             </h2>
             <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              Whether you're learning or exploring, LinkAI.com provides cutting-edge tools to enhance your reading experience.
+              Whether you're learning or exploring, LinkAI.com provides
+              cutting-edge tools to enhance your reading experience.
             </p>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             {features.map((feature, index) => (
               <div
@@ -162,8 +177,12 @@ export default function HomePage() {
                 <div className="bg-gradient-to-br from-purple-600 to-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
                   <feature.icon className="h-8 w-8 text-white" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-4">{feature.title}</h3>
-                <p className="text-gray-600 leading-relaxed">{feature.description}</p>
+                <h3 className="text-xl font-bold text-gray-900 mb-4">
+                  {feature.title}
+                </h3>
+                <p className="text-gray-600 leading-relaxed">
+                  {feature.description}
+                </p>
               </div>
             ))}
           </div>
@@ -181,7 +200,7 @@ export default function HomePage() {
               Two distinct paths tailored to your goals and interests.
             </p>
           </div>
-          
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
             {/* Learning Path */}
             <div className="group relative overflow-hidden rounded-3xl bg-white shadow-xl hover:shadow-2xl transition-all transform hover:scale-105">
@@ -190,10 +209,14 @@ export default function HomePage() {
                 <div className="bg-gradient-to-br from-green-500 to-blue-600 w-20 h-20 rounded-2xl flex items-center justify-center mb-8">
                   <Brain className="h-10 w-10 text-white" />
                 </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">Learning Mode</h3>
+                <h3 className="text-2xl font-bold text-gray-900 mb-4">
+                  Learning Mode
+                </h3>
                 <p className="text-gray-600 mb-8 text-lg leading-relaxed">
-                  Transform educational books into interactive tutorials, personalized lessons, and smart quizzes. 
-                  Earn verified credentials and track your progress with AI-powered learning analytics.
+                  Transform educational books into interactive tutorials,
+                  personalized lessons, and smart quizzes. Earn verified
+                  credentials and track your progress with AI-powered learning
+                  analytics.
                 </p>
                 <ul className="space-y-3 mb-8">
                   <li className="flex items-center text-gray-700">
@@ -222,7 +245,7 @@ export default function HomePage() {
                 </Link>
               </div>
             </div>
-            
+
             {/* Entertainment Path */}
             <div className="group relative overflow-hidden rounded-3xl bg-white shadow-xl hover:shadow-2xl transition-all transform hover:scale-105">
               <div className="absolute inset-0 bg-gradient-to-br from-purple-400 to-pink-500 opacity-10 group-hover:opacity-20 transition-opacity"></div>
@@ -230,10 +253,13 @@ export default function HomePage() {
                 <div className="bg-gradient-to-br from-purple-500 to-pink-600 w-20 h-20 rounded-2xl flex items-center justify-center mb-8">
                   <Sparkles className="h-10 w-10 text-white" />
                 </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-4">Entertainment Mode</h3>
+                <h3 className="text-2xl font-bold text-gray-900 mb-4">
+                  Entertainment Mode
+                </h3>
                 <p className="text-gray-600 mb-8 text-lg leading-relaxed">
-                  Convert novels and stories into branching narrative experiences with voice-driven characters, 
-                  AI-generated scenes, and collectible animated NFTs.
+                  Convert novels and stories into branching narrative
+                  experiences with voice-driven characters, AI-generated scenes,
+                  and collectible animated NFTs.
                 </p>
                 <ul className="space-y-3 mb-8">
                   <li className="flex items-center text-gray-700">
@@ -274,10 +300,11 @@ export default function HomePage() {
               What Our LinkAI.com Users Say
             </h2>
             <p className="text-xl text-gray-600">
-              Join thousands of readers who have transformed their reading experience.
+              Join thousands of readers who have transformed their reading
+              experience.
             </p>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {testimonials.map((testimonial, index) => (
               <div
@@ -286,14 +313,19 @@ export default function HomePage() {
               >
                 <div className="flex items-center mb-4">
                   {[...Array(testimonial.rating)].map((_, i) => (
-                    <Star key={i} className="h-5 w-5 text-yellow-400 fill-current" />
+                    <Star
+                      key={i}
+                      className="h-5 w-5 text-yellow-400 fill-current"
+                    />
                   ))}
                 </div>
                 <p className="text-gray-700 mb-6 italic leading-relaxed">
                   "{testimonial.content}"
                 </p>
                 <div>
-                  <p className="font-semibold text-gray-900">{testimonial.name}</p>
+                  <p className="font-semibold text-gray-900">
+                    {testimonial.name}
+                  </p>
                   <p className="text-purple-600">{testimonial.role}</p>
                 </div>
               </div>
@@ -309,9 +341,10 @@ export default function HomePage() {
             Ready to Transform Your Reading Experience?
           </h2>
           <p className="text-xl text-white/90 mb-12">
-            Join LinkAI.com today and discover a new way to learn, explore, and engage with books.
+            Join LinkAI.com today and discover a new way to learn, explore, and
+            engage with books.
           </p>
-          
+
           <div className="flex flex-col sm:flex-row gap-6 justify-center">
             <Link
               to="/learn"

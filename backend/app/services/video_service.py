@@ -1391,7 +1391,7 @@ Return as JSON with: script, character_details, scene_prompt
             print(f"Error generating real video with Tavus + ElevenLabs: {e}")
             return None
 
-    async def _generate_tavus_video(self, script: str, video_style: str) -> Optional[Dict[str, Any]]:
+    async def _generate_tavus_video(self, script: str, video_style: str, content_id: str = None, supabase_client = None) -> Optional[Dict[str, Any]]:
         """Generate video using Tavus API with enhanced error handling and logging"""
         try:
             print(f"🎬 Generating Tavus video with style: {video_style}")
@@ -1454,8 +1454,8 @@ Return as JSON with: script, character_details, scene_prompt
                         
                         if video_id:
                             print(f"🎯 Video ID extracted: {video_id}")
-                            # Poll for completion with enhanced logging
-                            return await self._poll_video_status_enhanced(video_id, f"AI Generated Video - {video_style}")
+                            # Poll for completion with enhanced logging and database updates
+                            return await self._poll_video_status_enhanced(video_id, f"AI Generated Video - {video_style}", content_id, supabase_client)
                         else:
                             print("❌ No video ID found in response")
                             print(f"🔍 Available keys in response: {list(data.keys()) if isinstance(data, dict) else 'Response is not a dict'}")
@@ -2577,8 +2577,8 @@ Return as JSON with: script, character_details, scene_prompt
             print(f"❌ Error combining videos: {e}")
             return None
 
-    async def _poll_video_status_enhanced(self, video_id: str, scene_description: str) -> Dict[str, Any]:
-        """Enhanced polling for video completion status with detailed logging"""
+    async def _poll_video_status_enhanced(self, video_id: str, scene_description: str, content_id: str = None, supabase_client = None) -> Dict[str, Any]:
+        """Enhanced polling for video completion status with detailed logging and database updates"""
         try:
             print(f"🔄 Enhanced polling for video completion: {video_id}")
             
@@ -2615,6 +2615,22 @@ Return as JSON with: script, character_details, scene_prompt
                                 status = data.get("status", "unknown")
                                 progress = data.get("generation_progress", "0/100")
                                 
+                                # Update database with current status and response
+                                if content_id and supabase_client:
+                                    update_data = {
+                                        "tavus_response": data,
+                                        "generation_progress": progress,
+                                        "status": "processing"
+                                    }
+                                    
+                                    # If we have a hosted_url, save it even if video is still generating
+                                    hosted_url = data.get("hosted_url")
+                                    if hosted_url:
+                                        update_data["tavus_url"] = hosted_url
+                                        print(f"🌐 Hosted URL available: {hosted_url}")
+                                    
+                                    supabase_client.table('learning_content').update(update_data).eq("id", content_id).execute()
+                                
                                 # Log status changes
                                 if status != last_status:
                                     print(f"🔄 Status changed from '{last_status}' to '{status}'")
@@ -2644,6 +2660,20 @@ Return as JSON with: script, character_details, scene_prompt
                                     print(f"🔗 Video URL found: {video_url}")
                                     print(f"🌐 Hosted URL found: {hosted_url}")
                                     
+                                    # Update database with final status
+                                    if content_id and supabase_client:
+                                        final_update = {
+                                            "tavus_response": data,
+                                            "status": "ready",
+                                            "generation_progress": progress
+                                        }
+                                        
+                                        if video_url:
+                                            final_update["content_url"] = video_url
+                                            final_update["tavus_url"] = hosted_url
+                                        
+                                        supabase_client.table('learning_content').update(final_update).eq("id", content_id).execute()
+                                    
                                     if video_url:
                                         return {
                                             "video_id": video_id,
@@ -2669,6 +2699,16 @@ Return as JSON with: script, character_details, scene_prompt
                                     error_msg = data.get("error", "Unknown error")
                                     print(f"❌ Video generation failed: {video_id}")
                                     print(f"📄 Error details: {error_msg}")
+                                    
+                                    # Update database with failed status
+                                    if content_id and supabase_client:
+                                        supabase_client.table('learning_content').update({
+                                            "tavus_response": data,
+                                            "status": "failed",
+                                            "error_message": error_msg,
+                                            "generation_progress": progress
+                                        }).eq("id", content_id).execute()
+                                    
                                     return {
                                         "video_id": video_id,
                                         "status": "failed",
@@ -2747,3 +2787,90 @@ Return as JSON with: script, character_details, scene_prompt
                 "status": "error",
                 "error": str(e)
             }
+
+    async def combine_tavus_videos(self, content_id: str, supabase_client = None) -> Optional[Dict[str, Any]]:
+        """Combine multiple Tavus video segments into a single video using FFmpeg"""
+        try:
+            print(f"🎬 Combining Tavus videos for content: {content_id}")
+            
+            if not supabase_client:
+                supabase_client = self.supabase
+            
+            # Get the learning content record
+            content_response = supabase_client.table('learning_content').select('*').eq('id', content_id).single().execute()
+            if not content_response.data:
+                print(f"❌ Content record not found: {content_id}")
+                return None
+            
+            content_data = content_response.data
+            tavus_url = content_data.get('tavus_url')
+            
+            if not tavus_url:
+                print(f"❌ No Tavus URL found for content: {content_id}")
+                return None
+            
+            print(f"🌐 Tavus URL: {tavus_url}")
+            
+            # Update status to combining
+            supabase_client.table('learning_content').update({
+                "status": "combining"
+            }).eq("id", content_id).execute()
+            
+            # Download the video from Tavus hosted URL
+            video_filename = f"tavus_video_{content_id}.mp4"
+            video_path = await self._download_and_store_video(tavus_url, video_filename, content_data.get('user_id'))
+            
+            if not video_path:
+                print(f"❌ Failed to download video from Tavus URL: {tavus_url}")
+                # Update status back to processing
+                supabase_client.table('learning_content').update({
+                    "status": "processing",
+                    "error_message": "Failed to download video from Tavus"
+                }).eq("id", content_id).execute()
+                return None
+            
+            print(f"✅ Video downloaded to: {video_path}")
+            
+            # Upload the combined video to Supabase Storage
+            combined_video_url = await self._serve_video_from_supabase(video_path, video_filename, content_data.get('user_id'))
+            
+            if not combined_video_url:
+                print(f"❌ Failed to upload combined video to Supabase")
+                # Update status back to processing
+                supabase_client.table('learning_content').update({
+                    "status": "processing",
+                    "error_message": "Failed to upload combined video to storage"
+                }).eq("id", content_id).execute()
+                return None
+            
+            print(f"✅ Combined video uploaded: {combined_video_url}")
+            
+            # Update the database with the final combined video URL
+            supabase_client.table('learning_content').update({
+                "status": "ready",
+                "content_url": combined_video_url,
+                "combined_video_url": combined_video_url,
+                "duration": 180  # Default duration
+            }).eq("id", content_id).execute()
+            
+            return {
+                "id": content_id,
+                "video_url": combined_video_url,
+                "tavus_url": tavus_url,
+                "status": "ready",
+                "duration": 180
+            }
+            
+        except Exception as e:
+            print(f"❌ Error combining Tavus videos: {e}")
+            import traceback
+            print(f"🔍 Full traceback: {traceback.format_exc()}")
+            
+            # Update database with error status
+            if supabase_client:
+                supabase_client.table('learning_content').update({
+                    "status": "failed",
+                    "error_message": f"Error combining videos: {str(e)}"
+                }).eq("id", content_id).execute()
+            
+            return None
