@@ -52,7 +52,7 @@ class VideoService:
             
             # Get chapter and book information
             chapter_response = self.supabase.table("chapters").select(
-                "*, books(title, cover_image_url, book_type, difficulty)"
+                "*, books(title, cover_image_url, book_type, difficulty, user_id)"
             ).eq("id", chapter_id).single().execute()
             
             if not chapter_response.data:
@@ -60,6 +60,9 @@ class VideoService:
             
             chapter_data = chapter_response.data
             book_data = chapter_data.get("books", {})
+            
+            # Get user_id from book data
+            user_id = book_data.get("user_id")
             
             # Get book cover image URL for thumbnail
             cover_image_url = book_data.get("cover_image_url")
@@ -95,7 +98,7 @@ class VideoService:
             # Priority 1: Try Tavus API first (real AI video generation)
             if settings.TAVUS_API_KEY and settings.TAVUS_API_KEY != "your-tavus-api-key":
                 print("Using Tavus API for real video generation...")
-                video_result = await self._generate_real_video(script, video_style)
+                video_result = await self._generate_real_video(script, video_style, user_id)
                 if video_result:
                     print("✅ Tavus API video generation successful")
             
@@ -137,18 +140,17 @@ class VideoService:
         self, 
         script: str, 
         chapter_context: Dict[str, Any], 
-        video_style: str
+        video_style: str,
+        user_id: str = None
     ) -> Optional[Dict[str, Any]]:
-        """Generate enhanced audio with ElevenLabs for video content"""
+        """Generate enhanced audio with narration, character voices, and sound effects"""
         try:
-            book = chapter_context['book']
-            chapter = chapter_context['chapter']
-            
-            if book['book_type'] == 'learning':
-                # Generate tutorial narration
+            if video_style in ["tutorial", "educational", "learning"]:
+                # Generate tutorial-style narration
                 narration_audio = await self.elevenlabs_service.create_audio_narration(
                     text=script,
-                    narrator_style="professional"
+                    narrator_style="professional",
+                    user_id=user_id
                 )
                 
                 return {
@@ -159,7 +161,7 @@ class VideoService:
             
             else:
                 # Generate entertainment audio with character voices and sound effects
-                return await self._generate_entertainment_audio(script, chapter_context, video_style)
+                return await self._generate_entertainment_audio(script, chapter_context, video_style, user_id)
                 
         except Exception as e:
             print(f"Error generating enhanced audio: {e}")
@@ -169,7 +171,8 @@ class VideoService:
         self, 
         script: str, 
         chapter_context: Dict[str, Any], 
-        video_style: str
+        video_style: str,
+        user_id: str = None
     ) -> Optional[Dict[str, Any]]:
         """Generate entertainment audio with character voices and sound effects"""
         try:
@@ -182,8 +185,9 @@ class VideoService:
                 character_profile = self._create_character_profile(dialogue['character'])
                 audio_url = await self.elevenlabs_service.generate_character_voice(
                     text=dialogue['text'],
-                    character_profile=character_profile,
-                    scene_context=chapter_context['chapter']['title']
+                    character_name=dialogue['character'],
+                    character_traits=character_profile.get('personality', ''),
+                    user_id=user_id
                 )
                 
                 if audio_url:
@@ -197,7 +201,8 @@ class VideoService:
             background_audio = await self.elevenlabs_service.generate_sound_effects(
                 effect_type=self._get_background_effect_type(video_style),
                 duration=180,  # 3 minutes
-                intensity=0.3
+                intensity=0.3,
+                user_id=user_id
             )
             
             # Handle case where no character dialogues were found
@@ -206,7 +211,8 @@ class VideoService:
                 # Create a fallback narration audio
                 fallback_audio = await self.elevenlabs_service.create_audio_narration(
                     text=script[:500],  # Use first 500 characters as fallback
-                    narrator_style="professional"
+                    narrator_style="professional",
+                    user_id=user_id
                 )
                 
                 return {
@@ -219,14 +225,13 @@ class VideoService:
             
             # Mix all audio tracks
             mixed_audio = await self.elevenlabs_service.mix_audio_tracks(
-                main_audio_path=character_audios[0]['audio_url'],
-                background_audio_path=background_audio,
-                sound_effects=[audio['audio_url'] for audio in character_audios[1:]]
+                audio_tracks=[{"url": audio['audio_url']} for audio in character_audios] + [{"url": background_audio}],
+                user_id=user_id
             )
             
             return {
                 'type': 'entertainment_audio',
-                'audio_url': mixed_audio,
+                'audio_url': mixed_audio.get('audio_url') if isinstance(mixed_audio, dict) else mixed_audio,
                 'character_audios': character_audios,
                 'background_audio': background_audio,
                 'duration': 180
@@ -384,119 +389,202 @@ class VideoService:
         chapter_id: str,
         animation_style: str = "animated",
         script_style: str = "screenplay",
-        supabase_client = None
+        supabase_client = None,
+        user_id: str = None
     ) -> Optional[Dict[str, Any]]:
-        """Generate entertainment-style video for story content using KlingAI"""
+        """Generate entertainment-style video for story content using RAG, OpenAI, ElevenLabs, KlingAI, and FFmpeg. User can choose script_style ('screenplay' or 'narration')."""
+        logs = []
         try:
-            # Use provided client or create new one
-            if supabase_client:
-                self.supabase = supabase_client
-            
-            # Get chapter and book information
-            chapter_response = self.supabase.table("chapters").select(
-                "*, books(title, user_id, book_type, difficulty)"
-            ).eq("id", chapter_id).single().execute()
-            
-            if not chapter_response.data:
-                raise ValueError("Chapter not found")
-            
-            chapter_data = chapter_response.data
-            book_data = chapter_data.get("books", {})
-            user_id = book_data.get("user_id")
-            
-            if not user_id:
-                raise ValueError("User ID not found in book data")
-            
-            # Get chapter content and context
-            chapter_content = chapter_data.get("content", "")
-            chapter_title = chapter_data.get("title", "")
-            book_title = book_data.get("title", "")
-            book_type = book_data.get("book_type", "entertainment")
-            
-            if not chapter_content:
-                raise ValueError("Chapter content is empty")
-            
-            # Get RAG context for enhanced content
-            rag_context = await self.rag_service.get_chapter_context(chapter_id)
-            
-            # Generate script and scene descriptions
-            script_result = await self._generate_entertainment_script(
-                chapter_content, 
-                rag_context, 
-                script_style
+            # 1. Get chapter context using RAG
+            chapter_context = await self.rag_service.get_chapter_with_context(
+                chapter_id=chapter_id,
+                include_adjacent=True,
+                use_vector_search=True
             )
             
-            if not script_result:
-                raise ValueError("Failed to generate script")
+            # 2. Generate script using OpenAI, passing script_style
+            script = await self.rag_service.generate_video_script(chapter_context, animation_style, script_style=script_style)
+            logs.append(f"[SCRIPT] Full script generated: {script}")
             
-            script = script_result.get("script", "")
-            character_details = script_result.get("character_details", "")
-            scene_prompt = script_result.get("scene_prompt", "")
-            
-            # Generate enhanced audio with ElevenLabs
-            enhanced_audio_result = await self.elevenlabs_service.generate_enhanced_speech(
-                script, 
-                "21m00Tcm4TlvDq8ikWAM",
-                user_id
+            # 3. Generate scene descriptions
+            scenes = await self.rag_service.ai_service._generate_scene_descriptions(
+                chapter_id=chapter_id,
+                rag_service=self.rag_service
             )
+            scene_prompt = scenes[0] if scenes else ""
+            character_details = chapter_context['chapter'].get('character_profiles', "")
             
-            if not enhanced_audio_result or not enhanced_audio_result.get("audio_url"):
-                raise ValueError("Enhanced audio generation failed")
+            # 4. Extract dialogue/narration for ElevenLabs (separate from scene descriptions)
+            if script_style == "screenplay":
+                # Extract character dialogues from screenplay
+                character_dialogues = self._extract_character_dialogues(script)
+                elevenlabs_content = self._format_dialogues_for_elevenlabs(character_dialogues)
+            else:
+                # For narration style, extract narration text (remove scene descriptions)
+                elevenlabs_content = self._extract_narration_text(script)
             
-            enhanced_audio_url = enhanced_audio_result["audio_url"]
+            logs.append(f"[ELEVENLABS CONTENT] Dialogue/Narration for ElevenLabs: {elevenlabs_content}")
+            logs.append(f"[CHARACTER] Character details: {character_details}")
+            logs.append(f"[SCENE] Scene prompt for KlingAI: {scene_prompt}")
             
-            # Generate video with KlingAI
+            # 5. Generate enhanced audio with ElevenLabs (dialogue/narration only)
+            enhanced_audio = await self._generate_enhanced_audio(elevenlabs_content, chapter_context, animation_style, user_id)
+            logs.append(f"[ENHANCED AUDIO] {enhanced_audio}")
+            if not enhanced_audio or not enhanced_audio.get('audio_url'):
+                logs.append(f"[ERROR] Enhanced audio generation failed: {enhanced_audio}")
+                raise Exception(f"Enhanced audio generation failed: {enhanced_audio}")
+            mixed_audio_url = enhanced_audio['audio_url']
+            
+            # 6. Generate video with KlingAI (scene + character descriptions)
             kling_prompt = f"{scene_prompt}\nCharacter: {character_details}"
-            kling_result = await self._generate_kling_video(kling_prompt, animation_style)
+            logs.append(f"[KLINGAI PROMPT] {kling_prompt}")
+            kling_result = await self._generate_kling_video(kling_prompt, animation_style, target_duration=180)  # 3 minutes
+            if "video_url" not in kling_result:
+                raise Exception(f"Kling AI video generation failed: {kling_result.get('error')}")
+            video_url = kling_result["video_url"]
+            logs.append(f"[KLINGAI VIDEO] Video URL: {video_url}")
+            logs.append(f"[KLINGAI DURATION] Requested: {kling_result.get('requested_duration')}s, Actual: {kling_result.get('actual_duration')}s")
             
-            if not kling_result or not kling_result.get("video_url"):
-                raise ValueError("KlingAI video generation failed")
+            # Save KlingAI video metadata to DB
+            try:
+                kling_metadata = {
+                    "chapter_id": chapter_id,
+                    "video_url": video_url,
+                    "script": script,
+                    "character_details": character_details,
+                    "scene_prompt": scene_prompt,
+                    "created_at": int(time.time()),
+                    "source": "klingai"
+                }
+                if 'book' in chapter_context and 'id' in chapter_context['book']:
+                    kling_metadata["book_id"] = chapter_context['book']['id']
+                if 'user_id' in chapter_context.get('book', {}):
+                    kling_metadata["user_id"] = chapter_context['book']['user_id']
+                logs.append(f"[DB INSERT] Saving KlingAI video metadata: {kling_metadata}")
+                db_result_kling = self.supabase_service.table("videos").insert(kling_metadata).execute()
+                logs.append(f"[DB INSERT RESULT] {db_result_kling}")
+            except Exception as db_exc:
+                logs.append(f"[DB INSERT ERROR - KlingAI] {db_exc}")
             
-            kling_video_url = kling_result["video_url"]
+            # Validate URLs before downloading
+            def is_valid_url(url):
+                return isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))
             
-            # Download and merge audio/video
-            merged_result = await self._merge_audio_video(
-                kling_video_url, 
-                enhanced_audio_url, 
-                user_id
-            )
+            # Ensure ElevenLabs audio is in Supabase Storage
+            if is_valid_url(mixed_audio_url) and "supabase.co" not in mixed_audio_url:
+                # Download and upload to Supabase
+                import tempfile, httpx, os
+                fd, temp_audio_path = tempfile.mkstemp(suffix=".mp3"); os.close(fd)
+                try:
+                    with httpx.Client() as client:
+                        r = client.get(mixed_audio_url)
+                        if r.status_code == 200:
+                            with open(temp_audio_path, 'wb') as f:
+                                f.write(r.content)
+                            # Upload to Supabase (append user_id if available)
+                            supabase_audio_url = await self._serve_video_from_supabase(temp_audio_path, f"audio_{int(time.time())}.mp3", user_id=user_id)
+                            logs.append(f"[AUDIO UPLOAD] Uploaded ElevenLabs audio to Supabase: {supabase_audio_url}")
+                            mixed_audio_url = supabase_audio_url
+                        else:
+                            logs.append(f"[AUDIO DOWNLOAD ERROR] {mixed_audio_url} status {r.status_code}")
+                except Exception as e:
+                    logs.append(f"[AUDIO DOWNLOAD ERROR] {e}")
             
-            if not merged_result or not merged_result.get("merged_video_url"):
-                raise ValueError("Audio/video merge failed")
+            # Download video and audio files
+            import tempfile, os, subprocess, httpx
+            async def download_file(url, suffix):
+                fd, path = tempfile.mkstemp(suffix=suffix)
+                os.close(fd)
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(url)
+                    with open(path, 'wb') as f:
+                        f.write(r.content)
+                return path
             
-            merged_video_url = merged_result["merged_video_url"]
+            video_path = await download_file(video_url, ".mp4")
+            audio_path = await download_file(mixed_audio_url, ".mp3")
             
-            # Save video metadata to database
-            video_metadata = {
-                "book_id": book_data.get("id"),
-                "chapter_id": chapter_id,
-                "user_id": user_id,
-                "video_url": merged_video_url,
-                "original_video_url": kling_video_url,
-                "script": script,
-                "character_details": character_details,
-                "scene_prompt": scene_prompt,
-                "created_at": int(time.time())
-            }
+            # Check file existence
+            if not os.path.exists(video_path):
+                logs.append(f"[ERROR] Video file not found at {video_path}")
+                return {"error": "Video file not found", "logs": logs}
+            if not os.path.exists(audio_path):
+                logs.append(f"[ERROR] Audio file not found at {audio_path}")
+                return {"error": "Audio file not found", "logs": logs}
             
-            video_response = self.supabase.table("videos").insert(video_metadata).execute()
-            video_id = video_response.data[0]["id"]
+            # 7. Merge audio and video with FFmpeg
+            merged_path = tempfile.mktemp(suffix="_merged.mp4")
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-i", video_path,
+                "-i", audio_path,
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-shortest",
+                merged_path
+            ]
+            logs.append(f"[FFMPEG CMD] {' '.join(ffmpeg_cmd)}")
+            proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+            logs.append(f"[FFMPEG OUT] {proc.stdout}")
+            logs.append(f"[FFMPEG ERR] {proc.stderr}")
+            if not os.path.exists(merged_path):
+                logs.append(f"[ERROR] Merged video not found at {merged_path}")
+                return {"error": "Merged video not found", "logs": logs}
+            
+            # 8. Upload merged video to storage and return URL (append user_id if available)
+            merged_video_url = await self._serve_video_from_supabase(merged_path, f"merged_video_{int(time.time())}.mp4", user_id=user_id)
+            logs.append(f"[UPLOAD] Merged video public URL: {merged_video_url}")
+            
+            # 9. Save merged video metadata to Supabase DB
+            try:
+                merged_metadata = {
+                    "chapter_id": chapter_id,
+                    "video_url": merged_video_url,
+                    "script": script,
+                    "character_details": character_details,
+                    "scene_prompt": scene_prompt,
+                    "created_at": int(time.time()),
+                    "source": "merged",
+                    "klingai_video_url": video_url
+                }
+                if 'book' in chapter_context and 'id' in chapter_context['book']:
+                    merged_metadata["book_id"] = chapter_context['book']['id']
+                if 'user_id' in chapter_context.get('book', {}):
+                    merged_metadata["user_id"] = chapter_context['book']['user_id']
+                logs.append(f"[DB INSERT] Saving merged video metadata: {merged_metadata}")
+                db_result_merged = self.supabase_service.table("videos").insert(merged_metadata).execute()
+                logs.append(f"[DB INSERT RESULT] {db_result_merged}")
+            except Exception as db_exc:
+                logs.append(f"[DB INSERT ERROR - Merged] {db_exc}")
             
             return {
-                "id": video_id,
-                "title": f"{chapter_title} - {book_title}",
-                "description": f"Entertainment video for {chapter_title}",
-                "video_url": merged_video_url,
-                "original_video_url": kling_video_url,
+                "merged_video_url": merged_video_url,
+                "klingai_video_url": video_url,
+                "logs": logs,
                 "script": script,
                 "character_details": character_details,
                 "scene_prompt": scene_prompt,
-                "status": "ready"
+                "elevenlabs_content": elevenlabs_content,
+                "klingai_prompt": kling_prompt,
+                "video_url": merged_video_url,
+                "enhanced_audio_url": mixed_audio_url,
+                "service_inputs": {
+                    "elevenlabs": {
+                        "content": elevenlabs_content,
+                        "content_type": "dialogue/narration",
+                        "character_count": len(elevenlabs_content)
+                    },
+                    "klingai": {
+                        "content": kling_prompt,
+                        "content_type": "scene_description",
+                        "character_count": len(kling_prompt)
+                    }
+                }
             }
-            
         except Exception as e:
+            logs.append(f"[ERROR] {e}")
             print(f"Error generating entertainment video: {e}")
-            return None
+            return {"error": str(e), "logs": logs}
 
     
     async def get_available_avatars(self) -> List[Dict[str, Any]]:
@@ -647,7 +735,7 @@ class VideoService:
                 
                 if video_url:
                     return {
-                        "id": f"mock_video_{int(time.time())}",
+                        "id": f"mock_video_{int(time())}",
                         "title": scene_description,
                         "description": "AI-generated video content for development",
                         "video_url": video_url,
@@ -662,7 +750,7 @@ class VideoService:
             # Fallback if video creation fails
             print("Video creation failed, returning fallback response")
             return {
-                "id": f"mock_video_{int(time.time())}",
+                "id": f"mock_video_{int(time())}",
                 "title": scene_description,
                 "description": "Video generation failed - development mode",
                 "video_url": None,
@@ -676,7 +764,7 @@ class VideoService:
         except Exception as e:
             print(f"Error in mock video generation: {e}")
             return {
-                "id": f"mock_video_{int(time.time())}",
+                "id": f"mock_video_{int(time())}",
                 "title": scene_description,
                 "description": "Video generation error",
                 "video_url": None,
@@ -865,7 +953,7 @@ class VideoService:
                 
                 if video_url:
                     return {
-                        "id": f"merged_video_{int(time.time())}",
+                        "id": f"merged_video_{int(time())}",
                         "title": scene_description,
                         "description": "AI-generated video with synchronized audio",
                         "video_url": video_url,
@@ -1114,7 +1202,7 @@ Return as JSON with: script, character_details, scene_prompt
             print(f"Error merging audio/video: {e}")
             return {"error": str(e)}
 
-    async def _generate_real_video(self, script: str, video_style: str) -> Optional[Dict[str, Any]]:
+    async def _generate_real_video(self, script: str, video_style: str, user_id: str) -> Optional[Dict[str, Any]]:
         """Generate real video using Tavus API + ElevenLabs audio"""
         try:
             print(f"Generating real video with Tavus API + ElevenLabs using style: {video_style}")
@@ -1126,7 +1214,7 @@ Return as JSON with: script, character_details, scene_prompt
                 return tavus_video  # Return the failed tavus_video object
 
             # Step 2: Generate audio with ElevenLabs ONLY if Tavus video was successful
-            elevenlabs_audio = await self._generate_elevenlabs_audio(script, video_style)
+            elevenlabs_audio = await self._generate_elevenlabs_audio(script, video_style, user_id)
             if not elevenlabs_audio:
                 print("⚠️  ElevenLabs audio unavailable, returning Tavus video only.")
                 return tavus_video  # Return the successful tavus_video (with its URL)
@@ -1214,11 +1302,15 @@ Return as JSON with: script, character_details, scene_prompt
             print(f"❌ Error generating Tavus video: {e}")
             return None
 
-    async def _generate_elevenlabs_audio(self, script: str, video_style: str) -> Optional[Dict[str, Any]]:
+    async def _generate_elevenlabs_audio(self, script: str, video_style: str, user_id: str = None) -> Optional[Dict[str, Any]]:
         try:
             # Map video_style to narrator_style
             narrator_style = self._map_video_style_to_narrator_style(video_style)
-            audio_url = await self.elevenlabs_service.create_audio_narration(text=script, narrator_style=narrator_style)
+            audio_url = await self.elevenlabs_service.create_audio_narration(
+                text=script, 
+                narrator_style=narrator_style,
+                user_id=user_id
+            )
             if not audio_url:
                 print("❌ ElevenLabs audio generation failed or returned None")
                 return None
@@ -1371,8 +1463,21 @@ Return as JSON with: script, character_details, scene_prompt
             print(f"❌ Error trying with available replicas: {e}")
             return None
 
-    async def _generate_kling_video(self, script: str, video_style: str = "realistic") -> dict:
+    async def _generate_kling_video(self, script: str, video_style: str = "realistic", target_duration: int = 30) -> dict:
         """Generate a video using Kling AI API and return the video URL and metadata."""
+        # Calculate proper duration based on content length
+        # Rough estimate: 1 second per 10-15 words for natural pacing
+        word_count = len(script.split())
+        calculated_duration = max(10, min(60, word_count // 12))  # 10-60 seconds range
+        
+        # Use the calculated duration or target duration, whichever is more appropriate
+        final_duration = max(calculated_duration, target_duration)
+        
+        print(f"[KlingAI DEBUG] Content word count: {word_count}")
+        print(f"[KlingAI DEBUG] Calculated duration: {calculated_duration}s")
+        print(f"[KlingAI DEBUG] Target duration: {target_duration}s")
+        print(f"[KlingAI DEBUG] Final duration: {final_duration}s")
+        
         # Generate JWT for Bearer authentication as per Kling AI docs
         headers_jwt = {
             "alg": "HS256",
@@ -1391,19 +1496,31 @@ Return as JSON with: script, character_details, scene_prompt
             "Authorization": f"Bearer {token}"
         }
         print(f"[KlingAI DEBUG] Using Authorization header: Bearer <JWT>")
-        # Correct payload based on Kling AI documentation
+        
+        # If duration is longer than 10 seconds, we need to split into multiple segments
+        if final_duration > 10:
+            return await self._generate_long_kling_video(script, video_style, final_duration, headers)
+        else:
+            # For shorter videos, use single KlingAI call
+            kling_duration = "10" if final_duration > 5 else "5"
+            return await self._generate_single_kling_video(script, video_style, kling_duration, headers, final_duration)
+
+    async def _generate_single_kling_video(self, script: str, video_style: str, kling_duration: str, headers: dict, target_duration: int) -> dict:
+        """Generate a single KlingAI video segment"""
         payload = {
             "model_name": "kling-v1",
             "prompt": f"A {video_style} video of: {script}",
             "aspect_ratio": "16:9",
-            "duration": "10"  # Must be a string, "5" or "10"
+            "duration": kling_duration
         }
+        
+        print(f"[KlingAI DEBUG] Single video request - duration: {kling_duration}s")
+        
         base_url = "https://api-singapore.klingai.com"
         create_url = f"{base_url}/v1/videos/text2video"
+        
         async with httpx.AsyncClient() as client:
             try:
-                print(f"[KlingAI DEBUG] Sending request to {create_url} with headers: {list(headers.keys())}")
-                print(f"[KlingAI DEBUG] Sending payload: {payload}")
                 response = await client.post(
                     create_url, json=payload, headers=headers, timeout=60
                 )
@@ -1412,11 +1529,11 @@ Return as JSON with: script, character_details, scene_prompt
 
                 task_id = data.get("data", {}).get("task_id")
                 if not task_id:
-                    print(f"[KlingAI ERROR] No task_id in response: {data}")
                     raise Exception("No task_id returned from Kling AI")
                 
                 print(f"[KlingAI DEBUG] Task created with ID: {task_id}")
 
+                # Poll for completion
                 poll_url = f"{create_url}/{task_id}"
                 for i in range(60):  # Poll for up to 10 minutes
                     await asyncio.sleep(10)
@@ -1433,7 +1550,14 @@ Return as JSON with: script, character_details, scene_prompt
                         if videos and videos[0].get("url"):
                             video_url = videos[0]["url"]
                             print(f"[KlingAI SUCCESS] Video generated: {video_url}")
-                            return {"video_url": video_url, "task_id": task_id, "meta": poll_data.get("data")}
+                            return {
+                                "video_url": video_url, 
+                                "task_id": task_id, 
+                                "meta": poll_data.get("data"),
+                                "actual_duration": kling_duration,
+                                "target_duration": target_duration,
+                                "is_segment": False
+                            }
                         else:
                             raise Exception(f"Kling AI task succeeded but no video URL found. Response: {poll_data}")
                     
@@ -1442,10 +1566,96 @@ Return as JSON with: script, character_details, scene_prompt
                         raise Exception(f"Kling AI video generation failed: {error_msg}")
 
                 raise Exception("Kling AI video generation timed out.")
-            except httpx.HTTPStatusError as e:
-                error_text = e.response.text
-                print(f"[KlingAI ERROR] HTTP Error: {e.response.status_code} - {error_text}")
-                return {"error": f"HTTP Error: {e.response.status_code} - {error_text}"}
             except Exception as e:
                 print(f"[KlingAI ERROR] {e}")
                 return {"error": str(e)}
+
+    async def _generate_long_kling_video(self, script: str, video_style: str, target_duration: int, headers: dict) -> dict:
+        """Generate a longer video by combining multiple KlingAI segments"""
+        print(f"[KlingAI DEBUG] Generating long video: {target_duration}s")
+        
+        # Split the script into segments for multiple 10-second videos
+        segments = self._split_script_for_segments(script, target_duration)
+        print(f"[KlingAI DEBUG] Split into {len(segments)} segments")
+        
+        # Generate each segment
+        segment_videos = []
+        for i, segment in enumerate(segments):
+            print(f"[KlingAI DEBUG] Generating segment {i+1}/{len(segments)}")
+            result = await self._generate_single_kling_video(
+                segment, video_style, "10", headers, 10
+            )
+            
+            if "error" in result:
+                return result
+            
+            result["segment_index"] = i
+            segment_videos.append(result)
+        
+        # For now, return the first segment as the main video
+        # In a full implementation, you would merge all segments using FFmpeg
+        main_video = segment_videos[0]
+        main_video["all_segments"] = segment_videos
+        main_video["target_duration"] = target_duration
+        main_video["is_segment"] = True
+        main_video["total_segments"] = len(segments)
+        
+        print(f"[KlingAI DEBUG] Generated {len(segments)} segments for {target_duration}s video")
+        return main_video
+
+    def _split_script_for_segments(self, script: str, target_duration: int) -> List[str]:
+        """Split script into segments for multiple video generation"""
+        # Simple splitting by sentences for now
+        # In a more sophisticated implementation, you might use NLP to split by scenes
+        sentences = script.split('. ')
+        segments = []
+        current_segment = ""
+        
+        for sentence in sentences:
+            if len(current_segment + sentence) < 200:  # Rough character limit per segment
+                current_segment += sentence + ". "
+            else:
+                if current_segment:
+                    segments.append(current_segment.strip())
+                current_segment = sentence + ". "
+        
+        if current_segment:
+            segments.append(current_segment.strip())
+        
+        # Ensure we have at least one segment
+        if not segments:
+            segments = [script]
+        
+        return segments
+
+    def _format_dialogues_for_elevenlabs(self, character_dialogues: List[Dict[str, str]]) -> str:
+        """Format character dialogues for ElevenLabs audio generation"""
+        if not character_dialogues:
+            return ""
+        
+        formatted_dialogues = []
+        for dialogue in character_dialogues:
+            formatted_dialogues.append(f"{dialogue['character']}: {dialogue['text']}")
+        
+        return "\n".join(formatted_dialogues)
+    
+    def _extract_narration_text(self, script: str) -> str:
+        """Extract narration text from script, removing scene descriptions"""
+        lines = script.split('\n')
+        narration_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            # Skip scene descriptions (usually in caps or with specific formatting)
+            if (line.isupper() and len(line) > 2 and len(line) < 50) or \
+               line.startswith('(') and line.endswith(')') or \
+               line.startswith('[') and line.endswith(']') or \
+               line.startswith('INT.') or line.startswith('EXT.') or \
+               line.startswith('FADE') or line.startswith('CUT'):
+                continue
+            
+            # Include dialogue and narration text
+            if line and not line.startswith('    '):  # Not indented dialogue
+                narration_lines.append(line)
+        
+        return "\n".join(narration_lines)

@@ -425,15 +425,16 @@ async def generate_enhanced_speech(
 ):
     """Generate enhanced speech with emotion and speed control"""
     try:
-        elevenlabs_service = ElevenLabsService()
-        audio_url = await elevenlabs_service.generate_enhanced_speech(
+        elevenlabs_service = ElevenLabsService(supabase_client)
+        result = await elevenlabs_service.generate_enhanced_speech(
             text=text,
             voice_id=voice_id,
+            user_id=current_user['id'],
             emotion=emotion,
             speed=speed
         )
         
-        return {"audio_url": audio_url}
+        return result
         
     except Exception as e:
         print(f"Error generating enhanced speech: {e}")

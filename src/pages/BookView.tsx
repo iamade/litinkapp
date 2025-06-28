@@ -4,6 +4,38 @@ import { userService } from "../services/userService";
 import { videoService, VideoScene } from "../services/videoService";
 import { toast } from "react-hot-toast";
 
+// Service Content Display Component
+interface ServiceContentDisplayProps {
+  content: string;
+  maxChars: number;
+}
+
+const ServiceContentDisplay: React.FC<ServiceContentDisplayProps> = ({
+  content,
+  maxChars,
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const shouldTruncate = content.length > maxChars;
+  const displayContent = isExpanded ? content : content.substring(0, maxChars);
+
+  return (
+    <div className="bg-white rounded border p-3">
+      <div className="text-sm text-gray-800 whitespace-pre-wrap">
+        {displayContent}
+        {shouldTruncate && !isExpanded && "..."}
+      </div>
+      {shouldTruncate && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+        >
+          {isExpanded ? "Show Less" : "Show More"}
+        </button>
+      )}
+    </div>
+  );
+};
+
 interface Chapter {
   id: string;
   title: string;
@@ -77,7 +109,8 @@ export default function BookView() {
         // Generate entertainment video for story content
         videoScene = await videoService.generateEntertainmentVideo(
           selectedChapter.id,
-          videoStyle
+          videoStyle,
+          scriptStyle
         );
       }
 
@@ -293,12 +326,83 @@ export default function BookView() {
                             </p>
                             <p>
                               <strong>Style:</strong>{" "}
-                              {currentVideoScene.metadata?.style}
+                              {((
+                                currentVideoScene.metadata as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?.style as string) || "Unknown"}
                             </p>
                             <p>
                               <strong>Status:</strong>{" "}
                               {currentVideoScene.status}
                             </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Service Inputs Display */}
+                      {currentVideoScene?.service_inputs && (
+                        <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                          <h4 className="font-medium text-gray-900 mb-3">
+                            AI Service Inputs
+                          </h4>
+                          <div className="space-y-4">
+                            {/* ElevenLabs Input */}
+                            <div className="border-l-4 border-green-500 pl-4">
+                              <h5 className="font-medium text-green-700 mb-2">
+                                🎤 ElevenLabs (Audio Generation)
+                              </h5>
+                              <p className="text-sm text-gray-600 mb-2">
+                                Content Type:{" "}
+                                {
+                                  currentVideoScene.service_inputs.elevenlabs
+                                    .content_type
+                                }
+                              </p>
+                              <p className="text-sm text-gray-600 mb-2">
+                                Character Count:{" "}
+                                {
+                                  currentVideoScene.service_inputs.elevenlabs
+                                    .character_count
+                                }
+                              </p>
+                              <ServiceContentDisplay
+                                content={
+                                  currentVideoScene.service_inputs.elevenlabs
+                                    .content
+                                }
+                                maxChars={170}
+                              />
+                            </div>
+
+                            {/* KlingAI Input */}
+                            <div className="border-l-4 border-purple-500 pl-4">
+                              <h5 className="font-medium text-purple-700 mb-2">
+                                🎬 KlingAI (Video Generation)
+                              </h5>
+                              <p className="text-sm text-gray-600 mb-2">
+                                Content Type:{" "}
+                                {
+                                  currentVideoScene.service_inputs.klingai
+                                    .content_type
+                                }
+                              </p>
+                              <p className="text-sm text-gray-600 mb-2">
+                                Character Count:{" "}
+                                {
+                                  currentVideoScene.service_inputs.klingai
+                                    .character_count
+                                }
+                              </p>
+                              <ServiceContentDisplay
+                                content={
+                                  currentVideoScene.service_inputs.klingai
+                                    .content
+                                }
+                                maxChars={170}
+                              />
+                            </div>
                           </div>
                         </div>
                       )}
@@ -311,7 +415,10 @@ export default function BookView() {
                       {selectedChapter.title}
                     </h2>
                     <div className="prose max-w-none text-gray-700 leading-relaxed">
-                      {selectedChapter.content}
+                      <ServiceContentDisplay
+                        content={selectedChapter.content}
+                        maxChars={370}
+                      />
                     </div>
 
                     {/* Video Generation Controls */}

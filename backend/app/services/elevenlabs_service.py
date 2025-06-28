@@ -20,11 +20,18 @@ class ElevenLabsService:
         # Ensure audio directory exists
         os.makedirs(self.audio_dir, exist_ok=True)
     
-    async def generate_enhanced_speech(self, text: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM", user_id: str = None) -> Dict[str, Any]:
+    async def generate_enhanced_speech(
+        self, 
+        text: str, 
+        voice_id: str = "21m00Tcm4TlvDq8ikWAM", 
+        user_id: str = None,
+        emotion: str = "neutral",
+        speed: float = 1.0
+    ) -> Dict[str, Any]:
         """Generate enhanced speech with ElevenLabs API"""
         try:
-            # Generate audio
-            audio_data = await self._generate_speech(text, voice_id)
+            # Generate audio with emotion and speed settings
+            audio_data = await self._generate_speech_with_settings(text, voice_id, emotion, speed)
             
             if not audio_data:
                 return {"audio_url": None, "error": "Failed to generate audio"}
@@ -137,6 +144,45 @@ class ElevenLabsService:
         except Exception as e:
             print(f"Error generating sound effect: {e}")
             return None
+
+    async def generate_sound_effects(
+        self, 
+        effect_type: str, 
+        duration: int = 3,
+        intensity: float = 0.5,
+        user_id: str = None
+    ) -> Optional[str]:
+        """Generate sound effects using ElevenLabs (if available) or return placeholder"""
+        try:
+            # For now, return placeholder sound effects
+            # In a real implementation, you might use ElevenLabs' sound generation features
+            # or integrate with other sound effect services
+            
+            effect_mapping = {
+                "ambient": "ambient_background",
+                "action": "action_sequence",
+                "emotional": "emotional_moment",
+                "transition": "scene_transition",
+                "magical": "magical_effect",
+                "nature": "nature_sounds"
+            }
+            
+            effect_name = effect_mapping.get(effect_type, "generic")
+            audio_filename = f"sfx_{effect_name}_{duration}s.mp3"
+            
+            # Generate a simple audio representation
+            placeholder_text = f"Sound effect: {effect_type} at {intensity} intensity for {duration} seconds"
+            result = await self.generate_enhanced_speech(placeholder_text, "21m00Tcm4TlvDq8ikWAM", user_id)
+            
+            if result and result.get("audio_url"):
+                return result["audio_url"]
+            else:
+                # Return placeholder path - in real implementation, generate actual audio
+                return f"/uploads/audio/{audio_filename}"
+            
+        except Exception as e:
+            print(f"Error generating sound effects: {e}")
+            return None
     
     async def mix_audio_tracks(self, audio_tracks: List[Dict[str, Any]], user_id: str = None) -> Dict[str, Any]:
         """Mix multiple audio tracks together"""
@@ -179,30 +225,30 @@ class ElevenLabsService:
             return {"audio_url": None, "error": str(e)}
     
 
-    async def create_audio_narration(self, text: str, narrator_style: str = "narration", background_music: Optional[str] = None) -> dict:
+    async def create_audio_narration(self, text: str, narrator_style: str = "narration", background_music: Optional[str] = None, user_id: str = None) -> dict:
         try:
             # Use narrator_style to get voice settings
             voice_settings = self._get_narrator_voice_settings(narrator_style)
             
             # Generate main narration
-            narration_audio = await self.generate_enhanced_speech(
+            narration_result = await self.generate_enhanced_speech(
                 text=text,
                 voice_id=voice_settings["voice_id"],
-                emotion=voice_settings["emotion"],
-                speed=voice_settings["speed"]
+                user_id=user_id
             )
             
-            if not narration_audio:
+            if not narration_result or not narration_result.get("audio_url"):
                 return None
             
             # Mix with background music if provided
             if background_music:
                 mixed_audio = await self.mix_audio_tracks(
-                    audio_tracks=[narration_audio, background_music]
+                    audio_tracks=[{"url": narration_result["audio_url"]}, {"url": background_music}],
+                    user_id=user_id
                 )
                 return mixed_audio
             
-            return narration_audio
+            return narration_result["audio_url"]
             
         except Exception as e:
             print(f"❌ ElevenLabs create_audio_narration error: {e}")
@@ -242,6 +288,10 @@ class ElevenLabsService:
         except Exception as e:
             print(f"Error fetching voices: {e}")
             return self._get_mock_voices()
+
+    async def list_voices(self) -> List[Dict[str, Any]]:
+        """Alias for get_available_voices for compatibility"""
+        return await self.get_available_voices()
     
     def _get_emotion_style(self, emotion: str) -> float:
         """Map emotion to ElevenLabs style parameter (numeric value)"""
@@ -378,6 +428,56 @@ class ElevenLabsService:
                 "personality": "mysterious"
             }
         ] 
+
+    async def _generate_speech_with_settings(
+        self, 
+        text: str, 
+        voice_id: str, 
+        emotion: str = "neutral", 
+        speed: float = 1.0
+    ) -> Optional[bytes]:
+        """Generate speech with emotion and speed settings"""
+        if not self.api_key:
+            return None
+        
+        try:
+            # Map emotion to style parameter
+            style = self._get_emotion_style(emotion)
+            
+            # Prepare request with emotion and speed settings
+            request_data = {
+                "text": text,
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {
+                    "stability": 0.75,
+                    "similarity_boost": 0.75,
+                    "style": style,
+                    "use_speaker_boost": True,
+                    "speaking_rate": speed
+                }
+            }
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/text-to-speech/{voice_id}",
+                    headers={
+                        "Accept": "audio/mpeg",
+                        "Content-Type": "application/json",
+                        "xi-api-key": self.api_key
+                    },
+                    json=request_data
+                )
+                
+                if response.status_code == 200:
+                    return response.content
+                else:
+                    print(f"ElevenLabs API error: {response.status_code}")
+                    print(f"Response content: {response.text}")
+                    return None
+                    
+        except Exception as e:
+            print(f"Error in _generate_speech_with_settings: {e}")
+            return None
 
     async def _generate_speech(self, text: str, voice_id: str) -> Optional[bytes]:
         """Generate speech using ElevenLabs API"""
