@@ -107,33 +107,159 @@ class RAGService:
         self, 
         chapter_context: Dict[str, Any], 
         video_style: str = "realistic",
-        script_style: str = "screenplay"
-    ) -> str:
-        """Generate optimized video script from chapter context using the full RAG-enhanced prompt. script_style can be 'screenplay' or 'narration'."""
+        script_style: str = "cinematic_movie"
+    ) -> Dict[str, Any]:
+        """Generate optimized video script from chapter context using the full RAG-enhanced prompt. script_style can be 'cinematic_movie' or 'cinematic_narration'."""
         try:
             enhanced_context = chapter_context.get('total_context', chapter_context['chapter']['content'])
             prompt = self._get_script_generation_prompt(enhanced_context, video_style, script_style)
             print(f"[RAG DEBUG] AI Prompt for Video Script:\n{prompt}\n")
             script = await self.ai_service.generate_text_from_prompt(prompt)
-            return script
+            
+            # Extract characters from the generated script
+            characters = self._extract_characters_from_script(script)
+            
+            # Generate character details for each character
+            character_details = await self._generate_character_details(characters, enhanced_context)
+            
+            return {
+                "script": script,
+                "characters": characters,
+                "character_details": character_details,
+                "script_style": script_style,
+                "video_style": video_style
+            }
         except Exception as e:
             print(f"Error generating video script: {e}")
-            return ""
+            return {
+                "script": "",
+                "characters": [],
+                "character_details": "",
+                "script_style": script_style,
+                "video_style": video_style
+            }
     
-    def _get_script_generation_prompt(self, context: str, video_style: str, script_style: str = "screenplay") -> str:
+    def _get_script_generation_prompt(self, context: str, video_style: str, script_style: str = "cinematic_movie") -> str:
         """Construct a prompt based on the full RAG-enhanced context and script_style."""
-        if script_style == "screenplay":
+        if script_style == "cinematic_movie":
             return f"""
-Given the following book and chapter context, generate a detailed screenplay script for a {video_style} style video. The script should include character names in ALL CAPS, dialogue, and scene descriptions in proper screenplay format. Use the context below:
+Given the following book and chapter context, generate a detailed cinematic movie script for a {video_style} style video. 
+
+The script should include:
+1. Character names in ALL CAPS with clear dialogue
+2. Detailed scene descriptions with visual elements
+3. Character actions and movements
+4. Emotional beats and dramatic moments
+5. Proper screenplay formatting with scene headings
+6. Multiple scenes that flow together naturally
+7. Character interactions and dialogue that drive the story
+
+Use the context below:
 
 {context}
+
+Format the script as a proper screenplay with:
+- SCENE HEADINGS (e.g., "INT. ROOM - DAY")
+- Character names in CAPS
+- Dialogue in quotes
+- Action descriptions
+- Multiple scenes for a complete story arc
+
+Return only the screenplay script.
 """
-        else:
+        else:  # cinematic_narration
             return f"""
-Given the following book and chapter context, generate a detailed narration script (prose style, no character lines) for a {video_style} style video. Use the context below:
+Given the following book and chapter context, generate a detailed cinematic narration script for a {video_style} style video.
+
+The script should include:
+1. Engaging narrative storytelling
+2. Descriptive language that paints visual scenes
+3. Character descriptions and motivations
+4. Emotional storytelling elements
+5. Scene transitions and flow
+6. Multiple narrative segments that build the story
+7. Rich, cinematic language suitable for voice-over
+
+Use the context below:
 
 {context}
+
+Format the script as narrative prose with:
+- Descriptive scene openings
+- Character introductions and descriptions
+- Emotional and dramatic moments
+- Smooth transitions between scenes
+- Engaging storytelling language
+
+Return only the narration script.
 """
+    
+    def _extract_characters_from_script(self, script: str) -> List[str]:
+        """Extract character names from the generated script"""
+        try:
+            # Look for character names in ALL CAPS (screenplay format)
+            import re
+            character_pattern = r'\b[A-Z][A-Z\s]+\b'
+            potential_characters = re.findall(character_pattern, script)
+            
+            # Filter out common non-character words and clean up
+            non_characters = {
+                'SCENE', 'INT', 'EXT', 'DAY', 'NIGHT', 'MORNING', 'EVENING', 'CONTINUOUS', 
+                'LATER', 'MOMENTS', 'LATER', 'FADE', 'CUT', 'DISSOLVE', 'THE', 'AND', 'OR',
+                'BUT', 'FOR', 'WITH', 'FROM', 'THAT', 'THIS', 'THESE', 'THOSE', 'WHAT',
+                'WHEN', 'WHERE', 'WHY', 'HOW', 'WHO', 'WHICH', 'WHOSE', 'WHOM'
+            }
+            
+            characters = []
+            for char in potential_characters:
+                char_clean = char.strip()
+                if (len(char_clean) > 2 and 
+                    char_clean not in non_characters and 
+                    not char_clean.isdigit() and
+                    char_clean not in characters):
+                    characters.append(char_clean)
+            
+            # If no characters found in CAPS, try to extract from dialogue
+            if not characters:
+                # Look for dialogue patterns and extract speaker names
+                dialogue_pattern = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*):\s*["\']'
+                dialogue_characters = re.findall(dialogue_pattern, script)
+                characters = list(set(dialogue_characters))
+            
+            return characters[:10]  # Limit to 10 characters
+            
+        except Exception as e:
+            print(f"Error extracting characters: {e}")
+            return []
+    
+    async def _generate_character_details(self, characters: List[str], context: str) -> str:
+        """Generate detailed character descriptions for the extracted characters"""
+        try:
+            if not characters:
+                return "Main character from the story"
+            
+            character_list = ", ".join(characters[:5])  # Limit to 5 characters for details
+            
+            prompt = f"""
+Based on the following story context, provide brief character descriptions for: {character_list}
+
+Context: {context[:2000]}
+
+For each character, provide:
+- Physical appearance
+- Personality traits
+- Role in the story
+- Key characteristics
+
+Format as a concise character guide suitable for video generation.
+"""
+            
+            character_details = await self.ai_service.generate_text_from_prompt(prompt)
+            return character_details
+            
+        except Exception as e:
+            print(f"Error generating character details: {e}")
+            return f"Characters: {', '.join(characters)}"
     
     async def _generate_entertainment_script(self, chapter_context: Dict[str, Any], video_style: str) -> str:
         """Generate entertainment script using OpenAI only (no PlotDrive)."""

@@ -12,9 +12,22 @@ export interface VideoScene {
   book_id?: string;
   book_type?: string;
   script?: string;
+  characters?: string[];
+  character_details?: string;
+  scene_prompt?: string;
   metadata?: Record<string, unknown>;
   elevenlabs_content?: string;
   klingai_prompt?: string;
+  enhanced_audio_url?: string;
+  merged_video_url?: string;
+  klingai_video_url?: string;
+  logs?: string[];
+  parsed_sections?: {
+    scene_descriptions?: string[];
+    narrator_dialogue?: string[];
+    character_dialogue?: string[];
+    narration_text?: string[];
+  };
   service_inputs?: {
     elevenlabs: {
       content: string;
@@ -72,7 +85,7 @@ export const videoService = {
   generateEntertainmentVideo: async (
     chapterId: string,
     animationStyle: string = "animated",
-    scriptStyle: string = "screenplay"
+    scriptStyle: string = "cinematic_movie"
   ): Promise<VideoScene> => {
     const response = await apiClient.post<VideoScene>(
       `/ai/generate-entertainment-video?chapter_id=${encodeURIComponent(
