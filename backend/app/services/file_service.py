@@ -60,8 +60,11 @@ class FileService:
                 raise ValueError("No content provided")
 
             # Update book with extracted content
+            # Clean the content to handle Unicode escape sequences
+            cleaned_content = self._clean_text_content(content)
+            
             self.db.table("books").update({
-                "content": content,
+                "content": cleaned_content,
                 "status": "PROCESSING",
                 "cover_image_url": cover_image_url
             }).eq("id", book_id_to_update).execute()
@@ -76,8 +79,8 @@ class FileService:
                     "book_id": book_id_to_update,
                     "chapter_number": i + 1,
                     "title": chapter_data["title"],
-                    "content": chapter_data["content"],
-                    "summary": chapter_data.get("summary", "")
+                    "content": self._clean_text_content(chapter_data["content"]),
+                    "summary": self._clean_text_content(chapter_data.get("summary", ""))
                 }
                 
                 # Insert chapter
@@ -707,3 +710,40 @@ Return JSON with 'validated_chapters' array and 'issues' array.
                 "content": content,
                 "summary": "Complete story content"
             }]
+
+    def _clean_text_content(self, content: str) -> str:
+        """Clean text content to handle Unicode escape sequences and problematic characters"""
+        if not content:
+            return ""
+        
+        try:
+            # Handle Unicode escape sequences
+            # Replace null bytes and other problematic characters
+            cleaned = content.replace('\x00', '')  # Remove null bytes
+            cleaned = cleaned.replace('\u0000', '')  # Remove Unicode null
+            
+            # Handle other problematic Unicode sequences
+            import re
+            # Remove or replace other problematic Unicode escape sequences
+            cleaned = re.sub(r'\\u[0-9a-fA-F]{4}', '', cleaned)  # Remove \uXXXX sequences
+            cleaned = re.sub(r'\\x[0-9a-fA-F]{2}', '', cleaned)  # Remove \xXX sequences
+            
+            # Normalize Unicode characters
+            import unicodedata
+            cleaned = unicodedata.normalize('NFKC', cleaned)
+            
+            # Remove any remaining control characters except newlines and tabs
+            cleaned = ''.join(char for char in cleaned if unicodedata.category(char)[0] != 'C' or char in '\n\t\r')
+            
+            # Ensure the string is valid UTF-8
+            cleaned = cleaned.encode('utf-8', errors='ignore').decode('utf-8')
+            
+            return cleaned
+            
+        except Exception as e:
+            print(f"Error cleaning text content: {e}")
+            # Fallback: return a safe version of the content
+            try:
+                return content.encode('utf-8', errors='ignore').decode('utf-8')
+            except:
+                return "Content could not be processed due to encoding issues."
