@@ -20,7 +20,7 @@ DEBUG=false
 SECRET_KEY=your-super-secret-key-change-this-in-production
 
 # CORS Configuration (comma-separated list)
-ALLOWED_HOSTS=https://litinkai.com,https://www.litinkai.com,https://litink.com,https://www.litink.com
+ALLOWED_HOSTS=https://www.litinkai.com,https://litinkai.com
 
 # Supabase Configuration
 SUPABASE_URL=your-supabase-url
@@ -56,10 +56,8 @@ CELERY_RESULT_BACKEND=your-redis-url/0
 
 The backend is now configured to accept requests from:
 
-- `https://litinkai.com`
 - `https://www.litinkai.com`
-- `https://litink.com`
-- `https://www.litink.com`
+- `https://litinkai.com`
 - Local development URLs (localhost)
 
 You can override this by setting the `ALLOWED_HOSTS` environment variable with a comma-separated list of domains.
@@ -70,7 +68,7 @@ You can override this by setting the `ALLOWED_HOSTS` environment variable with a
 
 - The frontend will automatically use the production backend URL
 - The `netlify.toml` file is configured to redirect API calls to the Render backend
-- Deploy to Netlify with the domain `litinkai.com`
+- Deploy to Netlify with the domain `www.litinkai.com`
 
 ### 2. Backend (Render)
 
