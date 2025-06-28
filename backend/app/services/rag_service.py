@@ -143,55 +143,55 @@ class RAGService:
         """Construct a prompt based on the full RAG-enhanced context and script_style."""
         if script_style == "cinematic_movie":
             return f"""
-Given the following book and chapter context, generate a detailed cinematic movie script for a {video_style} style video. 
+Given the following book and chapter context, generate a detailed tutorial script for a {video_style} style video. 
 
 The script should include:
-1. Character names in ALL CAPS with clear dialogue
-2. Detailed scene descriptions with visual elements
-3. Character actions and movements
-4. Emotional beats and dramatic moments
-5. Proper screenplay formatting with scene headings
-6. Multiple scenes that flow together naturally
-7. Character interactions and dialogue that drive the story
+1. Clear educational content delivery
+2. Conversational teaching tone
+3. Step-by-step explanations
+4. Examples and demonstrations
+5. Natural speech patterns and transitions
+6. Engaging educational narrative
+7. Focus on learning objectives
 
 Use the context below:
 
 {context}
 
-Format the script as a proper screenplay with:
-- SCENE HEADINGS (e.g., "INT. ROOM - DAY")
-- Character names in CAPS
-- Dialogue in quotes
-- Action descriptions
-- Multiple scenes for a complete story arc
+Format the script as a tutorial with:
+- Clear introduction of the topic
+- Educational content delivery
+- Examples and explanations
+- Natural speech patterns
+- Engaging teaching style
 
-Return only the screenplay script.
+Return only the tutorial script.
 """
         else:  # cinematic_narration
             return f"""
-Given the following book and chapter context, generate a detailed cinematic narration script for a {video_style} style video.
+Given the following book and chapter context, generate a detailed tutorial narration script for a {video_style} style video.
 
 The script should include:
-1. Engaging narrative storytelling
-2. Descriptive language that paints visual scenes
-3. Character descriptions and motivations
-4. Emotional storytelling elements
-5. Scene transitions and flow
-6. Multiple narrative segments that build the story
-7. Rich, cinematic language suitable for voice-over
+1. Engaging educational storytelling
+2. Descriptive language that explains concepts
+3. Clear learning objectives
+4. Educational content delivery
+5. Smooth transitions between topics
+6. Multiple educational segments that build understanding
+7. Rich, educational language suitable for voice-over
 
 Use the context below:
 
 {context}
 
-Format the script as narrative prose with:
-- Descriptive scene openings
-- Character introductions and descriptions
-- Emotional and dramatic moments
-- Smooth transitions between scenes
-- Engaging storytelling language
+Format the script as educational narration with:
+- Clear topic introductions
+- Concept explanations and descriptions
+- Educational examples and demonstrations
+- Smooth transitions between topics
+- Engaging educational language
 
-Return only the narration script.
+Return only the tutorial narration script.
 """
     
     def _extract_characters_from_script(self, script: str) -> List[str]:

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
+import time
 
 from app.schemas import AIRequest, AIResponse, QuizGenerationRequest, User, AnalyzeChapterSafetyRequest
 from app.services.ai_service import AIService
@@ -490,26 +491,195 @@ async def generate_sound_effects(
 
 @router.post("/generate-audio-narration")
 async def generate_audio_narration(
-    text: str,
-    background_music: str = "ambient",
-    voice_id: str = "21m00Tcm4TlvDq8ikWAM",
+    request: dict,
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Generate complete audio narration with background music"""
+    """Generate audio narration for learning content using RAG embeddings and ElevenLabs"""
     try:
-        elevenlabs_service = ElevenLabsService()
-        audio_url = await elevenlabs_service.generate_audio_narration(
-            text=text,
-            background_music=background_music,
-            voice_id=voice_id,
+        chapter_id = request.get("chapter_id")
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required")
+        
+        # Verify chapter access
+        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        
+        chapter_data = chapter_response.data
+        book_data = chapter_data['books']
+        
+        # Check access permissions
+        if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
+        
+        # Check if this is a learning book
+        if book_data['book_type'] != 'learning':
+            raise HTTPException(status_code=400, detail="Audio narration is only available for learning books")
+        
+        # Generate tutorial script using RAG and AI
+        ai_service = AIService()
+        
+        # Create tutorial prompt based on chapter content
+        tutorial_prompt = f"""
+        Create an engaging audio tutorial script for the following learning content:
+        
+        Chapter Title: {chapter_data['title']}
+        Chapter Content: {chapter_data['content'][:1000]}...
+        
+        Requirements:
+        1. Write a clear, educational tutorial script for audio narration
+        2. Use a conversational, teaching tone suitable for audio learning
+        3. Break down complex concepts into digestible parts
+        4. Include examples and explanations
+        5. Keep it engaging and informative
+        6. Target duration: 3-5 minutes when narrated
+        7. Format as a simple speaking script (no character names, no scene descriptions)
+        8. Focus on educational content delivery
+        9. Use natural speech patterns and transitions
+        
+        Write the script as if a teacher is directly speaking to students about this topic.
+        Do NOT include character names, scene descriptions, or cinematic elements.
+        Format the script for ElevenLabs audio narration.
+        """
+        
+        # Generate tutorial script using AI
+        tutorial_script = await ai_service.generate_tutorial_script(tutorial_prompt)
+        
+        if not tutorial_script:
+            raise HTTPException(status_code=500, detail="Failed to generate tutorial script")
+        
+        # Generate audio using ElevenLabs
+        elevenlabs_service = ElevenLabsService(supabase_client)
+        
+        audio_result = await elevenlabs_service.create_audio_narration(
+            text=tutorial_script,
+            narrator_style="professional",
             user_id=current_user['id']
         )
         
-        return {"audio_url": audio_url}
+        if not audio_result:
+            raise HTTPException(status_code=500, detail="Failed to generate audio narration")
+        
+        # Store the result in database (optional)
+        audio_record = {
+            "chapter_id": chapter_id,
+            "book_id": book_data['id'],
+            "user_id": current_user['id'],
+            "content_type": "audio_narration",
+            "content_url": audio_result,
+            "script": tutorial_script,
+            "duration": 180,  # Default 3 minutes
+            "status": "ready"
+        }
+        
+        supabase_client.table('learning_content').insert(audio_record).execute()
+        
+        return {
+            "id": f"audio_{int(time.time())}",
+            "audio_url": audio_result,
+            "duration": 180,
+            "status": "ready"
+        }
         
     except Exception as e:
         print(f"Error generating audio narration: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/generate-realistic-video")
+async def generate_realistic_video(
+    request: dict,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Generate realistic video tutorial using RAG embeddings and Tavus"""
+    try:
+        chapter_id = request.get("chapter_id")
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required")
+        
+        # Verify chapter access
+        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        
+        chapter_data = chapter_response.data
+        book_data = chapter_data['books']
+        
+        # Check access permissions
+        if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
+        
+        # Check if this is a learning book
+        if book_data['book_type'] != 'learning':
+            raise HTTPException(status_code=400, detail="Realistic video is only available for learning books")
+        
+        # Generate tutorial script using RAG and AI
+        ai_service = AIService()
+        
+        # Create tutorial prompt for video
+        tutorial_prompt = f"""
+        Create an engaging tutorial script for the following learning content:
+        
+        Chapter Title: {chapter_data['title']}
+        Chapter Content: {chapter_data['content'][:1000]}...
+        
+        Requirements:
+        1. Write a clear, educational tutorial script for a teacher/tutor to present
+        2. Use a conversational, teaching tone
+        3. Break down complex concepts into digestible parts
+        4. Include examples and explanations
+        5. Target duration: 3-5 minutes when spoken
+        6. Format as a simple speaking script (no character names, no scene descriptions)
+        7. Focus on educational content delivery
+        8. Use natural speech patterns and transitions
+        
+        Write the script as if a teacher is directly speaking to students about this topic.
+        Do NOT include character names, scene descriptions, or cinematic elements.
+        """
+        
+        # Generate tutorial script using AI
+        tutorial_script = await ai_service.generate_tutorial_script(tutorial_prompt)
+        
+        if not tutorial_script:
+            raise HTTPException(status_code=500, detail="Failed to generate tutorial script")
+        
+        # Generate video using Tavus
+        video_service = VideoService(supabase_client)
+        
+        # Use Tavus directly with the tutorial script
+        tavus_result = await video_service._generate_tavus_video(tutorial_script, "realistic")
+        
+        if not tavus_result or "error" in tavus_result:
+            raise HTTPException(status_code=500, detail=f"Failed to generate realistic video: {tavus_result}")
+        
+        video_url = tavus_result.get("video_url")
+        if not video_url:
+            raise HTTPException(status_code=500, detail="No video URL returned from Tavus")
+        
+        # Store the result in database
+        video_record = {
+            "chapter_id": chapter_id,
+            "book_id": book_data['id'],
+            "user_id": current_user['id'],
+            "content_type": "realistic_video",
+            "content_url": video_url,
+            "script": tutorial_script,
+            "duration": tavus_result.get("duration", 180),
+            "status": "ready"
+        }
+        
+        supabase_client.table('learning_content').insert(video_record).execute()
+        
+        return {
+            "id": f"video_{int(time.time())}",
+            "video_url": video_url,
+            "duration": tavus_result.get("duration", 180),
+            "status": "ready"
+        }
+        
+    except Exception as e:
+        print(f"Error generating realistic video: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/list-voices")

@@ -383,29 +383,48 @@ Return only the summary text, not JSON.
             return f"Summary for {chapter_title}"
 
     async def generate_text_from_prompt(self, prompt: str) -> str:
-        """Generate text from a given prompt using OpenAI."""
+        """Generate text from a custom prompt"""
         if not self.client:
-            return "Mock AI response for: " + prompt[:100] # Return a mock response if client not available
-
+            return f"Mock response for: {prompt[:100]}..."
+        
         try:
-            response = await asyncio.wait_for(
-                self.client.chat.completions.create(
-                    model="gpt-3.5-turbo-1106", # Or a more capable model if needed
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=1500
-                ),
-                timeout=settings.AI_TIMEOUT_SECONDS
+            response = await self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a helpful AI assistant that generates high-quality content based on user prompts."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=2000
             )
-            return response.choices[0].message.content.strip()
-        except asyncio.TimeoutError:
-            print("AI service request timed out in generate_text_from_prompt")
-            return "AI generation timed out."
+            
+            return response.choices[0].message.content
+            
         except Exception as e:
             print(f"AI service error in generate_text_from_prompt: {e}")
-            return "Error generating text."
+            return f"Error generating content: {str(e)}"
+
+    async def generate_tutorial_script(self, prompt: str) -> str:
+        """Generate tutorial script for learning content"""
+        if not self.client:
+            return f"Mock tutorial script for: {prompt[:100]}..."
+        
+        try:
+            response = await self.client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert educator and content creator. Create engaging, clear tutorial scripts that are perfect for audio narration or video presentation. Focus on making complex topics accessible and engaging."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=2000
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            print(f"AI service error in generate_tutorial_script: {e}")
+            return f"Error generating tutorial script: {str(e)}"
 
     async def _generate_scene_descriptions(self, chapter_id: str, rag_service) -> List[str]:
         """Generate scene descriptions using OpenAI and RAGService context."""

@@ -15,6 +15,15 @@ interface UserStats {
   badges_earned: number;
   quizzes_taken: number;
   average_quiz_score: number;
+  books_uploaded: number;
+}
+
+interface LearningContentResult {
+  id: string;
+  audio_url?: string;
+  video_url?: string;
+  duration: number;
+  status: string;
 }
 
 export const userService = {
@@ -41,6 +50,26 @@ export const userService = {
   },
   getChapters: async (bookId: string) => {
     return apiClient.get(`/books/${bookId}/chapters`);
+  },
+  generateAudioNarration: async (
+    chapterId: string
+  ): Promise<LearningContentResult> => {
+    return apiClient.post<LearningContentResult>(
+      `/ai/generate-audio-narration`,
+      {
+        chapter_id: chapterId,
+      }
+    );
+  },
+  generateRealisticVideo: async (
+    chapterId: string
+  ): Promise<LearningContentResult> => {
+    return apiClient.post<LearningContentResult>(
+      `/ai/generate-realistic-video`,
+      {
+        chapter_id: chapterId,
+      }
+    );
   },
 };
 
