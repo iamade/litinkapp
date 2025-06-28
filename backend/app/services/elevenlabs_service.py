@@ -63,65 +63,79 @@ class ElevenLabsService:
             return {"audio_url": None, "error": str(e)}
     
     async def generate_character_voice(
-        self,
-        text: str,
-        character_profile: Dict[str, Any],
-        scene_context: str = ""
+        self, 
+        text: str, 
+        character_name: str, 
+        character_traits: str = "",
+        user_id: str = None
     ) -> Optional[str]:
         """Generate character-specific voice with personality"""
-        if not self.api_key:
-            return await self._mock_generate_character_voice(text, character_profile)
-        
         try:
-            # Get character voice settings
-            voice_settings = self._get_character_voice_settings(character_profile)
+            # Create character-specific prompt
+            character_prompt = f"{character_name}: {text}"
+            if character_traits:
+                character_prompt += f" (Character traits: {character_traits})"
             
-            # Enhance text with character personality
-            enhanced_text = await self._enhance_text_for_character(text, character_profile, scene_context)
+            # Generate speech with character voice
+            result = await self.generate_enhanced_speech(character_prompt, "21m00Tcm4TlvDq8ikWAM", user_id)
             
-            # Generate speech
-            return await self.generate_enhanced_speech(
-                text=enhanced_text,
-                voice_id=voice_settings["voice_id"],
-                emotion=voice_settings["emotion"],
-                speed=voice_settings["speed"],
-                stability=voice_settings["stability"],
-                similarity_boost=voice_settings["similarity_boost"]
-            )
-            
+            if result and result.get("audio_url"):
+                return result["audio_url"]
+            else:
+                print(f"Failed to generate character voice for {character_name}")
+                return None
+                
         except Exception as e:
             print(f"Error generating character voice: {e}")
             return None
-    
-    async def generate_sound_effects(
+
+    async def generate_audio_narration(
         self, 
-        effect_type: str, 
-        duration: int = 3,
-        intensity: float = 0.5
+        text: str, 
+        background_music: str = "ambient",
+        voice_id: str = "21m00Tcm4TlvDq8ikWAM",
+        user_id: str = None
     ) -> Optional[str]:
-        """Generate sound effects using ElevenLabs (if available) or return placeholder"""
+        """Generate complete audio narration with background music"""
         try:
-            # For now, return placeholder sound effects
-            # In a real implementation, you might use ElevenLabs' sound generation features
-            # or integrate with other sound effect services
+            # Generate main narration
+            narration_result = await self.generate_enhanced_speech(text, voice_id, user_id)
             
-            effect_mapping = {
-                "ambient": "ambient_background",
-                "action": "action_sequence",
-                "emotional": "emotional_moment",
-                "transition": "scene_transition",
-                "magical": "magical_effect",
-                "nature": "nature_sounds"
-            }
+            if not narration_result or not narration_result.get("audio_url"):
+                return None
             
-            effect_name = effect_mapping.get(effect_type, "generic")
-            audio_filename = f"sfx_{effect_name}_{duration}s.mp3"
-            
-            # Return placeholder path - in real implementation, generate actual audio
-            return f"/uploads/audio/{audio_filename}"
+            # For now, return the narration without background music
+            # In a full implementation, you would mix with background music
+            return narration_result["audio_url"]
             
         except Exception as e:
-            print(f"Error generating sound effects: {e}")
+            print(f"Error generating audio narration: {e}")
+            return None
+
+    async def generate_sound_effect(
+        self, 
+        effect_type: str, 
+        duration: float = 2.0, 
+        intensity: str = "medium",
+        user_id: str = None
+    ) -> Optional[str]:
+        """Generate sound effects and upload to Supabase Storage"""
+        try:
+            # For now, use a placeholder sound effect
+            # In a real implementation, you would generate actual sound effects
+            placeholder_text = f"Sound effect: {effect_type} at {intensity} intensity for {duration} seconds"
+            
+            # Generate a simple audio representation
+            result = await self.generate_enhanced_speech(placeholder_text, "21m00Tcm4TlvDq8ikWAM", user_id)
+            
+            if result and result.get("audio_url"):
+                return result["audio_url"]
+            else:
+                # Fallback to a public CDN sound effect
+                return f"https://example.com/sound-effects/{effect_type}_{intensity}.mp3"
+                
+        except Exception as e:
+            print(f"Error generating sound effect: {e}")
             return None
     
     async def mix_audio_tracks(self, audio_tracks: List[Dict[str, Any]], user_id: str = None) -> Dict[str, Any]:

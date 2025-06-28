@@ -453,7 +453,8 @@ async def generate_character_voice(
         audio_url = await elevenlabs_service.generate_character_voice(
             text=text,
             character_name=character_name,
-            character_traits=character_traits
+            character_traits=character_traits,
+            user_id=current_user['id']
         )
         
         return {"audio_url": audio_url}
@@ -476,7 +477,8 @@ async def generate_sound_effects(
         audio_url = await elevenlabs_service.generate_sound_effect(
             effect_type=effect_type,
             duration=duration,
-            intensity=intensity
+            intensity=intensity,
+            user_id=current_user['id']
         )
         
         return {"audio_url": audio_url}
@@ -499,7 +501,8 @@ async def generate_audio_narration(
         audio_url = await elevenlabs_service.generate_audio_narration(
             text=text,
             background_music=background_music,
-            voice_id=voice_id
+            voice_id=voice_id,
+            user_id=current_user['id']
         )
         
         return {"audio_url": audio_url}

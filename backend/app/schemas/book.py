@@ -41,6 +41,7 @@ class BookCreate(BookBase):
     user_id: str
     status: str
     book_type: str
+    original_file_storage_path: Optional[str] = None
 
 
 class BookUpdate(BaseModel):
@@ -54,6 +55,7 @@ class BookUpdate(BaseModel):
     tags: Optional[List[str]] = None
     language: Optional[str] = None
     estimated_duration: Optional[int] = None
+    original_file_storage_path: Optional[str] = None
 
 
 class Book(BookBase):

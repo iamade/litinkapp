@@ -266,6 +266,7 @@ async def upload_book(
         user_id=current_user["id"],
         book_type=book_type,
         status="QUEUED",
+        original_file_storage_path=storage_path
     )
     
     try:
@@ -494,9 +495,12 @@ async def delete_book(
 
         # Delete the original book file
         try:
-            storage_path = f"{user_id}/{book['title']}"
-            supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([storage_path])
-            print(f"Deleted book file: {storage_path}")
+            original_file_storage_path = book.get("original_file_storage_path")
+            if original_file_storage_path:
+                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([original_file_storage_path])
+                print(f"Deleted book file: {original_file_storage_path}")
+            else:
+                print(f"Warning: No original_file_storage_path found for book {book_id}")
         except Exception as e:
             print(f"Warning: Could not delete book file: {e}")
 
