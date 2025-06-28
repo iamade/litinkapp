@@ -28,11 +28,11 @@ export default function Navbar() {
           <Link to="/" className="flex items-center space-x-3">
             <img
               src="/litink.png"
-              alt="LinkAI Logo"
+              alt="LitinkAI Logo"
               className="h-10 w-10 object-contain"
             />
             <span className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-              LinkAI
+              LitinkAI
             </span>
           </Link>
 
