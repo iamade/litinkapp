@@ -17,7 +17,18 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     ALGORITHM: str = "HS256"
     
-    # CORS
+      # CORS PRODUCTION
+    ALLOWED_HOSTS: List[str] = [
+        # "http://localhost:3000", 
+        # "http://localhost:5173", 
+        # "https://localhost:5173",
+        "https://litinkai.com",
+        "https://www.litinkai.com",
+        "https://www.litinkai.org"
+    ]
+    
+    
+    # CORS DEVELOPMENT
     ALLOWED_HOSTS: List[str] = [
         "http://localhost:3000", 
         "http://localhost:5173", 
