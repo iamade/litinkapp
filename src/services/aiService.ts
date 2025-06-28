@@ -25,4 +25,16 @@ export const aiService = {
     });
     return response.text;
   },
+
+  analyzeChapterSafety: async (chapterId: string): Promise<any> => {
+    try {
+      const response = await apiClient.post("/ai/analyze-chapter-safety", {
+        chapter_id: chapterId,
+      });
+      return response.data;
+    } catch (error) {
+      console.error("Error analyzing chapter safety:", error);
+      throw error;
+    }
+  },
 };

@@ -12,7 +12,34 @@ export interface VideoScene {
   book_id?: string;
   book_type?: string;
   script?: string;
-  metadata?: any;
+  characters?: string[];
+  character_details?: string;
+  scene_prompt?: string;
+  metadata?: Record<string, unknown>;
+  elevenlabs_content?: string;
+  klingai_prompt?: string;
+  enhanced_audio_url?: string;
+  merged_video_url?: string;
+  klingai_video_url?: string;
+  logs?: string[];
+  parsed_sections?: {
+    scene_descriptions?: string[];
+    narrator_dialogue?: string[];
+    character_dialogue?: string[];
+    narration_text?: string[];
+  };
+  service_inputs?: {
+    elevenlabs: {
+      content: string;
+      content_type: string;
+      character_count: number;
+    };
+    klingai: {
+      content: string;
+      content_type: string;
+      character_count: number;
+    };
+  };
 }
 
 export interface AvatarConfig {
@@ -34,7 +61,8 @@ export const videoService = {
         chapterId
       )}&video_style=${encodeURIComponent(
         videoStyle
-      )}&include_context=${includeContext}`
+      )}&include_context=${includeContext}`,
+      {}
     );
     return response;
   },
@@ -47,7 +75,8 @@ export const videoService = {
     const response = await apiClient.post<VideoScene>(
       `/ai/generate-tutorial-video?chapter_id=${encodeURIComponent(
         chapterId
-      )}&tutorial_style=${encodeURIComponent(tutorialStyle)}`
+      )}&tutorial_style=${encodeURIComponent(tutorialStyle)}`,
+      {}
     );
     return response;
   },
@@ -55,19 +84,23 @@ export const videoService = {
   // Entertainment video generation for story content
   generateEntertainmentVideo: async (
     chapterId: string,
-    animationStyle: string = "animated"
+    animationStyle: string = "animated",
+    scriptStyle: string = "cinematic_movie"
   ): Promise<VideoScene> => {
     const response = await apiClient.post<VideoScene>(
       `/ai/generate-entertainment-video?chapter_id=${encodeURIComponent(
         chapterId
-      )}&animation_style=${encodeURIComponent(animationStyle)}`
+      )}&animation_style=${encodeURIComponent(
+        animationStyle
+      )}&script_style=${encodeURIComponent(scriptStyle)}`,
+      {}
     );
     return response;
   },
 
   // Get available avatars for video generation
-  getAvailableAvatars: async (): Promise<any[]> => {
-    const response = await apiClient.get<{ avatars: any[] }>(
+  getAvailableAvatars: async (): Promise<AvatarConfig[]> => {
+    const response = await apiClient.get<{ avatars: AvatarConfig[] }>(
       "/ai/video-avatars"
     );
     return response.avatars;

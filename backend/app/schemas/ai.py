@@ -10,4 +10,7 @@ class AIResponse(BaseModel):
 class QuizGenerationRequest(BaseModel):
     book_id: int
     num_questions: int = 5
-    difficulty: str = "medium" 
+    difficulty: str = "medium"
+
+class AnalyzeChapterSafetyRequest(BaseModel):
+    chapter_id: str 

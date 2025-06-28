@@ -266,6 +266,7 @@ async def upload_book(
         user_id=current_user["id"],
         book_type=book_type,
         status="QUEUED",
+        original_file_storage_path=storage_path
     )
     
     try:
@@ -458,19 +459,77 @@ async def delete_book(
     if book["user_id"] != current_user["id"]:
         raise HTTPException(status_code=403, detail="Not authorized to delete this book")
 
-    # 3. Delete the file from Supabase Storage
-    # Construct storage path (adjust if your pattern is different)
-    storage_path = f"{current_user['id']}/{book['title']}"
+    user_id = current_user["id"]
+
+    # 3. Delete all user files from Supabase Storage
     try:
-        supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([storage_path])
+        # Delete covers
+        try:
+            covers = supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).list(path=f"users/{user_id}/covers")
+            if covers:
+                cover_paths = [f"users/{user_id}/covers/{item['name']}" for item in covers]
+                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove(cover_paths)
+                print(f"Deleted {len(cover_paths)} cover files for user {user_id}")
+        except Exception as e:
+            print(f"Warning: Could not delete cover files: {e}")
+
+        # Delete audio files
+        try:
+            audio_files = supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).list(path=f"users/{user_id}/audio")
+            if audio_files:
+                audio_paths = [f"users/{user_id}/audio/{item['name']}" for item in audio_files]
+                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove(audio_paths)
+                print(f"Deleted {len(audio_paths)} audio files for user {user_id}")
+        except Exception as e:
+            print(f"Warning: Could not delete audio files: {e}")
+
+        # Delete video files
+        try:
+            video_files = supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).list(path=f"users/{user_id}/videos")
+            if video_files:
+                video_paths = [f"users/{user_id}/videos/{item['name']}" for item in video_files]
+                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove(video_paths)
+                print(f"Deleted {len(video_paths)} video files for user {user_id}")
+        except Exception as e:
+            print(f"Warning: Could not delete video files: {e}")
+
+        # Delete the original book file
+        try:
+            original_file_storage_path = book.get("original_file_storage_path")
+            if original_file_storage_path:
+                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([original_file_storage_path])
+                print(f"Deleted book file: {original_file_storage_path}")
+            else:
+                print(f"Warning: No original_file_storage_path found for book {book_id}")
+        except Exception as e:
+            print(f"Warning: Could not delete book file: {e}")
+
     except Exception as e:
         # Log the error but continue, as the book record should still be deleted
-        print(f"Warning: Could not delete file from storage: {e}")
+        print(f"Warning: Could not delete files from storage: {e}")
 
-    # 4. Delete the book record from the database.
-    #    CASCADE DELETE will handle chapters and embeddings.
+    # 4. Delete related records from database
     try:
+        # Delete video records
+        supabase_client.table("videos").delete().eq("book_id", book_id).execute()
+        print(f"Deleted video records for book {book_id}")
+        
+        # Delete chapter embeddings
+        supabase_client.table("chapter_embeddings").delete().eq("book_id", book_id).execute()
+        print(f"Deleted chapter embeddings for book {book_id}")
+        
+        # Delete chapters (this will cascade to other related records)
+        supabase_client.table("chapters").delete().eq("book_id", book_id).execute()
+        print(f"Deleted chapters for book {book_id}")
+        
+        # Delete book embeddings
+        supabase_client.table("book_embeddings").delete().eq("book_id", book_id).execute()
+        print(f"Deleted book embeddings for book {book_id}")
+        
+        # Finally, delete the book record
         supabase_client.table("books").delete().eq("id", book_id).execute()
+        print(f"Deleted book record {book_id}")
+        
     except APIError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e.message}")
 
@@ -533,8 +592,9 @@ async def extract_cover_from_page(
         img_buffer = io.BytesIO()
         pix.save(img_buffer, format="png")
         img_buffer.seek(0)
-        # Upload to Supabase Storage
-        storage_path = f"covers/cover_{book_id}.png"
+        # Upload to Supabase Storage under user folder
+        user_id = current_user["id"]
+        storage_path = f"users/{user_id}/covers/cover_{book_id}.png"
         supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
             path=storage_path,
             file=img_buffer.getvalue(),
@@ -561,7 +621,8 @@ async def upload_cover_image(
         raise HTTPException(status_code=403, detail="Not authorized to modify this book")
     # Read file into memory
     img_bytes = await cover_image.read()
-    storage_path = f"covers/cover_{book_id}_upload.png"
+    user_id = current_user["id"]
+    storage_path = f"users/{user_id}/covers/cover_{book_id}_upload.png"
     supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
         path=storage_path,
         file=img_bytes,

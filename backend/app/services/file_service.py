@@ -14,6 +14,7 @@ import tempfile
 import math
 import hashlib
 import json
+import time
 
 
 class FileService:
@@ -48,15 +49,10 @@ class FileService:
                     temp_file.write(file_content)
                     temp_file_path = temp_file.name
 
-                extracted_data = self.process_book_file(temp_file_path, original_filename)
+                extracted_data = self.process_book_file(temp_file_path, original_filename, user_id)
                 content = extracted_data.get("text", "")
                 author_name = extracted_data.get("author")
-                cover_path = extracted_data.get("cover_image_path")
-
-                # --- TOC-based chapter extraction for PDF using real page numbers ---
-                chapters_data = None
-                if original_filename.lower().endswith('.pdf'):
-                    chapters_data = self.extract_chapters_from_pdf_with_toc(temp_file_path)
+                cover_image_url = extracted_data.get("cover_image_url")
 
                 # Clean up temporary file
                 os.unlink(temp_file_path)
@@ -66,11 +62,12 @@ class FileService:
             # Update book with extracted content
             self.db.table("books").update({
                 "content": content,
-                "status": "PROCESSING"
+                "status": "PROCESSING",
+                "cover_image_url": cover_image_url
             }).eq("id", book_id_to_update).execute()
 
-            # Extract chapters
-            chapters = await self.extract_chapters_with_ai_validation(content, book_type)
+            # NEW FLOW: Extract chapters following the specified order
+            chapters = await self.extract_chapters_with_new_flow(content, book_type, original_filename, storage_path)
             
             # Create chapters in database
             for i, chapter_data in enumerate(chapters):
@@ -129,28 +126,30 @@ class FileService:
             }).eq("id", book_id_to_update).execute()
             raise e
 
-    def process_book_file(self, file_path: str, filename: str) -> Dict[str, Any]:
+    def process_book_file(self, file_path: str, filename: str, user_id: str = None) -> Dict[str, Any]:
         """Process different file types and extract content"""
         try:
             if filename.lower().endswith('.pdf'):
-                return self.process_pdf(file_path)
+                return self.process_pdf(file_path, user_id)
             elif filename.lower().endswith('.docx'):
-                return self.process_docx(file_path)
+                return self.process_docx(file_path, user_id)
             elif filename.lower().endswith('.txt'):
-                return self.process_txt(file_path)
+                return self.process_txt(file_path, user_id)
             else:
                 raise ValueError(f"Unsupported file type: {filename}")
         except Exception as e:
             print(f"Error processing file {filename}: {e}")
             raise
 
-    def process_pdf(self, file_path: str) -> Dict[str, Any]:
-        """Extract text and metadata from PDF"""
+    def process_pdf(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
+        """Extract text, metadata, and cover image from PDF"""
         try:
             doc = fitz.open(file_path)
             text = ""
             author = None
+            cover_image_url = None
             
+            # Extract text from all pages
             for page in doc:
                 text += page.get_text()
             
@@ -159,37 +158,110 @@ class FileService:
             if metadata and metadata.get('author'):
                 author = metadata['author']
             
+            # Extract cover image from first page
+            if user_id and len(doc) > 0:
+                try:
+                    first_page = doc[0]
+                    # Get images from the first page
+                    images = first_page.get_images(full=True)
+                    
+                    if images:
+                        # Extract the first image as cover
+                        xref = images[0][0]
+                        pix = fitz.Pixmap(doc, xref)
+                        
+                        # Save to in-memory buffer
+                        import io
+                        img_buffer = io.BytesIO()
+                        pix.save(img_buffer, format="png")
+                        img_buffer.seek(0)
+                        
+                        # Upload to Supabase Storage under user folder
+                        storage_path = f"users/{user_id}/covers/cover_{int(time.time())}.png"
+                        self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
+                            path=storage_path,
+                            file=img_buffer.getvalue(),
+                            file_options={"content-type": "image/png"}
+                        )
+                        
+                        # Get the public URL
+                        cover_image_url = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).get_public_url(storage_path)
+                        print(f"[COVER EXTRACTION] Cover image uploaded: {cover_image_url}")
+                        
+                        # Clean up
+                        pix = None
+                        img_buffer.close()
+                    else:
+                        print("[COVER EXTRACTION] No images found on first page")
+                except Exception as e:
+                    print(f"[COVER EXTRACTION] Error extracting cover: {e}")
+            
             doc.close()
             
             return {
                 "text": text,
                 "author": author,
-                "cover_image_path": None
+                "cover_image_url": cover_image_url
             }
         except Exception as e:
             print(f"Error processing PDF: {e}")
             raise
 
-    def process_docx(self, file_path: str) -> Dict[str, Any]:
-        """Extract text from DOCX"""
+    def process_docx(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
+        """Extract text and cover image from DOCX"""
         try:
             doc = docx.Document(file_path)
             text = ""
+            cover_image_url = None
             
+            # Extract text from paragraphs
             for paragraph in doc.paragraphs:
                 text += paragraph.text + "\n"
+            
+            # Extract cover image from DOCX (first image found)
+            if user_id:
+                try:
+                    # DOCX files store images in the document's media folder
+                    # This is a simplified approach - in practice, you might need more complex extraction
+                    import zipfile
+                    import tempfile
+                    import os
+                    
+                    # Extract images from DOCX (DOCX is a ZIP file)
+                    with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                        image_files = [f for f in zip_ref.namelist() if f.startswith('word/media/') and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))]
+                        
+                        if image_files:
+                            # Get the first image
+                            first_image = image_files[0]
+                            with zip_ref.open(first_image) as image_file:
+                                img_data = image_file.read()
+                                
+                                # Upload to Supabase Storage under user folder
+                                storage_path = f"users/{user_id}/covers/cover_{int(time.time())}.png"
+                                self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
+                                    path=storage_path,
+                                    file=img_data,
+                                    file_options={"content-type": "image/png"}
+                                )
+                                
+                                # Get the public URL
+                                cover_image_url = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).get_public_url(storage_path)
+                                print(f"[COVER EXTRACTION] Cover image uploaded: {cover_image_url}")
+                except Exception as e:
+                    print(f"[COVER EXTRACTION] Error extracting cover from DOCX: {e}")
             
             return {
                 "text": text,
                 "author": None,
-                "cover_image_path": None
+                "cover_image_url": cover_image_url
             }
         except Exception as e:
             print(f"Error processing DOCX: {e}")
             raise
 
-    def process_txt(self, file_path: str) -> Dict[str, Any]:
-        """Extract text from TXT"""
+    def process_txt(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
+        """Extract text from TXT (no cover image)"""
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 text = file.read()
@@ -197,7 +269,7 @@ class FileService:
             return {
                 "text": text,
                 "author": None,
-                "cover_image_path": None
+                "cover_image_url": None
             }
         except Exception as e:
             print(f"Error processing TXT: {e}")
@@ -548,12 +620,90 @@ Return JSON with 'validated_chapters' array and 'issues' array.
             print(f"AI validation failed: {e}")
             return chapters
 
-    async def extract_chapters_with_ai_validation(self, content: str, book_type: str) -> List[Dict[str, Any]]:
-        """Extract chapters and validate with AI"""
-        # First extract chapters using regex
+    async def extract_chapters_with_new_flow(
+        self, 
+        content: str, 
+        book_type: str, 
+        original_filename: Optional[str] = None,
+        storage_path: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Extract chapters following the new flow order"""
+        
+        # Step 1: Try regex patterns for structured content
+        print("[CHAPTER EXTRACTION] Step 1: Attempting regex pattern matching...")
         chapters = self.extract_chapters_with_structure(content, book_type)
         
-        # Then validate with AI
-        validated_chapters = await self.validate_chapters_with_ai(chapters, content, book_type)
+        if chapters and len(chapters) > 1:
+            print(f"[CHAPTER EXTRACTION] Step 1 SUCCESS: Found {len(chapters)} chapters using regex patterns")
+        else:
+            print("[CHAPTER EXTRACTION] Step 1 FAILED: No structured chapters found, proceeding to AI generation")
+            
+            # Step 2: Use AI generation for unstructured content
+            print("[CHAPTER EXTRACTION] Step 2: Using AI generation for unstructured content...")
+            try:
+                ai_chapters = await self.ai_service.generate_chapters_from_content(content, book_type)
+                if ai_chapters and len(ai_chapters) > 0:
+                    chapters = ai_chapters
+                    print(f"[CHAPTER EXTRACTION] Step 2 SUCCESS: AI generated {len(chapters)} chapters")
+                else:
+                    print("[CHAPTER EXTRACTION] Step 2 FAILED: AI generation failed, using fallback")
+                    chapters = self._get_fallback_chapters(content, book_type)
+            except Exception as e:
+                print(f"[CHAPTER EXTRACTION] Step 2 ERROR: {e}, using fallback")
+                chapters = self._get_fallback_chapters(content, book_type)
         
-        return validated_chapters
+        # Step 3: Use PDF TOC extraction for quality check (if available)
+        if original_filename and original_filename.lower().endswith('.pdf') and storage_path:
+            print("[CHAPTER EXTRACTION] Step 3: Attempting PDF TOC extraction for quality check...")
+            try:
+                # Download file temporarily for TOC extraction
+                with tempfile.NamedTemporaryFile(delete=False, suffix=original_filename) as temp_file:
+                    file_content = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(path=storage_path)
+                    temp_file.write(file_content)
+                    temp_file_path = temp_file.name
+                
+                toc_chapters = self.extract_chapters_from_pdf_with_toc(temp_file_path)
+                os.unlink(temp_file_path)
+                
+                if toc_chapters and len(toc_chapters) > 0:
+                    print(f"[CHAPTER EXTRACTION] Step 3 SUCCESS: TOC found {len(toc_chapters)} chapters")
+                    # Use TOC chapters if they provide better structure
+                    if len(toc_chapters) >= len(chapters):
+                        chapters = toc_chapters
+                        print("[CHAPTER EXTRACTION] Step 3: Using TOC chapters (better structure)")
+                    else:
+                        print("[CHAPTER EXTRACTION] Step 3: Keeping previous chapters (TOC has fewer chapters)")
+                else:
+                    print("[CHAPTER EXTRACTION] Step 3: No TOC found, keeping previous chapters")
+            except Exception as e:
+                print(f"[CHAPTER EXTRACTION] Step 3 ERROR: {e}, keeping previous chapters")
+        
+        # Step 4: Validate with AI for quality
+        print("[CHAPTER EXTRACTION] Step 4: Validating chapters with AI...")
+        try:
+            validated_chapters = await self.validate_chapters_with_ai(chapters, content, book_type)
+            if validated_chapters and len(validated_chapters) > 0:
+                chapters = validated_chapters
+                print(f"[CHAPTER EXTRACTION] Step 4 SUCCESS: AI validated {len(chapters)} chapters")
+            else:
+                print("[CHAPTER EXTRACTION] Step 4: AI validation returned no changes, keeping original chapters")
+        except Exception as e:
+            print(f"[CHAPTER EXTRACTION] Step 4 ERROR: {e}, keeping original chapters")
+        
+        print(f"[CHAPTER EXTRACTION] FINAL RESULT: {len(chapters)} chapters extracted")
+        return chapters
+
+    def _get_fallback_chapters(self, content: str, book_type: str) -> List[Dict[str, Any]]:
+        """Fallback method when all other extraction methods fail"""
+        if book_type == "learning":
+            return [{
+                "title": "Complete Learning Content",
+                "content": content,
+                "summary": "Complete learning material"
+            }]
+        else:
+            return [{
+                "title": "Complete Story",
+                "content": content,
+                "summary": "Complete story content"
+            }]

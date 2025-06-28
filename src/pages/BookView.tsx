@@ -4,6 +4,38 @@ import { userService } from "../services/userService";
 import { videoService, VideoScene } from "../services/videoService";
 import { toast } from "react-hot-toast";
 
+// Service Content Display Component
+interface ServiceContentDisplayProps {
+  content: string;
+  maxChars: number;
+}
+
+const ServiceContentDisplay: React.FC<ServiceContentDisplayProps> = ({
+  content,
+  maxChars,
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const shouldTruncate = content.length > maxChars;
+  const displayContent = isExpanded ? content : content.substring(0, maxChars);
+
+  return (
+    <div className="bg-white rounded border p-3">
+      <div className="text-sm text-gray-800 whitespace-pre-wrap">
+        {displayContent}
+        {shouldTruncate && !isExpanded && "..."}
+      </div>
+      {shouldTruncate && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
+        >
+          {isExpanded ? "Show Less" : "Show More"}
+        </button>
+      )}
+    </div>
+  );
+};
+
 interface Chapter {
   id: string;
   title: string;
@@ -28,16 +60,17 @@ export default function BookView() {
   const { id } = useParams<{ id: string }>();
   const [book, setBook] = useState<Book | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
-  const [videoStyle, setVideoStyle] = useState<"cartoon" | "realistic">(
-    "realistic"
-  );
   const [videoUrls, setVideoUrls] = useState<Record<string, string>>({});
   const [videoScenes, setVideoScenes] = useState<Record<string, VideoScene>>(
     {}
   );
-  const [generating, setGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [scriptStyle, setScriptStyle] = useState<string>("screenplay");
+  const [scriptStyle, setScriptStyle] = useState<string>("cinematic_movie");
+  const [animationStyle, setAnimationStyle] = useState<string>("animated");
+  const [currentVideoScene, setCurrentVideoScene] = useState<VideoScene | null>(
+    null
+  );
+  const [showFullScript, setShowFullScript] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -61,48 +94,19 @@ export default function BookView() {
   };
 
   const handleGenerateVideo = async () => {
-    if (!book || !selectedChapter) return;
+    if (!selectedChapter) return;
 
-    setGenerating(true);
     try {
-      let videoScene: VideoScene;
-
-      if (book.book_type === "learning") {
-        // Generate tutorial video for learning content
-        videoScene = await videoService.generateTutorialVideo(
-          selectedChapter.id,
-          "udemy" // You can make this configurable
-        );
-      } else {
-        // Generate entertainment video for story content
-        videoScene = await videoService.generateEntertainmentVideo(
-          selectedChapter.id,
-          videoStyle
-        );
-      }
-
-      // Store the full video scene data
-      setVideoScenes((prev) => ({ ...prev, [selectedChapter.id]: videoScene }));
-
-      // Also store the video URL for backward compatibility
-      if (videoScene.video_url) {
-        setVideoUrls((prev) => ({
-          ...prev,
-          [selectedChapter.id]: videoScene.video_url,
-        }));
-      }
+      const result = await videoService.generateEntertainmentVideo(
+        selectedChapter.id,
+        animationStyle,
+        scriptStyle
+      );
+      setCurrentVideoScene(result);
+      console.log("Video generation result:", result);
     } catch (error) {
       console.error("Error generating video:", error);
-      // Fallback to legacy method if RAG generation fails
-      await handleLegacyVideoGeneration();
-    } finally {
-      setGenerating(false);
     }
-  };
-
-  const handleLegacyVideoGeneration = async () => {
-    // Optionally show an error or fallback message, but do not use a mock video URL
-    toast.error("Video generation failed. Please try again later.");
   };
 
   const handleDeleteVideo = async () => {
@@ -162,12 +166,95 @@ export default function BookView() {
   if (!book)
     return <div className="p-8 text-center text-red-500">Book not found.</div>;
 
-  const currentVideoScene = selectedChapter
-    ? videoScenes[selectedChapter.id]
-    : null;
   const currentVideoUrl = selectedChapter
     ? videoUrls[selectedChapter.id]
     : null;
+
+  // Chapter content display with reduced character limit
+  const renderChapterContent = () => {
+    const content = selectedChapter?.content || "";
+    const maxChars = 70;
+
+    if (content.length <= maxChars) {
+      return <p className="text-gray-700">{content}</p>;
+    }
+
+    return (
+      <div>
+        <p className="text-gray-700">
+          {showFullScript ? content : `${content.substring(0, maxChars)}...`}
+        </p>
+        <button
+          onClick={() => setShowFullScript(!showFullScript)}
+          className="text-blue-600 hover:text-blue-800 text-sm mt-1"
+        >
+          {showFullScript ? "Show Less" : "Show More"}
+        </button>
+      </div>
+    );
+  };
+
+  // Full script display with Show More/Show Less
+  const renderFullScript = () => {
+    if (!currentVideoScene?.script) return null;
+
+    const script = currentVideoScene.script;
+    const maxChars = 200;
+
+    return (
+      <div className="bg-gray-50 p-4 rounded-lg mb-4">
+        <h4 className="font-semibold text-gray-800 mb-2">Generated Script</h4>
+        <div className="text-sm text-gray-700">
+          {script.length <= maxChars ? (
+            <pre className="whitespace-pre-wrap">{script}</pre>
+          ) : (
+            <div>
+              <pre className="whitespace-pre-wrap">
+                {showFullScript
+                  ? script
+                  : `${script.substring(0, maxChars)}...`}
+              </pre>
+              <button
+                onClick={() => setShowFullScript(!showFullScript)}
+                className="text-blue-600 hover:text-blue-800 text-sm mt-2"
+              >
+                {showFullScript ? "Show Less" : "Show More"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Character list display
+  const renderCharacters = () => {
+    if (
+      !currentVideoScene?.characters ||
+      currentVideoScene.characters.length === 0
+    )
+      return null;
+
+    return (
+      <div className="bg-blue-50 p-4 rounded-lg mb-4">
+        <h4 className="font-semibold text-blue-800 mb-2">
+          Characters in Script
+        </h4>
+        <div className="flex flex-wrap gap-2">
+          {currentVideoScene.characters.map(
+            (character: string, index: number) => (
+              <span
+                key={index}
+                className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm"
+              >
+                {character}
+              </span>
+            )
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -293,12 +380,163 @@ export default function BookView() {
                             </p>
                             <p>
                               <strong>Style:</strong>{" "}
-                              {currentVideoScene.metadata?.style}
+                              {((
+                                currentVideoScene.metadata as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?.style as string) || "Unknown"}
                             </p>
                             <p>
                               <strong>Status:</strong>{" "}
                               {currentVideoScene.status}
                             </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Service Inputs Display */}
+                      {currentVideoScene?.service_inputs && (
+                        <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                          <h4 className="font-medium text-gray-900 mb-3">
+                            AI Service Inputs
+                          </h4>
+                          <div className="space-y-4">
+                            {/* ElevenLabs Input */}
+                            <div className="border-l-4 border-green-500 pl-4">
+                              <h5 className="font-medium text-green-700 mb-2">
+                                🎤 ElevenLabs (Audio Generation)
+                              </h5>
+                              <p className="text-sm text-gray-600 mb-2">
+                                Content Type:{" "}
+                                {
+                                  currentVideoScene.service_inputs.elevenlabs
+                                    .content_type
+                                }
+                              </p>
+                              <p className="text-sm text-gray-600 mb-2">
+                                Character Count:{" "}
+                                {
+                                  currentVideoScene.service_inputs.elevenlabs
+                                    .character_count
+                                }
+                              </p>
+                              <ServiceContentDisplay
+                                content={
+                                  currentVideoScene.service_inputs.elevenlabs
+                                    .content
+                                }
+                                maxChars={170}
+                              />
+                            </div>
+
+                            {/* KlingAI Input */}
+                            <div className="border-l-4 border-purple-500 pl-4">
+                              <h5 className="font-medium text-purple-700 mb-2">
+                                🎬 KlingAI (Video Generation)
+                              </h5>
+                              <p className="text-sm text-gray-600 mb-2">
+                                Content Type:{" "}
+                                {
+                                  currentVideoScene.service_inputs.klingai
+                                    .content_type
+                                }
+                              </p>
+                              <p className="text-sm text-gray-600 mb-2">
+                                Character Count:{" "}
+                                {
+                                  currentVideoScene.service_inputs.klingai
+                                    .character_count
+                                }
+                              </p>
+                              <ServiceContentDisplay
+                                content={
+                                  currentVideoScene.service_inputs.klingai
+                                    .content
+                                }
+                                maxChars={170}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Full Script Display */}
+                      {renderFullScript()}
+
+                      {/* Characters Display */}
+                      {renderCharacters()}
+
+                      {/* Character Details */}
+                      {currentVideoScene?.character_details && (
+                        <div className="mt-4 p-4 bg-green-50 rounded-lg">
+                          <h4 className="font-medium text-green-800 mb-2">
+                            Character Details
+                          </h4>
+                          <p className="text-sm text-green-700">
+                            {currentVideoScene.character_details}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Parsed Script Sections (Debug) */}
+                      {currentVideoScene?.parsed_sections && (
+                        <div className="mt-4 p-4 bg-yellow-50 rounded-lg">
+                          <h4 className="font-medium text-yellow-800 mb-2">
+                            Parsed Script Sections
+                          </h4>
+                          <div className="space-y-3">
+                            {currentVideoScene.parsed_sections
+                              .scene_descriptions && (
+                              <div>
+                                <h5 className="font-medium text-yellow-700 text-sm">
+                                  Scene Descriptions (KlingAI):
+                                </h5>
+                                <div className="text-xs text-yellow-600 bg-yellow-100 p-2 rounded max-h-32 overflow-y-auto">
+                                  {currentVideoScene.parsed_sections.scene_descriptions.map(
+                                    (desc: string, index: number) => (
+                                      <div key={index} className="mb-1">
+                                        • {desc}
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {currentVideoScene.parsed_sections
+                              .narrator_dialogue && (
+                              <div>
+                                <h5 className="font-medium text-yellow-700 text-sm">
+                                  Narrator Dialogue (ElevenLabs):
+                                </h5>
+                                <div className="text-xs text-yellow-600 bg-yellow-100 p-2 rounded max-h-32 overflow-y-auto">
+                                  {currentVideoScene.parsed_sections.narrator_dialogue.map(
+                                    (dialogue: string, index: number) => (
+                                      <div key={index} className="mb-1">
+                                        • "{dialogue}"
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            {currentVideoScene.parsed_sections
+                              .character_dialogue && (
+                              <div>
+                                <h5 className="font-medium text-yellow-700 text-sm">
+                                  Character Dialogue (ElevenLabs):
+                                </h5>
+                                <div className="text-xs text-yellow-600 bg-yellow-100 p-2 rounded max-h-32 overflow-y-auto">
+                                  {currentVideoScene.parsed_sections.character_dialogue.map(
+                                    (dialogue: string, index: number) => (
+                                      <div key={index} className="mb-1">
+                                        • "{dialogue}"
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -311,23 +549,28 @@ export default function BookView() {
                       {selectedChapter.title}
                     </h2>
                     <div className="prose max-w-none text-gray-700 leading-relaxed">
-                      {selectedChapter.content}
+                      {renderChapterContent()}
                     </div>
 
                     {/* Video Generation Controls */}
                     <div className="flex items-center gap-4 mt-6">
                       <select
                         className="border rounded-lg px-3 py-2 text-sm"
-                        value={videoStyle}
+                        value={animationStyle}
                         onChange={(e) =>
-                          setVideoStyle(
-                            e.target.value as "cartoon" | "realistic"
+                          setAnimationStyle(
+                            e.target.value as
+                              | "cartoon"
+                              | "realistic"
+                              | "cinematic"
+                              | "fantasy"
                           )
                         }
-                        disabled={generating}
                       >
                         <option value="cartoon">Cartoon Style</option>
                         <option value="realistic">Realistic Style</option>
+                        <option value="cinematic">Cinematic Style</option>
+                        <option value="fantasy">Fantasy Style</option>
                       </select>
                       <div className="mb-4">
                         <label
@@ -342,19 +585,19 @@ export default function BookView() {
                           onChange={(e) => setScriptStyle(e.target.value)}
                           className="border rounded px-2 py-1"
                         >
-                          <option value="screenplay">
-                            Screenplay (character dialog)
+                          <option value="cinematic_movie">
+                            Cinematic Movie (character dialog)
                           </option>
-                          <option value="narration">Narration (prose)</option>
+                          <option value="cinematic_narration">
+                            Cinematic Narration (voice-over)
+                          </option>
                         </select>
                       </div>
-                      {/* Place Generate Scene button directly under the dropdowns */}
                       <button
                         className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded mb-4"
                         onClick={handleGenerateVideo}
-                        disabled={generating}
                       >
-                        {generating ? "Generating..." : "Generate Scene"}
+                        Generate Scene
                       </button>
                     </div>
                   </div>
