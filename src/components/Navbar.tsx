@@ -32,7 +32,7 @@ export default function Navbar() {
               className="h-10 w-10 object-contain"
             />
             <span className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-              Litink
+              LitinkAI
             </span>
           </Link>
 
