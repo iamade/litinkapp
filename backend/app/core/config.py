@@ -18,7 +18,23 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     
     # CORS
-    ALLOWED_HOSTS: List[str] = ["http://localhost:3000", "http://localhost:5173", "https://localhost:5173"]
+    ALLOWED_HOSTS: List[str] = [
+        "http://localhost:3000", 
+        "http://localhost:5173", 
+        "https://localhost:5173",
+        "https://www.litinkai.com",
+        "https://litinkai.com",
+        "https://www.litink.com",
+        "https://litink.com"
+    ]
+    
+    @property
+    def get_allowed_hosts(self) -> List[str]:
+        """Get allowed hosts from environment or use defaults"""
+        env_hosts = os.getenv("ALLOWED_HOSTS")
+        if env_hosts:
+            return [host.strip() for host in env_hosts.split(",")]
+        return self.ALLOWED_HOSTS
     
     # Supabase Configuration (Primary Database)
     SUPABASE_URL: str
