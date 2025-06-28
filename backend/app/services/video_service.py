@@ -695,60 +695,115 @@ class VideoService:
             return self._get_mock_avatars()
     
     async def _poll_video_status(self, video_id: str, scene_description: str) -> Dict[str, Any]:
-        """Poll video generation status"""
-        max_attempts = 60  # 10 minutes max
-        attempt = 0
-        
-        while attempt < max_attempts:
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"{self.base_url}/videos/{video_id}",
-                        headers={"x-api-key": self.api_key}
-                    )
+        """Poll for video completion status"""
+        try:
+            print(f"🔄 Polling for video completion: {video_id}")
+            
+            headers = {
+                "x-api-key": settings.TAVUS_API_KEY,
+                "Content-Type": "application/json"
+            }
+            
+            # Increase polling attempts and intervals for longer videos
+            max_attempts = 120  # 10 minutes with 5-second intervals
+            attempt = 0
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                while attempt < max_attempts:
+                    attempt += 1
                     
-                    if response.status_code == 200:
-                        data = response.json()
-                        print(f"📊 Polling response: {data}")
+                    try:
+                        response = await client.get(
+                            f"{self.base_url}/videos/{video_id}",
+                            headers=headers
+                        )
                         
-                        # Handle different response formats
-                        status = data.get("status") or data.get("data", {}).get("status")
+                        print(f"📊 Polling response: {response.json()}")
                         
-                        if status == "ready" or status == "completed":
-                            # Extract video URL from response
-                            video_url = data.get("download_url") or data.get("video_url") or data.get("data", {}).get("download_url")
+                        if response.status_code == 200:
+                            data = response.json()
+                            status = data.get("status", "unknown")
                             
+                            if status == "completed":
+                                print(f"✅ Video completed: {video_id}")
+                                video_url = data.get("download_url") or data.get("video_url")
+                                hosted_url = data.get("hosted_url")
+                                
+                                if video_url:
+                                    return {
+                                        "video_id": video_id,
+                                        "video_url": video_url,
+                                        "hosted_url": hosted_url,
+                                        "download_url": data.get("download_url"),
+                                        "duration": data.get("duration", 180),
+                                        "status": "completed"
+                                    }
+                                else:
+                                    print("⚠️ Video completed but no URL found")
+                                    return {
+                                        "video_id": video_id,
+                                        "hosted_url": hosted_url,
+                                        "status": "completed_no_download"
+                                    }
+                            
+                            elif status == "failed":
+                                print(f"❌ Video generation failed: {video_id}")
+                                return {
+                                    "video_id": video_id,
+                                    "status": "failed",
+                                    "error": data.get("error", "Unknown error")
+                                }
+                            
+                            elif status in ["queued", "generating"]:
+                                progress = data.get("generation_progress", "0/100")
+                                print(f"⏳ Video status: {status} (attempt {attempt}/{max_attempts}) - Progress: {progress}")
+                                
+                                # Wait longer between polls for generating status
+                                await asyncio.sleep(10 if status == "generating" else 5)
+                                continue
+                            
+                            else:
+                                print(f"⚠️ Unknown status: {status}")
+                                await asyncio.sleep(5)
+                                continue
+                        
+                        elif response.status_code == 404:
+                            print(f"❌ Video not found: {video_id}")
                             return {
-                                "id": video_id,
-                                "title": scene_description,
-                                "description": "AI-generated video content",
-                                "video_url": video_url,
-                                "thumbnail_url": data.get("thumbnail_url") or data.get("data", {}).get("thumbnail_url"),
-                                "duration": data.get("duration", 180),
-                                "status": "ready"
+                                "video_id": video_id,
+                                "status": "not_found"
                             }
-                        elif status == "failed" or status == "error":
-                            print(f"❌ Video generation failed: {data}")
-                            break
+                        
                         else:
-                            print(f"⏳ Video status: {status} (attempt {attempt + 1}/{max_attempts})")
-                
-                # Wait 10 seconds before next poll
-                await asyncio.sleep(10)
-                attempt += 1
-                
-            except Exception as e:
-                print(f"❌ Polling error: {e}")
-                break
-        
-        # Return error or timeout result
-        return {
-            "id": video_id,
-            "title": scene_description,
-            "description": "Video generation failed or timed out",
-            "video_url": None,
-            "status": "error"
-        }
+                            print(f"❌ Polling failed: {response.status_code}")
+                            await asyncio.sleep(5)
+                            continue
+                    
+                    except httpx.TimeoutException:
+                        print(f"⏰ Timeout on attempt {attempt}, retrying...")
+                        await asyncio.sleep(5)
+                        continue
+                    
+                    except Exception as e:
+                        print(f"❌ Error polling video: {e}")
+                        await asyncio.sleep(5)
+                        continue
+            
+            # If we get here, we've exceeded max attempts
+            print(f"⏰ Video generation timed out after {max_attempts * 5} seconds")
+            return {
+                "video_id": video_id,
+                "status": "timeout",
+                "message": f"Video generation took longer than expected (max {max_attempts * 5} seconds)"
+            }
+            
+        except Exception as e:
+            print(f"❌ Error in video polling: {e}")
+            return {
+                "video_id": video_id,
+                "status": "error",
+                "error": str(e)
+            }
     
     def _get_avatar_id(self, style: str) -> str:
         """Get avatar ID based on style"""
@@ -2358,3 +2413,122 @@ Return as JSON with: script, character_details, scene_prompt
             return "HIGH"
         else:
             return "VERY HIGH"
+
+    async def _download_and_store_video(self, video_url: str, filename: str, user_id: str) -> str:
+        """Download video from URL and store in Supabase"""
+        try:
+            print(f"📥 Downloading video from: {video_url}")
+            
+            # Download video to temporary file
+            import tempfile
+            import httpx
+            
+            fd, temp_path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+            
+            async with httpx.AsyncClient(timeout=300.0) as client:  # 5 minute timeout for large videos
+                response = await client.get(video_url)
+                response.raise_for_status()
+                
+                with open(temp_path, 'wb') as f:
+                    f.write(response.content)
+            
+            print(f"✅ Video downloaded to: {temp_path}")
+            
+            # Upload to Supabase Storage
+            supabase_url = await self._serve_video_from_supabase(temp_path, filename, user_id)
+            
+            # Clean up temporary file
+            os.unlink(temp_path)
+            
+            print(f"✅ Video uploaded to Supabase: {supabase_url}")
+            return supabase_url
+            
+        except Exception as e:
+            print(f"❌ Error downloading/storing video: {e}")
+            return None
+
+    async def _combine_videos_with_ffmpeg(self, video_urls: List[str], output_filename: str, user_id: str) -> str:
+        """Combine multiple videos using FFmpeg"""
+        try:
+            print(f"🎬 Combining {len(video_urls)} videos using FFmpeg")
+            
+            import tempfile
+            import subprocess
+            import httpx
+            
+            # Download all videos to temporary files
+            temp_video_paths = []
+            
+            for i, video_url in enumerate(video_urls):
+                fd, temp_path = tempfile.mkstemp(suffix=f"_part_{i}.mp4")
+                os.close(fd)
+                
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    response = await client.get(video_url)
+                    response.raise_for_status()
+                    
+                    with open(temp_path, 'wb') as f:
+                        f.write(response.content)
+                
+                temp_video_paths.append(temp_path)
+                print(f"✅ Downloaded video {i+1}/{len(video_urls)}: {temp_path}")
+            
+            # Create file list for FFmpeg
+            fd, file_list_path = tempfile.mkstemp(suffix=".txt")
+            os.close(fd)
+            
+            with open(file_list_path, 'w') as f:
+                for video_path in temp_video_paths:
+                    f.write(f"file '{video_path}'\n")
+            
+            # Create output file path
+            fd, output_path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+            
+            # Run FFmpeg to concatenate videos
+            ffmpeg_cmd = [
+                'ffmpeg',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', file_list_path,
+                '-c', 'copy',  # Copy streams without re-encoding for speed
+                '-y',  # Overwrite output file
+                output_path
+            ]
+            
+            print(f"🔄 Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+            
+            result = subprocess.run(
+                ffmpeg_cmd,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minute timeout
+            )
+            
+            if result.returncode != 0:
+                print(f"❌ FFmpeg failed: {result.stderr}")
+                return None
+            
+            print(f"✅ Videos combined successfully: {output_path}")
+            
+            # Upload combined video to Supabase
+            supabase_url = await self._serve_video_from_supabase(output_path, output_filename, user_id)
+            
+            # Clean up temporary files
+            for temp_path in temp_video_paths:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            
+            if os.path.exists(file_list_path):
+                os.unlink(file_list_path)
+            
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+            
+            print(f"✅ Combined video uploaded: {supabase_url}")
+            return supabase_url
+            
+        except Exception as e:
+            print(f"❌ Error combining videos: {e}")
+            return None

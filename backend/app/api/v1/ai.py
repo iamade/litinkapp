@@ -647,36 +647,68 @@ async def generate_realistic_video(
         # Generate video using Tavus
         video_service = VideoService(supabase_client)
         
-        # Use Tavus directly with the tutorial script
-        tavus_result = await video_service._generate_tavus_video(tutorial_script, "realistic")
-        
-        if not tavus_result or "error" in tavus_result:
-            raise HTTPException(status_code=500, detail=f"Failed to generate realistic video: {tavus_result}")
-        
-        video_url = tavus_result.get("video_url")
-        if not video_url:
-            raise HTTPException(status_code=500, detail="No video URL returned from Tavus")
-        
-        # Store the result in database
-        video_record = {
+        # Store initial record with pending status
+        initial_record = {
             "chapter_id": chapter_id,
             "book_id": book_data['id'],
             "user_id": current_user['id'],
             "content_type": "realistic_video",
-            "content_url": video_url,
+            "content_url": None,
+            "tavus_url": None,
+            "tavus_video_id": None,
             "script": tutorial_script,
-            "duration": tavus_result.get("duration", 180),
-            "status": "ready"
+            "duration": 180,
+            "status": "processing"
         }
         
-        supabase_client.table('learning_content').insert(video_record).execute()
+        db_result = supabase_client.table('learning_content').insert(initial_record).execute()
+        content_id = db_result.data[0]['id'] if db_result.data else None
         
-        return {
-            "id": f"video_{int(time.time())}",
-            "video_url": video_url,
-            "duration": tavus_result.get("duration", 180),
-            "status": "ready"
+        # Use Tavus directly with the tutorial script
+        tavus_result = await video_service._generate_tavus_video(tutorial_script, "realistic")
+        
+        if not tavus_result:
+            # Update record with failed status
+            if content_id:
+                supabase_client.table('learning_content').update({
+                    "status": "failed",
+                    "error_message": "Tavus video generation failed"
+                }).eq("id", content_id).execute()
+            raise HTTPException(status_code=500, detail="Failed to generate realistic video")
+        
+        # Extract Tavus information
+        tavus_video_id = tavus_result.get("video_id")
+        tavus_url = tavus_result.get("hosted_url") or tavus_result.get("video_url")
+        download_url = tavus_result.get("download_url")
+        final_video_url = tavus_result.get("video_url")
+        
+        # Update record with Tavus information
+        update_data = {
+            "tavus_url": tavus_url,
+            "tavus_video_id": tavus_video_id,
+            "status": "ready" if final_video_url else "processing"
         }
+        
+        if final_video_url:
+            update_data["content_url"] = final_video_url
+            update_data["duration"] = tavus_result.get("duration", 180)
+        
+        if content_id:
+            supabase_client.table('learning_content').update(update_data).eq("id", content_id).execute()
+        
+        # Return response
+        response_data = {
+            "id": content_id or f"video_{int(time.time())}",
+            "tavus_url": tavus_url,
+            "tavus_video_id": tavus_video_id,
+            "status": "ready" if final_video_url else "processing"
+        }
+        
+        if final_video_url:
+            response_data["video_url"] = final_video_url
+            response_data["duration"] = tavus_result.get("duration", 180)
+        
+        return response_data
         
     except Exception as e:
         print(f"Error generating realistic video: {e}")
@@ -730,3 +762,153 @@ async def analyze_chapter_safety(
     except Exception as e:
         print(f"Error analyzing chapter safety: {e}")
         raise HTTPException(status_code=500, detail=f"Error analyzing chapter safety: {str(e)}")
+
+@router.get("/check-video-status/{content_id}")
+async def check_video_status(
+    content_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Check the status of video generation and handle completion"""
+    try:
+        # Get content record
+        content_response = supabase_client.table('learning_content').select('*').eq('id', content_id).single().execute()
+        if not content_response.data:
+            raise HTTPException(status_code=404, detail="Content not found")
+        
+        content_data = content_response.data
+        
+        # Check access permissions
+        if content_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this content")
+        
+        # If status is already ready, return the data
+        if content_data['status'] == 'ready':
+            return {
+                "id": content_id,
+                "status": "ready",
+                "video_url": content_data['content_url'],
+                "tavus_url": content_data.get('tavus_url'),
+                "duration": content_data.get('duration', 180)
+            }
+        
+        # If status is processing and we have a Tavus video ID, check its status
+        if content_data['status'] == 'processing' and content_data.get('tavus_video_id'):
+            video_service = VideoService(supabase_client)
+            
+            # Check Tavus status
+            tavus_status = await video_service._poll_video_status(
+                content_data['tavus_video_id'], 
+                f"Video for content {content_id}"
+            )
+            
+            if tavus_status['status'] == 'completed':
+                # Download and process the video
+                video_url = tavus_status.get('video_url')
+                if video_url:
+                    # Download video and upload to Supabase
+                    final_video_url = await video_service._download_and_store_video(
+                        video_url, 
+                        f"video_{content_id}.mp4",
+                        current_user['id']
+                    )
+                    
+                    # Update database record
+                    supabase_client.table('learning_content').update({
+                        "status": "ready",
+                        "content_url": final_video_url,
+                        "duration": tavus_status.get('duration', 180)
+                    }).eq("id", content_id).execute()
+                    
+                    return {
+                        "id": content_id,
+                        "status": "ready",
+                        "video_url": final_video_url,
+                        "tavus_url": content_data.get('tavus_url'),
+                        "duration": tavus_status.get('duration', 180)
+                    }
+                else:
+                    # Video completed but no download URL
+                    return {
+                        "id": content_id,
+                        "status": "completed_no_download",
+                        "tavus_url": content_data.get('tavus_url'),
+                        "message": "Video completed but download URL not available"
+                    }
+            
+            elif tavus_status['status'] == 'failed':
+                # Update database with failed status
+                supabase_client.table('learning_content').update({
+                    "status": "failed",
+                    "error_message": tavus_status.get('error', 'Video generation failed')
+                }).eq("id", content_id).execute()
+                
+                return {
+                    "id": content_id,
+                    "status": "failed",
+                    "error": tavus_status.get('error', 'Video generation failed')
+                }
+            
+            elif tavus_status['status'] == 'timeout':
+                return {
+                    "id": content_id,
+                    "status": "timeout",
+                    "tavus_url": content_data.get('tavus_url'),
+                    "message": tavus_status.get('message', 'Video generation timed out')
+                }
+            
+            else:
+                # Still processing
+                return {
+                    "id": content_id,
+                    "status": "processing",
+                    "tavus_url": content_data.get('tavus_url'),
+                    "tavus_video_id": content_data.get('tavus_video_id'),
+                    "progress": tavus_status.get('generation_progress', '0/100')
+                }
+        
+        # Return current status
+        return {
+            "id": content_id,
+            "status": content_data['status'],
+            "tavus_url": content_data.get('tavus_url'),
+            "error_message": content_data.get('error_message')
+        }
+        
+    except Exception as e:
+        print(f"Error checking video status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/combine-videos")
+async def combine_videos(
+    request: dict,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Combine multiple videos using FFmpeg"""
+    try:
+        video_urls = request.get("video_urls", [])
+        if not video_urls or len(video_urls) < 2:
+            raise HTTPException(status_code=400, detail="At least 2 video URLs are required")
+        
+        video_service = VideoService(supabase_client)
+        
+        # Combine videos using FFmpeg
+        combined_video_url = await video_service._combine_videos_with_ffmpeg(
+            video_urls, 
+            f"combined_video_{int(time.time())}.mp4",
+            current_user['id']
+        )
+        
+        if not combined_video_url:
+            raise HTTPException(status_code=500, detail="Failed to combine videos")
+        
+        return {
+            "combined_video_url": combined_video_url,
+            "source_videos": video_urls,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        print(f"Error combining videos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
