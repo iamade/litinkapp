@@ -72,7 +72,7 @@ export default function HomePage() {
           
           <p className="text-xl sm:text-2xl text-white/90 mb-12 max-w-3xl mx-auto leading-relaxed">
             Transform any book into immersive AI-powered learning adventures or interactive entertainment experiences. 
-            The future of reading is here.
+            The future of reading is here at Litink.com.
           </p>
           
           <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
@@ -95,7 +95,7 @@ export default function HomePage() {
 
           {/* Quick Demo Access */}
           <div className="mt-8 p-4 bg-white/10 backdrop-blur-sm rounded-xl max-w-md mx-auto">
-            <p className="text-white/90 text-sm mb-3">Quick Demo Access:</p>
+            <p className="text-white/90 text-sm mb-3">Experience Litink.com:</p>
             <div className="flex flex-col sm:flex-row gap-2 text-xs">
               <Link
                 to="/auth"
@@ -107,7 +107,7 @@ export default function HomePage() {
                 to="/auth"
                 className="bg-purple-500/20 text-white px-3 py-2 rounded-lg hover:bg-purple-500/30 transition-colors"
               >
-                Sign up as Author (use "author" in email)
+                Sign up as Author
               </Link>
             </div>
           </div>
@@ -149,7 +149,7 @@ export default function HomePage() {
               Powerful Features for Every Reader
             </h2>
             <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              Whether you're learning or exploring, Litink provides cutting-edge tools to enhance your reading experience.
+              Whether you're learning or exploring, Litink.com provides cutting-edge tools to enhance your reading experience.
             </p>
           </div>
           
@@ -175,7 +175,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
-              Choose Your Adventure
+              Choose Your Adventure on Litink.com
             </h2>
             <p className="text-xl text-gray-600">
               Two distinct paths tailored to your goals and interests.
@@ -271,7 +271,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
-              What Our Users Say
+              What Our Litink.com Users Say
             </h2>
             <p className="text-xl text-gray-600">
               Join thousands of readers who have transformed their reading experience.
@@ -309,7 +309,7 @@ export default function HomePage() {
             Ready to Transform Your Reading Experience?
           </h2>
           <p className="text-xl text-white/90 mb-12">
-            Join Litink today and discover a new way to learn, explore, and engage with books.
+            Join Litink.com today and discover a new way to learn, explore, and engage with books.
           </p>
           
           <div className="flex flex-col sm:flex-row gap-6 justify-center">
