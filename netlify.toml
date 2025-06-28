@@ -19,15 +19,9 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
 
-# Custom domain configuration
+# Custom domain configuration for litinkai.com
 [[redirects]]
-  from = "https://ni-scholar.com/*"
-  to = "https://litink.com/:splat"
-  status = 301
-  force = true
-
-[[redirects]]
-  from = "https://www.ni-scholar.com/*"
-  to = "https://litink.com/:splat"
+  from = "https://litinkai.com/*"
+  to = "https://www.litinkai.com/:splat"
   status = 301
   force = true
