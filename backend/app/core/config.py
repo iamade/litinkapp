@@ -19,9 +19,9 @@ class Settings(BaseSettings):
     
     # CORS
     ALLOWED_HOSTS: List[str] = [
-        "http://localhost:3000", 
-        "http://localhost:5173", 
-        "https://localhost:5173",
+        # "http://localhost:3000", 
+        # "http://localhost:5173", 
+        # "https://localhost:5173",
         "https://litinkai.com",
         "https://www.litinkai.com",
         "https://www.litinkai.org"

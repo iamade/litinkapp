@@ -37,12 +37,11 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173", 
-        "https://localhost:5173",
+        # "http://localhost:3000",
+        # "http://localhost:5173", 
+        # "https://localhost:5173",
         "https://www.litinkai.com",
         "https://litinkai.com",
-        "https://www.litink.com",
         "https://litink.com"
     ],
     allow_credentials=True,
