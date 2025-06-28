@@ -14,6 +14,7 @@ from pathlib import Path
 from supabase.client import create_client, Client
 import base64
 import jwt
+import json
 
 
 class VideoService:
@@ -385,164 +386,117 @@ class VideoService:
         script_style: str = "screenplay",
         supabase_client = None
     ) -> Optional[Dict[str, Any]]:
-        """Generate entertainment-style video for story content using RAG, OpenAI, ElevenLabs, KlingAI, and FFmpeg. User can choose script_style ('screenplay' or 'narration')."""
-        logs = []
+        """Generate entertainment-style video for story content using KlingAI"""
         try:
-            # 1. Get chapter context using RAG
-            chapter_context = await self.rag_service.get_chapter_with_context(
-                chapter_id=chapter_id,
-                include_adjacent=True,
-                use_vector_search=True
+            # Use provided client or create new one
+            if supabase_client:
+                self.supabase = supabase_client
+            
+            # Get chapter and book information
+            chapter_response = self.supabase.table("chapters").select(
+                "*, books(title, user_id, book_type, difficulty)"
+            ).eq("id", chapter_id).single().execute()
+            
+            if not chapter_response.data:
+                raise ValueError("Chapter not found")
+            
+            chapter_data = chapter_response.data
+            book_data = chapter_data.get("books", {})
+            user_id = book_data.get("user_id")
+            
+            if not user_id:
+                raise ValueError("User ID not found in book data")
+            
+            # Get chapter content and context
+            chapter_content = chapter_data.get("content", "")
+            chapter_title = chapter_data.get("title", "")
+            book_title = book_data.get("title", "")
+            book_type = book_data.get("book_type", "entertainment")
+            
+            if not chapter_content:
+                raise ValueError("Chapter content is empty")
+            
+            # Get RAG context for enhanced content
+            rag_context = await self.rag_service.get_chapter_context(chapter_id)
+            
+            # Generate script and scene descriptions
+            script_result = await self._generate_entertainment_script(
+                chapter_content, 
+                rag_context, 
+                script_style
             )
-            # 2. Generate script using OpenAI, passing script_style
-            script = await self.rag_service.generate_video_script(chapter_context, animation_style, script_style=script_style)
-            logs.append(f"[SCRIPT] Script sent to ElevenLabs: {script}")
-            # 3. Generate scene descriptions
-            scenes = await self.rag_service.ai_service._generate_scene_descriptions(
-                chapter_id=chapter_id,
-                rag_service=self.rag_service
+            
+            if not script_result:
+                raise ValueError("Failed to generate script")
+            
+            script = script_result.get("script", "")
+            character_details = script_result.get("character_details", "")
+            scene_prompt = script_result.get("scene_prompt", "")
+            
+            # Generate enhanced audio with ElevenLabs
+            enhanced_audio_result = await self.elevenlabs_service.generate_enhanced_speech(
+                script, 
+                "21m00Tcm4TlvDq8ikWAM",
+                user_id
             )
-            scene_prompt = scenes[0] if scenes else ""
-            character_details = chapter_context['chapter'].get('character_profiles', "")
-            logs.append(f"[CHARACTER] Character details sent to ElevenLabs: {character_details}")
-            logs.append(f"[SCENE] Scene prompt sent to KlingAI: {scene_prompt}")
-            # 4. Generate enhanced audio (narration, character, effects) with ElevenLabs
-            enhanced_audio = await self._generate_enhanced_audio(script, chapter_context, animation_style)
-            logs.append(f"[ENHANCED AUDIO] {enhanced_audio}")
-            if not enhanced_audio or not enhanced_audio.get('audio_url'):
-                logs.append(f"[ERROR] Enhanced audio generation failed: {enhanced_audio}")
-                raise Exception(f"Enhanced audio generation failed: {enhanced_audio}")
-            mixed_audio_url = enhanced_audio['audio_url']
-            # For logging, also extract character audios and background if present
-            if 'character_audios' in enhanced_audio:
-                logs.append(f"[CHARACTER AUDIOS] {enhanced_audio['character_audios']}")
-            if 'background_audio' in enhanced_audio:
-                logs.append(f"[BACKGROUND AUDIO] {enhanced_audio['background_audio']}")
-            # 5. Generate video with KlingAI (scene + character)
+            
+            if not enhanced_audio_result or not enhanced_audio_result.get("audio_url"):
+                raise ValueError("Enhanced audio generation failed")
+            
+            enhanced_audio_url = enhanced_audio_result["audio_url"]
+            
+            # Generate video with KlingAI
             kling_prompt = f"{scene_prompt}\nCharacter: {character_details}"
-            logs.append(f"[KLINGAI PROMPT] {kling_prompt}")
             kling_result = await self._generate_kling_video(kling_prompt, animation_style)
-            if "video_url" not in kling_result:
-                raise Exception(f"Kling AI video generation failed: {kling_result.get('error')}")
-            video_url = kling_result["video_url"]
-            logs.append(f"[KLINGAI VIDEO] Video URL: {video_url}")
-            # Save KlingAI video metadata to DB
-            try:
-                kling_metadata = {
-                    "chapter_id": chapter_id,
-                    "video_url": video_url,
-                    "script": script,
-                    "character_details": character_details,
-                    "scene_prompt": scene_prompt,
-                    "created_at": int(time.time()),
-                    "source": "klingai"
-                }
-                if 'book' in chapter_context and 'id' in chapter_context['book']:
-                    kling_metadata["book_id"] = chapter_context['book']['id']
-                if 'user_id' in chapter_context.get('book', {}):
-                    kling_metadata["user_id"] = chapter_context['book']['user_id']
-                logs.append(f"[DB INSERT] Saving KlingAI video metadata: {kling_metadata}")
-                db_result_kling = self.supabase_service.table("videos").insert(kling_metadata).execute()
-                logs.append(f"[DB INSERT RESULT] {db_result_kling}")
-            except Exception as db_exc:
-                logs.append(f"[DB INSERT ERROR - KlingAI] {db_exc}")
-            # Validate URLs before downloading
-            def is_valid_url(url):
-                return isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))
-            # Ensure ElevenLabs audio is in Supabase Storage
-            if is_valid_url(mixed_audio_url) and "supabase.co" not in mixed_audio_url:
-                # Download and upload to Supabase
-                import tempfile, httpx, os
-                fd, temp_audio_path = tempfile.mkstemp(suffix=".mp3"); os.close(fd)
-                try:
-                    with httpx.Client() as client:
-                        r = client.get(mixed_audio_url)
-                        if r.status_code == 200:
-                            with open(temp_audio_path, 'wb') as f:
-                                f.write(r.content)
-                            # Upload to Supabase
-                            supabase_audio_url = await self._serve_video_from_supabase(temp_audio_path, f"audio_{int(time.time())}.mp3")
-                            logs.append(f"[AUDIO UPLOAD] Uploaded ElevenLabs audio to Supabase: {supabase_audio_url}")
-                            mixed_audio_url = supabase_audio_url
-                        else:
-                            logs.append(f"[AUDIO DOWNLOAD ERROR] {mixed_audio_url} status {r.status_code}")
-                except Exception as e:
-                    logs.append(f"[AUDIO DOWNLOAD ERROR] {e}")
-            # Download video and audio files
-            import tempfile, os, subprocess, httpx
-            async def download_file(url, suffix):
-                fd, path = tempfile.mkstemp(suffix=suffix)
-                os.close(fd)
-                async with httpx.AsyncClient() as client:
-                    r = await client.get(url)
-                    with open(path, 'wb') as f:
-                        f.write(r.content)
-                return path
-            video_path = await download_file(video_url, ".mp4")
-            audio_path = await download_file(mixed_audio_url, ".mp3")
-            # Check file existence
-            if not os.path.exists(video_path):
-                logs.append(f"[ERROR] Video file not found at {video_path}")
-                return {"error": "Video file not found", "logs": logs}
-            if not os.path.exists(audio_path):
-                logs.append(f"[ERROR] Audio file not found at {audio_path}")
-                return {"error": "Audio file not found", "logs": logs}
-            # 7. Merge audio and video with FFmpeg
-            merged_path = tempfile.mktemp(suffix="_merged.mp4")
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-i", video_path,
-                "-i", audio_path,
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-shortest",
-                merged_path
-            ]
-            logs.append(f"[FFMPEG CMD] {' '.join(ffmpeg_cmd)}")
-            proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-            logs.append(f"[FFMPEG OUT] {proc.stdout}")
-            logs.append(f"[FFMPEG ERR] {proc.stderr}")
-            if not os.path.exists(merged_path):
-                logs.append(f"[ERROR] Merged video not found at {merged_path}")
-                return {"error": "Merged video not found", "logs": logs}
-            # 8. Upload merged video to storage and return URL
-            merged_video_url = await self._serve_video_from_supabase(merged_path, f"merged_video_{int(time.time())}.mp4")
-            logs.append(f"[UPLOAD] Merged video public URL: {merged_video_url}")
-            # 9. Save merged video metadata to Supabase DB
-            try:
-                merged_metadata = {
-                    "chapter_id": chapter_id,
-                    "video_url": merged_video_url,
-                    "script": script,
-                    "character_details": character_details,
-                    "scene_prompt": scene_prompt,
-                    "created_at": int(time.time()),
-                    "source": "merged",
-                    "klingai_video_url": video_url
-                }
-                if 'book' in chapter_context and 'id' in chapter_context['book']:
-                    merged_metadata["book_id"] = chapter_context['book']['id']
-                if 'user_id' in chapter_context.get('book', {}):
-                    merged_metadata["user_id"] = chapter_context['book']['user_id']
-                logs.append(f"[DB INSERT] Saving merged video metadata: {merged_metadata}")
-                db_result_merged = self.supabase_service.table("videos").insert(merged_metadata).execute()
-                logs.append(f"[DB INSERT RESULT] {db_result_merged}")
-            except Exception as db_exc:
-                logs.append(f"[DB INSERT ERROR - Merged] {db_exc}")
-            return {
-                "merged_video_url": merged_video_url,
-                "klingai_video_url": video_url,
-                "logs": logs,
+            
+            if not kling_result or not kling_result.get("video_url"):
+                raise ValueError("KlingAI video generation failed")
+            
+            kling_video_url = kling_result["video_url"]
+            
+            # Download and merge audio/video
+            merged_result = await self._merge_audio_video(
+                kling_video_url, 
+                enhanced_audio_url, 
+                user_id
+            )
+            
+            if not merged_result or not merged_result.get("merged_video_url"):
+                raise ValueError("Audio/video merge failed")
+            
+            merged_video_url = merged_result["merged_video_url"]
+            
+            # Save video metadata to database
+            video_metadata = {
+                "book_id": book_data.get("id"),
+                "chapter_id": chapter_id,
+                "user_id": user_id,
+                "video_url": merged_video_url,
+                "original_video_url": kling_video_url,
                 "script": script,
                 "character_details": character_details,
                 "scene_prompt": scene_prompt,
-                "video_url": merged_video_url,
-                "enhanced_audio_url": mixed_audio_url
+                "created_at": int(time.time())
             }
+            
+            video_response = self.supabase.table("videos").insert(video_metadata).execute()
+            video_id = video_response.data[0]["id"]
+            
+            return {
+                "id": video_id,
+                "title": f"{chapter_title} - {book_title}",
+                "description": f"Entertainment video for {chapter_title}",
+                "video_url": merged_video_url,
+                "original_video_url": kling_video_url,
+                "script": script,
+                "character_details": character_details,
+                "scene_prompt": scene_prompt,
+                "status": "ready"
+            }
+            
         except Exception as e:
-            logs.append(f"[ERROR] {e}")
             print(f"Error generating entertainment video: {e}")
-            return {"error": str(e), "logs": logs}
+            return None
 
     
     async def get_available_avatars(self) -> List[Dict[str, Any]]:
@@ -961,23 +915,35 @@ class VideoService:
             print(f"Error uploading to Supabase Storage: {e}")
             return None
 
-    async def _serve_video_from_supabase(self, file_path: str, filename: str) -> str:
-        """Upload video to Supabase and return public URL"""
+    async def _serve_video_from_supabase(self, file_path: str, filename: str, user_id: str = None) -> str:
+        """Upload video to Supabase Storage and return public URL"""
         try:
-            # Upload to Supabase Storage
-            public_url = await self._upload_to_supabase_storage(file_path, filename)
+            # Read the file
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
             
-            if public_url:
-                return public_url
+            # Create storage path with user organization
+            if user_id:
+                storage_path = f"users/{user_id}/videos/{filename}"
             else:
-                # Fallback to local serving if Supabase upload fails
-                print("Supabase upload failed, falling back to local serving")
-                return await self._serve_video_file(file_path)
-                
+                storage_path = f"videos/{filename}"
+            
+            # Upload to Supabase Storage
+            self.supabase.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
+                path=storage_path,
+                file=file_content,
+                file_options={"content-type": "video/mp4"}
+            )
+            
+            # Get public URL
+            public_url = self.supabase.storage.from_(settings.SUPABASE_BUCKET_NAME).get_public_url(storage_path)
+            print(f"[VIDEO UPLOAD] Video uploaded to: {public_url}")
+            
+            return public_url
+            
         except Exception as e:
-            print(f"Error serving video from Supabase: {e}")
-            # Fallback to local serving
-            return await self._serve_video_file(file_path)
+            print(f"Error uploading video to Supabase: {e}")
+            raise
 
     async def _generate_learning_script(
         self, 
@@ -1013,33 +979,140 @@ This concludes our discussion of {chapter_title}. Remember to review the key con
     async def _generate_entertainment_script(
         self, 
         chapter_content: str, 
-        chapter_title: str, 
-        book_title: str, 
-        video_style: str
-    ) -> str:
-        """Generate an entertainment-focused video script using RAGService for richer AI content"""
+        rag_context: Dict[str, Any], 
+        script_style: str
+    ) -> Dict[str, Any]:
+        """Generate entertainment script using OpenAI"""
         try:
-            # Use RAGService to get chapter context and generate script
-            chapter_context = {
-                'chapter': {'title': chapter_title, 'content': chapter_content},
-                'book': {'title': book_title, 'book_type': 'entertainment'},
-                'total_context': chapter_content
-            }
-            if self.rag_service:
-                return await self.rag_service.generate_video_script(chapter_context, video_style)
-            else:
-                # Fallback to basic template if RAGService is not available
-                script = f"""
-Join us for an exciting journey through {book_title}, as we dive into {chapter_title}.
+            # Use RAG context to enhance script generation
+            context_text = rag_context.get("total_context", chapter_content)
+            
+            if script_style == "screenplay":
+                prompt = f"""
+Generate a screenplay-style script for a video adaptation of this chapter content.
+Focus on dialogue and character interactions.
 
-{chapter_content[:1000]}...
+Chapter Content:
+{chapter_content}
 
-What an incredible adventure! Stay tuned for more from {book_title}.
-                """.strip()
-                return script
+Context:
+{context_text[:2000]}
+
+Generate a screenplay with:
+1. Character names in CAPS
+2. Dialogue in quotes
+3. Scene descriptions
+4. Character details
+
+Return as JSON with: script, character_details, scene_prompt
+"""
+            else:  # narration
+                prompt = f"""
+Generate a narration-style script for a video adaptation of this chapter content.
+Focus on storytelling and descriptive narration.
+
+Chapter Content:
+{chapter_content}
+
+Context:
+{context_text[:2000]}
+
+Generate a narration script with:
+1. Engaging storytelling
+2. Descriptive language
+3. Character descriptions
+4. Scene descriptions
+
+Return as JSON with: script, character_details, scene_prompt
+"""
+            
+            # Use OpenAI to generate script
+            response = await self.rag_service.ai_service.client.chat.completions.create(
+                model="gpt-3.5-turbo-1106",
+                messages=[
+                    {"role": "system", "content": "You are an expert script writer for video adaptations."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.7
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            return result
+            
         except Exception as e:
             print(f"Error generating entertainment script: {e}")
-            return chapter_content[:500] + "..."
+            return {
+                "script": chapter_content[:500],
+                "character_details": "Main character",
+                "scene_prompt": "A scene from the story"
+            }
+
+    async def _merge_audio_video(
+        self, 
+        video_url: str, 
+        audio_url: str, 
+        user_id: str
+    ) -> Dict[str, Any]:
+        """Download and merge audio/video files"""
+        try:
+            import tempfile
+            import subprocess
+            import httpx
+            
+            # Download video and audio files
+            async def download_file(url: str, suffix: str) -> str:
+                fd, path = tempfile.mkstemp(suffix=suffix)
+                os.close(fd)
+                async with httpx.AsyncClient() as client:
+                    r = await client.get(url)
+                    with open(path, 'wb') as f:
+                        f.write(r.content)
+                return path
+            
+            video_path = await download_file(video_url, ".mp4")
+            audio_path = await download_file(audio_url, ".mp3")
+            
+            # Check file existence
+            if not os.path.exists(video_path):
+                return {"error": "Video file not found"}
+            if not os.path.exists(audio_path):
+                return {"error": "Audio file not found"}
+            
+            # Merge with FFmpeg
+            merged_path = tempfile.mktemp(suffix="_merged.mp4")
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-i", video_path,
+                "-i", audio_path,
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-shortest",
+                merged_path
+            ]
+            
+            proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+            
+            if not os.path.exists(merged_path):
+                return {"error": "Merged video not found"}
+            
+            # Upload merged video to Supabase
+            merged_video_url = await self._serve_video_from_supabase(
+                merged_path, 
+                f"merged_video_{int(time.time())}.mp4",
+                user_id
+            )
+            
+            # Clean up temporary files
+            os.remove(video_path)
+            os.remove(audio_path)
+            os.remove(merged_path)
+            
+            return {"merged_video_url": merged_video_url}
+            
+        except Exception as e:
+            print(f"Error merging audio/video: {e}")
+            return {"error": str(e)}
 
     async def _generate_real_video(self, script: str, video_style: str) -> Optional[Dict[str, Any]]:
         """Generate real video using Tavus API + ElevenLabs audio"""

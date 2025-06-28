@@ -4,6 +4,7 @@ import os
 from typing import List, Dict, Any, Optional
 from app.core.config import settings
 import traceback
+import time
 
 
 class ElevenLabsService:
@@ -19,95 +20,47 @@ class ElevenLabsService:
         # Ensure audio directory exists
         os.makedirs(self.audio_dir, exist_ok=True)
     
-    async def generate_enhanced_speech(
-        self, 
-        text: str, 
-        voice_id: str,
-        emotion: str = "neutral",
-        speed: float = 1.0,
-        stability: float = 0.75,
-        similarity_boost: float = 0.75
-    ) -> Optional[str]:
-        """Generate enhanced speech with emotion and speed control, upload to Supabase, and return public URL"""
-        if not self.api_key:
-            return await self._mock_generate_speech(text, voice_id, emotion)
-        
+    async def generate_enhanced_speech(self, text: str, voice_id: str = "21m00Tcm4TlvDq8ikWAM", user_id: str = None) -> Dict[str, Any]:
+        """Generate enhanced speech with ElevenLabs API"""
         try:
-            # Validate input parameters
-            if not text or not text.strip():
-                print("Warning: Empty text provided to generate_enhanced_speech")
-                return None
+            # Generate audio
+            audio_data = await self._generate_speech(text, voice_id)
             
-            if not voice_id:
-                print("Warning: No voice_id provided to generate_enhanced_speech")
-                return None
+            if not audio_data:
+                return {"audio_url": None, "error": "Failed to generate audio"}
             
-            # Truncate text if too long (ElevenLabs has limits)
-            if len(text) > 2500:
-                text = text[:2500] + "..."
-                print(f"Warning: Text truncated to {len(text)} characters")
+            # Save audio to local file
+            timestamp = int(time.time())
+            audio_filename = f"speech_{timestamp}.mp3"
+            audio_path = os.path.join(self.audio_dir, audio_filename)
             
-            request_data = {
-                "text": text,
-                "model_id": "eleven_multilingual_v2",
-                "voice_settings": {
-                    "stability": stability,
-                    "similarity_boost": similarity_boost,
-                    "style": self._get_emotion_style(emotion),
-                    "use_speaker_boost": True,
-                    "speaking_rate": speed
-                }
-            }
+            with open(audio_path, "wb") as f:
+                f.write(audio_data)
             
-            print(f"ElevenLabs request - voice_id: {voice_id}, text_length: {len(text)}")
+            # Upload to Supabase Storage with user organization
+            if user_id:
+                storage_path = f"users/{user_id}/audio/{audio_filename}"
+            else:
+                storage_path = f"audio/{audio_filename}"
             
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{self.base_url}/text-to-speech/{voice_id}",
-                    headers={
-                        "Accept": "audio/mpeg",
-                        "Content-Type": "application/json",
-                        "xi-api-key": self.api_key
-                    },
-                    json=request_data
+            with open(audio_path, "rb") as f:
+                self.supabase_client.storage.from_(self.supabase_bucket_name).upload(
+                    path=storage_path,
+                    file=f.read(),
+                    file_options={"content-type": "audio/mpeg"}
                 )
-                
-                if response.status_code == 200:
-                    # Save audio file
-                    audio_filename = f"speech_{hash(text)}_{voice_id}.mp3"
-                    audio_path = os.path.join(self.audio_dir, audio_filename)
-                    
-                    with open(audio_path, "wb") as f:
-                        f.write(response.content)
-                    
-                    # Upload to Supabase and return public URL
-                    if self.supabase_client:
-                        with open(audio_path, "rb") as f:
-                            file_content = f.read()
-                        storage_path = f"audio/{audio_filename}"
-                        self.supabase_client.storage.from_(self.supabase_bucket_name).upload(
-                            path=storage_path,
-                            file=file_content,
-                            file_options={"content-type": "audio/mpeg"}
-                        )
-                        public_url = self.supabase_client.storage.from_(self.supabase_bucket_name).get_public_url(storage_path)
-                        return public_url
-                    else:
-                        print("[AUDIO UPLOAD ERROR] No supabase_client available to upload audio file.")
-                        return None
-                else:
-                    print(f"ElevenLabs API error: {response.status_code}")
-                    print(f"Response content: {response.text}")
-                    # Fall back to mock generation
-                    print("Falling back to mock speech generation")
-                    return await self._mock_generate_speech(text, voice_id, emotion)
-                    
+            
+            # Get public URL
+            public_url = self.supabase_client.storage.from_(self.supabase_bucket_name).get_public_url(storage_path)
+            
+            # Clean up local file
+            os.remove(audio_path)
+            
+            return {"audio_url": public_url, "local_path": audio_path}
+            
         except Exception as e:
-            print(f"❌ ElevenLabs generate_enhanced_speech error: {e}")
-            print(traceback.format_exc())
-            # Fall back to mock generation
-            print("Falling back to mock speech generation due to exception")
-            return await self._mock_generate_speech(text, voice_id, emotion)
+            print(f"Error in generate_enhanced_speech: {e}")
+            return {"audio_url": None, "error": str(e)}
     
     async def generate_character_voice(
         self,
@@ -171,54 +124,45 @@ class ElevenLabsService:
             print(f"Error generating sound effects: {e}")
             return None
     
-    async def mix_audio_tracks(
-        self, 
-        main_audio_path: Optional[str], 
-        background_audio_path: Optional[str] = None,
-        sound_effects: List[str] = []
-    ) -> Optional[str]:
-        """Mix multiple audio tracks together, upload to Supabase, and return public URL"""
+    async def mix_audio_tracks(self, audio_tracks: List[Dict[str, Any]], user_id: str = None) -> Dict[str, Any]:
+        """Mix multiple audio tracks together"""
         try:
-            # Handle case where main_audio_path is None
-            if not main_audio_path:
-                print("Warning: main_audio_path is None, cannot mix audio tracks")
-                return None
+            if not audio_tracks:
+                return {"audio_url": None, "error": "No audio tracks provided"}
             
-            # In a real implementation, you would use audio processing libraries
-            # like pydub or ffmpeg to mix the audio tracks
+            # Download and mix audio files
+            mixed_audio_path = await self._download_and_mix_audio(audio_tracks)
             
-            # For now, return the main audio path
-            # This is a placeholder for actual audio mixing functionality
+            if not mixed_audio_path or not os.path.exists(mixed_audio_path):
+                return {"audio_url": None, "error": "Failed to create mixed audio"}
             
-            if background_audio_path or sound_effects:
-                # Create mixed audio filename
-                mixed_filename = f"mixed_{hash(main_audio_path)}.mp3"
-                mixed_path = os.path.join(self.audio_dir, mixed_filename)
-                # Placeholder: in real implementation, mix the audio files
-                # For now, just copy the main audio
-                import shutil
-                main_full_path = os.path.join(os.getcwd(), main_audio_path.lstrip('/'))
-                if os.path.exists(main_full_path):
-                    shutil.copy2(main_full_path, mixed_path)
-                    if self.supabase_client:
-                        with open(mixed_path, "rb") as f:
-                            file_content = f.read()
-                        storage_path = f"audio/{mixed_filename}"
-                        self.supabase_client.storage.from_(self.supabase_bucket_name).upload(
-                            path=storage_path,
-                            file=file_content,
-                            file_options={"content-type": "audio/mpeg"}
-                        )
-                        public_url = self.supabase_client.storage.from_(self.supabase_bucket_name).get_public_url(storage_path)
-                        return public_url
-                    else:
-                        print("[AUDIO UPLOAD ERROR] No supabase_client available to upload mixed audio file.")
-                        return None
-            return main_audio_path
+            # Upload to Supabase Storage with user organization
+            timestamp = int(time.time())
+            mixed_filename = f"mixed_audio_{timestamp}.mp3"
+            
+            if user_id:
+                storage_path = f"users/{user_id}/audio/{mixed_filename}"
+            else:
+                storage_path = f"audio/{mixed_filename}"
+            
+            with open(mixed_audio_path, "rb") as f:
+                self.supabase_client.storage.from_(self.supabase_bucket_name).upload(
+                    path=storage_path,
+                    file=f.read(),
+                    file_options={"content-type": "audio/mpeg"}
+                )
+            
+            # Get public URL
+            public_url = self.supabase_client.storage.from_(self.supabase_bucket_name).get_public_url(storage_path)
+            
+            # Clean up local file
+            os.remove(mixed_audio_path)
+            
+            return {"audio_url": public_url, "local_path": mixed_audio_path}
             
         except Exception as e:
-            print(f"Error mixing audio tracks: {e}")
-            return main_audio_path
+            print(f"Error in mix_audio_tracks: {e}")
+            return {"audio_url": None, "error": str(e)}
     
 
     async def create_audio_narration(self, text: str, narrator_style: str = "narration", background_music: Optional[str] = None) -> dict:
@@ -240,8 +184,7 @@ class ElevenLabsService:
             # Mix with background music if provided
             if background_music:
                 mixed_audio = await self.mix_audio_tracks(
-                    main_audio_path=narration_audio,
-                    background_audio_path=background_music
+                    audio_tracks=[narration_audio, background_music]
                 )
                 return mixed_audio
             
@@ -421,3 +364,93 @@ class ElevenLabsService:
                 "personality": "mysterious"
             }
         ] 
+
+    async def _generate_speech(self, text: str, voice_id: str) -> Optional[bytes]:
+        """Generate speech using ElevenLabs API"""
+        if not self.api_key:
+            return None
+        
+        try:
+            # Validate input parameters
+            if not text or not text.strip():
+                print("Warning: Empty text provided to _generate_speech")
+                return None
+            
+            if not voice_id:
+                print("Warning: No voice_id provided to _generate_speech")
+                return None
+            
+            # Truncate text if too long (ElevenLabs has limits)
+            if len(text) > 2500:
+                text = text[:2500] + "..."
+                print(f"Warning: Text truncated to {len(text)} characters")
+            
+            request_data = {
+                "text": text,
+                "model_id": "eleven_multilingual_v2",
+                "voice_settings": {
+                    "stability": 0.75,
+                    "similarity_boost": 0.75,
+                    "use_speaker_boost": True
+                }
+            }
+            
+            print(f"ElevenLabs request - voice_id: {voice_id}, text_length: {len(text)}")
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/text-to-speech/{voice_id}",
+                    headers={
+                        "Accept": "audio/mpeg",
+                        "Content-Type": "application/json",
+                        "xi-api-key": self.api_key
+                    },
+                    json=request_data
+                )
+                
+                if response.status_code == 200:
+                    return response.content
+                else:
+                    print(f"ElevenLabs API error: {response.status_code}")
+                    print(f"Response content: {response.text}")
+                    return None
+                    
+        except Exception as e:
+            print(f"Error in _generate_speech: {e}")
+            return None
+
+    async def _download_and_mix_audio(self, audio_tracks: List[Dict[str, Any]]) -> Optional[str]:
+        """Download and mix audio tracks"""
+        try:
+            # For now, return the first audio track as a simple implementation
+            # In a real implementation, you would use audio processing libraries
+            # like pydub or ffmpeg to mix the audio tracks
+            
+            if not audio_tracks:
+                return None
+            
+            first_track = audio_tracks[0]
+            audio_url = first_track.get("audio_url")
+            
+            if not audio_url:
+                return None
+            
+            # Download the audio file
+            async with httpx.AsyncClient() as client:
+                response = await client.get(audio_url)
+                if response.status_code == 200:
+                    # Save to temporary file
+                    timestamp = int(time.time())
+                    mixed_filename = f"mixed_audio_{timestamp}.mp3"
+                    mixed_path = os.path.join(self.audio_dir, mixed_filename)
+                    
+                    with open(mixed_path, "wb") as f:
+                        f.write(response.content)
+                    
+                    return mixed_path
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error in _download_and_mix_audio: {e}")
+            return None 
