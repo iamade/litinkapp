@@ -33,7 +33,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware - Updated for production
+# CORS middleware - Updated for production with comprehensive origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
