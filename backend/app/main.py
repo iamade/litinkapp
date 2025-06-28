@@ -33,7 +33,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware - Updated for production
+# CORS middleware - Updated for production with comprehensive origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -43,7 +43,10 @@ app.add_middleware(
         "https://www.litinkai.com",
         "https://litinkai.com",
         "https://www.litink.com",
-        "https://litink.com"
+        "https://litink.com",
+        "https://teal-crostata-10b809.netlify.app",  # Add your Netlify subdomain
+        "https://litinkapp.netlify.app",  # Common Netlify pattern
+        # Add any other domains you might use
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],

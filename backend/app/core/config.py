@@ -24,7 +24,10 @@ class Settings(BaseSettings):
         "https://localhost:5173",
         "https://litinkai.com",
         "https://www.litinkai.com",
-        "https://www.litinkai.org"
+        "https://www.litink.com",
+        "https://litink.com",
+        "https://teal-crostata-10b809.netlify.app",
+        "https://litinkapp.netlify.app"
     ]
     
     @property
