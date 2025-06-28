@@ -463,6 +463,15 @@ class VideoService:
             video_url = kling_result["video_url"]
             logs.append(f"[VIDEO SUCCESS] KlingAI video URL: {video_url}")
             
+            # Check if this is a multi-segment video
+            is_multi_segment = kling_result.get("is_segment", False)
+            segment_urls = kling_result.get("segment_urls", [])
+            total_segments = kling_result.get("total_segments", 1)
+            
+            logs.append(f"[SEGMENT INFO] Is multi-segment: {is_multi_segment}")
+            logs.append(f"[SEGMENT INFO] Total segments: {total_segments}")
+            logs.append(f"[SEGMENT INFO] Segment URLs: {segment_urls}")
+            
             # 6. Save KlingAI video metadata to Supabase DB
             try:
                 kling_metadata = {
@@ -472,7 +481,10 @@ class VideoService:
                     "character_details": character_details,
                     "scene_prompt": klingai_content,
                     "created_at": int(time.time()),
-                    "source": "klingai"
+                    "source": "klingai",
+                    "is_multi_segment": is_multi_segment,
+                    "total_segments": total_segments,
+                    "segment_urls": segment_urls if is_multi_segment else []
                 }
                 if 'book' in chapter_context and 'id' in chapter_context['book']:
                     kling_metadata["book_id"] = chapter_context['book']['id']
@@ -538,7 +550,22 @@ class VideoService:
                     raise
             
             try:
-                video_path = await download_file(video_url, ".mp4")
+                # For multi-segment videos, download all segments
+                if is_multi_segment and segment_urls:
+                    logs.append(f"[MULTI-SEGMENT] Downloading {len(segment_urls)} video segments")
+                    video_paths = []
+                    for i, segment_url in enumerate(segment_urls):
+                        segment_path = await download_file(segment_url, f"_segment_{i}.mp4")
+                        video_paths.append(segment_path)
+                        logs.append(f"[MULTI-SEGMENT] Downloaded segment {i+1}: {segment_path}")
+                    
+                    # Use the first segment as the main video for now
+                    video_path = video_paths[0]
+                    logs.append(f"[MULTI-SEGMENT] Using first segment as main video: {video_path}")
+                else:
+                    # Single video
+                    video_path = await download_file(video_url, ".mp4")
+                
                 audio_path = await download_file(mixed_audio_url, ".mp3")
             except Exception as download_error:
                 logs.append(f"[DOWNLOAD FAILED] {download_error}")
@@ -571,6 +598,8 @@ class VideoService:
                 logs.append(f"[ERROR] Merged video not found at {merged_path}")
                 return {"error": "Merged video not found", "logs": logs}
             
+            logs.append(f"[FFMPEG SUCCESS] Merged video created at: {merged_path}")
+            
             # 8. Upload merged video to storage and return URL (append user_id if available)
             merged_video_url = await self._serve_video_from_supabase(merged_path, f"merged_video_{int(time.time())}.mp4", user_id=user_id)
             logs.append(f"[UPLOAD] Merged video public URL: {merged_video_url}")
@@ -585,7 +614,10 @@ class VideoService:
                     "scene_prompt": klingai_content,
                     "created_at": int(time.time()),
                     "source": "merged",
-                    "klingai_video_url": video_url
+                    "klingai_video_url": video_url,
+                    "is_multi_segment": is_multi_segment,
+                    "total_segments": total_segments,
+                    "segment_urls": segment_urls if is_multi_segment else []
                 }
                 if 'book' in chapter_context and 'id' in chapter_context['book']:
                     merged_metadata["book_id"] = chapter_context['book']['id']
@@ -609,6 +641,9 @@ class VideoService:
                 "klingai_prompt": klingai_content,
                 "video_url": merged_video_url,
                 "enhanced_audio_url": mixed_audio_url,
+                "is_multi_segment": is_multi_segment,
+                "total_segments": total_segments,
+                "segment_urls": segment_urls if is_multi_segment else [],
                 "service_inputs": {
                     "elevenlabs": {
                         "content": elevenlabs_content,
@@ -1616,10 +1651,12 @@ Return as JSON with: script, character_details, scene_prompt
         }
         
         print(f"[KlingAI DEBUG] Single video request - duration: {kling_duration}s")
+        print(f"[KlingAI DEBUG] Video style: {video_style}")
+        print(f"[KlingAI DEBUG] Final script length: {len(script)}")
+        print(f"[KlingAI DEBUG] Final script content:")
+        print(f"[KlingAI CONTENT] {script}")
         print(f"[KlingAI DEBUG] Full payload being sent to API:")
         print(f"[KlingAI PAYLOAD] {payload}")
-        print(f"[KlingAI DEBUG] Final script length: {len(script)}")
-        print(f"[KlingAI DEBUG] Final script preview: {script[:200]}...")
         
         base_url = "https://api-singapore.klingai.com"
         create_url = f"{base_url}/v1/videos/text2video"
@@ -1761,17 +1798,19 @@ Return as JSON with: script, character_details, scene_prompt
                 return result
             
             result["segment_index"] = i
+            result["segment_content"] = segment
             segment_videos.append(result)
         
-        # For now, return the first segment as the main video
-        # In a full implementation, you would merge all segments using FFmpeg
-        main_video = segment_videos[0]
+        # Return all segments for proper processing
+        main_video = segment_videos[0] if segment_videos else {"error": "No segments generated"}
         main_video["all_segments"] = segment_videos
         main_video["target_duration"] = target_duration
         main_video["is_segment"] = True
         main_video["total_segments"] = len(segments)
+        main_video["segment_urls"] = [seg.get("video_url") for seg in segment_videos if seg.get("video_url")]
         
         print(f"[KlingAI DEBUG] Generated {len(segments)} segments for {target_duration}s video")
+        print(f"[KlingAI DEBUG] Segment URLs: {main_video['segment_urls']}")
         return main_video
 
     def _split_script_for_segments(self, script: str, target_duration: int) -> List[str]:
@@ -1804,11 +1843,19 @@ Return as JSON with: script, character_details, scene_prompt
         if not character_dialogues:
             return ""
         
+        print(f"[ELEVENLABS FORMATTER] Formatting {len(character_dialogues)} dialogues")
+        
         formatted_dialogues = []
         for dialogue in character_dialogues:
-            formatted_dialogues.append(f"{dialogue['character']}: {dialogue['text']}")
+            character = dialogue.get('character', 'Character')
+            text = dialogue.get('text', '')
+            if text:
+                formatted_dialogues.append(f"{character}: {text}")
+                print(f"[ELEVENLABS FORMATTER] Added: {character}: {text[:50]}...")
         
-        return "\n".join(formatted_dialogues)
+        result = "\n".join(formatted_dialogues)
+        print(f"[ELEVENLABS FORMATTER] Final formatted content: {result[:200]}...")
+        return result
     
     def _extract_narration_text(self, script: str) -> str:
         """Extract narration text from script, removing scene descriptions"""
@@ -1871,83 +1918,92 @@ Return as JSON with: script, character_details, scene_prompt
 
     def _parse_screenplay_script(self, script: str) -> Dict[str, Any]:
         """Parse screenplay format script to separate dialogue from scene descriptions"""
+        print(f"[SCREENPLAY PARSER] Starting to parse screenplay script")
+        print(f"[SCREENPLAY PARSER] Script preview: {script[:300]}...")
+        
         # Initialize content sections
         scene_descriptions = []
-        narrator_dialogue = []
-        character_dialogue = []
+        character_dialogues = []
         
         # Split script into lines
         lines = script.split('\n')
+        current_character = None
         
-        for line in lines:
+        for i, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue
                 
+            print(f"[SCREENPLAY PARSER] Line {i}: '{line}'")
+                
             # Scene headings (INT./EXT. locations)
             if re.match(r'^(INT\.|EXT\.)', line, re.IGNORECASE):
                 scene_descriptions.append(line)
-                continue
-                
-            # Camera directions and scene descriptions
-            if any(keyword in line.upper() for keyword in [
-                'CAMERA', 'WE SEE', 'THE CAMERA', 'ZOOMS', 'PANS', 'SHOWS', 
-                'CUT TO', 'FADE', 'DISSOLVE', 'TRANSITION'
-            ]):
-                scene_descriptions.append(line)
+                print(f"[SCREENPLAY PARSER] Added scene heading: {line}")
                 continue
                 
             # Character names in CAPS (dialogue)
-            if re.match(r'^[A-Z][A-Z\s]+$', line) and len(line) < 50:
-                # This is a character name, next line should be dialogue
+            if re.match(r'^[A-Z][A-Z\s]+$', line) and len(line) < 50 and len(line) > 2:
+                current_character = line.strip()
+                print(f"[SCREENPLAY PARSER] Found character: {current_character}")
                 continue
                 
-            # Narrator dialogue (V.O. or voice-over)
-            if 'NARRATOR' in line.upper() or '(V.O.)' in line.upper() or 'VOICE-OVER' in line.upper():
-                # Extract the dialogue part
-                dialogue_match = re.search(r'["\']([^"\']+)["\']', line)
-                if dialogue_match:
-                    narrator_dialogue.append(dialogue_match.group(1))
-                else:
-                    # If no quotes, take everything after NARRATOR
-                    parts = re.split(r'NARRATOR\s*\(?V\.O\.\)?\s*:', line, flags=re.IGNORECASE)
-                    if len(parts) > 1:
-                        narrator_dialogue.append(parts[1].strip())
+            # Dialogue (indented or after character name)
+            if current_character and (line.startswith('    ') or '"' in line or "'" in line):
+                # Extract dialogue text
+                dialogue_text = line.strip()
+                if dialogue_text.startswith('    '):
+                    dialogue_text = dialogue_text[4:]  # Remove indentation
+                
+                # Remove quotes if present
+                if dialogue_text.startswith('"') and dialogue_text.endswith('"'):
+                    dialogue_text = dialogue_text[1:-1]
+                elif dialogue_text.startswith("'") and dialogue_text.endswith("'"):
+                    dialogue_text = dialogue_text[1:-1]
+                
+                if dialogue_text and len(dialogue_text) > 5:
+                    character_dialogues.append({
+                        "character": current_character,
+                        "text": dialogue_text
+                    })
+                    print(f"[SCREENPLAY PARSER] Added dialogue for {current_character}: {dialogue_text[:50]}...")
+                current_character = None
                 continue
                 
-            # Character dialogue in quotes
-            if '"' in line or "'" in line:
-                dialogue_match = re.search(r'["\']([^"\']+)["\']', line)
-                if dialogue_match:
-                    character_dialogue.append(dialogue_match.group(1))
-                continue
-                
-            # Action descriptions (not dialogue, not scene headings)
-            if not re.match(r'^[A-Z][A-Z\s]+$', line) and len(line) > 10:
+            # Action descriptions (not dialogue, not scene headings, not character names)
+            if (not re.match(r'^[A-Z][A-Z\s]+$', line) and 
+                len(line) > 10 and 
+                not line.startswith('(') and 
+                not line.startswith('[') and
+                not line.startswith('FADE') and
+                not line.startswith('CUT') and
+                not line.startswith('CAMERA')):
                 scene_descriptions.append(line)
+                print(f"[SCREENPLAY PARSER] Added scene description: {line[:50]}...")
                 continue
         
-        # Combine content for each service
-        elevenlabs_content = self._format_dialogues_for_elevenlabs([
-            {"character": "NARRATOR", "dialogue": dialogue} 
-            for dialogue in narrator_dialogue
-        ] + [
-            {"character": "CHARACTER", "dialogue": dialogue} 
-            for dialogue in character_dialogue
-        ])
+        print(f"[SCREENPLAY PARSER] Found {len(character_dialogues)} character dialogues")
+        print(f"[SCREENPLAY PARSER] Found {len(scene_descriptions)} scene descriptions")
         
-        klingai_content = "\n".join(scene_descriptions)
+        # Format content for each service
+        elevenlabs_content = self._format_dialogues_for_elevenlabs(character_dialogues)
+        klingai_content = ". ".join(scene_descriptions) if scene_descriptions else "A cinematic scene with visual elements and camera movements."
+        
+        # If no character dialogues found, use narration
+        if not elevenlabs_content or elevenlabs_content.strip() == "":
+            print("[SCREENPLAY PARSER] No character dialogues found, using narration")
+            elevenlabs_content = "Narrator: " + klingai_content[:200] + "..."
+        
+        print(f"[SCREENPLAY PARSER] ElevenLabs content: {elevenlabs_content[:100]}...")
+        print(f"[SCREENPLAY PARSER] KlingAI content: {klingai_content[:100]}...")
         
         return {
             "elevenlabs_content": elevenlabs_content,
             "klingai_content": klingai_content,
-            "elevenlabs_content_type": "character_and_narrator_dialogue",
-            "klingai_content_type": "scene_descriptions_and_camera_directions",
-            "parsed_sections": {
-                "scene_descriptions": scene_descriptions,
-                "narrator_dialogue": narrator_dialogue,
-                "character_dialogue": character_dialogue
-            }
+            "elevenlabs_content_type": "character_dialogue" if character_dialogues else "narration",
+            "klingai_content_type": "scene_descriptions",
+            "character_dialogues": character_dialogues,
+            "scene_descriptions": scene_descriptions
         }
 
     def _parse_narration_script(self, script: str) -> Dict[str, Any]:
