@@ -1,5 +1,5 @@
 const API_BASE_URL = import.meta.env.PROD 
-  ? "https://your-backend-url.render.com/api/v1"
+  ? "https://litinkapp.onrender.com/api/v1"
   : "http://localhost:8000/api/v1";
 
 const getAuthToken = (): string | null => {
