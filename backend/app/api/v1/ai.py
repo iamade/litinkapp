@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 
-from app.schemas import AIRequest, AIResponse, QuizGenerationRequest, User
+from app.schemas import AIRequest, AIResponse, QuizGenerationRequest, User, AnalyzeChapterSafetyRequest
 from app.services.ai_service import AIService
 from app.services.voice_service import VoiceService
 from app.services.video_service import VideoService
@@ -527,3 +527,36 @@ async def list_voices(
     except Exception as e:
         print(f"Error listing voices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/analyze-chapter-safety")
+async def analyze_chapter_safety(
+    request: AnalyzeChapterSafetyRequest,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Analyze chapter content for potential KlingAI risk control issues"""
+    try:
+        # Get chapter details
+        chapter_response = supabase_client.table("chapters").select("*").eq("id", request.chapter_id).execute()
+        
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        
+        chapter = chapter_response.data[0]
+        chapter_content = chapter.get("content", "")
+        chapter_title = chapter.get("title", "")
+        
+        # Analyze content safety
+        video_service = VideoService(supabase_client)
+        safety_analysis = video_service.analyze_chapter_content_safety(chapter_content, chapter_title)
+        
+        return {
+            "success": True,
+            "analysis": safety_analysis,
+            "chapter_id": request.chapter_id,
+            "chapter_title": chapter_title
+        }
+        
+    except Exception as e:
+        print(f"Error analyzing chapter safety: {e}")
+        raise HTTPException(status_code=500, detail=f"Error analyzing chapter safety: {str(e)}")
