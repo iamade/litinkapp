@@ -33,12 +33,20 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
+# CORS middleware - Updated for production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.get_allowed_hosts,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173", 
+        "https://localhost:5173",
+        "https://www.litinkai.com",
+        "https://litinkai.com",
+        "https://www.litink.com",
+        "https://litink.com"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 

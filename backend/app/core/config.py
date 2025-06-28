@@ -23,7 +23,9 @@ class Settings(BaseSettings):
         "http://localhost:5173", 
         "https://localhost:5173",
         "https://www.litinkai.com",
-        "https://www.litinkai.org"
+        "https://litinkai.com",
+        "https://www.litink.com",
+        "https://litink.com"
     ]
     
     @property

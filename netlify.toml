@@ -22,12 +22,24 @@
 # Custom domain configuration
 [[redirects]]
   from = "https://ni-scholar.com/*"
-  to = "https://litink.com/:splat"
+  to = "https://litinkai.com/:splat"
   status = 301
   force = true
 
 [[redirects]]
   from = "https://www.ni-scholar.com/*"
-  to = "https://litink.com/:splat"
+  to = "https://litinkai.com/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://litink.com/*"
+  to = "https://litinkai.com/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://www.litink.com/*"
+  to = "https://litinkai.com/:splat"
   status = 301
   force = true
