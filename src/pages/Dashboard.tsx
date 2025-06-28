@@ -28,6 +28,7 @@ interface UserStats {
   badges_earned: number;
   quizzes_taken: number;
   average_quiz_score: number;
+  books_uploaded: number;
 }
 
 interface Book {
@@ -453,6 +454,12 @@ export default function Dashboard() {
                   <span className="text-gray-600">Books Read</span>
                   <span className="font-bold text-2xl text-purple-600">
                     {stats?.books_read ?? "--"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-600">Books Uploaded</span>
+                  <span className="font-bold text-2xl text-orange-600">
+                    {stats?.books_uploaded ?? "--"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
