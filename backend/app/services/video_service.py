@@ -695,60 +695,115 @@ class VideoService:
             return self._get_mock_avatars()
     
     async def _poll_video_status(self, video_id: str, scene_description: str) -> Dict[str, Any]:
-        """Poll video generation status"""
-        max_attempts = 60  # 10 minutes max
-        attempt = 0
-        
-        while attempt < max_attempts:
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"{self.base_url}/videos/{video_id}",
-                        headers={"x-api-key": self.api_key}
-                    )
+        """Poll for video completion status"""
+        try:
+            print(f"🔄 Polling for video completion: {video_id}")
+            
+            headers = {
+                "x-api-key": settings.TAVUS_API_KEY,
+                "Content-Type": "application/json"
+            }
+            
+            # Increase polling attempts and intervals for longer videos
+            max_attempts = 120  # 10 minutes with 5-second intervals
+            attempt = 0
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                while attempt < max_attempts:
+                    attempt += 1
                     
-                    if response.status_code == 200:
-                        data = response.json()
-                        print(f"📊 Polling response: {data}")
+                    try:
+                        response = await client.get(
+                            f"{self.base_url}/videos/{video_id}",
+                            headers=headers
+                        )
                         
-                        # Handle different response formats
-                        status = data.get("status") or data.get("data", {}).get("status")
+                        print(f"📊 Polling response: {response.json()}")
                         
-                        if status == "ready" or status == "completed":
-                            # Extract video URL from response
-                            video_url = data.get("download_url") or data.get("video_url") or data.get("data", {}).get("download_url")
+                        if response.status_code == 200:
+                            data = response.json()
+                            status = data.get("status", "unknown")
                             
+                            if status == "completed":
+                                print(f"✅ Video completed: {video_id}")
+                                video_url = data.get("download_url") or data.get("video_url")
+                                hosted_url = data.get("hosted_url")
+                                
+                                if video_url:
+                                    return {
+                                        "video_id": video_id,
+                                        "video_url": video_url,
+                                        "hosted_url": hosted_url,
+                                        "download_url": data.get("download_url"),
+                                        "duration": data.get("duration", 180),
+                                        "status": "completed"
+                                    }
+                                else:
+                                    print("⚠️ Video completed but no URL found")
+                                    return {
+                                        "video_id": video_id,
+                                        "hosted_url": hosted_url,
+                                        "status": "completed_no_download"
+                                    }
+                            
+                            elif status == "failed":
+                                print(f"❌ Video generation failed: {video_id}")
+                                return {
+                                    "video_id": video_id,
+                                    "status": "failed",
+                                    "error": data.get("error", "Unknown error")
+                                }
+                            
+                            elif status in ["queued", "generating"]:
+                                progress = data.get("generation_progress", "0/100")
+                                print(f"⏳ Video status: {status} (attempt {attempt}/{max_attempts}) - Progress: {progress}")
+                                
+                                # Wait longer between polls for generating status
+                                await asyncio.sleep(10 if status == "generating" else 5)
+                                continue
+                            
+                            else:
+                                print(f"⚠️ Unknown status: {status}")
+                                await asyncio.sleep(5)
+                                continue
+                        
+                        elif response.status_code == 404:
+                            print(f"❌ Video not found: {video_id}")
                             return {
-                                "id": video_id,
-                                "title": scene_description,
-                                "description": "AI-generated video content",
-                                "video_url": video_url,
-                                "thumbnail_url": data.get("thumbnail_url") or data.get("data", {}).get("thumbnail_url"),
-                                "duration": data.get("duration", 180),
-                                "status": "ready"
+                                "video_id": video_id,
+                                "status": "not_found"
                             }
-                        elif status == "failed" or status == "error":
-                            print(f"❌ Video generation failed: {data}")
-                            break
+                        
                         else:
-                            print(f"⏳ Video status: {status} (attempt {attempt + 1}/{max_attempts})")
-                
-                # Wait 10 seconds before next poll
-                await asyncio.sleep(10)
-                attempt += 1
-                
-            except Exception as e:
-                print(f"❌ Polling error: {e}")
-                break
-        
-        # Return error or timeout result
-        return {
-            "id": video_id,
-            "title": scene_description,
-            "description": "Video generation failed or timed out",
-            "video_url": None,
-            "status": "error"
-        }
+                            print(f"❌ Polling failed: {response.status_code}")
+                            await asyncio.sleep(5)
+                            continue
+                    
+                    except httpx.TimeoutException:
+                        print(f"⏰ Timeout on attempt {attempt}, retrying...")
+                        await asyncio.sleep(5)
+                        continue
+                    
+                    except Exception as e:
+                        print(f"❌ Error polling video: {e}")
+                        await asyncio.sleep(5)
+                        continue
+            
+            # If we get here, we've exceeded max attempts
+            print(f"⏰ Video generation timed out after {max_attempts * 5} seconds")
+            return {
+                "video_id": video_id,
+                "status": "timeout",
+                "message": f"Video generation took longer than expected (max {max_attempts * 5} seconds)"
+            }
+            
+        except Exception as e:
+            print(f"❌ Error in video polling: {e}")
+            return {
+                "video_id": video_id,
+                "status": "error",
+                "error": str(e)
+            }
     
     def _get_avatar_id(self, style: str) -> str:
         """Get avatar ID based on style"""
@@ -1336,13 +1391,20 @@ Return as JSON with: script, character_details, scene_prompt
             print(f"Error generating real video with Tavus + ElevenLabs: {e}")
             return None
 
-    async def _generate_tavus_video(self, script: str, video_style: str) -> Optional[Dict[str, Any]]:
-        """Generate video using Tavus API"""
+    async def _generate_tavus_video(self, script: str, video_style: str, content_id: str = None, supabase_client = None) -> Optional[Dict[str, Any]]:
+        """Generate video using Tavus API with enhanced error handling and logging"""
         try:
             print(f"🎬 Generating Tavus video with style: {video_style}")
+            print(f"📝 Script length: {len(script)} characters")
             
-            # Get replica ID based on style (these should be your actual replica IDs from Tavus)
+            # Validate API key
+            if not settings.TAVUS_API_KEY or settings.TAVUS_API_KEY == "your-tavus-api-key":
+                print("❌ Tavus API key not configured")
+                return None
+            
+            # Get replica ID based on style
             replica_id = self._get_replica_id(video_style)
+            print(f"🆔 Using replica ID: {replica_id}")
             
             # Prepare Tavus API request
             headers = {
@@ -1352,13 +1414,14 @@ Return as JSON with: script, character_details, scene_prompt
             
             # Create video generation request with correct payload structure
             payload = {
-                "replica_id": replica_id,  # Required field
+                "replica_id": replica_id,
                 "script": script,
-                "video_name": f"AI Generated Video - {video_style}"  # Optional field
+                "video_name": f"AI Generated Video - {video_style}"
             }
             
             print(f"📤 Sending request to Tavus API...")
-            print(f"📋 Payload: {payload}")
+            print(f"🌐 Endpoint: {self.base_url}/videos")
+            print(f"📋 Payload keys: {list(payload.keys())}")
             
             async with httpx.AsyncClient(timeout=60.0) as client:
                 # Create a new video
@@ -1371,34 +1434,70 @@ Return as JSON with: script, character_details, scene_prompt
                 print(f"📊 Create Video Response Status: {response.status_code}")
                 print(f"📄 Response Headers: {dict(response.headers)}")
                 
-                if response.status_code == 200 or response.status_code == 201:
-                    data = response.json()
-                    print(f"✅ Video creation initiated: {data}")
+                # Log the raw response for debugging
+                try:
+                    response_text = response.text
+                    print(f"📄 Raw Response: {response_text[:500]}...")  # First 500 chars
                     
-                    video_id = data.get("video_id") or data.get("id")
-                    if video_id:
-                        # Poll for completion
-                        return await self._poll_video_status(video_id, f"AI Generated Video - {video_style}")
-                    else:
-                        print("❌ No video ID in response")
+                    if response.status_code in [200, 201]:
+                        data = response.json()
+                        print(f"✅ Video creation initiated successfully")
+                        print(f"📊 Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                        
+                        # Extract video ID with multiple fallbacks
+                        video_id = (
+                            data.get("video_id") or 
+                            data.get("id") or 
+                            data.get("videoId") or
+                            data.get("video_id")
+                        )
+                        
+                        if video_id:
+                            print(f"🎯 Video ID extracted: {video_id}")
+                            # Poll for completion with enhanced logging and database updates
+                            return await self._poll_video_status_enhanced(video_id, f"AI Generated Video - {video_style}", content_id, supabase_client)
+                        else:
+                            print("❌ No video ID found in response")
+                            print(f"🔍 Available keys in response: {list(data.keys()) if isinstance(data, dict) else 'Response is not a dict'}")
+                            return None
+                            
+                    elif response.status_code == 400:
+                        print(f"❌ Bad Request (400): {response_text}")
+                        # Try to get available replicas and use the first one
+                        return await self._try_with_available_replicas(client, headers, script, video_style)
+                        
+                    elif response.status_code == 401:
+                        print(f"❌ Unauthorized (401): Check your Tavus API key")
                         return None
                         
-                elif response.status_code == 400:
-                    print(f"❌ Bad Request: {response.text}")
-                    # Try to get available replicas and use the first one
-                    return await self._try_with_available_replicas(client, headers, script, video_style)
-                    
-                elif response.status_code == 404:
-                    print("⚠️  /videos endpoint not found, trying alternative approach...")
-                    return await self._try_alternative_video_creation(client, headers, script, video_style)
-                    
-                else:
-                    print(f"❌ Video creation failed: {response.status_code}")
-                    print(f"📄 Response: {response.text}")
+                    elif response.status_code == 404:
+                        print("⚠️  /videos endpoint not found, trying alternative approach...")
+                        return await self._try_alternative_video_creation(client, headers, script, video_style)
+                        
+                    elif response.status_code == 429:
+                        print(f"❌ Rate Limited (429): Too many requests to Tavus API")
+                        return None
+                        
+                    else:
+                        print(f"❌ Video creation failed with status: {response.status_code}")
+                        print(f"📄 Error Response: {response_text}")
+                        return None
+                        
+                except json.JSONDecodeError as e:
+                    print(f"❌ Failed to parse JSON response: {e}")
+                    print(f"📄 Raw response text: {response.text}")
                     return None
                     
+        except httpx.TimeoutException:
+            print(f"⏰ Timeout while creating Tavus video")
+            return None
+        except httpx.RequestError as e:
+            print(f"❌ Network error while creating Tavus video: {e}")
+            return None
         except Exception as e:
-            print(f"❌ Error generating Tavus video: {e}")
+            print(f"❌ Unexpected error generating Tavus video: {e}")
+            import traceback
+            print(f"🔍 Full traceback: {traceback.format_exc()}")
             return None
 
     async def _generate_elevenlabs_audio(self, script: str, video_style: str, user_id: str = None) -> Optional[Dict[str, Any]]:
@@ -2358,3 +2457,420 @@ Return as JSON with: script, character_details, scene_prompt
             return "HIGH"
         else:
             return "VERY HIGH"
+
+    async def _download_and_store_video(self, video_url: str, filename: str, user_id: str) -> str:
+        """Download video from URL and store in Supabase"""
+        try:
+            print(f"📥 Downloading video from: {video_url}")
+            
+            # Download video to temporary file
+            import tempfile
+            import httpx
+            
+            fd, temp_path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+            
+            async with httpx.AsyncClient(timeout=300.0) as client:  # 5 minute timeout for large videos
+                response = await client.get(video_url)
+                response.raise_for_status()
+                
+                with open(temp_path, 'wb') as f:
+                    f.write(response.content)
+            
+            print(f"✅ Video downloaded to: {temp_path}")
+            
+            # Upload to Supabase Storage
+            supabase_url = await self._serve_video_from_supabase(temp_path, filename, user_id)
+            
+            # Clean up temporary file
+            os.unlink(temp_path)
+            
+            print(f"✅ Video uploaded to Supabase: {supabase_url}")
+            return supabase_url
+            
+        except Exception as e:
+            print(f"❌ Error downloading/storing video: {e}")
+            return None
+
+    async def _combine_videos_with_ffmpeg(self, video_urls: List[str], output_filename: str, user_id: str) -> str:
+        """Combine multiple videos using FFmpeg"""
+        try:
+            print(f"🎬 Combining {len(video_urls)} videos using FFmpeg")
+            
+            import tempfile
+            import subprocess
+            import httpx
+            
+            # Download all videos to temporary files
+            temp_video_paths = []
+            
+            for i, video_url in enumerate(video_urls):
+                fd, temp_path = tempfile.mkstemp(suffix=f"_part_{i}.mp4")
+                os.close(fd)
+                
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    response = await client.get(video_url)
+                    response.raise_for_status()
+                    
+                    with open(temp_path, 'wb') as f:
+                        f.write(response.content)
+                
+                temp_video_paths.append(temp_path)
+                print(f"✅ Downloaded video {i+1}/{len(video_urls)}: {temp_path}")
+            
+            # Create file list for FFmpeg
+            fd, file_list_path = tempfile.mkstemp(suffix=".txt")
+            os.close(fd)
+            
+            with open(file_list_path, 'w') as f:
+                for video_path in temp_video_paths:
+                    f.write(f"file '{video_path}'\n")
+            
+            # Create output file path
+            fd, output_path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+            
+            # Run FFmpeg to concatenate videos
+            ffmpeg_cmd = [
+                'ffmpeg',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', file_list_path,
+                '-c', 'copy',  # Copy streams without re-encoding for speed
+                '-y',  # Overwrite output file
+                output_path
+            ]
+            
+            print(f"🔄 Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+            
+            result = subprocess.run(
+                ffmpeg_cmd,
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minute timeout
+            )
+            
+            if result.returncode != 0:
+                print(f"❌ FFmpeg failed: {result.stderr}")
+                return None
+            
+            print(f"✅ Videos combined successfully: {output_path}")
+            
+            # Upload combined video to Supabase
+            supabase_url = await self._serve_video_from_supabase(output_path, output_filename, user_id)
+            
+            # Clean up temporary files
+            for temp_path in temp_video_paths:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+            
+            if os.path.exists(file_list_path):
+                os.unlink(file_list_path)
+            
+            if os.path.exists(output_path):
+                os.unlink(output_path)
+            
+            print(f"✅ Combined video uploaded: {supabase_url}")
+            return supabase_url
+            
+        except Exception as e:
+            print(f"❌ Error combining videos: {e}")
+            return None
+
+    async def _poll_video_status_enhanced(self, video_id: str, scene_description: str, content_id: str = None, supabase_client = None) -> Dict[str, Any]:
+        """Enhanced polling for video completion status with detailed logging and database updates"""
+        try:
+            print(f"🔄 Enhanced polling for video completion: {video_id}")
+            
+            headers = {
+                "x-api-key": settings.TAVUS_API_KEY,
+                "Content-Type": "application/json"
+            }
+            
+            # Increase polling attempts and intervals for longer videos
+            max_attempts = 180  # 15 minutes with 5-second intervals
+            attempt = 0
+            last_status = None
+            last_progress = None
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                while attempt < max_attempts:
+                    attempt += 1
+                    
+                    try:
+                        print(f"📊 Polling attempt {attempt}/{max_attempts} for video {video_id}")
+                        
+                        response = await client.get(
+                            f"{self.base_url}/videos/{video_id}",
+                            headers=headers
+                        )
+                        
+                        print(f"📊 Polling response status: {response.status_code}")
+                        
+                        if response.status_code == 200:
+                            try:
+                                data = response.json()
+                                print(f"📄 Response data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                                
+                                status = data.get("status", "unknown")
+                                progress = data.get("generation_progress", "0/100")
+                                
+                                # Update database with current status and response
+                                if content_id and supabase_client:
+                                    update_data = {
+                                        "tavus_response": data,
+                                        "generation_progress": progress,
+                                        "status": "processing"
+                                    }
+                                    
+                                    # If we have a hosted_url, save it even if video is still generating
+                                    hosted_url = data.get("hosted_url")
+                                    if hosted_url:
+                                        update_data["tavus_url"] = hosted_url
+                                        print(f"🌐 Hosted URL available: {hosted_url}")
+                                    
+                                    supabase_client.table('learning_content').update(update_data).eq("id", content_id).execute()
+                                
+                                # Log status changes
+                                if status != last_status:
+                                    print(f"🔄 Status changed from '{last_status}' to '{status}'")
+                                    last_status = status
+                                
+                                if progress != last_progress:
+                                    print(f"📈 Progress changed from '{last_progress}' to '{progress}'")
+                                    last_progress = progress
+                                
+                                if status == "completed":
+                                    print(f"✅ Video completed: {video_id}")
+                                    
+                                    # Try multiple URL fields
+                                    video_url = (
+                                        data.get("download_url") or 
+                                        data.get("video_url") or 
+                                        data.get("hosted_url") or
+                                        data.get("url")
+                                    )
+                                    
+                                    hosted_url = (
+                                        data.get("hosted_url") or 
+                                        data.get("video_url") or
+                                        data.get("download_url")
+                                    )
+                                    
+                                    print(f"🔗 Video URL found: {video_url}")
+                                    print(f"🌐 Hosted URL found: {hosted_url}")
+                                    
+                                    # Update database with final status
+                                    if content_id and supabase_client:
+                                        final_update = {
+                                            "tavus_response": data,
+                                            "status": "ready",
+                                            "generation_progress": progress
+                                        }
+                                        
+                                        if video_url:
+                                            final_update["content_url"] = video_url
+                                            final_update["tavus_url"] = hosted_url
+                                        
+                                        supabase_client.table('learning_content').update(final_update).eq("id", content_id).execute()
+                                    
+                                    if video_url:
+                                        return {
+                                            "video_id": video_id,
+                                            "video_url": video_url,
+                                            "hosted_url": hosted_url,
+                                            "download_url": data.get("download_url"),
+                                            "duration": data.get("duration", 180),
+                                            "status": "completed",
+                                            "final_response": data
+                                        }
+                                    else:
+                                        print("⚠️ Video completed but no URL found")
+                                        print(f"🔍 Available URL fields: {[k for k, v in data.items() if 'url' in k.lower()]}")
+                                        return {
+                                            "video_id": video_id,
+                                            "hosted_url": hosted_url,
+                                            "status": "completed_no_download",
+                                            "final_response": data,
+                                            "error": "Video completed but no downloadable URL found"
+                                        }
+                                
+                                elif status == "failed":
+                                    error_msg = data.get("error", "Unknown error")
+                                    print(f"❌ Video generation failed: {video_id}")
+                                    print(f"📄 Error details: {error_msg}")
+                                    
+                                    # Update database with failed status
+                                    if content_id and supabase_client:
+                                        supabase_client.table('learning_content').update({
+                                            "tavus_response": data,
+                                            "status": "failed",
+                                            "error_message": error_msg,
+                                            "generation_progress": progress
+                                        }).eq("id", content_id).execute()
+                                    
+                                    return {
+                                        "video_id": video_id,
+                                        "status": "failed",
+                                        "error": error_msg,
+                                        "final_response": data
+                                    }
+                                
+                                elif status in ["queued", "generating", "processing"]:
+                                    print(f"⏳ Video status: {status} (attempt {attempt}/{max_attempts}) - Progress: {progress}")
+                                    
+                                    # Wait longer between polls for generating status
+                                    wait_time = 10 if status == "generating" else 5
+                                    await asyncio.sleep(wait_time)
+                                    continue
+                                
+                                else:
+                                    print(f"⚠️ Unknown status: {status}")
+                                    print(f"📄 Full response data: {data}")
+                                    await asyncio.sleep(5)
+                                    continue
+                                    
+                            except json.JSONDecodeError as e:
+                                print(f"❌ Failed to parse JSON response: {e}")
+                                print(f"📄 Raw response: {response.text}")
+                                await asyncio.sleep(5)
+                                continue
+                        
+                        elif response.status_code == 404:
+                            print(f"❌ Video not found: {video_id}")
+                            return {
+                                "video_id": video_id,
+                                "status": "not_found",
+                                "error": "Video ID not found in Tavus system"
+                            }
+                        
+                        elif response.status_code == 401:
+                            print(f"❌ Unauthorized access to video: {video_id}")
+                            return {
+                                "video_id": video_id,
+                                "status": "unauthorized",
+                                "error": "Invalid API key or insufficient permissions"
+                            }
+                        
+                        else:
+                            print(f"❌ Polling failed with status: {response.status_code}")
+                            print(f"📄 Error response: {response.text}")
+                            await asyncio.sleep(5)
+                            continue
+                    
+                    except httpx.TimeoutException:
+                        print(f"⏰ Timeout on attempt {attempt}, retrying...")
+                        await asyncio.sleep(5)
+                        continue
+                    
+                    except Exception as e:
+                        print(f"❌ Error polling video on attempt {attempt}: {e}")
+                        await asyncio.sleep(5)
+                        continue
+            
+            # If we get here, we've exceeded max attempts
+            print(f"⏰ Video generation timed out after {max_attempts * 5} seconds")
+            return {
+                "video_id": video_id,
+                "status": "timeout",
+                "message": f"Video generation took longer than expected (max {max_attempts * 5} seconds)",
+                "last_status": last_status,
+                "last_progress": last_progress
+            }
+            
+        except Exception as e:
+            print(f"❌ Error in enhanced video polling: {e}")
+            import traceback
+            print(f"🔍 Full traceback: {traceback.format_exc()}")
+            return {
+                "video_id": video_id,
+                "status": "error",
+                "error": str(e)
+            }
+
+    async def combine_tavus_videos(self, content_id: str, supabase_client = None) -> Optional[Dict[str, Any]]:
+        """Combine multiple Tavus video segments into a single video using FFmpeg"""
+        try:
+            print(f"🎬 Combining Tavus videos for content: {content_id}")
+            
+            if not supabase_client:
+                supabase_client = self.supabase
+            
+            # Get the learning content record
+            content_response = supabase_client.table('learning_content').select('*').eq('id', content_id).single().execute()
+            if not content_response.data:
+                print(f"❌ Content record not found: {content_id}")
+                return None
+            
+            content_data = content_response.data
+            tavus_url = content_data.get('tavus_url')
+            
+            if not tavus_url:
+                print(f"❌ No Tavus URL found for content: {content_id}")
+                return None
+            
+            print(f"🌐 Tavus URL: {tavus_url}")
+            
+            # Update status to combining
+            supabase_client.table('learning_content').update({
+                "status": "combining"
+            }).eq("id", content_id).execute()
+            
+            # Download the video from Tavus hosted URL
+            video_filename = f"tavus_video_{content_id}.mp4"
+            video_path = await self._download_and_store_video(tavus_url, video_filename, content_data.get('user_id'))
+            
+            if not video_path:
+                print(f"❌ Failed to download video from Tavus URL: {tavus_url}")
+                # Update status back to processing
+                supabase_client.table('learning_content').update({
+                    "status": "processing",
+                    "error_message": "Failed to download video from Tavus"
+                }).eq("id", content_id).execute()
+                return None
+            
+            print(f"✅ Video downloaded to: {video_path}")
+            
+            # Upload the combined video to Supabase Storage
+            combined_video_url = await self._serve_video_from_supabase(video_path, video_filename, content_data.get('user_id'))
+            
+            if not combined_video_url:
+                print(f"❌ Failed to upload combined video to Supabase")
+                # Update status back to processing
+                supabase_client.table('learning_content').update({
+                    "status": "processing",
+                    "error_message": "Failed to upload combined video to storage"
+                }).eq("id", content_id).execute()
+                return None
+            
+            print(f"✅ Combined video uploaded: {combined_video_url}")
+            
+            # Update the database with the final combined video URL
+            supabase_client.table('learning_content').update({
+                "status": "ready",
+                "content_url": combined_video_url,
+                "combined_video_url": combined_video_url,
+                "duration": 180  # Default duration
+            }).eq("id", content_id).execute()
+            
+            return {
+                "id": content_id,
+                "video_url": combined_video_url,
+                "tavus_url": tavus_url,
+                "status": "ready",
+                "duration": 180
+            }
+            
+        except Exception as e:
+            print(f"❌ Error combining Tavus videos: {e}")
+            import traceback
+            print(f"🔍 Full traceback: {traceback.format_exc()}")
+            
+            # Update database with error status
+            if supabase_client:
+                supabase_client.table('learning_content').update({
+                    "status": "failed",
+                    "error_message": f"Error combining videos: {str(e)}"
+                }).eq("id", content_id).execute()
+            
+            return None

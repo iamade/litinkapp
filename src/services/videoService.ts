@@ -49,6 +49,40 @@ export interface AvatarConfig {
   style: string;
 }
 
+interface VideoGenerationResponse {
+  id: string;
+  status: "ready" | "processing" | "failed" | "timeout";
+  video_url?: string;
+  tavus_url?: string;
+  tavus_video_id?: string;
+  duration?: number;
+  error_message?: string;
+  progress?: string;
+}
+
+interface VideoStatusResponse {
+  id: string;
+  status:
+    | "ready"
+    | "processing"
+    | "failed"
+    | "timeout"
+    | "completed_no_download";
+  video_url?: string;
+  tavus_url?: string;
+  tavus_video_id?: string;
+  duration?: number;
+  error_message?: string;
+  progress?: string;
+  message?: string;
+}
+
+interface VideoCombineResponse {
+  combined_video_url: string;
+  source_videos: string[];
+  status: "success";
+}
+
 export const videoService = {
   // RAG-based video generation from chapters
   generateVideoFromChapter: async (
@@ -104,5 +138,50 @@ export const videoService = {
       "/ai/video-avatars"
     );
     return response.avatars;
+  },
+
+  generateRealisticVideo: async (
+    chapterId: string
+  ): Promise<VideoGenerationResponse> => {
+    try {
+      const response = await apiClient.post<VideoGenerationResponse>(
+        "/ai/generate-realistic-video",
+        {
+          chapter_id: chapterId,
+        }
+      );
+
+      return response;
+    } catch (error) {
+      console.error("Error generating realistic video:", error);
+      throw error;
+    }
+  },
+
+  checkVideoStatus: async (contentId: string): Promise<VideoStatusResponse> => {
+    try {
+      const response = await apiClient.get<VideoStatusResponse>(
+        `/ai/check-video-status/${contentId}`
+      );
+      return response;
+    } catch (error) {
+      console.error("Error checking video status:", error);
+      throw error;
+    }
+  },
+
+  combineVideos: async (videoUrls: string[]): Promise<VideoCombineResponse> => {
+    try {
+      const response = await apiClient.post<VideoCombineResponse>(
+        "/ai/combine-videos",
+        {
+          video_urls: videoUrls,
+        }
+      );
+      return response;
+    } catch (error) {
+      console.error("Error combining videos:", error);
+      throw error;
+    }
   },
 };
