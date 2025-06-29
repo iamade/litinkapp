@@ -708,23 +708,21 @@ async def generate_realistic_video(
         tavus_video_id = tavus_result.get("video_id")
         tavus_url = tavus_result.get("hosted_url") or tavus_result.get("video_url")
         download_url = tavus_result.get("download_url")
-        final_video_url = tavus_result.get("video_url")
+        final_video_url = tavus_result.get("video_url") or tavus_result.get("download_url")
         
         print(f"🆔 Tavus Video ID: {tavus_video_id}")
         print(f"🌐 Tavus URL: {tavus_url}")
         print(f"🔗 Final Video URL: {final_video_url}")
         
-        # Update record with Tavus information
+        # Only set content_url if video is truly ready (downloadable URL present)
         update_data = {
             "tavus_url": tavus_url,
             "tavus_video_id": tavus_video_id,
             "status": "ready" if final_video_url else "processing"
         }
-        
         if final_video_url:
             update_data["content_url"] = final_video_url
             update_data["duration"] = tavus_result.get("duration", 180)
-        
         if content_id:
             print(f"💾 Updating database record with Tavus results...")
             supabase_client.table('learning_content').update(update_data).eq("id", content_id).execute()
@@ -815,19 +813,14 @@ async def check_video_status(
 ):
     """Check the status of video generation and handle completion"""
     try:
-        # Get content record
         content_response = supabase_client.table('learning_content').select('*').eq('id', content_id).single().execute()
         if not content_response.data:
             raise HTTPException(status_code=404, detail="Content not found")
-        
         content_data = content_response.data
-        
-        # Check access permissions
         if content_data['user_id'] != current_user['id']:
             raise HTTPException(status_code=403, detail="Not authorized to access this content")
-        
-        # If status is already ready, return the data
-        if content_data['status'] == 'ready':
+        # If status is already ready and content_url is present, return the data
+        if content_data['status'] == 'ready' and content_data.get('content_url'):
             return {
                 "id": content_id,
                 "status": "ready",
@@ -835,35 +828,26 @@ async def check_video_status(
                 "tavus_url": content_data.get('tavus_url'),
                 "duration": content_data.get('duration', 180)
             }
-        
         # If status is processing and we have a Tavus video ID, check its status
         if content_data['status'] == 'processing' and content_data.get('tavus_video_id'):
             video_service = VideoService(supabase_client)
-            
-            # Check Tavus status
             tavus_status = await video_service._poll_video_status(
-                content_data['tavus_video_id'], 
+                content_data['tavus_video_id'],
                 f"Video for content {content_id}"
             )
-            
-            if tavus_status['status'] == 'completed':
-                # Download and process the video
-                video_url = tavus_status.get('video_url')
+            if tavus_status['status'] in ['completed', 'ready']:
+                video_url = tavus_status.get('video_url') or tavus_status.get('download_url')
                 if video_url:
-                    # Download video and upload to Supabase
                     final_video_url = await video_service._download_and_store_video(
-                        video_url, 
+                        video_url,
                         f"video_{content_id}.mp4",
                         current_user['id']
                     )
-                    
-                    # Update database record
                     supabase_client.table('learning_content').update({
                         "status": "ready",
                         "content_url": final_video_url,
                         "duration": tavus_status.get('duration', 180)
                     }).eq("id", content_id).execute()
-                    
                     return {
                         "id": content_id,
                         "status": "ready",
@@ -872,27 +856,22 @@ async def check_video_status(
                         "duration": tavus_status.get('duration', 180)
                     }
                 else:
-                    # Video completed but no download URL
                     return {
                         "id": content_id,
                         "status": "completed_no_download",
                         "tavus_url": content_data.get('tavus_url'),
                         "message": "Video completed but download URL not available"
                     }
-            
             elif tavus_status['status'] == 'failed':
-                # Update database with failed status
                 supabase_client.table('learning_content').update({
                     "status": "failed",
                     "error_message": tavus_status.get('error', 'Video generation failed')
                 }).eq("id", content_id).execute()
-                
                 return {
                     "id": content_id,
                     "status": "failed",
                     "error": tavus_status.get('error', 'Video generation failed')
                 }
-            
             elif tavus_status['status'] == 'timeout':
                 return {
                     "id": content_id,
@@ -900,9 +879,7 @@ async def check_video_status(
                     "tavus_url": content_data.get('tavus_url'),
                     "message": tavus_status.get('message', 'Video generation timed out')
                 }
-            
             else:
-                # Still processing
                 return {
                     "id": content_id,
                     "status": "processing",
@@ -910,7 +887,6 @@ async def check_video_status(
                     "tavus_video_id": content_data.get('tavus_video_id'),
                     "progress": tavus_status.get('generation_progress', '0/100')
                 }
-        
         # Return current status
         return {
             "id": content_id,
@@ -918,7 +894,6 @@ async def check_video_status(
             "tavus_url": content_data.get('tavus_url'),
             "error_message": content_data.get('error_message')
         }
-        
     except Exception as e:
         print(f"Error checking video status: {e}")
         raise HTTPException(status_code=500, detail=str(e))

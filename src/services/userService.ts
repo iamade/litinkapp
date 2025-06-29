@@ -71,6 +71,9 @@ export const userService = {
       }
     );
   },
+  getLearningBooksWithProgress: async () => {
+    return apiClient.get("/books/learning-progress");
+  },
 };
 
 export async function deleteBook(bookId: string) {
