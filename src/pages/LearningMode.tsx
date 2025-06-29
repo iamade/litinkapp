@@ -7,19 +7,30 @@ import {
   Filter,
   Clock,
   Award,
-  Star,
-  Users,
   Play,
-  CheckCircle,
 } from "lucide-react";
 import { userService } from "../services/userService";
 import { toast } from "react-hot-toast";
 
+interface Book {
+  id: string;
+  title: string;
+  author_name?: string;
+  cover_image_url?: string;
+  description?: string;
+  book_type?: string;
+  status?: string;
+  progress?: number;
+  image?: string;
+}
+
 export default function LearningMode() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
-  const [continueBooks, setContinueBooks] = useState<any[]>([]);
+  const [continueBooks, setContinueBooks] = useState<Book[]>([]);
   const [continueLoading, setContinueLoading] = useState(true);
+  const [exploreBooks, setExploreBooks] = useState<Book[]>([]);
+  const [exploreLoading, setExploreLoading] = useState(true);
 
   const categories = [
     { id: "all", label: "All Categories" },
@@ -30,106 +41,11 @@ export default function LearningMode() {
     { id: "language", label: "Languages" },
   ];
 
-  const featuredBooks = [
-    {
-      id: 1,
-      title: "Introduction to Machine Learning",
-      author: "Dr. Sarah Chen",
-      category: "programming",
-      level: "Beginner",
-      duration: "6 hours",
-      students: 1250,
-      rating: 4.8,
-      progress: 0,
-      image:
-        "https://images.pexels.com/photos/8386434/pexels-photo-8386434.jpeg?auto=compress&cs=tinysrgb&w=400",
-      description:
-        "Learn the fundamentals of machine learning with interactive tutorials and real-world examples.",
-    },
-    {
-      id: 2,
-      title: "Modern Web Development",
-      author: "Alex Rivera",
-      category: "programming",
-      level: "Intermediate",
-      duration: "8 hours",
-      students: 890,
-      rating: 4.9,
-      progress: 45,
-      image:
-        "https://images.pexels.com/photos/11035380/pexels-photo-11035380.jpeg?auto=compress&cs=tinysrgb&w=400",
-      description:
-        "Master modern web development with React, Node.js, and cutting-edge tools.",
-    },
-    {
-      id: 3,
-      title: "Digital Marketing Mastery",
-      author: "Jessica Wong",
-      category: "business",
-      level: "Beginner",
-      duration: "5 hours",
-      students: 2100,
-      rating: 4.7,
-      progress: 0,
-      image:
-        "https://images.pexels.com/photos/265087/pexels-photo-265087.jpeg?auto=compress&cs=tinysrgb&w=400",
-      description:
-        "Comprehensive guide to digital marketing strategies and implementation.",
-    },
-    {
-      id: 4,
-      title: "Data Science Fundamentals",
-      author: "Dr. Michael Torres",
-      category: "science",
-      level: "Intermediate",
-      duration: "10 hours",
-      students: 756,
-      rating: 4.9,
-      progress: 75,
-      image:
-        "https://images.pexels.com/photos/8386440/pexels-photo-8386440.jpeg?auto=compress&cs=tinysrgb&w=400",
-      description:
-        "Explore data science concepts with hands-on projects and AI-powered insights.",
-    },
-    {
-      id: 5,
-      title: "UX Design Principles",
-      author: "Emma Thompson",
-      category: "design",
-      level: "Beginner",
-      duration: "4 hours",
-      students: 1450,
-      rating: 4.8,
-      progress: 0,
-      image:
-        "https://images.pexels.com/photos/196644/pexels-photo-196644.jpeg?auto=compress&cs=tinysrgb&w=400",
-      description:
-        "Learn essential UX design principles with interactive case studies.",
-    },
-    {
-      id: 6,
-      title: "Spanish for Beginners",
-      author: "Carlos Martinez",
-      category: "language",
-      level: "Beginner",
-      duration: "12 hours",
-      students: 3200,
-      rating: 4.6,
-      progress: 20,
-      image:
-        "https://images.pexels.com/photos/256417/pexels-photo-256417.jpeg?auto=compress&cs=tinysrgb&w=400",
-      description:
-        "Interactive Spanish learning with AI-powered pronunciation and conversation practice.",
-    },
-  ];
-
-  const filteredBooks = featuredBooks.filter((book) => {
+  const filteredBooks = exploreBooks.filter((book) => {
     const matchesSearch =
       book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      book.author.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory =
-      selectedCategory === "all" || book.category === selectedCategory;
-    return matchesSearch && matchesCategory;
+      (book.author_name || "").toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesSearch;
   });
 
   useEffect(() => {
@@ -140,13 +56,28 @@ export default function LearningMode() {
         setContinueBooks(
           Array.isArray(books) ? books.filter((b) => b.progress > 0) : []
         );
-      } catch (err) {
+      } catch {
         toast.error("Failed to load your learning books");
       } finally {
         setContinueLoading(false);
       }
     };
     fetchBooksWithProgress();
+  }, []);
+
+  useEffect(() => {
+    const fetchExploreBooks = async () => {
+      setExploreLoading(true);
+      try {
+        const books = await userService.getSuperadminLearningBooks();
+        setExploreBooks(Array.isArray(books) ? books : []);
+      } catch {
+        toast.error("Failed to load Explore Learning Materials");
+      } finally {
+        setExploreLoading(false);
+      }
+    };
+    fetchExploreBooks();
   }, []);
 
   return (
@@ -206,7 +137,7 @@ export default function LearningMode() {
                         {book.title}
                       </h3>
                       <p className="text-gray-600 text-sm mb-4">
-                        by {book.author_name || book.author}
+                        by {book.author_name}
                       </p>
                       <Link
                         to={`/book/${book.id}`}
@@ -262,84 +193,47 @@ export default function LearningMode() {
             <BookOpen className="h-7 w-7 text-purple-600 mr-2" />
             Explore Learning Materials
           </h2>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {filteredBooks.map((book) => (
-              <div
-                key={book.id}
-                className="group bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden hover:shadow-xl transition-all transform hover:scale-105"
-              >
-                <div className="relative">
-                  <img
-                    src={book.image}
-                    alt={book.title}
-                    className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-300"
-                  />
-                  <div className="absolute top-4 left-4">
-                    <span className="bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium text-gray-900">
-                      {book.level}
-                    </span>
+          {exploreLoading ? (
+            <div className="text-center py-8">
+              Loading Explore Learning Materials...
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {filteredBooks.map((book) => (
+                <div
+                  key={book.id}
+                  className="group bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden hover:shadow-xl transition-all transform hover:scale-105"
+                >
+                  <div className="relative">
+                    <img
+                      src={book.cover_image_url || book.image}
+                      alt={book.title}
+                      className="w-full h-48 object-cover group-hover:scale-110 transition-transform duration-300"
+                    />
                   </div>
-                  {book.progress > 0 && (
-                    <div className="absolute top-4 right-4">
-                      <div className="bg-green-500 p-2 rounded-full">
-                        <CheckCircle className="h-4 w-4 text-white" />
-                      </div>
+                  <div className="p-6">
+                    <h3 className="font-bold text-lg text-gray-900 mb-2 group-hover:text-purple-600 transition-colors">
+                      {book.title}
+                    </h3>
+                    <p className="text-gray-600 text-sm mb-3">
+                      by {book.author_name}
+                    </p>
+                    <p className="text-gray-600 text-sm mb-4 line-clamp-2">
+                      {book.description}
+                    </p>
+                    <div className="flex space-x-2">
+                      <Link
+                        to={`/book/${book.id}`}
+                        className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white py-2 px-4 rounded-full font-medium text-center hover:from-purple-700 hover:to-blue-700 transition-all transform hover:scale-105"
+                      >
+                        Start Learning
+                      </Link>
                     </div>
-                  )}
-                </div>
-
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-purple-600 font-medium capitalize">
-                      {book.category}
-                    </span>
-                    <div className="flex items-center space-x-1">
-                      <Star className="h-4 w-4 text-yellow-400 fill-current" />
-                      <span className="text-sm text-gray-600">
-                        {book.rating}
-                      </span>
-                    </div>
-                  </div>
-
-                  <h3 className="font-bold text-lg text-gray-900 mb-2 group-hover:text-purple-600 transition-colors">
-                    {book.title}
-                  </h3>
-
-                  <p className="text-gray-600 text-sm mb-3">by {book.author}</p>
-
-                  <p className="text-gray-600 text-sm mb-4 line-clamp-2">
-                    {book.description}
-                  </p>
-
-                  <div className="flex items-center justify-between text-sm text-gray-500 mb-4">
-                    <div className="flex items-center space-x-4">
-                      <span className="flex items-center">
-                        <Clock className="h-4 w-4 mr-1" />
-                        {book.duration}
-                      </span>
-                      <span className="flex items-center">
-                        <Users className="h-4 w-4 mr-1" />
-                        {book.students.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex space-x-2">
-                    <Link
-                      to={`/book/${book.id}`}
-                      className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white py-2 px-4 rounded-full font-medium text-center hover:from-purple-700 hover:to-blue-700 transition-all transform hover:scale-105"
-                    >
-                      {book.progress > 0 ? "Continue" : "Start Learning"}
-                    </Link>
-                    <button className="border border-purple-200 text-purple-600 py-2 px-4 rounded-full hover:bg-purple-50 transition-colors">
-                      Preview
-                    </button>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* AI Features Callout */}
