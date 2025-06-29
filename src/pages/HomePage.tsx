@@ -1,5 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { toast } from "react-hot-toast";
 import {
   Brain,
   Sparkles,
@@ -11,6 +12,18 @@ import {
 } from "lucide-react";
 
 export default function HomePage() {
+  const handleExploreStoriesClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    toast("Explore Stories feature coming soon! 🌟", {
+      icon: "📚",
+      style: {
+        borderRadius: "10px",
+        background: "#333",
+        color: "#fff",
+      },
+    });
+  };
+
   const features = [
     {
       icon: Brain,
@@ -98,13 +111,13 @@ export default function HomePage() {
               <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
             </Link>
 
-            <Link
-              to="/explore"
+            <button
+              onClick={handleExploreStoriesClick}
               className="group border-2 border-white text-white px-8 py-4 rounded-full font-bold text-lg hover:bg-white hover:text-purple-600 transition-all transform hover:scale-105 flex items-center space-x-2"
             >
               <Play className="h-5 w-5" />
               <span>Explore Stories</span>
-            </Link>
+            </button>
           </div>
 
           {/* Quick Demo Access */}
