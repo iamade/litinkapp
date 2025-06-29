@@ -29,6 +29,7 @@ class BookStatus(str, Enum):
 
 
 class UserBookStatus(str, Enum):
+    PENDING_PAYMENT = "PENDING_PAYMENT"  # New status for payment required
     PROCESSING = "PROCESSING"      # Initial upload, file processing
     GENERATING = "GENERATING"      # AI generating chapters/content
     READY = "READY"               # AI processing complete
@@ -280,13 +281,21 @@ async def upload_book(
 ):
     """
     Upload and process a book from a file or raw text.
-    This endpoint now runs the processing in the background.
+    This endpoint now includes payment logic for 2nd+ books.
     """
     if not file and not text_content:
         raise HTTPException(
             status_code=400,
             detail="Either a file or text content must be provided.",
         )
+
+    # Check how many books the user has already uploaded (excluding FAILED ones)
+    books_response = supabase_client.table('books').select('id', count='exact').eq('user_id', current_user['id']).neq('status', 'FAILED').execute()
+    book_count = books_response.count or 0
+    
+    # Determine if payment is required (2nd book and beyond)
+    requires_payment = book_count >= 1
+    initial_status = "PENDING_PAYMENT" if requires_payment else "QUEUED"
 
     file_service = FileService()
     
@@ -309,12 +318,12 @@ async def upload_book(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to upload file to storage: {e}")
 
-    # Create an initial book record so we can return an ID immediately
+    # Create an initial book record
     initial_book_data = BookCreate(
         title=original_filename if file else "Untitled Text",
         user_id=current_user["id"],
         book_type=book_type,
-        status="QUEUED",
+        status=initial_status,
         original_file_storage_path=storage_path
     )
     
@@ -322,18 +331,31 @@ async def upload_book(
         response = supabase_client.table("books").insert(initial_book_data.dict(exclude_none=True)).execute()
         book_record = response.data[0]
         
-        # Add the processing task to the background
-        background_tasks.add_task(
-            file_service.process_uploaded_book,
-            storage_path=storage_path,
-            original_filename=original_filename,
-            text_content=text_content,
-            book_type=book_type,
-            user_id=current_user["id"],
-            book_id_to_update=book_record["id"], # Pass ID to update
-        )
-        
-        return book_record
+        if requires_payment:
+            # Return book record with payment_required flag
+            # Frontend will handle creating checkout session
+            return {
+                **book_record,
+                "payment_required": True,
+                "message": "Payment required for additional book uploads"
+            }
+        else:
+            # Add the processing task to the background for free first book
+            background_tasks.add_task(
+                file_service.process_uploaded_book,
+                storage_path=storage_path,
+                original_filename=original_filename,
+                text_content=text_content,
+                book_type=book_type,
+                user_id=current_user["id"],
+                book_id_to_update=book_record["id"],
+            )
+            
+            return {
+                **book_record,
+                "payment_required": False,
+                "message": "Book processing started"
+            }
 
     except Exception as e:
         # This will catch errors during initial book creation

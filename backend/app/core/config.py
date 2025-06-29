@@ -39,6 +39,9 @@ class Settings(BaseSettings):
             return [host.strip() for host in env_hosts.split(",")]
         return self.ALLOWED_HOSTS
     
+    # Frontend URL for redirects
+    FRONTEND_URL: str = "http://localhost:5173" if ENVIRONMENT == "development" else "https://www.litinkai.com"
+    
     # Supabase Configuration (Primary Database)
     SUPABASE_URL: str
     SUPABASE_SERVICE_ROLE_KEY: str
@@ -59,6 +62,11 @@ class Settings(BaseSettings):
     ALGORAND_SERVER: str = "https://testnet-api.algonode.cloud"
     ALGORAND_INDEXER: str = "https://testnet-idx.algonode.cloud"
     CREATOR_MNEMONIC: Optional[str] = None
+    
+    # Stripe Configuration
+    STRIPE_SECRET_KEY: Optional[str] = None
+    STRIPE_WEBHOOK_SECRET: Optional[str] = None
+    STRIPE_PRICE_ID: Optional[str] = None
     
     # File Storage
     UPLOAD_DIR: str = "uploads"

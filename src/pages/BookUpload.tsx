@@ -11,8 +11,11 @@ import {
   ArrowRight,
   Book,
   CheckCircle,
+  CreditCard,
+  AlertCircle,
 } from "lucide-react";
 import { apiClient } from "../lib/api";
+import { stripeService } from "../services/stripeService";
 
 // Add interface for chapter structure
 interface Chapter {
@@ -44,6 +47,8 @@ interface Book {
   error_message?: string;
   progress_message?: string;
   processing_time_seconds?: number;
+  payment_required?: boolean;
+  message?: string;
 }
 
 export default function BookUpload() {
@@ -100,6 +105,11 @@ export default function BookUpload() {
   const [chapterError, setChapterError] = useState("");
   const [processingStatus, setProcessingStatus] = useState("");
   const [processingFailed, setProcessingFailed] = useState(false);
+  
+  // Payment-related state
+  const [paymentRequired, setPaymentRequired] = useState(false);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
+  const [userBookCount, setUserBookCount] = useState(0);
 
   useEffect(() => {
     // Check if we are resuming a book from the dashboard
@@ -135,7 +145,32 @@ export default function BookUpload() {
       // Jump to the chapter review step
       setStep(4);
     }
-  }, [location.state]);
+
+    // Check payment success/cancel from URL params
+    const urlParams = new URLSearchParams(location.search);
+    const paymentStatus = urlParams.get('payment');
+    const bookId = urlParams.get('book_id');
+
+    if (paymentStatus === 'success' && bookId) {
+      toast.success('Payment successful! Your book is now being processed.');
+      navigate('/dashboard');
+    } else if (paymentStatus === 'cancelled' && bookId) {
+      toast.error('Payment was cancelled. You can try again from your dashboard.');
+      navigate('/dashboard');
+    }
+
+    // Load user book count
+    loadUserBookCount();
+  }, [location.state, location.search, navigate]);
+
+  const loadUserBookCount = async () => {
+    try {
+      const bookCountData = await stripeService.getUserBookCount();
+      setUserBookCount(bookCountData.book_count);
+    } catch (error) {
+      console.error('Error loading user book count:', error);
+    }
+  };
 
   if (!user) {
     return (
@@ -166,13 +201,15 @@ export default function BookUpload() {
     }
   };
 
-  // Step 3: AI Processing
+  // Step 3: AI Processing with Payment Logic
   const handleProcessAI = async () => {
     setIsProcessing(true);
     setProcessingFailed(false);
     setAiBook(null);
     setEditableChapters([]);
     setProcessingStatus("Initializing...");
+    setPaymentRequired(false);
+    
     try {
       const formData = new FormData();
       formData.append("book_type", bookMode);
@@ -186,11 +223,22 @@ export default function BookUpload() {
         setProcessingStatus("");
         return;
       }
+
       const book = (await apiClient.upload("/books/upload", formData)) as Book;
       setAiBook(book);
+
+      // Check if payment is required
+      if (book.payment_required) {
+        setPaymentRequired(true);
+        setIsProcessing(false);
+        setProcessingStatus("");
+        toast.info("Payment required for additional book uploads");
+        return;
+      }
+
       setProcessingStatus("Uploading book...");
 
-      // Poll for status changes
+      // Poll for status changes (existing logic for free books)
       const pollInterval = setInterval(async () => {
         try {
           const response = await apiClient.get<Book>(
@@ -280,6 +328,23 @@ export default function BookUpload() {
       toast.error(error.message || "AI processing failed.");
       setIsProcessing(false);
       setProcessingStatus("");
+    }
+  };
+
+  // Handle payment for book upload
+  const handlePayment = async () => {
+    if (!aiBook) return;
+
+    setPaymentProcessing(true);
+    try {
+      const checkoutSession = await stripeService.createBookUploadCheckoutSession(aiBook.id);
+      
+      // Redirect to Stripe Checkout
+      stripeService.redirectToCheckout(checkoutSession.checkout_url);
+    } catch (error) {
+      console.error('Error creating checkout session:', error);
+      toast.error('Failed to create payment session. Please try again.');
+      setPaymentProcessing(false);
     }
   };
 
@@ -610,6 +675,16 @@ export default function BookUpload() {
           <p className="text-gray-600">
             Transform your content into an interactive AI-powered experience
           </p>
+          {userBookCount >= 1 && (
+            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center justify-center space-x-2">
+                <CreditCard className="h-5 w-5 text-blue-600" />
+                <span className="text-blue-800 text-sm font-medium">
+                  You have uploaded {userBookCount} book{userBookCount !== 1 ? 's' : ''}. Additional uploads require payment.
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Progress Steps */}
@@ -821,7 +896,7 @@ export default function BookUpload() {
             </div>
           )}
 
-          {/* Step 3: AI Processing */}
+          {/* Step 3: AI Processing with Payment */}
           {step === 3 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">
@@ -830,6 +905,56 @@ export default function BookUpload() {
               <p className="text-gray-600 mb-4">
                 Let AI analyze your book and auto-populate the details for you.
               </p>
+              
+              {/* Payment Required Section */}
+              {paymentRequired && aiBook && (
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-6 mb-6">
+                  <div className="flex items-start space-x-4">
+                    <div className="flex-shrink-0">
+                      <CreditCard className="h-8 w-8 text-blue-600" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-blue-900 mb-2">
+                        Payment Required
+                      </h3>
+                      <p className="text-blue-800 mb-4">
+                        This is your {userBookCount + 1}{userBookCount === 0 ? 'st' : userBookCount === 1 ? 'nd' : userBookCount === 2 ? 'rd' : 'th'} book upload. 
+                        Additional uploads require a one-time payment to continue processing.
+                      </p>
+                      <div className="bg-white/50 rounded-lg p-4 mb-4">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-blue-900">Book Processing Fee</span>
+                          <span className="text-xl font-bold text-blue-900">$9.99</span>
+                        </div>
+                        <p className="text-sm text-blue-700 mt-1">
+                          One-time payment per additional book
+                        </p>
+                      </div>
+                      <button
+                        onClick={handlePayment}
+                        disabled={paymentProcessing}
+                        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-6 rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                      >
+                        {paymentProcessing ? (
+                          <>
+                            <Settings className="h-5 w-5 animate-spin" />
+                            <span>Processing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CreditCard className="h-5 w-5" />
+                            <span>Pay & Continue Processing</span>
+                          </>
+                        )}
+                      </button>
+                      <p className="text-xs text-blue-600 mt-2 text-center">
+                        Secure payment powered by Stripe
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col items-center justify-center min-h-[120px]">
                 {isProcessing ? (
                   <div className="flex flex-col items-center">
@@ -855,6 +980,13 @@ export default function BookUpload() {
                     >
                       Retry Processing
                     </button>
+                  </div>
+                ) : paymentRequired ? (
+                  <div className="flex flex-col items-center">
+                    <AlertCircle className="h-12 w-12 text-blue-600 mb-4" />
+                    <p className="text-gray-600 text-center">
+                      Complete payment above to continue with AI processing
+                    </p>
                   </div>
                 ) : (
                   <button
