@@ -101,6 +101,14 @@ interface LearningContentResponse {
   content: LearningContentItem[];
 }
 
+interface AudioGenerationResponse {
+  id: string;
+  audio_url?: string;
+  duration: number;
+  status: "ready" | "processing" | "failed";
+  error_message?: string;
+}
+
 export const videoService = {
   // RAG-based video generation from chapters
   generateVideoFromChapter: async (
@@ -213,6 +221,23 @@ export const videoService = {
       return response;
     } catch (error) {
       console.error("Error getting learning content:", error);
+      throw error;
+    }
+  },
+
+  generateAudioNarration: async (
+    chapterId: string
+  ): Promise<AudioGenerationResponse> => {
+    try {
+      const response = await apiClient.post<AudioGenerationResponse>(
+        "/ai/generate-audio-narration",
+        {
+          chapter_id: chapterId,
+        }
+      );
+      return response;
+    } catch (error) {
+      console.error("Error generating audio narration:", error);
       throw error;
     }
   },

@@ -51,6 +51,8 @@ export default function BookViewForLearning() {
   const [videoError, setVideoError] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Load book data
@@ -100,6 +102,13 @@ export default function BookViewForLearning() {
 
           // Set video URL for immediate display
           setVideoUrl(item.content_url);
+        } else if (
+          item.content_type === "audio_narration" &&
+          item.status === "ready" &&
+          item.content_url
+        ) {
+          // Set audio URL for immediate display
+          setAudioUrl(item.content_url);
         }
       });
 
@@ -116,8 +125,11 @@ export default function BookViewForLearning() {
   const handleChapterSelect = async (chapter: Chapter) => {
     setSelectedChapter(chapter);
     setVideoUrl(null); // Clear current video
+    setAudioUrl(null); // Clear current audio
     setVideoError(null);
+    setAudioError(null);
     setVideoLoading(false);
+    setAudioLoading(false);
 
     // Load learning content for the selected chapter
     await loadLearningContent(chapter.id);
@@ -224,16 +236,36 @@ export default function BookViewForLearning() {
     if (!selectedChapter) return;
 
     setAudioLoading(true);
+    setAudioError(null);
+    setAudioUrl(null);
+
     try {
-      // TODO: Implement audio narration generation
-      toast.success("Audio narration feature coming soon!");
+      const result = await videoService.generateAudioNarration(
+        selectedChapter.id
+      );
+
+      if (result.status === "ready" && result.audio_url) {
+        setAudioUrl(result.audio_url);
+        setAudioLoading(false);
+        toast.success("Audio narration generated successfully!");
+      } else if (result.status === "failed") {
+        setAudioError(
+          result.error_message || "Failed to generate audio narration"
+        );
+        setAudioLoading(false);
+        toast.error("Failed to generate audio narration");
+      } else {
+        setAudioError("Audio generation failed");
+        setAudioLoading(false);
+        toast.error("Failed to generate audio narration");
+      }
     } catch (error: unknown) {
       console.error("Error generating audio narration:", error);
       const errorMessage =
         error instanceof Error ? error.message : "Failed to generate audio";
-      toast.error(errorMessage);
-    } finally {
+      setAudioError(errorMessage);
       setAudioLoading(false);
+      toast.error(errorMessage);
     }
   };
 
@@ -410,6 +442,12 @@ export default function BookViewForLearning() {
                         </div>
                       )}
 
+                      {audioError && (
+                        <div className="p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+                          {audioError}
+                        </div>
+                      )}
+
                       {videoUrl && (
                         <div className="mt-4">
                           <h4 className="text-lg font-semibold mb-2">
@@ -422,6 +460,21 @@ export default function BookViewForLearning() {
                           >
                             Your browser does not support the video tag.
                           </video>
+                        </div>
+                      )}
+
+                      {audioUrl && (
+                        <div className="mt-4">
+                          <h4 className="text-lg font-semibold mb-2">
+                            Generated Audio Narration:
+                          </h4>
+                          <audio
+                            controls
+                            className="w-full max-w-2xl"
+                            src={audioUrl}
+                          >
+                            Your browser does not support the audio tag.
+                          </audio>
                         </div>
                       )}
 
