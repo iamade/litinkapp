@@ -923,6 +923,47 @@ async def check_video_status(
         print(f"Error checking video status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/learning-content/{chapter_id}")
+async def get_learning_content(
+    chapter_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get existing learning content for a chapter"""
+    try:
+        # Get all learning content for this chapter
+        content_response = supabase_client.table('learning_content').select('*').eq('chapter_id', chapter_id).execute()
+        
+        if not content_response.data:
+            return {
+                "chapter_id": chapter_id,
+                "content": []
+            }
+        
+        # Filter content by user access
+        user_content = []
+        for content in content_response.data:
+            if content['user_id'] == current_user['id']:
+                user_content.append({
+                    "id": content['id'],
+                    "content_type": content['content_type'],
+                    "content_url": content.get('content_url'),
+                    "tavus_url": content.get('tavus_url'),
+                    "status": content['status'],
+                    "duration": content.get('duration', 180),
+                    "created_at": content['created_at'],
+                    "updated_at": content['updated_at']
+                })
+        
+        return {
+            "chapter_id": chapter_id,
+            "content": user_content
+        }
+        
+    except Exception as e:
+        print(f"Error getting learning content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/combine-videos")
 async def combine_videos(
     request: dict,
