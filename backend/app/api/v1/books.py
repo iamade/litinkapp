@@ -674,3 +674,57 @@ async def save_user_chapters(
     # Update total_chapters in books table
     supabase_client.table('books').update({"total_chapters": len(chapters)}).eq('id', book_id).execute()
     return {"message": "Chapters saved", "total_chapters": len(chapters)}
+
+
+@router.get("/learning-progress")
+async def get_learning_books_with_progress(
+    supabase_client: Client = Depends(get_supabase),
+    current_user: User = Depends(get_current_user)
+):
+    """Return all 'learning' books for the user with progress percentage and book info."""
+    try:
+        # Get all learning books for the user
+        books_response = supabase_client.table('books').select('*, chapters(*)').eq('user_id', current_user["id"]).eq('book_type', 'learning').execute()
+        books = books_response.data or []
+        result = []
+        for book in books:
+            chapters = book.get('chapters') or []
+            if not isinstance(chapters, list) or len(chapters) == 0:
+                # No chapters, progress is 0
+                result.append({
+                    'id': book.get('id', ''),
+                    'title': book.get('title', ''),
+                    'author_name': book.get('author_name', ''),
+                    'cover_image_url': book.get('cover_image_url', ''),
+                    'description': book.get('description', ''),
+                    'progress': 0,
+                    'total_chapters': 0,
+                    'book_type': book.get('book_type', ''),
+                    'status': book.get('status', ''),
+                })
+                continue
+            chapter_ids = [c.get('id') for c in chapters if c.get('id')]
+            total_chapters = len(chapter_ids)
+            progress = 0
+            if total_chapters > 0:
+                # Get all learning_content for these chapters for this user
+                content_response = supabase_client.table('learning_content').select('chapter_id, content_type, status').in_('chapter_id', chapter_ids).eq('user_id', current_user["id"]).eq('status', 'ready').execute()
+                content = content_response.data or []
+                # Count unique chapters with at least one ready audio or video
+                chapters_with_content = set([c.get('chapter_id') for c in content if c.get('content_type') in ['audio_narration', 'realistic_video']])
+                progress = round((len(chapters_with_content) / total_chapters) * 100)
+            result.append({
+                'id': book.get('id', ''),
+                'title': book.get('title', ''),
+                'author_name': book.get('author_name', ''),
+                'cover_image_url': book.get('cover_image_url', ''),
+                'description': book.get('description', ''),
+                'progress': progress,
+                'total_chapters': total_chapters,
+                'book_type': book.get('book_type', ''),
+                'status': book.get('status', ''),
+            })
+        return result
+    except Exception as e:
+        print(f"Error in /learning-progress: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

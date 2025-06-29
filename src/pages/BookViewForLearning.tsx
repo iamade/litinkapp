@@ -55,6 +55,15 @@ export default function BookViewForLearning() {
   const [audioError, setAudioError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Helper to lock buttons if any content is processing or loading
+  const isLocked =
+    audioLoading ||
+    videoLoading ||
+    (selectedChapter &&
+      Object.values(learningContent).some(
+        (c) => c.chapter_id === selectedChapter.id && c.status === "processing"
+      ));
+
   // Load book data
   const loadBook = async (bookId: string) => {
     try {
@@ -411,7 +420,7 @@ export default function BookViewForLearning() {
                       <div className="flex items-center space-x-4">
                         <button
                           onClick={handleAudioNarration}
-                          disabled={audioLoading}
+                          disabled={isLocked}
                           className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                         >
                           {audioLoading ? (
@@ -424,7 +433,7 @@ export default function BookViewForLearning() {
 
                         <button
                           onClick={handleRealisticVideo}
-                          disabled={videoLoading}
+                          disabled={isLocked}
                           className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                         >
                           {videoLoading ? (
