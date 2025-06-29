@@ -63,6 +63,8 @@ export default function BookViewForLearning() {
       // Set first chapter as selected by default
       if (bookData.chapters && bookData.chapters.length > 0) {
         setSelectedChapter(bookData.chapters[0]);
+        // Load learning content for the first chapter
+        await loadLearningContent(bookData.chapters[0].id);
       }
     } catch (error) {
       console.error("Error loading book:", error);
@@ -70,6 +72,55 @@ export default function BookViewForLearning() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Load learning content for a chapter
+  const loadLearningContent = async (chapterId: string) => {
+    try {
+      const response = await videoService.getLearningContent(chapterId);
+
+      // Update learning content state
+      const newLearningContent: Record<string, LearningContent> = {};
+
+      response.content.forEach((item) => {
+        if (
+          item.content_type === "realistic_video" &&
+          item.status === "ready" &&
+          item.content_url
+        ) {
+          newLearningContent[chapterId] = {
+            id: item.id,
+            type: "video",
+            title: "Realistic Video",
+            content_url: item.content_url,
+            duration: item.duration,
+            status: item.status,
+            chapter_id: chapterId,
+          };
+
+          // Set video URL for immediate display
+          setVideoUrl(item.content_url);
+        }
+      });
+
+      setLearningContent((prev) => ({
+        ...prev,
+        ...newLearningContent,
+      }));
+    } catch (error) {
+      console.error("Error loading learning content:", error);
+    }
+  };
+
+  // Handle chapter selection
+  const handleChapterSelect = async (chapter: Chapter) => {
+    setSelectedChapter(chapter);
+    setVideoUrl(null); // Clear current video
+    setVideoError(null);
+    setVideoLoading(false);
+
+    // Load learning content for the selected chapter
+    await loadLearningContent(chapter.id);
   };
 
   // Handle realistic video generation
@@ -84,8 +135,11 @@ export default function BookViewForLearning() {
         selectedChapter.id
       );
 
-      if (result.status === "ready" && result.video_url) {
-        setVideoUrl(result.video_url);
+      if (
+        result.status === "ready" &&
+        (result.content_url || result.video_url)
+      ) {
+        setVideoUrl(result.content_url || result.video_url);
         setVideoLoading(false);
         toast.success("Realistic video generated successfully!");
       } else if (result.status === "processing") {
@@ -115,10 +169,18 @@ export default function BookViewForLearning() {
       try {
         const status = await videoService.checkVideoStatus(contentId);
 
-        if (status.status === "ready" && status.video_url) {
-          setVideoUrl(status.video_url);
+        if (
+          status.status === "ready" &&
+          (status.content_url || status.video_url)
+        ) {
+          setVideoUrl(status.content_url || status.video_url);
           setVideoLoading(false);
           toast.success("Realistic video generated successfully!");
+          return;
+        } else if (status.status === "completed_no_download") {
+          setVideoError("Video completed but no downloadable URL found");
+          setVideoLoading(false);
+          toast.error("Video completed but no downloadable URL found");
           return;
         } else if (status.status === "failed") {
           setVideoError(status.error_message || "Video generation failed");
@@ -262,7 +324,7 @@ export default function BookViewForLearning() {
                 {book.chapters?.map((chapter, index) => (
                   <button
                     key={chapter.id}
-                    onClick={() => setSelectedChapter(chapter)}
+                    onClick={() => handleChapterSelect(chapter)}
                     className={`w-full text-left p-3 rounded-lg transition-colors ${
                       selectedChapter?.id === chapter.id
                         ? "bg-blue-50 border-blue-200 border"
@@ -279,7 +341,14 @@ export default function BookViewForLearning() {
                         </p>
                       </div>
                       {learningContent[chapter.id] && (
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                        <div className="flex items-center space-x-1">
+                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          <span className="text-xs text-green-600">
+                            {learningContent[chapter.id].type === "video"
+                              ? "🎬"
+                              : "🎵"}
+                          </span>
+                        </div>
                       )}
                     </div>
                   </button>
@@ -353,6 +422,25 @@ export default function BookViewForLearning() {
                           >
                             Your browser does not support the video tag.
                           </video>
+                        </div>
+                      )}
+
+                      {learningContent[selectedChapter.id] && !videoUrl && (
+                        <div className="mt-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded">
+                          <p>
+                            Video content exists for this chapter but is not
+                            currently loaded.
+                          </p>
+                          <button
+                            onClick={() =>
+                              setVideoUrl(
+                                learningContent[selectedChapter.id].content_url
+                              )
+                            }
+                            className="mt-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+                          >
+                            Load Video
+                          </button>
                         </div>
                       )}
                     </div>

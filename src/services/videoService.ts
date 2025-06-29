@@ -53,6 +53,7 @@ interface VideoGenerationResponse {
   id: string;
   status: "ready" | "processing" | "failed" | "timeout";
   video_url?: string;
+  content_url?: string;
   tavus_url?: string;
   tavus_video_id?: string;
   duration?: number;
@@ -69,6 +70,7 @@ interface VideoStatusResponse {
     | "timeout"
     | "completed_no_download";
   video_url?: string;
+  content_url?: string;
   tavus_url?: string;
   tavus_video_id?: string;
   duration?: number;
@@ -81,6 +83,22 @@ interface VideoCombineResponse {
   combined_video_url: string;
   source_videos: string[];
   status: "success";
+}
+
+interface LearningContentItem {
+  id: string;
+  content_type: string;
+  content_url?: string;
+  tavus_url?: string;
+  status: string;
+  duration: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface LearningContentResponse {
+  chapter_id: string;
+  content: LearningContentItem[];
 }
 
 export const videoService = {
@@ -143,6 +161,7 @@ export const videoService = {
   generateRealisticVideo: async (
     chapterId: string
   ): Promise<VideoGenerationResponse> => {
+    // Only send required parameters for Tavus integration (chapter_id)
     try {
       const response = await apiClient.post<VideoGenerationResponse>(
         "/ai/generate-realistic-video",
@@ -150,7 +169,6 @@ export const videoService = {
           chapter_id: chapterId,
         }
       );
-
       return response;
     } catch (error) {
       console.error("Error generating realistic video:", error);
@@ -181,6 +199,20 @@ export const videoService = {
       return response;
     } catch (error) {
       console.error("Error combining videos:", error);
+      throw error;
+    }
+  },
+
+  getLearningContent: async (
+    chapterId: string
+  ): Promise<LearningContentResponse> => {
+    try {
+      const response = await apiClient.get<LearningContentResponse>(
+        `/ai/learning-content/${chapterId}`
+      );
+      return response;
+    } catch (error) {
+      console.error("Error getting learning content:", error);
       throw error;
     }
   },
