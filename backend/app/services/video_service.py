@@ -2640,7 +2640,7 @@ Return as JSON with: script, character_details, scene_prompt
                                     print(f"📈 Progress changed from '{last_progress}' to '{progress}'")
                                     last_progress = progress
                                 
-                                if status == "completed":
+                                if status in ["completed", "ready"]:
                                     print(f"✅ Video completed: {video_id}")
                                     
                                     # Try multiple URL fields
