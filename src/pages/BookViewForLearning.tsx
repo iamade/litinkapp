@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { userService } from "../services/userService";
 import { videoService } from "../services/videoService";
 import { toast } from "react-hot-toast";
@@ -32,11 +32,11 @@ interface LearningContent {
   duration: number;
   status: string;
   chapter_id: string;
+  tavus_url?: string;
 }
 
 export default function BookViewForLearning() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
 
   // State declarations - all hooks at the top level
   const [book, setBook] = useState<Book | null>(null);
@@ -57,8 +57,8 @@ export default function BookViewForLearning() {
 
   // Helper to lock buttons if any content is processing or loading
   const isLocked =
-    audioLoading ||
-    videoLoading ||
+    !!audioLoading ||
+    !!videoLoading ||
     (selectedChapter &&
       Object.values(learningContent).some(
         (c) => c.chapter_id === selectedChapter.id && c.status === "processing"
@@ -69,13 +69,17 @@ export default function BookViewForLearning() {
     try {
       setIsLoading(true);
       const bookData = await userService.getBook(bookId);
-      setBook(bookData);
-
-      // Set first chapter as selected by default
-      if (bookData.chapters && bookData.chapters.length > 0) {
-        setSelectedChapter(bookData.chapters[0]);
-        // Load learning content for the first chapter
-        await loadLearningContent(bookData.chapters[0].id);
+      if (bookData && typeof bookData === "object") {
+        setBook(bookData as Book);
+        // Set first chapter as selected by default
+        if (
+          (bookData as Book).chapters &&
+          (bookData as Book).chapters.length > 0
+        ) {
+          setSelectedChapter((bookData as Book).chapters[0]);
+          // Load learning content for the first chapter
+          await loadLearningContent((bookData as Book).chapters[0].id);
+        }
       }
     } catch (error) {
       console.error("Error loading book:", error);
@@ -160,7 +164,7 @@ export default function BookViewForLearning() {
         result.status === "ready" &&
         (result.content_url || result.video_url)
       ) {
-        setVideoUrl(result.content_url || result.video_url);
+        setVideoUrl((result.content_url || result.video_url) ?? null);
         setVideoLoading(false);
         toast.success("Realistic video generated successfully!");
       } else if (result.status === "processing") {
@@ -194,7 +198,7 @@ export default function BookViewForLearning() {
           status.status === "ready" &&
           (status.content_url || status.video_url)
         ) {
-          setVideoUrl(status.content_url || status.video_url);
+          setVideoUrl((status.content_url || status.video_url) ?? null);
           setVideoLoading(false);
           toast.success("Realistic video generated successfully!");
           return;
@@ -213,11 +217,24 @@ export default function BookViewForLearning() {
           setVideoLoading(false);
           toast.error("Video generation timed out");
           return;
+        } else if (
+          status.status === "processing" &&
+          status.tavus_url &&
+          !status.content_url &&
+          !status.video_url
+        ) {
+          // Show a message and keep polling
+          setVideoError(
+            "Video is being created. You can preview the hosted link below, but the downloadable video will appear here when ready."
+          );
+          setVideoLoading(true);
+          // Optionally, you could set a fallback link to status.tavus_url
         }
 
         attempts++;
         if (attempts < maxAttempts) {
-          setTimeout(poll, 5000);
+          const interval = attempts < 10 ? 10000 : 30000; // 10s for first 10, then 30s
+          setTimeout(poll, interval);
         } else {
           setVideoError(
             "Video generation is taking longer than expected. Please check back later."
@@ -254,7 +271,7 @@ export default function BookViewForLearning() {
       );
 
       if (result.status === "ready" && result.audio_url) {
-        setAudioUrl(result.audio_url);
+        setAudioUrl(result.audio_url ?? null);
         setAudioLoading(false);
         toast.success("Audio narration generated successfully!");
       } else if (result.status === "failed") {
@@ -420,7 +437,7 @@ export default function BookViewForLearning() {
                       <div className="flex items-center space-x-4">
                         <button
                           onClick={handleAudioNarration}
-                          disabled={isLocked}
+                          disabled={!!isLocked}
                           className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                         >
                           {audioLoading ? (
@@ -433,7 +450,7 @@ export default function BookViewForLearning() {
 
                         <button
                           onClick={handleRealisticVideo}
-                          disabled={isLocked}
+                          disabled={!!isLocked}
                           className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                         >
                           {videoLoading ? (
@@ -505,6 +522,26 @@ export default function BookViewForLearning() {
                           </button>
                         </div>
                       )}
+
+                      {videoError &&
+                        currentLearningContent &&
+                        currentLearningContent.status === "processing" &&
+                        currentLearningContent.tavus_url && (
+                          <div className="p-3 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded mt-2">
+                            <span>
+                              The video is still being processed. You can
+                              preview the hosted video here (may not be ready):{" "}
+                              <a
+                                href={currentLearningContent.tavus_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="underline text-blue-700"
+                              >
+                                Hosted Video Link
+                              </a>
+                            </span>
+                          </div>
+                        )}
                     </div>
 
                     <div className="text-sm text-gray-600 mt-4">

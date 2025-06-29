@@ -15,18 +15,6 @@ export default function Navbar() {
     navigate("/auth");
   };
 
-  const handleLearnClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    toast("Learn feature coming soon! 🎓", {
-      icon: "📚",
-      style: {
-        borderRadius: "10px",
-        background: "#333",
-        color: "#fff",
-      },
-    });
-  };
-
   const handleExploreClick = (e: React.MouseEvent) => {
     e.preventDefault();
     toast("Explore feature coming soon! 🔍", {
@@ -45,7 +33,6 @@ export default function Navbar() {
       path: "/learn",
       label: "Learn",
       showWhenLoggedIn: true,
-      onClick: handleLearnClick,
     },
     {
       path: "/explore",
