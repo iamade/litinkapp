@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Menu, X, User, LogOut } from "lucide-react";
+import { toast } from "react-hot-toast";
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -14,12 +15,53 @@ export default function Navbar() {
     navigate("/auth");
   };
 
+  const handleLearnClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    toast("Learn feature coming soon! 🎓", {
+      icon: "📚",
+      style: {
+        borderRadius: "10px",
+        background: "#333",
+        color: "#fff",
+      },
+    });
+  };
+
+  const handleExploreClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    toast("Explore feature coming soon! 🔍", {
+      icon: "🌟",
+      style: {
+        borderRadius: "10px",
+        background: "#333",
+        color: "#fff",
+      },
+    });
+  };
+
   const navItems = [
-    { path: "/", label: "Home" },
-    { path: "/learn", label: "Learn" },
-    { path: "/explore", label: "Explore" },
-    ...(user?.role === "author" ? [{ path: "/author", label: "Create" }] : []),
+    { path: "/", label: "Home", showWhenLoggedIn: true },
+    {
+      path: "/learn",
+      label: "Learn",
+      showWhenLoggedIn: true,
+      onClick: handleLearnClick,
+    },
+    {
+      path: "/explore",
+      label: "Explore",
+      showWhenLoggedIn: true,
+      onClick: handleExploreClick,
+    },
+    ...(user?.role === "author"
+      ? [{ path: "/author", label: "Create", showWhenLoggedIn: true }]
+      : []),
   ];
+
+  // Filter nav items based on authentication status
+  const visibleNavItems = navItems.filter(
+    (item) => !item.showWhenLoggedIn || user
+  );
 
   return (
     <nav className="bg-white/90 backdrop-blur-lg border-b border-purple-100 sticky top-0 z-50">
@@ -38,10 +80,11 @@ export default function Navbar() {
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-8">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <Link
                 key={item.path}
                 to={item.path}
+                onClick={item.onClick}
                 className={`text-sm font-medium transition-colors hover:text-purple-600 ${
                   location.pathname === item.path
                     ? "text-purple-600"
@@ -115,11 +158,16 @@ export default function Navbar() {
         {isMenuOpen && (
           <div className="md:hidden py-4 border-t border-purple-100">
             <div className="flex flex-col space-y-3">
-              {navItems.map((item) => (
+              {visibleNavItems.map((item) => (
                 <Link
                   key={item.path}
                   to={item.path}
-                  onClick={() => setIsMenuOpen(false)}
+                  onClick={(e) => {
+                    if (item.onClick) {
+                      item.onClick(e);
+                    }
+                    setIsMenuOpen(false);
+                  }}
                   className={`text-base font-medium transition-colors hover:text-purple-600 px-2 py-1 ${
                     location.pathname === item.path
                       ? "text-purple-600"
