@@ -74,6 +74,12 @@ export const userService = {
   getLearningBooksWithProgress: async () => {
     return apiClient.get("/books/learning-progress");
   },
+  getSuperadminLearningBooks: async () => {
+    return apiClient.get("/books/superadmin-learning-books");
+  },
+  getSuperadminEntertainmentBooks: async () => {
+    return apiClient.get("/books/superadmin-entertainment-books");
+  },
 };
 
 export async function deleteBook(bookId: string) {
