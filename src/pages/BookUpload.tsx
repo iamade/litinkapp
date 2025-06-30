@@ -105,7 +105,7 @@ export default function BookUpload() {
   const [chapterError, setChapterError] = useState("");
   const [processingStatus, setProcessingStatus] = useState("");
   const [processingFailed, setProcessingFailed] = useState(false);
-  
+
   // Payment-related state
   const [paymentRequired, setPaymentRequired] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
@@ -148,15 +148,17 @@ export default function BookUpload() {
 
     // Check payment success/cancel from URL params
     const urlParams = new URLSearchParams(location.search);
-    const paymentStatus = urlParams.get('payment');
-    const bookId = urlParams.get('book_id');
+    const paymentStatus = urlParams.get("payment");
+    const bookId = urlParams.get("book_id");
 
-    if (paymentStatus === 'success' && bookId) {
-      toast.success('Payment successful! Your book is now being processed.');
-      navigate('/dashboard');
-    } else if (paymentStatus === 'cancelled' && bookId) {
-      toast.error('Payment was cancelled. You can try again from your dashboard.');
-      navigate('/dashboard');
+    if (paymentStatus === "success" && bookId) {
+      toast.success("Payment successful! Your book is now being processed.");
+      navigate("/dashboard");
+    } else if (paymentStatus === "cancelled" && bookId) {
+      toast.error(
+        "Payment was cancelled. You can try again from your dashboard."
+      );
+      navigate("/dashboard");
     }
 
     // Load user book count
@@ -168,7 +170,7 @@ export default function BookUpload() {
       const bookCountData = await stripeService.getUserBookCount();
       setUserBookCount(bookCountData.book_count);
     } catch (error) {
-      console.error('Error loading user book count:', error);
+      console.error("Error loading user book count:", error);
     }
   };
 
@@ -209,7 +211,7 @@ export default function BookUpload() {
     setEditableChapters([]);
     setProcessingStatus("Initializing...");
     setPaymentRequired(false);
-    
+
     try {
       const formData = new FormData();
       formData.append("book_type", bookMode);
@@ -337,13 +339,14 @@ export default function BookUpload() {
 
     setPaymentProcessing(true);
     try {
-      const checkoutSession = await stripeService.createBookUploadCheckoutSession(aiBook.id);
-      
+      const checkoutSession =
+        await stripeService.createBookUploadCheckoutSession(aiBook.id);
+
       // Redirect to Stripe Checkout
       stripeService.redirectToCheckout(checkoutSession.checkout_url);
     } catch (error) {
-      console.error('Error creating checkout session:', error);
-      toast.error('Failed to create payment session. Please try again.');
+      console.error("Error creating checkout session:", error);
+      toast.error("Failed to create payment session. Please try again.");
       setPaymentProcessing(false);
     }
   };
@@ -665,22 +668,24 @@ export default function BookUpload() {
   ];
 
   return (
-    <div className="min-h-screen py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen py-4 sm:py-8">
+      <div className="max-w-4xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">
+        <div className="text-center mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2 sm:mb-4">
             Upload Your Book
           </h1>
-          <p className="text-gray-600">
+          <p className="text-gray-600 text-sm sm:text-base">
             Transform your content into an interactive AI-powered experience
           </p>
           {userBookCount >= 1 && (
-            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="mt-3 sm:mt-4 p-2 sm:p-3 bg-blue-50 border border-blue-200 rounded-lg">
               <div className="flex items-center justify-center space-x-2">
                 <CreditCard className="h-5 w-5 text-blue-600" />
-                <span className="text-blue-800 text-sm font-medium">
-                  You have uploaded {userBookCount} book{userBookCount !== 1 ? 's' : ''}. Additional uploads require payment.
+                <span className="text-blue-800 text-xs sm:text-sm font-medium">
+                  You have uploaded {userBookCount} book
+                  {userBookCount !== 1 ? "s" : ""}. Additional uploads require
+                  payment.
                 </span>
               </div>
             </div>
@@ -688,28 +693,29 @@ export default function BookUpload() {
         </div>
 
         {/* Progress Steps */}
-        <div className="mb-12">
-          <div className="flex items-center justify-between">
+        <div className="mb-8 sm:mb-12">
+          <div className="flex items-center justify-between overflow-x-auto scrollbar-thin scrollbar-thumb-gray-200 scrollbar-track-transparent py-2">
             {steps.map((stepItem, index) => (
-              <div key={stepItem.number} className="flex items-center">
+              <div
+                key={stepItem.number}
+                className="flex items-center min-w-[160px] sm:min-w-0"
+              >
                 <div
-                  className={`flex items-center justify-center w-10 h-10 rounded-full border-2 ${
+                  className={`flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 text-sm sm:text-base ${
                     step >= stepItem.number
                       ? "bg-purple-600 border-purple-600 text-white"
                       : "border-gray-300 text-gray-500"
                   }`}
                 >
                   {step > stepItem.number ? (
-                    <CheckCircle className="h-6 w-6" />
+                    <CheckCircle className="h-5 w-5 sm:h-6 sm:w-6" />
                   ) : (
-                    <span className="text-sm font-medium">
-                      {stepItem.number}
-                    </span>
+                    <span className="font-medium">{stepItem.number}</span>
                   )}
                 </div>
-                <div className="ml-3 min-w-0">
+                <div className="ml-2 sm:ml-3 min-w-0">
                   <p
-                    className={`text-sm font-medium ${
+                    className={`text-xs sm:text-sm font-medium ${
                       step >= stepItem.number
                         ? "text-purple-600"
                         : "text-gray-500"
@@ -717,68 +723,68 @@ export default function BookUpload() {
                   >
                     {stepItem.title}
                   </p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-[10px] sm:text-xs text-gray-500">
                     {stepItem.description}
                   </p>
                 </div>
                 {index < steps.length - 1 && (
-                  <ArrowRight className="h-5 w-5 text-gray-400 mx-4" />
+                  <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400 mx-2 sm:mx-4" />
                 )}
               </div>
             ))}
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
+        <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-100 p-4 sm:p-8">
           {/* Step 1: Upload Method */}
           {step === 1 && (
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">
+            <div className="space-y-4 sm:space-y-6">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-4 sm:mb-6">
                 How would you like to add your content?
               </h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                 <button
                   onClick={() => setUploadMethod("file")}
-                  className={`p-8 rounded-2xl border-2 transition-all hover:scale-105 ${
+                  className={`w-full p-4 sm:p-8 rounded-2xl border-2 transition-all hover:scale-105 text-left ${
                     uploadMethod === "file"
                       ? "border-purple-500 bg-purple-50"
                       : "border-gray-300 hover:border-purple-300"
                   }`}
                 >
-                  <Upload className="h-12 w-12 text-purple-600 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  <Upload className="h-10 w-10 sm:h-12 sm:w-12 text-purple-600 mx-auto mb-2 sm:mb-4" />
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-1 sm:mb-2">
                     Upload File
                   </h3>
-                  <p className="text-gray-600 text-sm">
+                  <p className="text-gray-600 text-xs sm:text-sm">
                     Upload a PDF, DOCX, TXT, or EPUB file of your book
                   </p>
                 </button>
 
                 <button
                   onClick={() => setUploadMethod("text")}
-                  className={`p-8 rounded-2xl border-2 transition-all hover:scale-105 ${
+                  className={`w-full p-4 sm:p-8 rounded-2xl border-2 transition-all hover:scale-105 text-left ${
                     uploadMethod === "text"
                       ? "border-purple-500 bg-purple-50"
                       : "border-gray-300 hover:border-purple-300"
                   }`}
                 >
-                  <FileText className="h-12 w-12 text-purple-600 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  <FileText className="h-10 w-10 sm:h-12 sm:w-12 text-purple-600 mx-auto mb-2 sm:mb-4" />
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-1 sm:mb-2">
                     Paste Text
                   </h3>
-                  <p className="text-gray-600 text-sm">
+                  <p className="text-gray-600 text-xs sm:text-sm">
                     Copy and paste your book content directly
                   </p>
                 </button>
               </div>
 
               {uploadMethod === "file" && (
-                <div className="mt-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                <div className="mt-4 sm:mt-6">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                     Select your book file
                   </label>
-                  <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-purple-400 transition-colors">
+                  <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 sm:p-8 text-center hover:border-purple-400 transition-colors">
                     <input
                       type="file"
                       accept=".pdf,.docx,.txt,.epub"
@@ -787,11 +793,11 @@ export default function BookUpload() {
                       id="file-upload"
                     />
                     <label htmlFor="file-upload" className="cursor-pointer">
-                      <Book className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                      <p className="text-gray-600">
+                      <Book className="h-10 w-10 sm:h-12 sm:w-12 text-gray-400 mx-auto mb-2 sm:mb-4" />
+                      <p className="text-gray-600 text-xs sm:text-sm">
                         {file ? file.name : "Click to upload or drag and drop"}
                       </p>
-                      <p className="text-xs text-gray-500 mt-2">
+                      <p className="text-[10px] sm:text-xs text-gray-500 mt-1 sm:mt-2">
                         PDF, DOCX, TXT, or EPUB up to 10MB
                       </p>
                     </label>
@@ -800,24 +806,24 @@ export default function BookUpload() {
               )}
 
               {uploadMethod === "text" && (
-                <div className="mt-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                <div className="mt-4 sm:mt-6">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
                     Paste your book content
                   </label>
                   <textarea
                     value={textContent}
                     onChange={(e) => setTextContent(e.target.value)}
-                    rows={12}
-                    className="w-full border border-gray-300 rounded-xl p-4 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    rows={8}
+                    className="w-full border border-gray-300 rounded-xl p-3 sm:p-4 focus:ring-2 focus:ring-purple-500 focus:border-transparent text-xs sm:text-base"
                     placeholder="Paste your book content here..."
                   />
                 </div>
               )}
 
-              <div className="flex justify-end mt-8">
+              <div className="flex flex-col sm:flex-row justify-end gap-3 sm:gap-0 mt-6 sm:mt-8">
                 <button
                   onClick={handleNext}
-                  className="px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-all"
+                  className="w-full sm:w-auto px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-all"
                 >
                   Next
                 </button>
@@ -905,7 +911,7 @@ export default function BookUpload() {
               <p className="text-gray-600 mb-4">
                 Let AI analyze your book and auto-populate the details for you.
               </p>
-              
+
               {/* Payment Required Section */}
               {paymentRequired && aiBook && (
                 <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-6 mb-6">
@@ -918,13 +924,25 @@ export default function BookUpload() {
                         Payment Required
                       </h3>
                       <p className="text-blue-800 mb-4">
-                        This is your {userBookCount + 1}{userBookCount === 0 ? 'st' : userBookCount === 1 ? 'nd' : userBookCount === 2 ? 'rd' : 'th'} book upload. 
-                        Additional uploads require a one-time payment to continue processing.
+                        This is your {userBookCount + 1}
+                        {userBookCount === 0
+                          ? "st"
+                          : userBookCount === 1
+                          ? "nd"
+                          : userBookCount === 2
+                          ? "rd"
+                          : "th"}{" "}
+                        book upload. Additional uploads require a one-time
+                        payment to continue processing.
                       </p>
                       <div className="bg-white/50 rounded-lg p-4 mb-4">
                         <div className="flex items-center justify-between">
-                          <span className="font-medium text-blue-900">Book Processing Fee</span>
-                          <span className="text-xl font-bold text-blue-900">$9.99</span>
+                          <span className="font-medium text-blue-900">
+                            Book Processing Fee
+                          </span>
+                          <span className="text-xl font-bold text-blue-900">
+                            $9.99
+                          </span>
                         </div>
                         <p className="text-sm text-blue-700 mt-1">
                           One-time payment per additional book

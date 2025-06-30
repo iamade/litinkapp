@@ -39,6 +39,44 @@ class UserBookStatus(str, Enum):
 router = APIRouter()
 
 
+@router.get("/superadmin-learning-books", response_model=List[BookWithChapters])
+async def get_superadmin_learning_books(
+    supabase_client: Client = Depends(get_supabase)
+):
+    """Get all published learning books authored by the superadmin (for Explore Learning Materials)"""
+    try:
+        # Get superadmin user_id
+        profile_resp = supabase_client.table('profiles').select('id').eq('email', 'support@litinkai.com').single().execute()
+        if not profile_resp.data:
+            raise HTTPException(status_code=404, detail="Superadmin profile not found")
+        superadmin_id = profile_resp.data['id']
+        # Get published learning books by superadmin
+        books_resp = supabase_client.table('books').select('*, chapters(*)').eq('user_id', superadmin_id).eq('book_type', 'learning').eq('status', 'PUBLISHED').order('created_at', desc=True).execute()
+        return books_resp.data or []
+    except Exception as e:
+        print(f"Error in /superadmin-learning-books: {e}")
+        return []
+
+
+@router.get("/superadmin-entertainment-books", response_model=List[BookWithChapters])
+async def get_superadmin_entertainment_books(
+    supabase_client: Client = Depends(get_supabase)
+):
+    """Get all published entertainment books authored by the superadmin (for Interactive Stories)"""
+    try:
+        # Get superadmin user_id
+        profile_resp = supabase_client.table('profiles').select('id').eq('email', 'support@litinkai.com').single().execute()
+        if not profile_resp.data:
+            raise HTTPException(status_code=404, detail="Superadmin profile not found")
+        superadmin_id = profile_resp.data['id']
+        # Get published entertainment books by superadmin
+        books_resp = supabase_client.table('books').select('*, chapters(*)').eq('user_id', superadmin_id).eq('book_type', 'entertainment').eq('status', 'PUBLISHED').order('created_at', desc=True).execute()
+        return books_resp.data or []
+    except Exception as e:
+        print(f"Error in /superadmin-entertainment-books: {e}")
+        return []
+
+
 @router.get("/learning-progress")
 async def get_learning_books_with_progress(
     supabase_client: Client = Depends(get_supabase),
@@ -293,8 +331,8 @@ async def upload_book(
     books_response = supabase_client.table('books').select('id', count='exact').eq('user_id', current_user['id']).neq('status', 'FAILED').execute()
     book_count = books_response.count or 0
     
-    # Determine if payment is required (2nd book and beyond)
-    requires_payment = book_count >= 1
+    # Determine if payment is required (2nd book and beyond, unless superadmin)
+    requires_payment = (book_count >= 1) and (current_user.get('role') != 'superadmin')
     initial_status = "PENDING_PAYMENT" if requires_payment else "QUEUED"
 
     file_service = FileService()
@@ -745,41 +783,3 @@ async def save_user_chapters(
     # Update total_chapters in books table
     supabase_client.table('books').update({"total_chapters": len(chapters)}).eq('id', book_id).execute()
     return {"message": "Chapters saved", "total_chapters": len(chapters)}
-
-
-@router.get("/superadmin-learning-books", response_model=List[BookWithChapters])
-async def get_superadmin_learning_books(
-    supabase_client: Client = Depends(get_supabase)
-):
-    """Get all published learning books authored by the superadmin (for Explore Learning Materials)"""
-    try:
-        # Get superadmin user_id
-        profile_resp = supabase_client.table('profiles').select('id').eq('email', 'support@litinkai.com').single().execute()
-        if not profile_resp.data:
-            raise HTTPException(status_code=404, detail="Superadmin profile not found")
-        superadmin_id = profile_resp.data['id']
-        # Get published learning books by superadmin
-        books_resp = supabase_client.table('books').select('*, chapters(*)').eq('user_id', superadmin_id).eq('book_type', 'learning').eq('status', 'PUBLISHED').order('created_at', desc=True).execute()
-        return books_resp.data or []
-    except Exception as e:
-        print(f"Error in /superadmin-learning-books: {e}")
-        return []
-
-
-@router.get("/superadmin-entertainment-books", response_model=List[BookWithChapters])
-async def get_superadmin_entertainment_books(
-    supabase_client: Client = Depends(get_supabase)
-):
-    """Get all published entertainment books authored by the superadmin (for Interactive Stories)"""
-    try:
-        # Get superadmin user_id
-        profile_resp = supabase_client.table('profiles').select('id').eq('email', 'support@litinkai.com').single().execute()
-        if not profile_resp.data:
-            raise HTTPException(status_code=404, detail="Superadmin profile not found")
-        superadmin_id = profile_resp.data['id']
-        # Get published entertainment books by superadmin
-        books_resp = supabase_client.table('books').select('*, chapters(*)').eq('user_id', superadmin_id).eq('book_type', 'entertainment').eq('status', 'PUBLISHED').order('created_at', desc=True).execute()
-        return books_resp.data or []
-    except Exception as e:
-        print(f"Error in /superadmin-entertainment-books: {e}")
-        return []
