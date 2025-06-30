@@ -339,12 +339,28 @@ export default function BookUpload() {
       const checkoutSession =
         await stripeService.createBookUploadCheckoutSession(aiBook.id);
 
-      // Redirect to Stripe Checkout
-      stripeService.redirectToCheckout(checkoutSession.checkout_url);
-    } catch (error) {
-      console.error("Error creating checkout session:", error);
-      toast.error("Failed to create payment session. Please try again.");
-      setPaymentProcessing(false);
+      console.log("Stripe checkout session response:", checkoutSession);
+      if (
+        checkoutSession &&
+        typeof checkoutSession === "object" &&
+        "checkout_url" in checkoutSession
+      ) {
+        const url = (checkoutSession as { checkout_url: string }).checkout_url;
+        if (url) {
+          stripeService.redirectToCheckout(url);
+          return;
+        } else {
+          toast.error("Stripe did not return a checkout URL.");
+          console.error("No checkout_url in Stripe response:", checkoutSession);
+        }
+      } else {
+        toast.error("Failed to create Stripe checkout session.");
+        console.error("Unexpected Stripe session response:", checkoutSession);
+      }
+    } catch (e) {
+      const error = e as Error;
+      toast.error(error.message || "Error creating Stripe checkout session.");
+      console.error("Stripe checkout session error:", error);
     }
   };
 
