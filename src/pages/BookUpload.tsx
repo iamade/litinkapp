@@ -231,7 +231,7 @@ export default function BookUpload() {
         setPaymentRequired(true);
         setIsProcessing(false);
         setProcessingStatus("");
-        toast.info("Payment required for additional book uploads");
+        toast.success("Payment required for additional book uploads");
         return;
       }
 
@@ -666,39 +666,97 @@ export default function BookUpload() {
 
   const handleUploadBookClick = async () => {
     if (!user) return;
-    if (user.role === "superadmin") {
-      // Superadmin: skip payment, proceed to next step
-      setStep(2);
-      return;
-    }
-    if (userBookCount >= 1) {
-      // Not superadmin and needs to pay
+    if (
+      (user.role && user.role.toLowerCase() === "superadmin") ||
+      userBookCount < 1
+    ) {
       try {
-        // Create temp book
-        const tempBookData = {
-          title: file?.name || textContent?.slice(0, 20) || "Untitled Text",
-          book_type: bookMode,
-          status: "PENDING_PAYMENT",
-        };
-        const tempBook = await apiClient.post(
-          "/books/temp-create",
-          tempBookData
+        const formData = new FormData();
+        formData.append("book_type", bookMode);
+        if (uploadMethod === "file" && file) {
+          formData.append("file", file);
+        } else if (uploadMethod === "text" && textContent) {
+          formData.append("text_content", textContent);
+        } else {
+          toast.error("Please provide a file or text content.");
+          return;
+        }
+        const book = await apiClient.upload("/books/upload", formData);
+        if (
+          typeof book === "object" &&
+          book !== null &&
+          "id" in book &&
+          "status" in book
+        ) {
+          if (
+            (book as { status?: string }).status === "PENDING_PAYMENT" &&
+            (book as { id?: string }).id
+          ) {
+            // Immediately redirect to Stripe
+            const checkoutSession =
+              await stripeService.createBookUploadCheckoutSession(
+                (book as { id: string }).id
+              );
+            stripeService.redirectToCheckout(
+              (checkoutSession as { checkout_url: string }).checkout_url
+            );
+            return;
+          } else {
+            setAiBook(book as Book);
+            setStep(2); // Proceed to next step
+          }
+        }
+      } catch (e) {
+        const error = e as Error;
+        toast.error(
+          error.message || "Failed to upload book. Please try again."
         );
-        const tempBookId = (tempBook as { id?: string })?.id;
-        // Create Stripe checkout session
-        const checkoutSession =
-          await stripeService.createBookUploadCheckoutSession(tempBookId);
-        // Redirect to Stripe checkout
-        stripeService.redirectToCheckout(
-          (checkoutSession as { checkout_url: string }).checkout_url
-        );
-      } catch (error) {
-        toast.error("Failed to initiate payment. Please try again.");
       }
       return;
     }
-    // First book: proceed to next step
-    setStep(2);
+    try {
+      const formData = new FormData();
+      formData.append("book_type", bookMode);
+      if (uploadMethod === "file" && file) {
+        formData.append("file", file);
+      } else if (uploadMethod === "text" && textContent) {
+        formData.append("text_content", textContent);
+      } else {
+        toast.error("Please provide a file or text content.");
+        return;
+      }
+      const book = await apiClient.upload("/books/upload", formData);
+      if (
+        typeof book === "object" &&
+        book !== null &&
+        "payment_required" in book &&
+        "id" in book
+      ) {
+        if (
+          (book as { payment_required?: boolean }).payment_required &&
+          (book as { id?: string }).id
+        ) {
+          // Immediately redirect to Stripe
+          const checkoutSession =
+            await stripeService.createBookUploadCheckoutSession(
+              (book as { id: string }).id
+            );
+          stripeService.redirectToCheckout(
+            (checkoutSession as { checkout_url: string }).checkout_url
+          );
+          return;
+        } else {
+          setAiBook(book as Book);
+          setStep(2); // Proceed to next step
+        }
+      }
+    } catch (e) {
+      const error = e as Error;
+      toast.error(
+        error.message ||
+          "Failed to upload book or initiate payment. Please try again."
+      );
+    }
   };
 
   return (
