@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Body
 from supabase import Client
 from gotrue.errors import AuthApiError
 from postgrest.exceptions import APIError
+from pydantic import BaseModel
 
 from app.core.auth import (
     verify_password,
@@ -16,6 +17,20 @@ from app.schemas.auth import Token, UserLogin, UserRegister
 from app.schemas.user import User as UserSchema, UserCreate
 
 router = APIRouter()
+
+
+class PasswordResetRequest(BaseModel):
+    email: str
+
+
+class PasswordResetConfirm(BaseModel):
+    email: str
+    token: str
+    new_password: str
+
+
+class EmailVerificationRequest(BaseModel):
+    email: str
 
 
 @router.post("/register", response_model=UserSchema, status_code=201)
@@ -103,6 +118,56 @@ async def login(
             detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+@router.post("/request-password-reset")
+async def request_password_reset(
+    request: PasswordResetRequest,
+    supabase: Client = Depends(get_supabase)
+):
+    """Request a password reset email"""
+    try:
+        response = supabase.auth.reset_password_email(request.email)
+        return {"message": "Password reset email sent successfully"}
+    except AuthApiError as e:
+        # Don't reveal if email exists or not for security
+        return {"message": "If the email exists, a password reset link has been sent"}
+
+
+@router.post("/confirm-password-reset")
+async def confirm_password_reset(
+    request: PasswordResetConfirm,
+    supabase: Client = Depends(get_supabase)
+):
+    """Confirm password reset with token"""
+    try:
+        response = supabase.auth.verify_otp({
+            "email": request.email,
+            "token": request.token,
+            "type": "recovery"
+        })
+        
+        # Update password
+        supabase.auth.update_user({
+            "password": request.new_password
+        })
+        
+        return {"message": "Password reset successfully"}
+    except AuthApiError as e:
+        raise HTTPException(status_code=400, detail=f"Password reset failed: {e}")
+
+
+@router.post("/resend-verification")
+async def resend_verification_email(
+    request: EmailVerificationRequest,
+    supabase: Client = Depends(get_supabase)
+):
+    """Resend email verification"""
+    try:
+        response = supabase.auth.resend_signup_email(request.email)
+        return {"message": "Verification email sent successfully"}
+    except AuthApiError as e:
+        raise HTTPException(status_code=400, detail=f"Failed to send verification email: {e}")
 
 
 @router.get("/me", response_model=UserSchema)
