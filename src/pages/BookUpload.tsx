@@ -152,13 +152,10 @@ export default function BookUpload() {
     const bookId = urlParams.get("book_id");
 
     if (paymentStatus === "success" && bookId) {
-      toast.success("Payment successful! Your book is now being processed.");
-      navigate("/dashboard");
+      toast.success("Payment successful! Please continue your upload.");
+      setStep(2);
     } else if (paymentStatus === "cancelled" && bookId) {
-      toast.error(
-        "Payment was cancelled. You can try again from your dashboard."
-      );
-      navigate("/dashboard");
+      toast.error("Payment was cancelled. You can try again.");
     }
 
     // Load user book count
@@ -667,6 +664,43 @@ export default function BookUpload() {
     },
   ];
 
+  const handleUploadBookClick = async () => {
+    if (!user) return;
+    if (user.role === "superadmin") {
+      // Superadmin: skip payment, proceed to next step
+      setStep(2);
+      return;
+    }
+    if (userBookCount >= 1) {
+      // Not superadmin and needs to pay
+      try {
+        // Create temp book
+        const tempBookData = {
+          title: file?.name || textContent?.slice(0, 20) || "Untitled Text",
+          book_type: bookMode,
+          status: "PENDING_PAYMENT",
+        };
+        const tempBook = await apiClient.post(
+          "/books/temp-create",
+          tempBookData
+        );
+        const tempBookId = (tempBook as { id?: string })?.id;
+        // Create Stripe checkout session
+        const checkoutSession =
+          await stripeService.createBookUploadCheckoutSession(tempBookId);
+        // Redirect to Stripe checkout
+        stripeService.redirectToCheckout(
+          (checkoutSession as { checkout_url: string }).checkout_url
+        );
+      } catch (error) {
+        toast.error("Failed to initiate payment. Please try again.");
+      }
+      return;
+    }
+    // First book: proceed to next step
+    setStep(2);
+  };
+
   return (
     <div className="min-h-screen py-4 sm:py-8">
       <div className="max-w-4xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8">
@@ -822,7 +856,7 @@ export default function BookUpload() {
 
               <div className="flex flex-col sm:flex-row justify-end gap-3 sm:gap-0 mt-6 sm:mt-8">
                 <button
-                  onClick={handleNext}
+                  onClick={handleUploadBookClick}
                   className="w-full sm:w-auto px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-all"
                 >
                   Next
