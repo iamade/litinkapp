@@ -27,6 +27,13 @@ interface AuthContextType {
   ) => Promise<void>;
   logout: () => void;
   loading: boolean;
+  requestPasswordReset: (email: string) => Promise<void>;
+  confirmPasswordReset: (
+    email: string,
+    token: string,
+    newPassword: string
+  ) => Promise<void>;
+  resendVerificationEmail: (email: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -91,6 +98,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await login(email, password);
   };
 
+  const requestPasswordReset = async (email: string) => {
+    await apiClient.post("/auth/request-password-reset", { email });
+  };
+
+  const confirmPasswordReset = async (
+    email: string,
+    token: string,
+    newPassword: string
+  ) => {
+    await apiClient.post("/auth/confirm-password-reset", {
+      email,
+      token,
+      new_password: newPassword,
+    });
+  };
+
+  const resendVerificationEmail = async (email: string) => {
+    await apiClient.post("/auth/resend-verification", { email });
+  };
+
   const logout = () => {
     setUser(null);
     localStorage.removeItem("authToken");
@@ -98,7 +125,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, loading }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        login,
+        register,
+        logout,
+        loading,
+        requestPasswordReset,
+        confirmPasswordReset,
+        resendVerificationEmail,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
