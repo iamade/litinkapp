@@ -16,6 +16,13 @@ export interface UserBookCountResponse {
   user_id: string;
   book_count: number;
   next_book_requires_payment: boolean;
+  is_superadmin: boolean;
+}
+
+export interface PaymentRequiredResponse {
+  payment_required: boolean;
+  reason: string;
+  book_count: number;
 }
 
 export const stripeService = {
@@ -33,6 +40,21 @@ export const stripeService = {
       return response;
     } catch (error) {
       console.error("Error creating checkout session:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Check if payment is required for the next book upload
+   */
+  checkPaymentRequired: async (): Promise<PaymentRequiredResponse> => {
+    try {
+      const response = await apiClient.get<PaymentRequiredResponse>(
+        "/books/check-payment-required"
+      );
+      return response;
+    } catch (error) {
+      console.error("Error checking payment requirement:", error);
       throw error;
     }
   },
