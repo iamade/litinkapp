@@ -25,3 +25,9 @@
   to = "https://www.litinkai.com/:splat"
   status = 301
   force = true
+
+# SPA Fallback for React Router
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
