@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from supabase import Client
 import time
 
@@ -1030,3 +1030,134 @@ async def combine_tavus_videos(
         import traceback
         print(f"🔍 Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.post("/generate-script-and-scenes")
+async def generate_script_and_scenes(
+    chapter_id: str,
+    script_style: str = "cinematic_movie",
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Generate only the AI script and scene descriptions for a chapter (no video generation)"""
+    try:
+        # Verify chapter access
+        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        chapter_data = chapter_response.data
+        book_data = chapter_data['books']
+        # Check access permissions
+        if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
+        # Generate script using RAGService
+        rag_service = RAGService(supabase_client)
+        chapter_context = await rag_service.get_chapter_with_context(chapter_id, include_adjacent=True)
+        script_result = await rag_service.generate_video_script(chapter_context, video_style=book_data.get('book_type', 'realistic'), script_style=script_style)
+        script = script_result.get('script', '')
+        characters = script_result.get('characters', [])
+        character_details = script_result.get('character_details', '')
+        # Parse script for scene descriptions
+        video_service = VideoService()
+        parsed = video_service._parse_script_for_services(script, script_style)
+        scene_descriptions = parsed.get('scene_descriptions') or parsed.get('parsed_sections', {}).get('scene_descriptions', [])
+        return {
+            'chapter_id': chapter_id,
+            'script': script,
+            'scene_descriptions': scene_descriptions,
+            'characters': characters,
+            'character_details': character_details,
+            'script_style': script_style
+        }
+    except Exception as e:
+        print(f"Error generating script and scenes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/save-script-and-scenes")
+async def save_script_and_scenes(
+    chapter_id: str = Body(...),
+    script: str = Body(...),
+    scene_descriptions: list = Body(...),
+    characters: list = Body(...),
+    character_details: str = Body(...),
+    script_style: str = Body(...),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Save or update the AI-generated script and scene descriptions for a chapter (per user)."""
+    try:
+        # Verify chapter access
+        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        chapter_data = chapter_response.data
+        book_data = chapter_data['books']
+        if book_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to modify this chapter")
+        # Prepare new content
+        new_content = {
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "script_style": script_style,
+            "user_id": current_user['id']
+        }
+        # Update ai_generated_content (per user, per script_style)
+        ai_content = chapter_data.get('ai_generated_content') or {}
+        if not isinstance(ai_content, dict):
+            ai_content = {}
+        key = f"{current_user['id']}:{script_style}"
+        ai_content[key] = new_content
+        supabase_client.table('chapters').update({"ai_generated_content": ai_content}).eq('id', chapter_id).execute()
+        return {"message": "Saved", "chapter_id": chapter_id, "script_style": script_style}
+    except Exception as e:
+        print(f"Error saving script and scenes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/get-script-and-scenes")
+async def get_script_and_scenes(
+    chapter_id: str,
+    script_style: str = "cinematic_movie",
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Fetch the saved AI-generated script and scene descriptions for a chapter (per user)."""
+    try:
+        chapter_response = supabase_client.table('chapters').select('ai_generated_content').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        ai_content = chapter_response.data.get('ai_generated_content') or {}
+        if not isinstance(ai_content, dict):
+            ai_content = {}
+        key = f"{current_user['id']}:{script_style}"
+        result = ai_content.get(key)
+        if not result:
+            return {"chapter_id": chapter_id, "script_style": script_style, "content": None}
+        return {"chapter_id": chapter_id, "script_style": script_style, "content": result}
+    except Exception as e:
+        print(f"Error fetching script and scenes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/delete-script-and-scenes")
+async def delete_script_and_scenes(
+    chapter_id: str,
+    script_style: str = "cinematic_movie",
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Delete the saved AI-generated script and scene descriptions for a chapter (per user)."""
+    try:
+        chapter_response = supabase_client.table('chapters').select('ai_generated_content').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        ai_content = chapter_response.data.get('ai_generated_content') or {}
+        if not isinstance(ai_content, dict):
+            ai_content = {}
+        key = f"{current_user['id']}:{script_style}"
+        if key in ai_content:
+            del ai_content[key]
+            supabase_client.table('chapters').update({"ai_generated_content": ai_content}).eq('id', chapter_id).execute()
+        return {"message": "Deleted", "chapter_id": chapter_id, "script_style": script_style}
+    except Exception as e:
+        print(f"Error deleting script and scenes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

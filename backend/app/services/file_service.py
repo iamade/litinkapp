@@ -176,7 +176,7 @@ class FileService:
                         # Save to in-memory buffer
                         import io
                         img_buffer = io.BytesIO()
-                        pix.save(img_buffer, format="png")
+                        img_buffer.write(pix.tobytes(format="png"))
                         img_buffer.seek(0)
                         
                         # Upload to Supabase Storage under user folder
@@ -573,32 +573,27 @@ class FileService:
             return self.extract_chapters(content, book_type)
 
     async def validate_chapters_with_ai(self, chapters: List[Dict[str, Any]], book_content: str, book_type: str) -> List[Dict[str, Any]]:
-        """Use AI to validate and improve chapter extraction"""
+        """Validate chapters using AI, but limit prompt size to avoid context_length_exceeded errors."""
+        # Reduce chapter content for prompt
+        reduced_chapters = [
+            {
+                "title": ch.get("title", ""),
+                "content_preview": (ch.get("content", "")[:500] + ("..." if len(ch.get("content", "")) > 500 else ""))
+            }
+            for ch in chapters
+        ]
+        # Use reduced_chapters in the prompt
+        validation_prompt = f"""
+You are an expert book editor. Here are the extracted chapters for a {book_type} book. For each chapter, only a preview of the content is shown. Please check if the chapter titles and structure make sense. Suggest improvements if needed.
+
+Chapters:
+{reduced_chapters}
+"""
+        
         try:
             if not self.ai_service.client:
                 print("AI service not available, skipping validation")
                 return chapters
-            
-            # Create a validation prompt
-            validation_prompt = f"""
-You are an expert book editor. Review the extracted chapters and validate their correctness.
-
-Book Type: {book_type}
-Total Book Content Length: {len(book_content)} characters
-
-EXTRACTED CHAPTERS:
-{json.dumps(chapters, indent=2)}
-
-VALIDATION TASKS:
-1. Check if chapters are properly separated (no overlap)
-2. Verify chapter titles match their content
-3. Ensure front matter (cover, TOC, preface) is not included in chapters
-4. Confirm each chapter has substantial, relevant content
-5. Identify any missing chapters or content
-
-If issues are found, provide corrected chapter structure.
-Return JSON with 'validated_chapters' array and 'issues' array.
-"""
             
             response = await self.ai_service.client.chat.completions.create(
                 model="gpt-3.5-turbo-1106",

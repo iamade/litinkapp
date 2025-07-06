@@ -241,4 +241,29 @@ export const videoService = {
       throw error;
     }
   },
+
+  generateScriptAndScenes: async (
+    chapterId: string,
+    scriptStyle: string = "cinematic_movie"
+  ): Promise<{
+    script: string;
+    scene_descriptions: string[];
+    characters: string[];
+    character_details: string;
+    script_style: string;
+  }> => {
+    const response = await apiClient.post<{
+      script: string;
+      scene_descriptions: string[];
+      characters: string[];
+      character_details: string;
+      script_style: string;
+    }>(
+      `/ai/generate-script-and-scenes?chapter_id=${encodeURIComponent(
+        chapterId
+      )}&script_style=${encodeURIComponent(scriptStyle)}`,
+      {}
+    );
+    return response;
+  },
 };

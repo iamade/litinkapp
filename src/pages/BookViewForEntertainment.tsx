@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { userService } from "../services/userService";
 import { videoService, VideoScene } from "../services/videoService";
 import { toast } from "react-hot-toast";
@@ -26,7 +26,6 @@ interface Book {
 
 export default function BookViewForEntertainment() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
 
   // State declarations - all hooks at the top level
   const [book, setBook] = useState<Book | null>(null);
@@ -35,21 +34,31 @@ export default function BookViewForEntertainment() {
   const [videoScenes, setVideoScenes] = useState<Record<string, VideoScene>>(
     {}
   );
-  const [currentVideoScene, setCurrentVideoScene] = useState<VideoScene | null>(
-    null
-  );
   const [showFullScript, setShowFullScript] = useState(false);
   const [animationStyle, setAnimationStyle] = useState<
     "cartoon" | "realistic" | "cinematic" | "fantasy"
   >("realistic");
   const [scriptStyle, setScriptStyle] = useState("cinematic_movie");
   const [isLoading, setIsLoading] = useState(true);
+  const [aiScriptResults, setAiScriptResults] = useState<
+    Record<
+      string,
+      {
+        script: string;
+        scene_descriptions: string[];
+        characters: string[];
+        character_details: string;
+        script_style: string;
+      }
+    >
+  >({});
+  const [loadingScript, setLoadingScript] = useState(false);
 
   // Load book data
   const loadBook = async (bookId: string) => {
     try {
       setIsLoading(true);
-      const bookData = await userService.getBook(bookId);
+      const bookData = (await userService.getBook(bookId)) as Book;
       setBook(bookData);
 
       // Set first chapter as selected by default
@@ -69,11 +78,11 @@ export default function BookViewForEntertainment() {
     if (!selectedChapter) return;
 
     try {
-      const result = await videoService.generateVideo({
-        chapter_id: selectedChapter.id,
-        animation_style: animationStyle,
-        script_style: scriptStyle,
-      });
+      const result = await videoService.generateEntertainmentVideo(
+        selectedChapter.id,
+        animationStyle,
+        scriptStyle
+      );
 
       if (result.video_url) {
         setVideoUrls((prev) => ({
@@ -86,7 +95,6 @@ export default function BookViewForEntertainment() {
           [selectedChapter.id]: result,
         }));
 
-        setCurrentVideoScene(result);
         toast.success("Video generated successfully!");
       }
     } catch (error) {
@@ -95,41 +103,25 @@ export default function BookViewForEntertainment() {
     }
   };
 
-  // Handle video deletion
-  const handleDeleteVideo = async () => {
+  const handleGenerateScript = async () => {
     if (!selectedChapter) return;
-
+    setLoadingScript(true);
     try {
-      await videoService.deleteVideo(selectedChapter.id);
-
-      setVideoUrls((prev) => {
-        const newUrls = { ...prev };
-        delete newUrls[selectedChapter.id];
-        return newUrls;
-      });
-
-      setVideoScenes((prev) => {
-        const newScenes = { ...prev };
-        delete newScenes[selectedChapter.id];
-        return newScenes;
-      });
-
-      setCurrentVideoScene(null);
-      toast.success("Video deleted successfully!");
-    } catch (error) {
-      console.error("Error deleting video:", error);
-      toast.error("Failed to delete video");
+      const result = await videoService.generateScriptAndScenes(
+        selectedChapter.id,
+        scriptStyle
+      );
+      setAiScriptResults((prev) => ({
+        ...prev,
+        [selectedChapter.id]: result,
+      }));
+      toast.success("AI Script & Scene Descriptions generated!");
+    } catch {
+      toast.error("Failed to generate script/scene descriptions");
+    } finally {
+      setLoadingScript(false);
     }
   };
-
-  // Update current video scene when selected chapter changes
-  useEffect(() => {
-    if (selectedChapter) {
-      setCurrentVideoScene(videoScenes[selectedChapter.id] || null);
-    } else {
-      setCurrentVideoScene(null);
-    }
-  }, [selectedChapter, videoScenes]);
 
   // Load book on component mount
   useEffect(() => {
@@ -158,62 +150,6 @@ export default function BookViewForEntertainment() {
         >
           {showFullScript ? "Show Less" : "Show More"}
         </button>
-      </div>
-    );
-  };
-
-  // Render full script
-  const renderFullScript = () => {
-    if (!currentVideoScene?.script) return null;
-
-    const script = currentVideoScene.script;
-    const maxChars = 200;
-
-    if (script.length <= maxChars) {
-      return <p className="text-gray-700">{script}</p>;
-    }
-
-    return (
-      <div>
-        <p className="text-gray-700">
-          {showFullScript ? script : `${script.substring(0, maxChars)}...`}
-        </p>
-        <button
-          onClick={() => setShowFullScript(!showFullScript)}
-          className="text-blue-600 hover:text-blue-800 text-sm mt-1"
-        >
-          {showFullScript ? "Show Less" : "Show More"}
-        </button>
-      </div>
-    );
-  };
-
-  // Render characters
-  const renderCharacters = () => {
-    if (
-      !currentVideoScene?.characters ||
-      currentVideoScene.characters.length === 0
-    ) {
-      return null;
-    }
-
-    return (
-      <div className="bg-blue-50 p-4 rounded-lg mb-4">
-        <h4 className="font-semibold text-blue-800 mb-2">
-          Characters in Script
-        </h4>
-        <div className="flex flex-wrap gap-2">
-          {currentVideoScene.characters.map(
-            (character: string, index: number) => (
-              <span
-                key={index}
-                className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm"
-              >
-                {character}
-              </span>
-            )
-          )}
-        </div>
       </div>
     );
   };
@@ -356,6 +292,16 @@ export default function BookViewForEntertainment() {
                     >
                       Generate Scene
                     </button>
+
+                    <button
+                      className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded mb-4"
+                      onClick={handleGenerateScript}
+                      disabled={loadingScript}
+                    >
+                      {loadingScript
+                        ? "Generating..."
+                        : "Generate AI Script & Scene Descriptions"}
+                    </button>
                   </div>
 
                   {/* Generated Video Display */}
@@ -365,12 +311,12 @@ export default function BookViewForEntertainment() {
                         <h3 className="text-lg font-semibold text-gray-900">
                           Generated Video
                         </h3>
-                        <button
+                        {/* <button
                           onClick={handleDeleteVideo}
                           className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600 transition-colors"
                         >
                           Delete Video
-                        </button>
+                        </button> */}
                       </div>
 
                       <video
@@ -378,9 +324,39 @@ export default function BookViewForEntertainment() {
                         controls
                         className="w-full h-64 object-cover rounded-lg"
                       />
+                    </div>
+                  )}
 
-                      {renderCharacters()}
-                      {renderFullScript()}
+                  {/* AI Script & Scene Descriptions Display (separate from video) */}
+                  {selectedChapter && aiScriptResults[selectedChapter.id] && (
+                    <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
+                      <h4 className="font-semibold text-gray-800 mb-2">
+                        AI-Generated Script
+                      </h4>
+                      <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-white p-2 rounded border mb-4 overflow-x-auto">
+                        {aiScriptResults[selectedChapter.id].script ||
+                          "No script available."}
+                      </pre>
+                      <h4 className="font-semibold text-gray-800 mb-2">
+                        Scene Descriptions
+                      </h4>
+                      {aiScriptResults[selectedChapter.id].scene_descriptions &&
+                      aiScriptResults[selectedChapter.id].scene_descriptions
+                        .length > 0 ? (
+                        <ul className="list-decimal list-inside text-gray-700">
+                          {aiScriptResults[
+                            selectedChapter.id
+                          ].scene_descriptions.map((desc, idx) => (
+                            <li key={idx} className="mb-1">
+                              {desc}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-gray-600">
+                          No scene descriptions available.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
