@@ -4,6 +4,7 @@ import numpy as np
 from supabase import Client
 from app.core.config import settings
 import logging
+from app.services.text_utils import TextSanitizer
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,12 @@ class EmbeddingsService:
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding for a text using OpenAI"""
         try:
+            # Sanitize text before sending to OpenAI
+            sanitized_text = TextSanitizer.sanitize_for_openai(text)
+            
             response = self.client.embeddings.create(
                 model=self.embedding_model,
-                input=text
+                input=sanitized_text
             )
             return response.data[0].embedding
         except Exception as e:
@@ -29,15 +33,18 @@ class EmbeddingsService:
     
     async def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[Dict[str, Any]]:
         """Split text into overlapping chunks for embedding"""
+        # Sanitize text first
+        sanitized_text = TextSanitizer.sanitize_text(text)
+        
         chunks = []
         start = 0
         
-        while start < len(text):
+        while start < len(sanitized_text):
             end = start + chunk_size
-            chunk_text = text[start:end]
+            chunk_text = sanitized_text[start:end]
             
             # Try to break at sentence boundaries
-            if end < len(text):
+            if end < len(sanitized_text):
                 last_period = chunk_text.rfind('.')
                 last_exclamation = chunk_text.rfind('!')
                 last_question = chunk_text.rfind('?')
@@ -56,7 +63,7 @@ class EmbeddingsService:
             })
             
             start = end - overlap
-            if start >= len(text):
+            if start >= len(sanitized_text):
                 break
         
         return chunks

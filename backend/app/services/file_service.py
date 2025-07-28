@@ -15,6 +15,7 @@ import math
 import hashlib
 import json
 import time
+from app.services.text_utils import TextSanitizer
 
 
 class FileService:
@@ -708,37 +709,4 @@ Chapters:
 
     def _clean_text_content(self, content: str) -> str:
         """Clean text content to handle Unicode escape sequences and problematic characters"""
-        if not content:
-            return ""
-        
-        try:
-            # Handle Unicode escape sequences
-            # Replace null bytes and other problematic characters
-            cleaned = content.replace('\x00', '')  # Remove null bytes
-            cleaned = cleaned.replace('\u0000', '')  # Remove Unicode null
-            
-            # Handle other problematic Unicode sequences
-            import re
-            # Remove or replace other problematic Unicode escape sequences
-            cleaned = re.sub(r'\\u[0-9a-fA-F]{4}', '', cleaned)  # Remove \uXXXX sequences
-            cleaned = re.sub(r'\\x[0-9a-fA-F]{2}', '', cleaned)  # Remove \xXX sequences
-            
-            # Normalize Unicode characters
-            import unicodedata
-            cleaned = unicodedata.normalize('NFKC', cleaned)
-            
-            # Remove any remaining control characters except newlines and tabs
-            cleaned = ''.join(char for char in cleaned if unicodedata.category(char)[0] != 'C' or char in '\n\t\r')
-            
-            # Ensure the string is valid UTF-8
-            cleaned = cleaned.encode('utf-8', errors='ignore').decode('utf-8')
-            
-            return cleaned
-            
-        except Exception as e:
-            print(f"Error cleaning text content: {e}")
-            # Fallback: return a safe version of the content
-            try:
-                return content.encode('utf-8', errors='ignore').decode('utf-8')
-            except:
-                return "Content could not be processed due to encoding issues."
+        return TextSanitizer.sanitize_text(content)

@@ -5,6 +5,7 @@ import asyncio
 import os
 from app.core.config import settings
 from openai import AsyncOpenAI
+from app.services.text_utils import TextSanitizer, TokenCounter, TextChunker, create_safe_openai_messages
 
 
 class AIService:
@@ -127,25 +128,37 @@ Each chapter object must have 'title' and 'content' keys.
 Please process the following content and structure it into chapters:
 
 --- CONTENT START ---
-{content[:15000]} 
+{content}
 --- CONTENT END ---
 
 Ensure the entire output is a single valid JSON object.
 """
 
-            # LOGGING: Print prompt and content length
-            print("[AIService] System prompt:\n", system_prompt)
-            print("[AIService] User prompt (first 500 chars):\n", user_prompt[:500])
-            print(f"[AIService] Content length: {len(content)} characters (truncated to 15000)")
+            # Use the new safe message creation utility
+            try:
+                messages, total_tokens = create_safe_openai_messages(
+                    system_prompt=system_prompt,
+                    user_content=user_prompt,
+                    max_tokens=16385,  # gpt-3.5-turbo limit
+                    reserved_tokens=2000  # Reserve tokens for response
+                )
+                
+                print(f"[AIService] Token count: {total_tokens}")
+                print(f"[AIService] Messages created successfully")
+                
+            except ValueError as e:
+                print(f"[AIService] Error creating safe messages: {e}")
+                # Fallback to truncation
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt[:12000] + "\n\n[Content truncated due to length limits]"}
+                ]
 
             # Add timeout to prevent hanging
             response = await asyncio.wait_for(
                 self.client.chat.completions.create(
                     model="gpt-3.5-turbo-1106",  # Optimized for JSON mode
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
+                    messages=messages,
                     response_format={"type": "json_object"},
                     temperature=0.3,
                 ),
@@ -205,12 +218,20 @@ Ensure the entire output is a single valid JSON object.
             return "This is a mock summary of the content."
         
         try:
+            # Sanitize and limit content
+            sanitized_content = TextSanitizer.sanitize_for_openai(content)
+            
+            # Create safe messages
+            messages, total_tokens = create_safe_openai_messages(
+                system_prompt="Summarize the following content concisely.",
+                user_content=sanitized_content,
+                max_tokens=16385,
+                reserved_tokens=500  # Reserve tokens for response
+            )
+            
             response = await self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "Summarize the following content concisely."},
-                    {"role": "user", "content": content[:2000]}
-                ],
+                messages=messages,
                 temperature=0.5,
                 max_tokens=200
             )
@@ -353,6 +374,9 @@ Ensure the entire output is a single valid JSON object.
         if not self.client:
             return f"Summary for {chapter_title}"
         try:
+            # Sanitize content
+            sanitized_content = TextSanitizer.sanitize_for_openai(content)
+            
             prompt = f"""
 You are given the full text of {chapter_title} from the book '{book_title}' by {author}.
 Write a concise, clear summary of this chapter, focusing only on its main ideas and key points.
@@ -361,16 +385,22 @@ Do not include content from the introduction, preface, or appendices.
 Return only the summary text, not JSON.
 
 --- CHAPTER CONTENT START ---
-{content[:12000]}
+{sanitized_content}
 --- CHAPTER CONTENT END ---
 """
+            
+            # Create safe messages
+            messages, total_tokens = create_safe_openai_messages(
+                system_prompt="You are an expert editor and summarizer.",
+                user_content=prompt,
+                max_tokens=16385,
+                reserved_tokens=1000  # Reserve tokens for response
+            )
+            
             response = await asyncio.wait_for(
                 self.client.chat.completions.create(
                     model="gpt-3.5-turbo-1106",
-                    messages=[
-                        {"role": "system", "content": "You are an expert editor and summarizer."},
-                        {"role": "user", "content": prompt},
-                    ],
+                    messages=messages,
                     temperature=0.3,
                     max_tokens=600,
                 ),
@@ -388,12 +418,20 @@ Return only the summary text, not JSON.
             return f"Mock response for: {prompt[:100]}..."
         
         try:
+            # Sanitize prompt
+            sanitized_prompt = TextSanitizer.sanitize_for_openai(prompt)
+            
+            # Create safe messages
+            messages, total_tokens = create_safe_openai_messages(
+                system_prompt="You are a helpful AI assistant that generates high-quality content based on user prompts.",
+                user_content=sanitized_prompt,
+                max_tokens=16385,
+                reserved_tokens=2000  # Reserve tokens for response
+            )
+            
             response = await self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a helpful AI assistant that generates high-quality content based on user prompts."},
-                    {"role": "user", "content": prompt}
-                ],
+                messages=messages,
                 temperature=0.7,
                 max_tokens=2000
             )
@@ -410,12 +448,20 @@ Return only the summary text, not JSON.
             return f"Mock tutorial script for: {prompt[:100]}..."
         
         try:
+            # Sanitize prompt
+            sanitized_prompt = TextSanitizer.sanitize_for_openai(prompt)
+            
+            # Create safe messages
+            messages, total_tokens = create_safe_openai_messages(
+                system_prompt="You are an expert educator and content creator. Create engaging, clear tutorial scripts that are perfect for audio narration or video presentation. Focus on making complex topics accessible and engaging.",
+                user_content=sanitized_prompt,
+                max_tokens=16385,
+                reserved_tokens=2000  # Reserve tokens for response
+            )
+            
             response = await self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are an expert educator and content creator. Create engaging, clear tutorial scripts that are perfect for audio narration or video presentation. Focus on making complex topics accessible and engaging."},
-                    {"role": "user", "content": prompt}
-                ],
+                messages=messages,
                 temperature=0.7,
                 max_tokens=2000
             )
