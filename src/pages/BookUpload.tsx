@@ -133,7 +133,7 @@ export default function BookUpload() {
         author_name: bookToResume.author_name || "",
         description: bookToResume.description || "",
         cover_image_url: bookToResume.cover_image_url || "",
-        book_type: bookToResume.book_type || "learning",
+        book_type: bookToResume.book_type || bookMode,
         difficulty: bookToResume.difficulty || "medium",
         tags: bookToResume.tags || [],
         language: bookToResume.language || "en",
@@ -223,8 +223,13 @@ export default function BookUpload() {
         return;
       }
 
+    
+    try {
+
       const book = (await apiClient.upload("/books/upload", formData)) as Book;
       setAiBook(book);
+      
+    
 
       // Check if payment is required
       if (book.payment_required) {
@@ -299,7 +304,7 @@ export default function BookUpload() {
               author_name: updatedBook.author_name || "",
               description: updatedBook.description || "",
               cover_image_url: updatedBook.cover_image_url || "",
-              book_type: updatedBook.book_type || "learning",
+              book_type: updatedBook.book_type || bookMode,
               difficulty: updatedBook.difficulty || "medium",
               tags: updatedBook.tags || [],
               language: updatedBook.language || "en",
@@ -319,9 +324,20 @@ export default function BookUpload() {
           toast.error("Could not get book status. Please check the dashboard.");
         }
       }, 7000); // Poll every 7 seconds
-
+  
       // Cleanup polling on component unmount
       return () => clearInterval(pollInterval);
+
+    } catch (uploadError: any){
+      console.log("Upload error:", uploadError);
+      setIsProcessing(false);
+      setProcessingStatus("")
+
+      //Show the actual error message
+      const errorMessage = uploadError?.response?.data?.details || uploadError?.message || "Upload failed";
+      toast.error(`Upload failed: ${errorMessage}`);
+      return;
+    }
     } catch (e: unknown) {
       const error = e as Error;
       toast.error(error.message || "AI processing failed.");
@@ -329,6 +345,8 @@ export default function BookUpload() {
       setProcessingStatus("");
     }
   };
+
+
 
   // Handle payment for book upload
   const handlePayment = async () => {
@@ -420,7 +438,7 @@ export default function BookUpload() {
               author_name: bookStatus.author_name || "",
               description: bookStatus.description || "",
               cover_image_url: bookStatus.cover_image_url || "",
-              book_type: bookStatus.book_type || "learning",
+              book_type: bookStatus.book_type || bookMode,
               difficulty: bookStatus.difficulty || "medium",
               tags: bookStatus.tags || [],
               language: bookStatus.language || "en",

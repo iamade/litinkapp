@@ -600,7 +600,7 @@ Chapters:
                 model="gpt-3.5-turbo-1106",
                 messages=[
                     {"role": "system", "content": "You are an expert book editor and content validator."},
-                    {"role": "user", "content": validation_prompt}
+                    {"role": "user", "content": f"{validation_prompt}\n\nPlease respond in JSON format."}
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.3

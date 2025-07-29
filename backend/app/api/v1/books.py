@@ -345,15 +345,17 @@ async def upload_book(
     if file:
         original_filename = file.filename
         # Define a unique path in Supabase Storage
-        storage_path = f"{current_user['id']}/{original_filename}"
+        storage_path = f"users/{current_user['id']}/{original_filename}"
         
         try:
             # Read file content and upload to Supabase Storage
             content = await file.read()
+            # Try to upload, if duplicate exists, use upsert to overwrite
             supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
                 path=storage_path,
                 file=content,
-                file_options={"content-type": file.content_type}
+                file_options={"content-type": file.content_type},
+                upsert=True # This allows overwriting existing files
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to upload file to storage: {e}")
