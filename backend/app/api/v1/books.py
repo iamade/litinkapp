@@ -15,7 +15,7 @@ import io
 
 from app.core.auth import get_current_user, get_current_author, get_current_active_user
 from app.core.database import get_supabase
-from app.schemas import Book, BookCreate, BookUpdate, User
+from app.schemas import Book, BookCreate, BookUpdate, User, BookStructureInput, ChapterInput, SectionInput, BookWithSections
 from app.schemas.book import Book as BookSchema, Chapter as ChapterSchema, ChapterCreate, BookWithDraftChapters, BookWithChapters
 from app.services.ai_service import AIService
 from app.services.file_service import FileService
@@ -330,13 +330,17 @@ async def upload_book(
         )
 
     # Check how many books the user has already uploaded (excluding FAILED ones)
-    books_response = supabase_client.table('books').select('id', count='exact').eq('user_id', current_user['id']).neq('status', 'FAILED').execute()
-    book_count = books_response.count or 0
+    # books_response = supabase_client.table('books').select('id', count='exact').eq('user_id', current_user['id']).neq('status', 'FAILED').execute()
+    # book_count = books_response.count or 0
     
-    # Determine if payment is required (2nd book and beyond, unless superadmin)
-    requires_payment = (book_count >= 1) and (current_user.get('role') != 'superadmin')
-    initial_status = "PENDING_PAYMENT" if requires_payment else "QUEUED"
+    # # Determine if payment is required (2nd book and beyond, unless superadmin)
+    # requires_payment = (book_count >= 1) and (current_user.get('role') != 'superadmin')
+    # initial_status = "PENDING_PAYMENT" if requires_payment else "QUEUED"
 
+    # Payment bypass - always set to QUEUED
+    requires_payment = False
+    initial_status = "QUEUED"
+    
     file_service = FileService()
     
     storage_path = None
@@ -355,10 +359,29 @@ async def upload_book(
                 path=storage_path,
                 file=content,
                 file_options={"content-type": file.content_type},
-                upsert=True # This allows overwriting existing files
             )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to upload file to storage: {e}")
+        except Exception as upload_error:
+            #if it's a duplicate error, use update with upsert to overwrite
+            if "Duplicate" in str(upload_error) or "already exists" in str(upload_error):
+                try:
+                    # Reset file pointer to beginning
+                    await file.seek(0)
+                    content = await file.read()
+                    
+                    #Use update with upsert to overwrite existing file
+                    supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).update(
+                        path=storage_path,
+                        file=content,
+                        file_options={
+                            "content-type": file.content_type,
+                            "upsert": "true" # This allows overwriting existing files
+                        })
+                except Exception as update_error:
+                    raise Exception(f"Failed to overwrite existing file: {update_error}")
+            else:
+                raise upload_error
+                
+            # raise HTTPException(status_code=500, detail=f"Failed to upload file to storage: {e}")
 
     # Create an initial book record
     initial_book_data = BookCreate(
@@ -373,17 +396,8 @@ async def upload_book(
         response = supabase_client.table("books").insert(initial_book_data.dict(exclude_none=True)).execute()
         book_record = response.data[0]
         
-        if requires_payment:
-            # Return book record with payment_required flag
-            # Frontend will handle creating checkout session
-            return {
-                **book_record,
-                "payment_required": True,
-                "message": "Payment required for additional book uploads"
-            }
-        else:
             # Add the processing task to the background for free first book
-            background_tasks.add_task(
+        background_tasks.add_task(
                 file_service.process_uploaded_book,
                 storage_path=storage_path,
                 original_filename=original_filename,
@@ -393,11 +407,37 @@ async def upload_book(
                 book_id_to_update=book_record["id"],
             )
             
-            return {
+        return {
                 **book_record,
                 "payment_required": False,
                 "message": "Book processing started"
             }
+        
+        # if requires_payment:
+        #     # Return book record with payment_required flag
+        #     # Frontend will handle creating checkout session
+        #     return {
+        #         **book_record,
+        #         "payment_required": True,
+        #         "message": "Payment required for additional book uploads"
+        #     }
+        # else:
+        #     # Add the processing task to the background for free first book
+        #     background_tasks.add_task(
+        #         file_service.process_uploaded_book,
+        #         storage_path=storage_path,
+        #         original_filename=original_filename,
+        #         text_content=text_content,
+        #         book_type=book_type,
+        #         user_id=current_user["id"],
+        #         book_id_to_update=book_record["id"],
+        #     )
+            
+        #     return {
+        #         **book_record,
+        #         "payment_required": False,
+        #         "message": "Book processing started"
+        #     }
 
     except Exception as e:
         # This will catch errors during initial book creation
@@ -457,7 +497,32 @@ async def get_book_status(
         # Return book with processing_time_seconds if available
         if processing_time_seconds is not None:
             book["processing_time_seconds"] = processing_time_seconds
-        return book
+        sections_data = []
+        chapters_data = book.get("chapters", [])
+
+        if book.get("has_sections") and book.get("structure_type") != "flat":
+            # Fetch sections data from book_sections table
+            try:
+                sections_response = supabase_client.table("book_sections").select("*").eq("book_id", book_id).order("order_index").execute()
+                sections_data = sections_response.data or []
+            except Exception as e:
+                print(f"Error fetching sections: {e}")
+                sections_data = []
+
+        # Create enhanced book response with structure data
+        book_response = {
+            **book,
+            "structure_data": {
+                "id": book["id"],
+                "title": book.get("title", ""),
+                "structure_type": book.get("structure_type", "flat"),
+                "has_sections": book.get("has_sections", False),
+                "sections": sections_data,
+                "chapters": chapters_data
+            }
+        }
+
+        return book_response
     except APIError:
         raise HTTPException(status_code=404, detail="Book not found.")
 
@@ -606,16 +671,34 @@ async def delete_book(
         except Exception as e:
             print(f"Warning: Could not delete video files: {e}")
 
-        # Delete the original book file
+        # # Delete the original book file
+        # try:
+        #     original_file_storage_path = book.get("original_file_storage_path")
+        #     if original_file_storage_path:
+        #         supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([original_file_storage_path])
+        #         print(f"Deleted book file: {original_file_storage_path}")
+        #     else:
+        #         print(f"Warning: No original_file_storage_path found for book {book_id}")
+        # except Exception as e:
+        #     print(f"Warning: Could not delete book file: {e}")
+            
+                # Delete the specific book file from users folder
         try:
-            original_file_storage_path = book.get("original_file_storage_path")
-            if original_file_storage_path:
-                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([original_file_storage_path])
-                print(f"Deleted book file: {original_file_storage_path}")
-            else:
-                print(f"Warning: No original_file_storage_path found for book {book_id}")
+            # Try to construct the expected path for the book file
+            if book.get("title"):
+                # Assume the book file has the same name as the title (you might need to adjust this)
+                possible_extensions = ['.pdf', '.docx', '.txt']
+                for ext in possible_extensions:
+                    book_file_path = f"users/{user_id}/{book['title']}{ext}"
+                    try:
+                        supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([book_file_path])
+                        print(f"Deleted book file: {book_file_path}")
+                        break  # Stop trying other extensions if successful
+                    except:
+                        continue  # Try next extension
         except Exception as e:
-            print(f"Warning: Could not delete book file: {e}")
+            print(f"Warning: Could not delete book file from users folder: {e}")
+
 
     except Exception as e:
         # Log the error but continue, as the book record should still be deleted
@@ -753,37 +836,146 @@ class ChapterInput(BaseModel):
     content: str = ""
 
 
-@router.post("/{book_id}/save-chapters")
-async def save_user_chapters(
+# @router.post("/{book_id}/save-chapters")
+# async def save_user_chapters(
+#     book_id: str,
+#     chapters: List[ChapterInput],
+#     supabase_client: Client = Depends(get_supabase),
+#     current_user: dict = Depends(get_current_active_user)
+# ):
+#     # Check book ownership
+#     response = supabase_client.table("books").select("user_id").eq("id", book_id).single().execute()
+#     if not response.data or response.data["user_id"] != current_user["id"]:
+#         raise HTTPException(status_code=403, detail="Not authorized to modify this book")
+    
+#      # Delete existing chapter embeddings for this book
+#     supabase_client.table('chapter_embeddings').delete().eq('book_id', book_id).execute()
+    
+#     # Delete existing draft chapters for this book
+#     supabase_client.table('chapters').delete().eq('book_id', book_id).execute()
+#     # Insert new chapters and create embeddings
+#     embeddings_service = EmbeddingsService(supabase_client)
+#     for idx, chapter in enumerate(chapters, 1):
+#         chapter_data = {
+#             "book_id": book_id,
+#             "title": chapter.title,
+#             "content": chapter.content,
+#             "chapter_number": idx
+#         }
+#         insert_response = supabase_client.table('chapters').insert(chapter_data).execute()
+#         chapter_id = insert_response.data[0]['id']
+#         # Create embeddings for the new chapter
+#         await embeddings_service.create_chapter_embeddings(chapter_id, chapter.content)
+
+#     # Update total_chapters in books table
+#     supabase_client.table('books').update({"total_chapters": len(chapters)}).eq('id', book_id).execute()
+#     return {"message": "Chapters saved", "total_chapters": len(chapters)}
+
+
+@router.post("/{book_id}/save-structure")
+async def save_book_structure(
     book_id: str,
-    chapters: List[ChapterInput],
+    structure_data: BookStructureInput,
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    # Check book ownership
-    response = supabase_client.table("books").select("user_id").eq("id", book_id).single().execute()
-    if not response.data or response.data["user_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Not authorized to modify this book")
-    
-     # Delete existing chapter embeddings for this book
-    supabase_client.table('chapter_embeddings').delete().eq('book_id', book_id).execute()
-    
-    # Delete existing draft chapters for this book
-    supabase_client.table('chapters').delete().eq('book_id', book_id).execute()
-    # Insert new chapters and create embeddings
-    embeddings_service = EmbeddingsService(supabase_client)
-    for idx, chapter in enumerate(chapters, 1):
-        chapter_data = {
-            "book_id": book_id,
-            "title": chapter.title,
-            "content": chapter.content,
-            "chapter_number": idx
+    """Save the book structure (sections and chapters) after user review"""
+    try:
+        # Verify book ownership
+        book_response = supabase_client.table('books').select('*').eq('id', book_id).eq('user_id', current_user['id']).execute()
+        if not book_response.data:
+            raise HTTPException(status_code=404, detail="Book not found or not authorized")
+        
+        book = book_response.data[0]
+        
+        # Extract chapters from structure_data
+        chapters = structure_data.get("chapters", [])
+        sections = structure_data.get("sections", [])
+        
+        if not chapters:
+            raise HTTPException(status_code=400, detail="No chapters provided in structure data")
+        
+        # Delete existing chapter embeddings for this book
+        supabase_client.table('chapter_embeddings').delete().eq('book_id', book_id).execute()
+        print(f"Deleted existing chapter embeddings for book {book_id}")
+        
+        # Delete existing chapters for this book
+        supabase_client.table('chapters').delete().eq('book_id', book_id).execute()
+        print(f"Deleted existing chapters for book {book_id}")
+        
+        # Delete existing book sections for this book
+        supabase_client.table('book_sections').delete().eq('book_id', book_id).execute()
+        print(f"Deleted existing book sections for book {book_id}")
+        
+        # Create section_id mapping if there are sections
+        section_id_map = {}
+        if sections:
+            for section in sections:
+                section_data = {
+                    "book_id": book_id,
+                    "title": section.get("title", ""),
+                    "section_type": section.get("section_type", ""),
+                    "section_number": section.get("section_number", ""),
+                    "order_index": section.get("order_index", 0)
+                }
+                section_response = supabase_client.table('book_sections').insert(section_data).execute()
+                section_id = section_response.data[0]['id']
+                section_key = f"{section.get('title', '')}_{section.get('section_type', '')}"
+                section_id_map[section_key] = section_id
+        
+        # Insert new chapters and create embeddings
+        embeddings_service = EmbeddingsService(supabase_client)
+        
+        for idx, chapter in enumerate(chapters, 1):
+            # Prepare chapter data
+            chapter_data = {
+                "book_id": book_id,
+                "title": chapter.get("title", f"Chapter {idx}"),
+                "content": chapter.get("content", ""),
+                "chapter_number": chapter.get("chapter_number", idx),
+                "summary": chapter.get("summary", ""),
+                "order_index": chapter.get("order_index", idx)
+            }
+            
+            # Add section_id if chapter belongs to a section
+            if chapter.get("section_title") and sections:
+                section_key = f"{chapter.get('section_title')}_{chapter.get('section_type', '')}"
+                if section_key in section_id_map:
+                    chapter_data["section_id"] = section_id_map[section_key]
+            
+            # Insert chapter
+            insert_response = supabase_client.table('chapters').insert(chapter_data).execute()
+            chapter_id = insert_response.data[0]['id']
+            print(f"Inserted chapter {idx}: {chapter_data['title']}")
+            
+            # Create embeddings for the new chapter
+            if chapter_data["content"].strip():  # Only create embeddings if there's content
+                try:
+                    await embeddings_service.create_chapter_embeddings(chapter_id, chapter_data["content"])
+                    print(f"Created embeddings for chapter {chapter_id}")
+                except Exception as e:
+                    print(f"Warning: Failed to create embeddings for chapter {chapter_id}: {e}")
+        
+        # Update book with structure information and final status
+        book_update = {
+            "has_sections": structure_data.get("has_sections", False),
+            "structure_type": structure_data.get("structure_type", "flat"),
+            "total_chapters": len(chapters),
+            "status": "READY",
+            "progress": 100,
+            "progress_message": "Book structure saved successfully"
         }
-        insert_response = supabase_client.table('chapters').insert(chapter_data).execute()
-        chapter_id = insert_response.data[0]['id']
-        # Create embeddings for the new chapter
-        await embeddings_service.create_chapter_embeddings(chapter_id, chapter.content)
-
-    # Update total_chapters in books table
-    supabase_client.table('books').update({"total_chapters": len(chapters)}).eq('id', book_id).execute()
-    return {"message": "Chapters saved", "total_chapters": len(chapters)}
+        
+        supabase_client.table('books').update(book_update).eq('id', book_id).execute()
+        print(f"Updated book {book_id} with final status")
+        
+        return {
+            "success": True, 
+            "message": "Book structure saved successfully",
+            "chapters_created": len(chapters),
+            "sections_created": len(sections)
+        }
+        
+    except Exception as e:
+        print(f"Error saving book structure: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save book structure: {str(e)}")

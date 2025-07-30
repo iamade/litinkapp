@@ -3,16 +3,90 @@ from typing import Optional, List
 from datetime import datetime
 
 
+# Add these after the existing schemas, before the end of the file
+
+class SectionBase(BaseModel):
+    title: str
+    section_type: str  # "part", "tablet", "book", "section"
+    section_number: str  # "1", "I", "III", etc.
+    order_index: int
+    description: Optional[str] = None
+
+
+class SectionCreate(SectionBase):
+    book_id: str
+
+
+class Section(SectionBase):
+    id: str
+    book_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ChapterInput(BaseModel):
+    title: str
+    content: str = ""
+    chapter_number: Optional[int] = None
+    summary: Optional[str] = ""
+    order_index: Optional[int] = None
+    
+    # Section-related fields for hierarchical books
+    section_title: Optional[str] = None
+    section_type: Optional[str] = None  # "part", "tablet", "book", "section"
+    section_number: Optional[str] = None  # "1", "I", "III", etc.
+    section_id: Optional[str] = None  # Foreign key reference
+
+
+class SectionInput(BaseModel):
+    title: str
+    section_type: str  # "part", "tablet", "book", "section"
+    section_number: str  # "1", "I", "III", etc.
+    order_index: int
+    description: Optional[str] = None
+
+
+class BookStructureInput(BaseModel):
+    structure_type: str  # "flat", "hierarchical"
+    has_sections: bool
+    sections: Optional[List[SectionInput]] = []
+    chapters: List[ChapterInput]
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "structure_type": "hierarchical",
+                "has_sections": True,
+                "sections": [
+                    {
+                        "title": "Part I: Introduction",
+                        "section_type": "part",
+                        "section_number": "I",
+                        "order_index": 1
+                    }
+                ],
+                "chapters": [
+                    {
+                        "title": "Chapter 1: Getting Started",
+                        "content": "Chapter content here...",
+                        "chapter_number": 1,
+                        "section_title": "Part I: Introduction",
+                        "section_type": "part",
+                        "section_number": "I"
+                    }
+                ]
+            }
+        }
+        
+
 class ChapterBase(BaseModel):
     title: str
     content: str
     summary: Optional[str] = None
     duration: Optional[int] = None
-
-
-class ChapterCreate(ChapterBase):
-    chapter_number: int
-    book_id: str
 
 
 class Chapter(ChapterBase):
@@ -26,6 +100,13 @@ class Chapter(ChapterBase):
         from_attributes = True
 
 
+
+# Enhanced Chapter with section relationship
+class ChapterWithSection(Chapter):
+    section_id: Optional[str] = None
+    section: Optional[Section] = None
+
+
 class BookBase(BaseModel):
     title: str
     author_name: Optional[str] = None
@@ -35,6 +116,37 @@ class BookBase(BaseModel):
     difficulty: Optional[str] = "medium"
     tags: Optional[List[str]] = None
     language: Optional[str] = "en"
+
+
+
+class Book(BookBase):
+    id: str
+    user_id: Optional[str] = None
+    status: str
+    total_chapters: int
+    estimated_duration: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+    chapters: Optional[List[Chapter]] = None
+
+    class Config:
+        from_attributes = True
+
+
+
+# Enhanced Book with sections
+class BookWithSections(Book):
+    has_sections: Optional[bool] = False
+    structure_type: Optional[str] = "flat"
+    sections: Optional[List[Section]] = []
+    chapters: Optional[List[ChapterWithSection]] = []
+
+
+
+
+class ChapterCreate(ChapterBase):
+    chapter_number: int
+    book_id: str
 
 
 class BookCreate(BookBase):
@@ -56,20 +168,6 @@ class BookUpdate(BaseModel):
     language: Optional[str] = None
     estimated_duration: Optional[int] = None
     original_file_storage_path: Optional[str] = None
-
-
-class Book(BookBase):
-    id: str
-    user_id: Optional[str] = None
-    status: str
-    total_chapters: int
-    estimated_duration: Optional[int] = None
-    created_at: datetime
-    updated_at: datetime
-    chapters: Optional[List[Chapter]] = None
-
-    class Config:
-        from_attributes = True
 
 
 class ChapterDraft(BaseModel):

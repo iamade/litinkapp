@@ -52,6 +52,30 @@ This feature addresses critical issues in the book upload system that are preven
 
 ### Requirement 5
 
+**User Story:** As an author, I want the system to automatically detect and preserve my book's hierarchical structure (parts and chapters), so that the organization of my content is maintained.
+
+#### Acceptance Criteria
+
+1. WHEN a book contains hierarchical sections (e.g., "Part 1", "Part 2", "Part 3" or "TABLET I", "TABLET II", "TABLET III") THEN the system SHALL detect and extract the hierarchical structure
+2. WHEN chapters exist within parts THEN the system SHALL associate each chapter with its correct part
+3. WHEN displaying the chapter review interface THEN the system SHALL show parts as collapsible sections with their respective chapters
+4. WHEN saving the book structure THEN the system SHALL preserve the hierarchical relationship between parts and chapters
+5. IF a book has no parts THEN the system SHALL display chapters in a flat structure as currently implemented
+
+### Requirement 6
+
+**User Story:** As an author, I want to review and edit my book's structure in step 4, so that I can reorganize parts and chapters before finalizing my upload.
+
+#### Acceptance Criteria
+
+1. WHEN viewing step 4 THEN the system SHALL display parts as expandable/collapsible sections
+2. WHEN editing within a part THEN the system SHALL allow adding, removing, and reordering chapters within that part
+3. WHEN moving chapters between parts THEN the system SHALL update the hierarchical structure accordingly
+4. WHEN adding a new part THEN the system SHALL allow creating empty parts and moving chapters into them
+5. IF the book structure changes THEN the system SHALL validate the new structure before allowing progression to step 5
+
+### Requirement 7
+
 **User Story:** As a system administrator, I want comprehensive error handling and logging, so that I can diagnose and resolve upload issues quickly.
 
 #### Acceptance Criteria

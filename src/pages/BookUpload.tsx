@@ -16,11 +16,43 @@ import {
 } from "lucide-react";
 import { apiClient } from "../lib/api";
 import { stripeService } from "../services/stripeService";
+// import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 // Add interface for chapter structure
+// interface Chapter {
+//   title: string;
+//   content: string;
+// }
+
+interface BookSection {
+  id: string;
+  book_id: string;
+  section_number: string; // "1", "I", "III", etc.
+  section_type: string; // "part", "tablet", "book", "section"
+  title: string;
+  description?: string;
+  order_index: number;
+  chapters: Chapter[];
+}
+
 interface Chapter {
+  id: string;
+  book_id: string;
+  section_id?: string;
+  chapter_number: number;
   title: string;
   content: string;
+  summary?: string;
+  order_index: number;
+}
+
+interface BookStructure {
+  id: string;
+  title: string;
+  has_sections: boolean;
+  structure_type: "flat" | "hierarchical";
+  sections: BookSection[];
+  chapters: Chapter[]; // For flat structure books
 }
 
 // Add new type for editable chapters
@@ -49,6 +81,9 @@ interface Book {
   processing_time_seconds?: number;
   payment_required?: boolean;
   message?: string;
+  has_sections?: boolean;
+  structure_type?: "flat" | "hierarchical";
+  structure_data?: BookStructure; 
 }
 
 export default function BookUpload() {
@@ -102,7 +137,7 @@ export default function BookUpload() {
     []
   );
   const [savingChapters, setSavingChapters] = useState(false);
-  const [chapterError, setChapterError] = useState("");
+  // const [chapterError, setChapterError] = useState("");
   const [processingStatus, setProcessingStatus] = useState("");
   const [processingFailed, setProcessingFailed] = useState(false);
 
@@ -110,6 +145,61 @@ export default function BookUpload() {
   const [paymentRequired, setPaymentRequired] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
   const [userBookCount, setUserBookCount] = useState(0);
+  // Add this state variable near the other useState declarations
+  const [bookStructure, setBookStructure] = useState<BookStructure | null>(
+    null
+  );
+  const [isUploading, setIsUploading] = useState(false);
+
+  const getSectionIcon = (type: string) => {
+    switch (type.toLowerCase()) {
+      case "tablet":
+        return "📜";
+      case "part":
+        return "📖";
+      case "book":
+        return "📚";
+      case "section":
+        return "📄";
+      case "chapter":
+        return "📝";
+      case "act":
+        return "🎭";
+      case "scene":
+        return "🎬";
+      case "unit":
+        return "🎯";
+      case "lesson":
+        return "🎓";
+      default:
+        return "📄";
+    }
+  };
+
+  const getSectionLabel = (type: string) => {
+    switch (type.toLowerCase()) {
+      case "tablet":
+        return "Tablet";
+      case "part":
+        return "Part";
+      case "book":
+        return "Book";
+      case "section":
+        return "Section";
+      case "chapter":
+        return "Chapter";
+      case "act":
+        return "Act";
+      case "scene":
+        return "Scene";
+      case "unit":
+        return "Unit";
+      case "lesson":
+        return "Lesson";
+      default:
+        return "Section";
+    }
+  };
 
   useEffect(() => {
     // Check if we are resuming a book from the dashboard
@@ -202,6 +292,11 @@ export default function BookUpload() {
 
   // Step 3: AI Processing with Payment Logic
   const handleProcessAI = async () => {
+    console.log("🚀 handleProcessAI called with bookMode:", bookMode);
+    console.log("🚀 Upload method:", uploadMethod);
+    console.log("🚀 File:", file?.name);
+    if (isUploading) return;
+    setIsUploading(true);
     setIsProcessing(true);
     setProcessingFailed(false);
     setAiBook(null);
@@ -212,6 +307,7 @@ export default function BookUpload() {
     try {
       const formData = new FormData();
       formData.append("book_type", bookMode);
+      console.log("📤 Sending upload with book_type:", bookMode);
       if (uploadMethod === "file" && file) {
         formData.append("file", file);
       } else if (uploadMethod === "text" && textContent) {
@@ -223,130 +319,149 @@ export default function BookUpload() {
         return;
       }
 
-    
-    try {
+      try {
+        const book = (await apiClient.upload(
+          "/books/upload",
+          formData
+        )) as Book;
+        setAiBook(book);
 
-      const book = (await apiClient.upload("/books/upload", formData)) as Book;
-      setAiBook(book);
-      
-    
-
-      // Check if payment is required
-      if (book.payment_required) {
-        setPaymentRequired(true);
-        setIsProcessing(false);
-        setProcessingStatus("");
-        toast.success("Payment required for additional book uploads");
-        return;
-      }
-
-      setProcessingStatus("Uploading book...");
-
-      // Poll for status changes (existing logic for free books)
-      const pollInterval = setInterval(async () => {
-        try {
-          const response = await apiClient.get<Book>(
-            `/books/${book.id}/status`
-          );
-          const updatedBook = response as Book;
-          setAiBook(updatedBook);
-
-          // Update processing status based on book status
-          if (updatedBook.progress_message) {
-            setProcessingStatus(updatedBook.progress_message);
-          } else {
-            switch (updatedBook.status) {
-              case "QUEUED":
-                setProcessingStatus("Queued for processing...");
-                break;
-              case "PROCESSING":
-                setProcessingStatus("Extracting content...");
-                break;
-              case "GENERATING":
-                setProcessingStatus("Generating chapters with AI...");
-                break;
-              case "READY":
-                setProcessingStatus("Book is ready!");
-                break;
-              case "FAILED":
-                setProcessingStatus("Processing failed");
-                break;
-              default:
-                setProcessingStatus("Processing...");
-            }
-          }
-
-          // Stop polling if the book processing has failed
-          if (updatedBook.status === "FAILED") {
-            clearInterval(pollInterval);
-            setProcessingFailed(true);
-            toast.error(
-              updatedBook.error_message ||
-                "Book processing failed. Please try again."
-            );
-            setIsProcessing(false);
-            setProcessingStatus("");
-          } else if (updatedBook.status === "READY") {
-            // Proceed to the next step only when the book is fully ready
-            clearInterval(pollInterval);
-
-            // Set editable chapters for review
-            if (updatedBook.chapters) {
-              setEditableChapters(
-                updatedBook.chapters.map((ch: Chapter) => ({
-                  title: ch.title || "",
-                  content: ch.content || "",
-                }))
-              );
-            }
-            setDetails({
-              title: updatedBook.title || "",
-              author_name: updatedBook.author_name || "",
-              description: updatedBook.description || "",
-              cover_image_url: updatedBook.cover_image_url || "",
-              book_type: updatedBook.book_type || bookMode,
-              difficulty: updatedBook.difficulty || "medium",
-              tags: updatedBook.tags || [],
-              language: updatedBook.language || "en",
-              estimated_duration: updatedBook.estimated_duration
-                ? String(updatedBook.estimated_duration)
-                : "",
-            });
-            setStep(4); // Go to chapter review step
-            setIsProcessing(false);
-            setProcessingStatus("");
-          }
-        } catch (error) {
-          console.error("Error polling book status:", error);
-          clearInterval(pollInterval);
+        // Check if payment is required
+        if (book.payment_required) {
+          setPaymentRequired(true);
           setIsProcessing(false);
           setProcessingStatus("");
-          toast.error("Could not get book status. Please check the dashboard.");
+          toast.success("Payment required for additional book uploads");
+          return;
         }
-      }, 7000); // Poll every 7 seconds
-  
-      // Cleanup polling on component unmount
-      return () => clearInterval(pollInterval);
 
-    } catch (uploadError: any){
-      console.log("Upload error:", uploadError);
-      setIsProcessing(false);
-      setProcessingStatus("")
+        setProcessingStatus("Uploading book...");
 
-      //Show the actual error message
-      const errorMessage = uploadError?.response?.data?.details || uploadError?.message || "Upload failed";
-      toast.error(`Upload failed: ${errorMessage}`);
-      return;
-    }
+        // Poll for status changes (existing logic for free books)
+        const pollInterval = setInterval(async () => {
+          try {
+            const response = await apiClient.get<Book>(
+              `/books/${book.id}/status`
+            );
+            const updatedBook = response as Book;
+            setAiBook(updatedBook);
+
+            // Update processing status based on book status
+            if (updatedBook.progress_message) {
+              setProcessingStatus(updatedBook.progress_message);
+            } else {
+              switch (updatedBook.status) {
+                case "QUEUED":
+                  setProcessingStatus("Queued for processing...");
+                  break;
+                case "PROCESSING":
+                  setProcessingStatus("Extracting content...");
+                  break;
+                case "GENERATING":
+                  setProcessingStatus("Generating chapters with AI...");
+                  break;
+                case "READY":
+                  setProcessingStatus("Book is ready!");
+                  break;
+                case "FAILED":
+                  setProcessingStatus("Processing failed");
+                  break;
+                default:
+                  setProcessingStatus("Processing...");
+              }
+            }
+
+            // Stop polling if the book processing has failed
+            if (updatedBook.status === "FAILED") {
+              clearInterval(pollInterval);
+              setProcessingFailed(true);
+              toast.error(
+                updatedBook.error_message ||
+                  "Book processing failed. Please try again."
+              );
+              setIsProcessing(false);
+              setProcessingStatus("");
+            } else if (updatedBook.status === "READY") {
+              // Proceed to the next step only when the book is fully ready
+              clearInterval(pollInterval);
+
+              // Set editable chapters for review
+              if (updatedBook.chapters) {
+                setEditableChapters(
+                  updatedBook.chapters.map((ch: Chapter) => ({
+                    title: ch.title || "",
+                    content: ch.content || "",
+                  }))
+                );
+              }
+
+              // Set book structure data if available
+              if (updatedBook.structure_data) {
+                setBookStructure(updatedBook.structure_data);
+              } else if (updatedBook.chapters) {
+                // Fallback: create basic structure from chapters
+                setBookStructure({
+                  id: updatedBook.id,
+                  title: updatedBook.title || "",
+                  has_sections: updatedBook.has_sections || false,
+                  structure_type: updatedBook.structure_type || "flat",
+                  sections: [],
+                  chapters: updatedBook.chapters || [],
+                });
+              }
+              
+              setDetails({
+                title: updatedBook.title || "",
+                author_name: updatedBook.author_name || "",
+                description: updatedBook.description || "",
+                cover_image_url: updatedBook.cover_image_url || "",
+                book_type: updatedBook.book_type || bookMode,
+                difficulty: updatedBook.difficulty || "medium",
+                tags: updatedBook.tags || [],
+                language: updatedBook.language || "en",
+                estimated_duration: updatedBook.estimated_duration
+                  ? String(updatedBook.estimated_duration)
+                  : "",
+              });
+              setStep(4); // Go to chapter review step
+              setIsProcessing(false);
+              setProcessingStatus("");
+            }
+          } catch (error) {
+            console.error("Error polling book status:", error);
+            clearInterval(pollInterval);
+            setIsProcessing(false);
+            setProcessingStatus("");
+            toast.error(
+              "Could not get book status. Please check the dashboard."
+            );
+          }
+        }, 7000); // Poll every 7 seconds
+
+        // Cleanup polling on component unmount
+        return () => clearInterval(pollInterval);
+      } catch (uploadError: any) {
+        console.log("Upload error:", uploadError);
+        setIsProcessing(false);
+        setProcessingStatus("");
+
+        //Show the actual error message
+        const errorMessage =
+          uploadError?.response?.data?.details ||
+          uploadError?.message ||
+          "Upload failed";
+        toast.error(`Upload failed: ${errorMessage}`);
+        return;
+      }
     } catch (e: unknown) {
       const error = e as Error;
       toast.error(error.message || "AI processing failed.");
       setIsProcessing(false);
       setProcessingStatus("");
+    } finally {
+      setIsUploading(false);
     }
   };
-
-
 
   // Handle payment for book upload
   const handlePayment = async () => {
@@ -472,30 +587,64 @@ export default function BookUpload() {
   };
 
   // Step 4: Save Chapters (after user review)
-  const handleSaveChapters = async () => {
-    if (!aiBook) return;
-    setSavingChapters(true);
-    setChapterError("");
-    // Validate chapters
-    if (
-      !editableChapters.length ||
-      editableChapters.some((ch) => !ch.title.trim())
-    ) {
-      setChapterError("Each chapter must have a title.");
-      setSavingChapters(false);
+  // const handleSaveChapters = async () => {
+  //   if (!aiBook) return;
+  //   setSavingChapters(true);
+  //   setChapterError("");
+  //   // Validate chapters
+  //   if (
+  //     !editableChapters.length ||
+  //     editableChapters.some((ch) => !ch.title.trim())
+  //   ) {
+  //     setChapterError("Each chapter must have a title.");
+  //     setSavingChapters(false);
+  //     return;
+  //   }
+  //   try {
+  //     await apiClient.post(
+  //       `/books/${aiBook.id}/save-chapters`,
+  //       editableChapters
+  //     );
+  //     setStep(5); // Proceed to Book Details
+  //     toast.success("Chapters saved! Now complete book details.");
+  //   } catch (e: unknown) {
+  //     const error = e as Error;
+  //     toast.error(error.message || "Failed to save chapters.");
+  //     setChapterError(error.message || "Failed to save chapters.");
+  //   } finally {
+  //     setSavingChapters(false);
+  //   }
+  // };
+
+  // ADD THE handleSaveStructure FUNCTION HERE (after line 535)
+  const handleSaveStructure = async () => {
+    if (!aiBook || !bookStructure) {
+      toast.error("No book structure to save");
       return;
     }
+
+    setSavingChapters(true);
+
     try {
-      await apiClient.post(
-        `/books/${aiBook.id}/save-chapters`,
-        editableChapters
-      );
-      setStep(5); // Proceed to Book Details
-      toast.success("Chapters saved! Now complete book details.");
-    } catch (e: unknown) {
-      const error = e as Error;
-      toast.error(error.message || "Failed to save chapters.");
-      setChapterError(error.message || "Failed to save chapters.");
+      // Convert bookStructure to the format expected by the backend
+      const structureData = {
+        book_id: aiBook.id,
+        has_sections: bookStructure.has_sections,
+        structure_type: bookStructure.structure_type,
+        sections: bookStructure.sections,
+        chapters: bookStructure.chapters,
+      };
+
+      console.log("Saving structure:", structureData);
+
+      // Save the hierarchical structure
+      await apiClient.put(`/books/${aiBook.id}/structure`, structureData);
+
+      toast.success("Book structure saved successfully!");
+      setStep(5); // Move to next step
+    } catch (error) {
+      console.error("Error saving book structure:", error);
+      toast.error("Failed to save book structure. Please try again.");
     } finally {
       setSavingChapters(false);
     }
@@ -699,99 +848,128 @@ export default function BookUpload() {
   ];
 
   const handleUploadBookClick = async () => {
+    console.log("🚀 handleUploadBookClick called with bookMode:", bookMode);
+
     if (!user) return;
-    if (
-      (user.role && user.role.toLowerCase() === "superadmin") ||
-      userBookCount < 1
-    ) {
-      try {
-        const formData = new FormData();
-        formData.append("book_type", bookMode);
-        if (uploadMethod === "file" && file) {
-          formData.append("file", file);
-        } else if (uploadMethod === "text" && textContent) {
-          formData.append("text_content", textContent);
-        } else {
-          toast.error("Please provide a file or text content.");
-          return;
-        }
-        const book = await apiClient.upload("/books/upload", formData);
-        if (
-          typeof book === "object" &&
-          book !== null &&
-          "id" in book &&
-          "status" in book
-        ) {
-          if (
-            (book as { status?: string }).status === "PENDING_PAYMENT" &&
-            (book as { id?: string }).id
-          ) {
-            // Immediately redirect to Stripe
-            const checkoutSession =
-              await stripeService.createBookUploadCheckoutSession(
-                (book as { id: string }).id
-              );
-            stripeService.redirectToCheckout(
-              (checkoutSession as { checkout_url: string }).checkout_url
-            );
-            return;
-          } else {
-            setAiBook(book as Book);
-            setStep(2); // Proceed to next step
-          }
-        }
-      } catch (e) {
-        const error = e as Error;
-        toast.error(
-          error.message || "Failed to upload book. Please try again."
-        );
-      }
-      return;
-    }
-    try {
-      const formData = new FormData();
-      formData.append("book_type", bookMode);
-      if (uploadMethod === "file" && file) {
-        formData.append("file", file);
-      } else if (uploadMethod === "text" && textContent) {
-        formData.append("text_content", textContent);
-      } else {
-        toast.error("Please provide a file or text content.");
-        return;
-      }
-      const book = await apiClient.upload("/books/upload", formData);
-      if (
-        typeof book === "object" &&
-        book !== null &&
-        "payment_required" in book &&
-        "id" in book
-      ) {
-        if (
-          (book as { payment_required?: boolean }).payment_required &&
-          (book as { id?: string }).id
-        ) {
-          // Immediately redirect to Stripe
-          const checkoutSession =
-            await stripeService.createBookUploadCheckoutSession(
-              (book as { id: string }).id
-            );
-          stripeService.redirectToCheckout(
-            (checkoutSession as { checkout_url: string }).checkout_url
-          );
-          return;
-        } else {
-          setAiBook(book as Book);
-          setStep(2); // Proceed to next step
-        }
-      }
-    } catch (e) {
-      const error = e as Error;
-      toast.error(
-        error.message ||
-          "Failed to upload book or initiate payment. Please try again."
-      );
-    }
+    setStep(2);
+
+    // try {
+    //   const formData = new FormData();
+    //   formData.append("book_type", bookMode);
+    //   if (uploadMethod === "file" && file) {
+    //     formData.append("file", file);
+    //   } else if (uploadMethod === "text" && textContent) {
+    //     formData.append("text_content", textContent);
+    //   } else {
+    //     toast.error("Please provide a file or text content.");
+    //     return;
+    //   }
+
+    //   const book = await apiClient.upload("/books/upload", formData);
+
+    //   // Always proceed to step 2, ignoring payment requirements
+    //   setAiBook(book as Book);
+    //   setStep(2);
+    // } catch (e) {
+    //   const error = e as Error;
+    //   toast.error(error.message || "Failed to upload book. Please try again.");
+    // }
   };
+
+  // const handleUploadBookClick = async () => {
+  //   if (!user) return;
+  //   if (
+  //     (user.role && user.role.toLowerCase() === "superadmin") ||
+  //     userBookCount < 1
+  //   ) {
+  //     try {
+  //       const formData = new FormData();
+  //       formData.append("book_type", bookMode);
+  //       if (uploadMethod === "file" && file) {
+  //         formData.append("file", file);
+  //       } else if (uploadMethod === "text" && textContent) {
+  //         formData.append("text_content", textContent);
+  //       } else {
+  //         toast.error("Please provide a file or text content.");
+  //         return;
+  //       }
+  //       const book = await apiClient.upload("/books/upload", formData);
+  //       if (
+  //         typeof book === "object" &&
+  //         book !== null &&
+  //         "id" in book &&
+  //         "status" in book
+  //       ) {
+  //         if (
+  //           (book as { status?: string }).status === "PENDING_PAYMENT" &&
+  //           (book as { id?: string }).id
+  //         ) {
+  //           // Immediately redirect to Stripe
+  //           const checkoutSession =
+  //             await stripeService.createBookUploadCheckoutSession(
+  //               (book as { id: string }).id
+  //             );
+  //           stripeService.redirectToCheckout(
+  //             (checkoutSession as { checkout_url: string }).checkout_url
+  //           );
+  //           return;
+  //         } else {
+  //           setAiBook(book as Book);
+  //           setStep(2); // Proceed to next step
+  //         }
+  //       }
+  //     } catch (e) {
+  //       const error = e as Error;
+  //       toast.error(
+  //         error.message || "Failed to upload book. Please try again."
+  //       );
+  //     }
+  //     return;
+  //   }
+  //   try {
+  //     const formData = new FormData();
+  //     formData.append("book_type", bookMode);
+  //     if (uploadMethod === "file" && file) {
+  //       formData.append("file", file);
+  //     } else if (uploadMethod === "text" && textContent) {
+  //       formData.append("text_content", textContent);
+  //     } else {
+  //       toast.error("Please provide a file or text content.");
+  //       return;
+  //     }
+  //     const book = await apiClient.upload("/books/upload", formData);
+  //     if (
+  //       typeof book === "object" &&
+  //       book !== null &&
+  //       "payment_required" in book &&
+  //       "id" in book
+  //     ) {
+  //       if (
+  //         (book as { payment_required?: boolean }).payment_required &&
+  //         (book as { id?: string }).id
+  //       ) {
+  //         // Immediately redirect to Stripe
+  //         const checkoutSession =
+  //           await stripeService.createBookUploadCheckoutSession(
+  //             (book as { id: string }).id
+  //           );
+  //         stripeService.redirectToCheckout(
+  //           (checkoutSession as { checkout_url: string }).checkout_url
+  //         );
+  //         return;
+  //       } else {
+  //         setAiBook(book as Book);
+  //         setStep(2); // Proceed to next step
+  //       }
+  //     }
+  //   } catch (e) {
+  //     const error = e as Error;
+  //     toast.error(
+  //       error.message ||
+  //         "Failed to upload book or initiate payment. Please try again."
+  //     );
+  //   }
+  // };
 
   return (
     <div className="min-h-screen py-4 sm:py-8">
@@ -1152,7 +1330,7 @@ export default function BookUpload() {
             </div>
           )}
 
-          {/* Step 4: Chapter Review */}
+          {/* Step 4: Chapter Review
           {step === 4 && (
             <div className="space-y-6">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">
@@ -1250,6 +1428,113 @@ export default function BookUpload() {
                     Processing time: {aiBook.processing_time_seconds} seconds
                   </div>
                 )}
+            </div>
+          )} */}
+
+          {/* Step 4: Dynamic Chapter Review */}
+          {step === 4 && (
+            <div className="space-y-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">
+                Review & Edit{" "}
+                {bookStructure?.structure_type === "flat"
+                  ? "Chapters"
+                  : bookStructure?.has_sections
+                  ? `${getSectionLabel(bookStructure.structure_type)}s`
+                  : "Chapters"}
+              </h2>
+              <p className="text-gray-600 mb-4">
+                Review, edit, reorder, or add{" "}
+                {bookStructure?.has_sections
+                  ? "sections and chapters"
+                  : "chapters"}
+                . Only confirmed content will be saved.
+              </p>
+
+              {bookStructure?.has_sections ? (
+                <HierarchicalStructureReview
+                  structure={bookStructure}
+                  onStructureChange={setBookStructure}
+                />
+              ) : (
+                <div className="space-y-4">
+                  {editableChapters.map((ch, idx) => (
+                    <div
+                      key={idx}
+                      className="border border-gray-200 rounded-lg p-4"
+                    >
+                      <div className="flex justify-between items-center mb-2">
+                        <h3 className="text-lg font-semibold">
+                          Chapter {idx + 1}
+                        </h3>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => handleMoveChapter(idx, "up")}
+                            disabled={idx === 0}
+                            className="text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            onClick={() => handleMoveChapter(idx, "down")}
+                            disabled={idx === editableChapters.length - 1}
+                            className="text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+                          >
+                            ↓
+                          </button>
+                          <button
+                            onClick={() => handleRemoveChapter(idx)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2 mb-2"
+                        placeholder="Chapter Title"
+                        value={ch.title}
+                        onChange={(e) =>
+                          handleChapterChange(idx, "title", e.target.value)
+                        }
+                      />
+                      <textarea
+                        className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                        placeholder="Chapter Content"
+                        rows={4}
+                        value={ch.content}
+                        onChange={(e) =>
+                          handleChapterChange(idx, "content", e.target.value)
+                        }
+                      />
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="mt-2 px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                    onClick={handleAddChapter}
+                  >
+                    + Add Chapter
+                  </button>
+                </div>
+              )}
+
+              <div className="flex justify-between mt-8">
+                <button
+                  onClick={handleBack}
+                  className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
+                  disabled={savingChapters}
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleSaveStructure}
+                  disabled={savingChapters}
+                  className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
+                >
+                  {savingChapters ? "Saving..." : "Confirm Structure"}
+                </button>
+              </div>
             </div>
           )}
 
@@ -1522,3 +1807,259 @@ export default function BookUpload() {
     </div>
   );
 }
+
+const HierarchicalStructureReview: React.FC<{
+  structure: BookStructure;
+  onStructureChange: (structure: BookStructure) => void;
+}> = ({ structure, onStructureChange }) => {
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(
+    new Set()
+  );
+
+  const moveChapter = (
+    sectionIndex: number,
+    chapterIndex: number,
+    direction: "up" | "down"
+  ) => {
+    const newStructure = { ...structure };
+    const section = newStructure.sections[sectionIndex];
+    const chapters = [...section.chapters];
+
+    const targetIndex =
+      direction === "up" ? chapterIndex - 1 : chapterIndex + 1;
+
+    if (targetIndex >= 0 && targetIndex < chapters.length) {
+      [chapters[chapterIndex], chapters[targetIndex]] = [
+        chapters[targetIndex],
+        chapters[chapterIndex],
+      ];
+      newStructure.sections[sectionIndex] = { ...section, chapters };
+      onStructureChange(newStructure);
+    }
+  };
+
+  const removeChapter = (sectionIndex: number, chapterIndex: number) => {
+    const newStructure = { ...structure };
+    const section = newStructure.sections[sectionIndex];
+    const chapters = section.chapters.filter((_, idx) => idx !== chapterIndex);
+    newStructure.sections[sectionIndex] = { ...section, chapters };
+    onStructureChange(newStructure);
+  };
+
+  const addChapter = (sectionIndex: number) => {
+    const newStructure = { ...structure };
+    const section = newStructure.sections[sectionIndex];
+    const newChapter: Chapter = {
+      id: `temp-${Date.now()}`,
+      book_id: structure.id,
+      section_id: section.id,
+      chapter_number: section.chapters.length + 1,
+      title: `New Chapter ${section.chapters.length + 1}`,
+      content: "",
+      summary: "",
+      order_index: section.chapters.length,
+    };
+
+    newStructure.sections[sectionIndex] = {
+      ...section,
+      chapters: [...section.chapters, newChapter],
+    };
+    onStructureChange(newStructure);
+  };
+
+  const toggleSection = (sectionId: string) => {
+    const newExpanded = new Set(expandedSections);
+    if (newExpanded.has(sectionId)) {
+      newExpanded.delete(sectionId);
+    } else {
+      newExpanded.add(sectionId);
+    }
+    setExpandedSections(newExpanded);
+  };
+
+  const getSectionIcon = (type: string) => {
+    switch (type.toLowerCase()) {
+      case "tablet":
+        return "📜";
+      case "part":
+        return "📖";
+      case "book":
+        return "📚";
+      case "section":
+        return "📄";
+      case "chapter":
+        return "📝";
+      case "act":
+        return "🎭";
+      case "scene":
+        return "🎬";
+      case "unit":
+        return "🎯";
+      case "lesson":
+        return "🎓";
+      default:
+        return "📄";
+    }
+  };
+
+  const getSectionLabel = (type: string) => {
+    switch (type.toLowerCase()) {
+      case "tablet":
+        return "Tablet";
+      case "part":
+        return "Part";
+      case "book":
+        return "Book";
+      case "section":
+        return "Section";
+      case "chapter":
+        return "Chapter";
+      case "act":
+        return "Act";
+      case "scene":
+        return "Scene";
+      case "unit":
+        return "Unit";
+      case "lesson":
+        return "Lesson";
+      default:
+        return "Section";
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {structure.sections.map((section, sectionIndex) => (
+        <div
+          key={section.id}
+          className="border border-gray-200 rounded-lg overflow-hidden"
+        >
+          {/* Section Header */}
+          <div
+            className="bg-gray-50 p-4 cursor-pointer hover:bg-gray-100 transition-colors"
+            onClick={() => toggleSection(section.id)}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <span className="text-2xl">
+                  {getSectionIcon(section.section_type)}
+                </span>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    {getSectionLabel(section.section_type)}{" "}
+                    {section.section_number}: {section.title}
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    {section.chapters.length} chapter
+                    {section.chapters.length !== 1 ? "s" : ""}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Add chapter to this section
+                  }}
+                  className="px-3 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-sm"
+                >
+                  + Chapter
+                </button>
+                {expandedSections.has(section.id) ? (
+                  <span className="text-gray-500">▲</span>
+                ) : (
+                  <span className="text-gray-500">▲</span>
+                )}
+                {/* {expandedSections.has(section.id) ? 
+                  <ChevronUpIcon className="h-5 w-5 text-gray-500" /> : 
+                  <ChevronDownIcon className="h-5 w-5 text-gray-500" />
+                } */}
+              </div>
+            </div>
+          </div>
+
+          {/* Section Content */}
+          {expandedSections.has(section.id) && (
+            <div className="p-4 space-y-4">
+              {section.chapters.map((chapter, chapterIndex) => (
+                <div
+                  key={chapter.id}
+                  className="border border-gray-200 rounded-lg p-4"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-medium text-gray-900">
+                      Chapter {chapterIndex + 1}
+                    </h4>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() =>
+                          moveChapter(sectionIndex, chapterIndex, "up")
+                        }
+                        className="text-blue-600 hover:text-blue-800 text-sm"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        onClick={() =>
+                          moveChapter(sectionIndex, chapterIndex, "down")
+                        }
+                        className="text-blue-600 hover:text-blue-800 text-sm"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        onClick={() =>
+                          removeChapter(sectionIndex, chapterIndex)
+                        }
+                        className="text-red-600 hover:text-red-800 text-sm"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+
+                  <input
+                    type="text"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-2"
+                    placeholder="Chapter Title"
+                    value={chapter.title}
+                    onChange={(e) => {
+                      // Update chapter title
+                    }}
+                  />
+
+                  <textarea
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="Chapter Content"
+                    rows={4}
+                    value={chapter.content}
+                    onChange={(e) => {
+                      // Update chapter content
+                    }}
+                  />
+                </div>
+              ))}
+
+              {section.chapters.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <p>
+                    No chapters in this{" "}
+                    {getSectionLabel(section.section_type).toLowerCase()}
+                  </p>
+                  <button className="mt-2 px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">
+                    Add First Chapter
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+
+      <button className="w-full p-4 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 hover:text-gray-800 transition-colors">
+        {/* + Add New {getSectionLabel(structure.structure_type)} */}+ Add New{" "}
+        {getSectionLabel(structure?.structure_type || "section")}
+      </button>
+    </div>
+  );
+};
