@@ -638,7 +638,7 @@ export default function BookUpload() {
       console.log("Saving structure:", structureData);
 
       // Save the hierarchical structure
-      await apiClient.put(`/books/${aiBook.id}/structure`, structureData);
+      await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
 
       toast.success("Book structure saved successfully!");
       setStep(5); // Move to next step

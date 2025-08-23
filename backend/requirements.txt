@@ -30,3 +30,4 @@ PyMuPDF==1.23.26
 numpy==1.26.4
 stripe==7.12.0
 tiktoken==0.5.2
+debugpy

@@ -19,8 +19,14 @@ COPY . .
 # Create uploads directory
 RUN mkdir -p uploads/audio uploads/video
 
+# Add this to your Dockerfile
+RUN pip install debugpy
+
 # Expose port
 EXPOSE 8000
+
+# Expose debug port
+EXPOSE 5678
 
 # Run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

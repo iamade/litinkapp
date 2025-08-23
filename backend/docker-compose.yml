@@ -3,6 +3,7 @@ services:
     build: .
     ports:
       - "8000:8000"
+      - "5678:5678" 
     environment:
       - DATABASE_URL=postgresql://postgres:litink123@db.vtuqaubejlzqjmieelyr.supabase.co:5432/litink
       - REDIS_URL=redis://redis:6379
