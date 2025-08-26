@@ -7,6 +7,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:litink123@db.vtuqaubejlzqjmieelyr.supabase.co:5432/litink
       - REDIS_URL=redis://redis:6379
+      - DEBUG=${DEBUG:-false}              
+      - ENVIRONMENT=${ENVIRONMENT:-production} 
     depends_on:
       # - db  # Commented out, using Supabase cloud
       - redis
@@ -41,6 +43,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DEBUG=${DEBUG:-false}              # ✅ Also pass to celery if needed
+      - ENVIRONMENT=${ENVIRONMENT:-production}
     depends_on:
       # - db  # Commented out, using Supabase cloud
       - redis

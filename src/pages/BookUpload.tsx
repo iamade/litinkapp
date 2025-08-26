@@ -83,7 +83,7 @@ interface Book {
   message?: string;
   has_sections?: boolean;
   structure_type?: "flat" | "hierarchical";
-  structure_data?: BookStructure; 
+  structure_data?: BookStructure;
 }
 
 export default function BookUpload() {
@@ -409,7 +409,7 @@ export default function BookUpload() {
                   chapters: updatedBook.chapters || [],
                 });
               }
-              
+
               setDetails({
                 title: updatedBook.title || "",
                 author_name: updatedBook.author_name || "",
@@ -618,37 +618,90 @@ export default function BookUpload() {
 
   // ADD THE handleSaveStructure FUNCTION HERE (after line 535)
   const handleSaveStructure = async () => {
-    if (!aiBook || !bookStructure) {
-      toast.error("No book structure to save");
+    if (!aiBook) {
+      toast.error("No book to save structure for");
       return;
     }
 
     setSavingChapters(true);
 
     try {
-      // Convert bookStructure to the format expected by the backend
+      // Prepare the data for the new confirm structure endpoint
       const structureData = {
-        book_id: aiBook.id,
-        has_sections: bookStructure.has_sections,
-        structure_type: bookStructure.structure_type,
-        sections: bookStructure.sections,
-        chapters: bookStructure.chapters,
+        chapters: bookStructure?.has_sections
+          ? bookStructure.sections.flatMap((section) =>
+              section.chapters.map((ch) => ({
+                title: ch.title,
+                content: ch.content,
+                summary: ch.summary || "",
+                chapter_number: ch.chapter_number,
+                section_title: section.title,
+                section_type: section.section_type,
+                section_number: section.section_number,
+              }))
+            )
+          : editableChapters.map((ch, index) => ({
+              title: ch.title,
+              content: ch.content,
+              summary: "",
+              chapter_number: index + 1,
+            })),
       };
 
       console.log("Saving structure:", structureData);
 
-      // Save the hierarchical structure
+      // Call the NEW save-structure endpoint
       await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
 
-      toast.success("Book structure saved successfully!");
-      setStep(5); // Move to next step
-    } catch (error) {
+      toast.success("Book structure confirmed! Processing chapters...");
+
+      // After successful save, book should be READY
+      // Redirect to book details or continue to step 5
+      setStep(5); // Move to book details step
+    } catch (error: any) {
       console.error("Error saving book structure:", error);
-      toast.error("Failed to save book structure. Please try again.");
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Failed to save book structure";
+      toast.error(`Failed to save structure: ${errorMessage}`);
     } finally {
       setSavingChapters(false);
     }
   };
+
+  // const handleSaveStructure = async () => {
+  //   if (!aiBook || !bookStructure) {
+  //     toast.error("No book structure to save");
+  //     return;
+  //   }
+
+  //   setSavingChapters(true);
+
+  //   try {
+  //     // Convert bookStructure to the format expected by the backend
+  //     const structureData = {
+  //       book_id: aiBook.id,
+  //       has_sections: bookStructure.has_sections,
+  //       structure_type: bookStructure.structure_type,
+  //       sections: bookStructure.sections,
+  //       chapters: bookStructure.chapters,
+  //     };
+
+  //     console.log("Saving structure:", structureData);
+
+  //     // Save the hierarchical structure
+  //     await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
+
+  //     toast.success("Book structure saved successfully!");
+  //     setStep(5); // Move to next step
+  //   } catch (error) {
+  //     console.error("Error saving book structure:", error);
+  //     toast.error("Failed to save book structure. Please try again.");
+  //   } finally {
+  //     setSavingChapters(false);
+  //   }
+  // };
 
   // Step 4: Save/Update Book Details
   const handleDetailsChange = (
@@ -847,33 +900,270 @@ export default function BookUpload() {
     },
   ];
 
-  const handleUploadBookClick = async () => {
-    console.log("🚀 handleUploadBookClick called with bookMode:", bookMode);
+  const handleUpload = async () => {
+    console.log("🚀 handleUpload called with bookMode:", bookMode);
 
     if (!user) return;
-    setStep(2);
 
-    // try {
-    //   const formData = new FormData();
-    //   formData.append("book_type", bookMode);
-    //   if (uploadMethod === "file" && file) {
-    //     formData.append("file", file);
-    //   } else if (uploadMethod === "text" && textContent) {
-    //     formData.append("text_content", textContent);
-    //   } else {
-    //     toast.error("Please provide a file or text content.");
-    //     return;
-    //   }
+    // Validate input
+    if (uploadMethod === "file" && !file) {
+      toast.error("Please select a file to upload.");
+      return;
+    }
 
-    //   const book = await apiClient.upload("/books/upload", formData);
+    if (uploadMethod === "text" && !textContent.trim()) {
+      toast.error("Please provide text content.");
+      return;
+    }
 
-    //   // Always proceed to step 2, ignoring payment requirements
-    //   setAiBook(book as Book);
-    //   setStep(2);
-    // } catch (e) {
-    //   const error = e as Error;
-    //   toast.error(error.message || "Failed to upload book. Please try again.");
-    // }
+    setIsUploading(true);
+    setIsProcessing(true);
+    setProcessingStatus("Uploading...");
+
+    try {
+      const formData = new FormData();
+      formData.append("book_type", bookMode);
+      formData.append("title", `Uploaded Book - ${new Date().toISOString()}`);
+      formData.append("description", "Book uploaded for processing");
+
+      if (uploadMethod === "file" && file) {
+        formData.append("file", file);
+      } else if (uploadMethod === "text" && textContent) {
+        formData.append("text_content", textContent);
+      }
+
+      // Call the upload endpoint
+      const uploadResponse = (await apiClient.upload(
+        "/books/upload",
+        formData
+      )) as any;
+
+      // ENHANCED DEBUG LOGGING
+      console.log("=== UPLOAD RESPONSE DEBUG ===");
+      console.log("Full response:", uploadResponse);
+      console.log("Response type:", typeof uploadResponse);
+      console.log("Response constructor:", uploadResponse?.constructor?.name);
+      console.log("Response keys:", Object.keys(uploadResponse || {}));
+      console.log("Has id:", "id" in (uploadResponse || {}));
+      console.log("Has status:", "status" in (uploadResponse || {}));
+      console.log("Has chapters:", "chapters" in (uploadResponse || {}));
+      console.log("============================");
+
+      // Check if response is valid
+      if (!uploadResponse || typeof uploadResponse !== "object") {
+        throw new Error("Invalid response from server");
+      }
+
+      // Check if this is the new preview flow
+      // if (
+      //   uploadResponse.status === "PENDING_CONFIRMATION" &&
+      //   uploadResponse.chapters
+      // ) {
+
+      // Check if this is the new preview flow
+      if (uploadResponse.status === "PENDING_CONFIRMATION") {
+        console.log("✅ NEW PREVIEW FLOW DETECTED");
+
+        // Check if chapters exist
+        if (!uploadResponse.chapters) {
+          console.log("⚠️ No chapters in preview response");
+          throw new Error("Preview response missing chapters");
+        }
+        // NEW FLOW: Show preview
+        setIsProcessing(false);
+        setProcessingStatus("");
+        setAiBook(uploadResponse);
+
+        // Set extracted chapters for preview
+        setEditableChapters(
+          uploadResponse.chapters.map((ch: any) => ({
+            title: ch.title || "",
+            content: ch.content || "",
+          }))
+        );
+
+        // Set book structure data if available
+        if (uploadResponse.structure_data) {
+          setBookStructure(uploadResponse.structure_data);
+        }
+
+        // Set basic details from extracted data
+        setDetails({
+          title: uploadResponse.title || "",
+          author_name: uploadResponse.author_name || "",
+          description: uploadResponse.description || "",
+          cover_image_url: uploadResponse.cover_image_url || "",
+          book_type: uploadResponse.book_type || bookMode,
+          difficulty: uploadResponse.difficulty || "medium",
+          tags: uploadResponse.tags || [],
+          language: uploadResponse.language || "en",
+          estimated_duration: uploadResponse.estimated_duration
+            ? String(uploadResponse.estimated_duration)
+            : "",
+        });
+
+        toast.success("Book processed! Please review the extracted chapters.");
+        setStep(4); // Go directly to chapter review
+        return;
+      }
+
+      // IGNORE PAYMENT LOGIC FOR NOW - Skip payment checks completely
+      // if (uploadResponse.payment_required) {
+      //   setPaymentRequired(true);
+      //   setIsProcessing(false);
+      //   setProcessingStatus("");
+      //   toast.success("Payment required for additional book uploads");
+      //   return;
+      // }
+
+      // ADD THIS SAFETY CHECK HERE:
+      if (
+        !uploadResponse.id &&
+        uploadResponse.status !== "PENDING_CONFIRMATION"
+      ) {
+        console.log("❌ Response missing both ID and preview status");
+        console.log("Response:", JSON.stringify(uploadResponse, null, 2));
+
+        // Show user what happened
+        toast.error(
+          `Server response invalid. Status: ${
+            uploadResponse.status || "unknown"
+          }`
+        );
+
+        // Try to extract useful info anyway
+        if (uploadResponse.chapters) {
+          // Treat as preview even without explicit status
+          console.log("🔄 Treating as preview due to chapters presence");
+          setIsProcessing(false);
+          setProcessingStatus("");
+          setAiBook(uploadResponse);
+          setEditableChapters(
+            uploadResponse.chapters.map((ch: any) => ({
+              title: ch.title || "",
+              content: ch.content || "",
+            }))
+          );
+          setStep(4);
+          return;
+        }
+
+        return; // Don't proceed if we can't handle the response
+      }
+
+      // OLD FLOW: Process normally if we have an id
+      if (uploadResponse.id) {
+        console.log("✅ OLD FLOW: Found ID, starting polling");
+        setAiBook(uploadResponse);
+        startPollingForBookStatus(uploadResponse.id);
+      } else {
+        // If no ID and not preview flow, something went wrong
+        console.log("❌ NO ID AND NOT PREVIEW MODE");
+        console.log("Available fields:", Object.keys(uploadResponse));
+        throw new Error(
+          "No book ID returned from server and not in preview mode"
+        );
+      }
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      setIsProcessing(false);
+      setProcessingStatus("");
+
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.details ||
+        error?.message ||
+        "Upload failed";
+      toast.error(`Upload failed: ${errorMessage}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Helper function to start polling (for old flow compatibility)
+  const startPollingForBookStatus = (bookId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await apiClient.get<Book>(`/books/${bookId}/status`);
+        const updatedBook = response as Book;
+        setAiBook(updatedBook);
+
+        if (updatedBook.progress_message) {
+          setProcessingStatus(updatedBook.progress_message);
+        } else {
+          switch (updatedBook.status) {
+            case "QUEUED":
+              setProcessingStatus("Queued for processing...");
+              break;
+            case "PROCESSING":
+              setProcessingStatus("Extracting content...");
+              break;
+            case "GENERATING":
+              setProcessingStatus("Generating chapters with AI...");
+              break;
+            case "READY":
+              setProcessingStatus("Book is ready!");
+              break;
+            case "FAILED":
+              setProcessingStatus("Processing failed");
+              break;
+            default:
+              setProcessingStatus("Processing...");
+          }
+        }
+
+        if (updatedBook.status === "FAILED") {
+          clearInterval(pollInterval);
+          setProcessingFailed(true);
+          toast.error(
+            updatedBook.error_message ||
+              "Book processing failed. Please try again."
+          );
+          setIsProcessing(false);
+          setProcessingStatus("");
+        } else if (updatedBook.status === "READY") {
+          clearInterval(pollInterval);
+
+          // Set editable chapters for review
+          if (updatedBook.chapters) {
+            setEditableChapters(
+              updatedBook.chapters.map((ch: Chapter) => ({
+                title: ch.title || "",
+                content: ch.content || "",
+              }))
+            );
+          }
+
+          // Set details and go to review step
+          setDetails({
+            title: updatedBook.title || "",
+            author_name: updatedBook.author_name || "",
+            description: updatedBook.description || "",
+            cover_image_url: updatedBook.cover_image_url || "",
+            book_type: updatedBook.book_type || bookMode,
+            difficulty: updatedBook.difficulty || "medium",
+            tags: updatedBook.tags || [],
+            language: updatedBook.language || "en",
+            estimated_duration: updatedBook.estimated_duration
+              ? String(updatedBook.estimated_duration)
+              : "",
+          });
+
+          setStep(4);
+          setIsProcessing(false);
+          setProcessingStatus("");
+        }
+      } catch (error) {
+        console.error("Error polling book status:", error);
+        clearInterval(pollInterval);
+        setIsProcessing(false);
+        setProcessingStatus("");
+        toast.error("Could not get book status. Please check the dashboard.");
+      }
+    }, 7000);
+
+    // Store interval for cleanup
+    return pollInterval;
   };
 
   // const handleUploadBookClick = async () => {
@@ -1126,12 +1416,27 @@ export default function BookUpload() {
 
               <div className="flex flex-col sm:flex-row justify-end gap-3 sm:gap-0 mt-6 sm:mt-8">
                 <button
+                  onClick={handleUpload} // Changed from handleUploadBookClick
+                  disabled={
+                    (uploadMethod === "file" && !file) ||
+                    (uploadMethod === "text" && !textContent.trim()) ||
+                    isUploading
+                  }
+                  className="w-full sm:w-auto px-6 py-3 bg-purple-600 text-white rounded-xl fontdivmibold hover:bg-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isUploading ? "Uploading..." : "Next"}
+                </button>
+              </div>
+{/* 
+              <div className="flex flex-col sm:flex-row justify-end gap-3 sm:gap-0 mt-6 sm:mt-8">
+                <button
                   onClick={handleUploadBookClick}
                   className="w-full sm:w-auto px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-all"
                 >
                   Next
-                </button>
-              </div>
+                </button> */}
+
+              
             </div>
           )}
 

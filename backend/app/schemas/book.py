@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 from datetime import datetime
 
 
@@ -50,10 +50,15 @@ class SectionInput(BaseModel):
 
 
 class BookStructureInput(BaseModel):
-    structure_type: str  # "flat", "hierarchical"
-    has_sections: bool
-    sections: Optional[List[SectionInput]] = []
-    chapters: List[ChapterInput]
+    structure_type: Optional[str] = "flat"  # "flat", "hierarchical"
+    has_sections: Optional[bool] = False
+    sections: Optional[List[Dict[str, Any]]] = []
+    chapters: Optional[List[Dict[str, Any]]] = []
+    
+    # Add this method if it's missing
+    def get(self, key: str, default=None):
+        """Add dict-like get method for backward compatibility"""
+        return getattr(self, key, default)
     
     class Config:
         schema_extra = {
@@ -128,10 +133,17 @@ class Book(BookBase):
     created_at: datetime
     updated_at: datetime
     chapters: Optional[List[Chapter]] = None
-
+    
     class Config:
         from_attributes = True
 
+# ✅ ADD: New preview schema that extends Book
+class BookPreview(Book):
+    """Book with preview chapters (not saved to database yet)"""
+    preview_chapters: Optional[List[dict]] = None
+    total_preview_chapters: Optional[int] = None
+    author_name: Optional[str] = None  # From extraction
+    cover_image_url: Optional[str] = None  # From extraction
 
 
 # Enhanced Book with sections
