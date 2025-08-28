@@ -1350,11 +1350,11 @@ class FileService:
                 return chapters
                 
             doc.close()
-            return None
+            return []
             
         except Exception as e:
             print(f"[TOC EXTRACTION] Error: {e}")
-            return None
+            return []
         
     def _process_pdf_bookmarks(self, doc, toc) -> List[Dict[str, Any]]:
         """Process PDF bookmarks into chapters"""
@@ -1670,65 +1670,77 @@ class FileService:
         chapter_titles = [{'title': ch['title']} for ch in chapters]
         
         return await self._validate_chapters_exist_in_book_improved(chapter_titles, chapters, doc)
-        
+     
     async def _validate_chapters_exist_in_book_improved(self, chapter_titles: List[Dict], original_chapters: List[Dict], doc) -> List[Dict[str, Any]]:
-        """Step 3: More lenient validation that doesn't reject valid chapters"""
-        print("[CHAPTER VALIDATION] Validating chapters exist in book...")
+        """Skip AI validation - TOC extraction is reliable enough"""
+        print(f"[CHAPTER VALIDATION] TOC found {len(chapter_titles)} chapters - proceeding directly to content extraction")
         
-        # Get book content for validation
+        # Get full book text
         full_text = ""
-        for i in range(min(100, len(doc))):  # Check more pages
+        for i in range(min(100, len(doc))):  
             full_text += doc[i].get_text()
         
-        try:
-            titles_list = [ch['title'] for ch in chapter_titles]
+        # Go directly to content extraction without AI validation
+        return await self._extract_content_for_chapters_improved(chapter_titles, full_text)
+    
+    # async def _validate_chapters_exist_in_book_improved(self, chapter_titles: List[Dict], original_chapters: List[Dict], doc) -> List[Dict[str, Any]]:
+    #     """Step 3: More lenient validation that doesn't reject valid chapters"""
+    #     print("[CHAPTER VALIDATION] Validating chapters exist in book...")
+        
+    #     # Get book content for validation
+    #     full_text = ""
+    #     for i in range(min(100, len(doc))):  # Check more pages
+    #         full_text += doc[i].get_text()
+        
+    #     try:
+    #         titles_list = [ch['title'] for ch in chapter_titles]
             
-            prompt = f"""
-            These chapters were extracted from a table of contents. Check if they exist in the book.
+    #         prompt = f"""
+    #         These chapters were extracted from a table of contents. Check if they exist in the book.
             
-            IMPORTANT: Be GENEROUS in validation. If you find ANY evidence of a chapter (even partial), mark it as valid.
+    #         IMPORTANT: Be GENEROUS in validation. If you find ANY evidence of a chapter (even partial), mark it as valid.
             
-            Chapters to validate:
-            {json.dumps(titles_list)}
+    #         Chapters to validate:
+    #         {json.dumps(titles_list)}
             
-            Book content sample:
-            {full_text[:8000]}
+    #         Book content sample:
+    #         {full_text[:8000]}
             
-            Return JSON - include ALL chapters that have ANY evidence:
-            {{
-                "validated_chapters": [
-                    {{"title": "Chapter 1: Introduction", "confidence": 0.8}},
-                    {{"title": "Chapter 2: History", "confidence": 0.7}}
-                ]
-            }}
-            """
+    #         Return JSON - include ALL chapters that have ANY evidence:
+    #         {{
+    #             "validated_chapters": [
+    #                 {{"title": "Chapter 1: Introduction", "confidence": 0.8}},
+    #                 {{"title": "Chapter 2: History", "confidence": 0.7}}
+    #             ]
+    #         }}
+    #         """
             
-            response = await self.ai_service.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=1000,
-                temperature=0.1
-            )
+    #         response = await self.ai_service.client.chat.completions.create(
+    #             model="gpt-3.5-turbo",
+    #             messages=[{"role": "user", "content": prompt}],
+    #             max_tokens=1000,
+    #             temperature=0.1
+    #         )
             
-            result = json.loads(response.choices[0].message.content)
+    #         result = json.loads(response.choices[0].message.content)
             
-            validated_count = len(result.get('validated_chapters', []))
-            print(f"[CHAPTER VALIDATION] AI validated {validated_count} out of {len(chapter_titles)}")
+    #         validated_count = len(result.get('validated_chapters', []))
+    #         print(f"[CHAPTER VALIDATION] AI validated {validated_count} out of {len(chapter_titles)}")
             
-            # If AI rejects more than 50% of chapters, ignore AI and use all chapters
-            if validated_count < len(chapter_titles) * 0.5:
-                print("[CHAPTER VALIDATION] AI too aggressive, using all TOC chapters")
-                validated_chapters = chapter_titles
-            else:
-                validated_chapters = result['validated_chapters']
+    #         # If AI rejects more than 50% of chapters, ignore AI and use all chapters
+    #         if validated_count < len(chapter_titles) * 0.5:
+    #             print("[CHAPTER VALIDATION] AI too aggressive, using all TOC chapters")
+    #             validated_chapters = chapter_titles
+    #         else:
+    #             validated_chapters = result['validated_chapters']
             
-            # FIX: Remove original_chapters parameter from method call
-            return self._extract_content_for_chapters_improved(validated_chapters, full_text)
+    #         # FIX: Remove original_chapters parameter from method call
+    #         return self._extract_content_for_chapters_improved(validated_chapters, full_text)
 
-        except Exception as e:
-            print(f"[CHAPTER VALIDATION] Validation failed, using all chapters: {e}")
-            # FIX: Remove original_chapters parameter from method call here too
-            return self._extract_content_for_chapters_improved(chapter_titles, full_text)
+    #     except Exception as e:
+    #         print(f"[CHAPTER VALIDATION] Validation failed, using all chapters: {e}")
+    #         # FIX: Remove original_chapters parameter from method call here too
+    #         return self._extract_content_for_chapters_improved(chapter_titles, full_text)
         
     def _identify_toc_boundaries(self, full_text: str) -> Dict[str, int]:
         """Better TOC boundary detection"""
@@ -1757,79 +1769,324 @@ class FileService:
         
         return {'start': start_pos, 'end': end_pos}
 
-    def _extract_content_for_chapters_improved(self, validated_chapters: List[Dict], full_text: str) -> List[Dict[str, Any]]:
-        """Step 4: Extract actual chapter content, avoiding TOC sections"""
-        """Extract chapter content with better boundary handling"""
-        print("[CONTENT EXTRACTION] Extracting actual chapter content...")
+    # def _extract_content_for_chapters_improved(self, validated_chapters: List[Dict], full_text: str) -> List[Dict[str, Any]]:
+    #     """Step 4: Extract actual chapter content, avoiding TOC sections"""
+    #     """Extract chapter content with better boundary handling"""
+    #     print("[CONTENT EXTRACTION] Extracting actual chapter content...")
         
-        toc_boundaries = self._identify_toc_boundaries(full_text)
-        print(f"[CONTENT EXTRACTION] TOC boundaries: {toc_boundaries}")
+    #     toc_boundaries = self._identify_toc_boundaries(full_text)
+    #     print(f"[CONTENT EXTRACTION] TOC boundaries: {toc_boundaries}")
         
-        final_chapters = []
+    #     final_chapters = []
         
-        for i, chapter in enumerate(validated_chapters):
-            chapter_title = chapter['title']
-            print(f"[CONTENT EXTRACTION] Processing: {chapter_title}")
+    #     for i, chapter in enumerate(validated_chapters):
+    #         chapter_title = chapter['title']
+    #         print(f"[CONTENT EXTRACTION] Processing: {chapter_title}")
             
-            # chapter_num_match = re.search(r'Chapter (\d+)', chapter_title)
-            # if not chapter_num_match:
-            #     continue
-            # chapter_num = int(chapter_num_match.group(1))
+    #         # chapter_num_match = re.search(r'Chapter (\d+)', chapter_title)
+    #         # if not chapter_num_match:
+    #         #     continue
+    #         # chapter_num = int(chapter_num_match.group(1))
             
-            # all_occurrences = self._find_all_chapter_occurrences(full_text, chapter_num, chapter_title)
-            # Use title-based search instead of chapter number extraction
-            all_occurrences = self._find_title_occurrences(full_text, chapter_title)
+    #         # all_occurrences = self._find_all_chapter_occurrences(full_text, chapter_num, chapter_title)
+    #         # Use title-based search instead of chapter number extraction
+    #         all_occurrences = self._find_title_occurrences(full_text, chapter_title)
 
-            content_start = None
+    #         content_start = None
             
-            # For last chapter, be more lenient with TOC boundaries
-            is_last_chapter = (i == len(validated_chapters) - 1)
+    #         # For last chapter, be more lenient with TOC boundaries
+    #         is_last_chapter = (i == len(validated_chapters) - 1)
             
-            for occurrence in all_occurrences:
-                # For last chapter, only skip if clearly in TOC start area
-                if is_last_chapter:
-                    if occurrence < toc_boundaries['start'] + 1000:  # Only skip if very early in doc
-                        print(f"[CONTENT EXTRACTION] Skipping early occurrence at position {occurrence}")
-                        continue
-                else:
-                    # For other chapters, use normal TOC boundary check
-                    if self._is_in_toc_boundaries(occurrence, toc_boundaries):
-                        print(f"[CONTENT EXTRACTION] Skipping TOC occurrence at position {occurrence}")
-                        continue
+    #         for occurrence in all_occurrences:
+    #             # For last chapter, only skip if clearly in TOC start area
+    #             if is_last_chapter:
+    #                 if occurrence < toc_boundaries['start'] + 1000:  # Only skip if very early in doc
+    #                     print(f"[CONTENT EXTRACTION] Skipping early occurrence at position {occurrence}")
+    #                     continue
+    #             else:
+    #                 # For other chapters, use normal TOC boundary check
+    #                 if self._is_in_toc_boundaries(occurrence, toc_boundaries):
+    #                     print(f"[CONTENT EXTRACTION] Skipping TOC occurrence at position {occurrence}")
+    #                     continue
                 
-                # Validate this is actual chapter content
-                preview = full_text[occurrence:occurrence + 500]
-                # if self._is_actual_chapter_content(preview, chapter_num):
-                if self._is_actual_chapter_content_by_title(preview, chapter_title):
-                    content_start = occurrence
-                    print(f"[CONTENT EXTRACTION] Found chapter {chapter_title} start at position {content_start}")
-                    break
-                else:
-                    print(f"[CONTENT EXTRACTION] Position {occurrence} appears to be another TOC/index reference")
+    #             # Validate this is actual chapter content
+    #             preview = full_text[occurrence:occurrence + 500]
+    #             # if self._is_actual_chapter_content(preview, chapter_num):
+    #             if self._is_actual_chapter_content_by_title(preview, chapter_title):
+    #                 content_start = occurrence
+    #                 print(f"[CONTENT EXTRACTION] Found chapter {chapter_title} start at position {content_start}")
+    #                 break
+    #             else:
+    #                 print(f"[CONTENT EXTRACTION] Position {occurrence} appears to be another TOC/index reference")
             
-            if content_start is not None:
-                # content_end = self._find_chapter_content_end(full_text, chapter_num, content_start)
-                content_end = self._find_chapter_content_end_by_title(full_text, validated_chapters, i, content_start)
-                # Extract and clean content
-                raw_content = full_text[content_start:content_end]
-                extracted_content = self._clean_chapter_content(raw_content, chapter_title)
+    #         if content_start is not None:
+    #             # content_end = self._find_chapter_content_end(full_text, chapter_num, content_start)
+    #             content_end = self._find_chapter_content_end_by_title(full_text, validated_chapters, i, content_start)
+    #             # Extract and clean content
+    #             raw_content = full_text[content_start:content_end]
+    #             extracted_content = self._clean_chapter_content(raw_content, chapter_title)
                 
-                if len(extracted_content) > 200:
-                    final_chapters.append({
-                        'title': chapter_title,
-                        'content': extracted_content,
-                        'summary': f"Content for {chapter_title}",
-                        # 'chapter_number': chapter_num,
-                        'toc_validated': True,
-                        'extraction_method': 'content_search'
-                    })
-                    print(f"[CONTENT EXTRACTION] ✅ Successfully extracted {len(extracted_content)} chars for: {chapter_title}")
-                else:
-                    print(f"[CONTENT EXTRACTION] ❌ Content too short for: {chapter_title}")
-            else:
-                print(f"[CONTENT EXTRACTION] ❌ No valid content found for: {chapter_title}")
+    #             if len(extracted_content) > 200:
+    #                 final_chapters.append({
+    #                     'title': chapter_title,
+    #                     'content': extracted_content,
+    #                     'summary': f"Content for {chapter_title}",
+    #                     # 'chapter_number': chapter_num,
+    #                     'toc_validated': True,
+    #                     'extraction_method': 'content_search'
+    #                 })
+    #                 print(f"[CONTENT EXTRACTION] ✅ Successfully extracted {len(extracted_content)} chars for: {chapter_title}")
+    #             else:
+    #                 print(f"[CONTENT EXTRACTION] ❌ Content too short for: {chapter_title}")
+    #         else:
+    #             print(f"[CONTENT EXTRACTION] ❌ No valid content found for: {chapter_title}")
         
-        return final_chapters
+    #     return final_chapters
+    
+    async def _extract_content_for_chapters_improved(self, validated_chapters: List[Dict], full_text: str) -> List[Dict[str, Any]]:
+        """Improved extraction using AI instead of pattern matching"""
+        
+        print(f"[CONTENT EXTRACTION] Using AI-powered extraction for {len(validated_chapters)} chapters")
+        
+        # Get chapter titles
+        chapter_titles = [ch['title'] for ch in validated_chapters]
+        
+        # Use AI to extract content instead of pattern matching
+        extracted_chapters = await self._extract_content_with_ai(full_text, chapter_titles)
+        
+        print(f"[CONTENT EXTRACTION] AI extracted {len(extracted_chapters)} chapters successfully")
+        
+        return extracted_chapters
+    
+    async def _extract_content_with_ai(self, full_text: str, chapter_titles: List[str]) -> List[Dict]:
+        """Use AI to extract chapter content instead of pattern matching"""
+        
+        # Split text into manageable chunks for AI processing
+        text_chunks = self._split_text_for_ai(full_text, max_chunk_size=15000)
+        
+        extracted_chapters = []
+        
+        for chapter_title in chapter_titles:
+            print(f"[AI EXTRACTION] Processing: {chapter_title}")
+            
+            # Find relevant chunks that likely contain this chapter
+            relevant_chunks = self._find_relevant_chunks(text_chunks, chapter_title)
+            
+            # Use AI to extract the specific chapter content
+            chapter_content = await self._ai_extract_chapter_content(
+                chunks=relevant_chunks,
+                chapter_title=chapter_title,
+                context={"book_title": self.extracted_title, "total_chapters": len(chapter_titles)}
+            )
+            
+            if chapter_content and len(chapter_content) > 200:
+                extracted_chapters.append({
+                    'title': chapter_title,
+                    'content': chapter_content,
+                    'summary': f"Content for {chapter_title}",
+                    'extraction_method': 'ai'
+                })
+                print(f"[AI EXTRACTION] ✅ Extracted {len(chapter_content)} chars")
+            else:
+                print(f"[AI EXTRACTION] ❌ No content found")
+        
+        return extracted_chapters
+    
+    def _split_text_for_ai(self, text: str, max_chunk_size: int = 15000) -> List[str]:
+        """Split text into manageable chunks for AI processing"""
+        chunks = []
+        
+        # Split by paragraphs first
+        paragraphs = text.split('\n\n')
+        current_chunk = ""
+        
+        for paragraph in paragraphs:
+            # If adding this paragraph would exceed the limit
+            if len(current_chunk) + len(paragraph) > max_chunk_size:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = paragraph
+                else:
+                    # Single paragraph is too large, split by sentences
+                    sentences = paragraph.split('. ')
+                    for sentence in sentences:
+                        if len(current_chunk) + len(sentence) > max_chunk_size:
+                            if current_chunk:
+                                chunks.append(current_chunk.strip())
+                                current_chunk = sentence
+                            else:
+                                # Single sentence too large, force split
+                                chunks.append(sentence[:max_chunk_size])
+                        else:
+                            current_chunk += sentence + ". "
+            else:
+                current_chunk += paragraph + "\n\n"
+        
+        # Add the last chunk
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+        
+        print(f"[AI CHUNKING] Split text into {len(chunks)} chunks")
+        return chunks
+
+    def _find_relevant_chunks(self, text_chunks: List[str], chapter_title: str) -> List[str]:
+        """Find chunks that likely contain the chapter content"""
+        relevant_chunks = []
+        
+        # Extract key words from chapter title for searching
+        title_words = chapter_title.lower().split()
+        search_words = [word for word in title_words if len(word) > 3 and word not in ['chapter', 'the', 'and', 'of', 'to', 'in', 'for']]
+        
+        # Score chunks based on relevance
+        chunk_scores = []
+        for i, chunk in enumerate(text_chunks):
+            chunk_lower = chunk.lower()
+            score = 0
+            
+            # Score based on title word matches
+            for word in search_words:
+                if word in chunk_lower:
+                    score += chunk_lower.count(word)
+            
+            # Bonus for exact chapter title match
+            if chapter_title.lower() in chunk_lower:
+                score += 10
+            
+            # Bonus for chapter number patterns
+            chapter_num_match = re.search(r'chapter (\d+)', chapter_title.lower())
+            if chapter_num_match:
+                chapter_num = chapter_num_match.group(1)
+                if f"chapter {chapter_num}" in chunk_lower or f"\n{chapter_num}\n" in chunk_lower:
+                    score += 15
+            
+            chunk_scores.append((i, score))
+        
+        # Sort by score and take top chunks
+        chunk_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        # Take top 3 chunks or chunks with score > 0
+        for i, score in chunk_scores:
+            if score > 0 and len(relevant_chunks) < 3:
+                relevant_chunks.append(text_chunks[i])
+        
+        # If no relevant chunks found, take first few chunks as fallback
+        if not relevant_chunks:
+            relevant_chunks = text_chunks[:2]
+        
+        print(f"[CHUNK SELECTION] Selected {len(relevant_chunks)} chunks for chapter: {chapter_title}")
+        return relevant_chunks
+
+    @property
+    def extracted_title(self) -> Optional[str]:
+        """Get the extracted book title"""
+        return getattr(self, '_extracted_title', None)
+
+    @extracted_title.setter
+    def extracted_title(self, value: str):
+        """Set the extracted book title"""
+        self._extracted_title = value
+
+    def _extract_book_title_from_content(self, content: str) -> str:
+        """Extract book title from content"""
+        lines = content.split('\n')[:20]  # Check first 20 lines
+        
+        # Look for title patterns
+        for line in lines:
+            line = line.strip()
+            if len(line) > 10 and len(line) < 100:
+                # Check if line looks like a title (starts with capital, has multiple words)
+                if (line[0].isupper() and 
+                    len(line.split()) > 2 and 
+                    not re.match(r'^\d+', line) and
+                    'chapter' not in line.lower()):
+                    return line
+        
+        return "Untitled Book"
+
+    async def _ai_extract_chapter_content(self, chunks: List[str], chapter_title: str, context: Dict) -> str:
+        """Use AI to extract specific chapter content from text chunks"""
+        
+        # Combine relevant chunks
+        search_text = "\n\n".join(chunks)
+        
+        # Use the property correctly
+        book_title = self.extracted_title or context.get('book_title', 'Unknown Book')
+        
+        print(f"[AI EXTRACTION] Processing: {chapter_title}")
+        print(f"[AI EXTRACTION] Search text length: {len(search_text)}")
+        print(f"[AI EXTRACTION] First 200 chars: {search_text[:200]}...")
+    
+        
+        prompt = f"""
+        Extract the full content for the chapter titled "{chapter_title}" from the following text.
+        
+        Book context: {book_title} - Total chapters: {context.get('total_chapters', 'unknown')}
+        
+        Instructions:
+        1. Find the chapter that matches the title "{chapter_title}"
+        2. Extract the complete content from chapter start to chapter end
+        3. Include all paragraphs, sections, and subsections within this chapter
+        4. Stop before the next chapter begins
+        5. Remove any table of contents references
+        6. Return only the main chapter content, not headers or page numbers
+        
+        Text to search:
+        {search_text[:10000]}...
+        
+        Chapter content:
+        """
+        
+        try:
+            response = await self.ai_service.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert at extracting specific chapter content from books. Return only the requested chapter content, nothing else."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=4000,
+                temperature=0.1
+            )
+            
+            content = response.choices[0].message.content.strip()
+            print(f"[AI EXTRACTION] AI returned {len(content)} characters")
+            print(f"[AI EXTRACTION] First 200 chars of AI response: {content[:200]}...")
+        
+            # Validate the extracted content
+            is_valid = self._validate_ai_extracted_content(content, chapter_title)
+            print(f"[AI EXTRACTION] Content validation: {is_valid}")
+            
+            
+            # Validate the extracted content
+            if is_valid:
+                return content
+            else:
+                print(f"[AI EXTRACTION] Content failed validation")
+                return ""
+                
+        except Exception as e:
+            print(f"[AI EXTRACTION] Error: {e}")
+            import traceback
+            print(f"[AI EXTRACTION] Full error: {traceback.format_exc()}")
+            return ""
+
+    def _validate_ai_extracted_content(self, content: str, chapter_title: str) -> bool:
+        """Validate that AI extracted relevant content"""
+        if len(content) < 100:
+            return False
+        
+        # Check if content seems related to the chapter title
+        title_words = chapter_title.lower().split()
+        content_lower = content.lower()
+        
+        # At least one significant word from title should appear in content
+        significant_words = [w for w in title_words if len(w) > 3 and w not in ['chapter', 'the', 'and', 'of']]
+        if significant_words:
+            word_matches = sum(1 for word in significant_words if word in content_lower)
+            if word_matches == 0:
+                print(f"[AI VALIDATION] No title words found in content")
+                return False
+        
+        return True
     
     def _find_title_occurrences(self, full_text: str, chapter_title: str) -> List[int]:
         """Find all occurrences of the exact chapter title in the text"""
@@ -2297,16 +2554,26 @@ class FileService:
             # Extract text content (same as your existing logic)
             if text_content:
                 content = text_content
+                self.extracted_title = self._extract_book_title_from_content(content)
             elif storage_path:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=original_filename) as temp_file:
                     file_content = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(path=storage_path)
                     temp_file.write(file_content)
                     temp_file_path = temp_file.name
+                    
 
                 extracted_data = self.process_book_file(temp_file_path, original_filename, user_id)
                 content = extracted_data.get("text", "")
                 author_name = extracted_data.get("author")
                 cover_image_url = extracted_data.get("cover_image_url")
+                
+                # Extract title from content
+                self.extracted_title = self._extract_book_title_from_content(content)
+                
+                # Set defaults for variables that might not be defined
+                author_name = locals().get('author_name')
+                cover_image_url = locals().get('cover_image_url')
+            
 
                 os.unlink(temp_file_path)
             else:
@@ -2843,17 +3110,23 @@ Chapters:
                     temp_file_path = temp_file.name
                 
                 toc_chapters = await self.extract_chapters_from_pdf_with_toc(temp_file_path)
-                if toc_chapters is None:
+                if not isinstance(toc_chapters, list):
                     toc_chapters = []
                 os.unlink(temp_file_path)
                 
                 # If TOC found ANY chapters, use them (don't require high threshold)
-                if toc_chapters and len(toc_chapters) >= 2:  # Just need at least 2 chapters
+                # if toc_chapters and len(toc_chapters) >= 2:  # Just need at least 2 chapters
+                if len(toc_chapters) >= 2:  # Just need at least 2 chapters
                     print(f"[TOC EXTRACTION] SUCCESS: Using {len(toc_chapters)} TOC chapters")
                     return toc_chapters  # Don't fall back to structure detection
                     
             except Exception as e:
                 print(f"[TOC EXTRACTION] Failed: {e}")
+                if 'temp_file_path' in locals():
+                    try:
+                        os.unlink(temp_file_path)
+                    except:
+                        pass
             
         # Step 2: Fallback to structure detection only if TOC failed
         print("[STRUCTURE DETECTION] TOC failed, using structure detection...")

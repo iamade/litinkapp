@@ -245,24 +245,7 @@ export default function BookViewForEntertainment() {
 
                   {/* Video Generation Controls */}
                   <div className="flex items-center gap-4 mt-6">
-                    <select
-                      className="border rounded-lg px-3 py-2 text-sm"
-                      value={animationStyle}
-                      onChange={(e) =>
-                        setAnimationStyle(
-                          e.target.value as
-                            | "cartoon"
-                            | "realistic"
-                            | "cinematic"
-                            | "fantasy"
-                        )
-                      }
-                    >
-                      <option value="cartoon">Cartoon Style</option>
-                      <option value="realistic">Realistic Style</option>
-                      <option value="cinematic">Cinematic Style</option>
-                      <option value="fantasy">Fantasy Style</option>
-                    </select>
+                  
 
                     <div className="mb-4">
                       <label
@@ -286,12 +269,7 @@ export default function BookViewForEntertainment() {
                       </select>
                     </div>
 
-                    <button
-                      className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded mb-4"
-                      onClick={handleGenerateVideo}
-                    >
-                      Generate Scene
-                    </button>
+                   
 
                     <button
                       className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded mb-4"
@@ -300,7 +278,41 @@ export default function BookViewForEntertainment() {
                     >
                       {loadingScript
                         ? "Generating..."
-                        : "Generate AI Script & Scene Descriptions"}
+                        : "Generate Script & Scene"}
+                    </button>
+
+                      <div className="mb-4">
+                      <label
+                        htmlFor="script-style"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
+                        Video Style:
+                      </label>
+                      <select
+                      className="border rounded-lg px-3 py-2 text-sm"
+                      value={animationStyle}
+                      onChange={(e) =>
+                        setAnimationStyle(
+                          e.target.value as
+                            | "cartoon"
+                            | "realistic"
+                            | "cinematic"
+                            | "fantasy"
+                        )
+                      }
+                    >
+                      <option value="cartoon">Cartoon Style</option>
+                      <option value="realistic">Realistic Style</option>
+                      <option value="cinematic">Cinematic Style</option>
+                      <option value="fantasy">Fantasy Style</option>
+                    </select>
+                    </div>
+
+                     <button
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded mb-4"
+                      onClick={handleGenerateVideo}
+                    >
+                      Generate Video
                     </button>
                   </div>
 

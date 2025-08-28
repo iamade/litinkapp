@@ -136,6 +136,7 @@ async def generate_tutorial_video(
 @router.post("/generate-entertainment-video")
 async def generate_entertainment_video(
     chapter_id: str,
+    
     animation_style: str = "cinematic",
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
@@ -1060,13 +1061,79 @@ async def generate_script_and_scenes(
         video_service = VideoService()
         parsed = video_service._parse_script_for_services(script, script_style)
         scene_descriptions = parsed.get('scene_descriptions') or parsed.get('parsed_sections', {}).get('scene_descriptions', [])
+        
+        # Enhanced script data with metadata
+        script_data = {
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "script_style": script_style,
+            "user_id": current_user['id'],
+            "created_at": datetime.now().isoformat(),
+            "metadata": {
+                "total_scenes": len(scene_descriptions),
+                "estimated_duration": len(script) * 0.01,  # Rough estimate
+                "has_characters": len(characters) > 0,
+                "script_length": len(script)
+            }
+        }
+        
+        
+        # Store in chapters table (your existing approach)
+        ai_content = chapter_data.get('ai_generated_content') or {}
+        if not isinstance(ai_content, dict):
+            ai_content = {}
+        key = f"{current_user['id']}:{script_style}"
+        ai_content[key] = script_data
+        
+        supabase_client.table('chapters').update({
+            "ai_generated_content": ai_content
+        }).eq('id', chapter_id).execute()
+        
+        # ALSO create a dedicated scripts table entry for easier access
+        script_record = {
+            "chapter_id": chapter_id,
+            "user_id": current_user['id'],
+            "script_style": script_style,
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "metadata": script_data["metadata"],
+            "status": "ready"
+        }
+        
+        # Insert or update in scripts table
+        existing_script = supabase_client.table('scripts')\
+            .select('id')\
+            .eq('chapter_id', chapter_id)\
+            .eq('user_id', current_user['id'])\
+            .eq('script_style', script_style)\
+            .execute()
+        
+        if existing_script.data:
+            # Update existing
+            script_result = supabase_client.table('scripts')\
+                .update(script_record)\
+                .eq('id', existing_script.data[0]['id'])\
+                .execute()
+            script_id = existing_script.data[0]['id']
+        else:
+            # Insert new
+            script_result = supabase_client.table('scripts').insert(script_record).execute()
+            script_id = script_result.data[0]['id']
+        
+        
         return {
             'chapter_id': chapter_id,
+            script_id:script_id,
             'script': script,
             'scene_descriptions': scene_descriptions,
             'characters': characters,
             'character_details': character_details,
-            'script_style': script_style
+            'script_style': script_style,
+            'metadata': script_data["metadata"]
         }
     except Exception as e:
         print(f"Error generating script and scenes: {e}")
