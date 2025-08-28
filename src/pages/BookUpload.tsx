@@ -65,9 +65,9 @@ interface EditableChapter {
 interface Book {
   id: string;
   title: string;
-  author_name: string | null;
-  description: string | null;
-  cover_image_url: string | null;
+  author_name?: string | null;
+  description?: string | null;
+  cover_image_url?: string | null;
   book_type: string;
   difficulty: string;
   tags: string[] | null;
@@ -84,6 +84,14 @@ interface Book {
   has_sections?: boolean;
   structure_type?: "flat" | "hierarchical";
   structure_data?: BookStructure;
+
+  preview_chapters?: Array<{
+    title: string;
+    content: string;
+    chapter_number: number;
+    summary?: string;
+  }>;
+  total_preview_chapters?: number;
 }
 
 export default function BookUpload() {
@@ -291,177 +299,292 @@ export default function BookUpload() {
   };
 
   // Step 3: AI Processing with Payment Logic
-  const handleProcessAI = async () => {
-    console.log("🚀 handleProcessAI called with bookMode:", bookMode);
-    console.log("🚀 Upload method:", uploadMethod);
-    console.log("🚀 File:", file?.name);
-    if (isUploading) return;
+
+  const handleUploadBookClick = async () => {
+    if (!user) return;
+
     setIsUploading(true);
     setIsProcessing(true);
-    setProcessingFailed(false);
-    setAiBook(null);
-    setEditableChapters([]);
-    setProcessingStatus("Initializing...");
-    setPaymentRequired(false);
+    setProcessingStatus("Uploading...");
 
     try {
+      // Prepare form data
       const formData = new FormData();
       formData.append("book_type", bookMode);
-      console.log("📤 Sending upload with book_type:", bookMode);
+      formData.append("title", `Uploaded Book - ${new Date().toISOString()}`);
+      formData.append("description", "Book uploaded for processing");
+
       if (uploadMethod === "file" && file) {
         formData.append("file", file);
       } else if (uploadMethod === "text" && textContent) {
         formData.append("text_content", textContent);
       } else {
         toast.error("Please provide a file or text content.");
+        setIsUploading(false);
         setIsProcessing(false);
         setProcessingStatus("");
         return;
       }
 
-      try {
-        const book = (await apiClient.upload(
-          "/books/upload",
-          formData
-        )) as Book;
-        setAiBook(book);
+      // Call upload endpoint
+      const uploadResponse = (await apiClient.upload(
+        "/books/upload",
+        formData
+      )) as Book;
 
-        // Check if payment is required
-        if (book.payment_required) {
-          setPaymentRequired(true);
-          setIsProcessing(false);
-          setProcessingStatus("");
-          toast.success("Payment required for additional book uploads");
-          return;
+      console.log("Upload response:", uploadResponse);
+
+      // ✅ NEW PREVIEW FLOW: Check if this is the new preview response
+      if (
+        uploadResponse.status === "READY" &&
+        uploadResponse.preview_chapters
+      ) {
+        console.log("✅ NEW PREVIEW FLOW DETECTED");
+
+        setIsProcessing(false);
+        setProcessingStatus("");
+        setAiBook(uploadResponse);
+
+        // Set extracted chapters for preview
+        setEditableChapters(
+          uploadResponse.preview_chapters.map((ch) => ({
+            title: ch.title || "",
+            content: ch.content || "",
+          }))
+        );
+
+        // Set book structure data if available
+        if (uploadResponse.structure_data) {
+          setBookStructure(uploadResponse.structure_data);
         }
 
-        setProcessingStatus("Uploading book...");
+        // Set basic details from extracted data
+        setDetails({
+          title: uploadResponse.title || "",
+          author_name: uploadResponse.author_name || "",
+          description: uploadResponse.description || "",
+          cover_image_url: uploadResponse.cover_image_url || "",
+          book_type: uploadResponse.book_type || bookMode,
+          difficulty: uploadResponse.difficulty || "medium",
+          tags: uploadResponse.tags || [],
+          language: uploadResponse.language || "en",
+          estimated_duration: uploadResponse.estimated_duration
+            ? String(uploadResponse.estimated_duration)
+            : "",
+        });
 
-        // Poll for status changes (existing logic for free books)
-        const pollInterval = setInterval(async () => {
-          try {
-            const response = await apiClient.get<Book>(
-              `/books/${book.id}/status`
-            );
-            const updatedBook = response as Book;
-            setAiBook(updatedBook);
-
-            // Update processing status based on book status
-            if (updatedBook.progress_message) {
-              setProcessingStatus(updatedBook.progress_message);
-            } else {
-              switch (updatedBook.status) {
-                case "QUEUED":
-                  setProcessingStatus("Queued for processing...");
-                  break;
-                case "PROCESSING":
-                  setProcessingStatus("Extracting content...");
-                  break;
-                case "GENERATING":
-                  setProcessingStatus("Generating chapters with AI...");
-                  break;
-                case "READY":
-                  setProcessingStatus("Book is ready!");
-                  break;
-                case "FAILED":
-                  setProcessingStatus("Processing failed");
-                  break;
-                default:
-                  setProcessingStatus("Processing...");
-              }
-            }
-
-            // Stop polling if the book processing has failed
-            if (updatedBook.status === "FAILED") {
-              clearInterval(pollInterval);
-              setProcessingFailed(true);
-              toast.error(
-                updatedBook.error_message ||
-                  "Book processing failed. Please try again."
-              );
-              setIsProcessing(false);
-              setProcessingStatus("");
-            } else if (updatedBook.status === "READY") {
-              // Proceed to the next step only when the book is fully ready
-              clearInterval(pollInterval);
-
-              // Set editable chapters for review
-              if (updatedBook.chapters) {
-                setEditableChapters(
-                  updatedBook.chapters.map((ch: Chapter) => ({
-                    title: ch.title || "",
-                    content: ch.content || "",
-                  }))
-                );
-              }
-
-              // Set book structure data if available
-              if (updatedBook.structure_data) {
-                setBookStructure(updatedBook.structure_data);
-              } else if (updatedBook.chapters) {
-                // Fallback: create basic structure from chapters
-                setBookStructure({
-                  id: updatedBook.id,
-                  title: updatedBook.title || "",
-                  has_sections: updatedBook.has_sections || false,
-                  structure_type: updatedBook.structure_type || "flat",
-                  sections: [],
-                  chapters: updatedBook.chapters || [],
-                });
-              }
-
-              setDetails({
-                title: updatedBook.title || "",
-                author_name: updatedBook.author_name || "",
-                description: updatedBook.description || "",
-                cover_image_url: updatedBook.cover_image_url || "",
-                book_type: updatedBook.book_type || bookMode,
-                difficulty: updatedBook.difficulty || "medium",
-                tags: updatedBook.tags || [],
-                language: updatedBook.language || "en",
-                estimated_duration: updatedBook.estimated_duration
-                  ? String(updatedBook.estimated_duration)
-                  : "",
-              });
-              setStep(4); // Go to chapter review step
-              setIsProcessing(false);
-              setProcessingStatus("");
-            }
-          } catch (error) {
-            console.error("Error polling book status:", error);
-            clearInterval(pollInterval);
-            setIsProcessing(false);
-            setProcessingStatus("");
-            toast.error(
-              "Could not get book status. Please check the dashboard."
-            );
-          }
-        }, 7000); // Poll every 7 seconds
-
-        // Cleanup polling on component unmount
-        return () => clearInterval(pollInterval);
-      } catch (uploadError: any) {
-        console.log("Upload error:", uploadError);
-        setIsProcessing(false);
-        setProcessingStatus("");
-
-        //Show the actual error message
-        const errorMessage =
-          uploadError?.response?.data?.details ||
-          uploadError?.message ||
-          "Upload failed";
-        toast.error(`Upload failed: ${errorMessage}`);
+        toast.success("Book processed! Please review the extracted chapters.");
+        setStep(4); // Go directly to chapter review
         return;
       }
-    } catch (e: unknown) {
-      const error = e as Error;
-      toast.error(error.message || "AI processing failed.");
+
+      // ✅ PAYMENT FLOW - COMMENTED OUT
+      /*
+    if (uploadResponse.payment_required && uploadResponse.id) {
+      setPaymentRequired(true);
+      setAiBook(uploadResponse);
       setIsProcessing(false);
       setProcessingStatus("");
+      toast.success("Payment required for additional book uploads");
+      return;
+    }
+    */
+
+      // ✅ OLD FLOW: If we have an ID but not preview, use polling
+      if (uploadResponse.id) {
+        console.log("✅ OLD FLOW: Found ID, starting polling");
+        setAiBook(uploadResponse);
+        startPollingForBookStatus(uploadResponse.id);
+      } else {
+        throw new Error("Invalid response from server");
+      }
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      setIsProcessing(false);
+      setProcessingStatus("");
+
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.details ||
+        error?.message ||
+        "Upload failed";
+      toast.error(`Upload failed: ${errorMessage}`);
     } finally {
       setIsUploading(false);
     }
   };
+
+  // const handleProcessAI = async () => {
+  //   console.log("🚀 handleProcessAI called with bookMode:", bookMode);
+  //   console.log("🚀 Upload method:", uploadMethod);
+  //   console.log("🚀 File:", file?.name);
+  //   if (isUploading) return;
+  //   setIsUploading(true);
+  //   setIsProcessing(true);
+  //   setProcessingFailed(false);
+  //   setAiBook(null);
+  //   setEditableChapters([]);
+  //   setProcessingStatus("Initializing...");
+  //   setPaymentRequired(false);
+
+  //   try {
+  //     const formData = new FormData();
+  //     formData.append("book_type", bookMode);
+  //     console.log("📤 Sending upload with book_type:", bookMode);
+  //     if (uploadMethod === "file" && file) {
+  //       formData.append("file", file);
+  //     } else if (uploadMethod === "text" && textContent) {
+  //       formData.append("text_content", textContent);
+  //     } else {
+  //       toast.error("Please provide a file or text content.");
+  //       setIsProcessing(false);
+  //       setProcessingStatus("");
+  //       return;
+  //     }
+
+  //     try {
+  //       const book = (await apiClient.upload(
+  //         "/books/upload",
+  //         formData
+  //       )) as Book;
+  //       setAiBook(book);
+
+  //       // Check if payment is required
+  //       if (book.payment_required) {
+  //         setPaymentRequired(true);
+  //         setIsProcessing(false);
+  //         setProcessingStatus("");
+  //         toast.success("Payment required for additional book uploads");
+  //         return;
+  //       }
+
+  //       setProcessingStatus("Uploading book...");
+
+  //       // Poll for status changes (existing logic for free books)
+  //       const pollInterval = setInterval(async () => {
+  //         try {
+  //           const response = await apiClient.get<Book>(
+  //             `/books/${book.id}/status`
+  //           );
+  //           const updatedBook = response as Book;
+  //           setAiBook(updatedBook);
+
+  //           // Update processing status based on book status
+  //           if (updatedBook.progress_message) {
+  //             setProcessingStatus(updatedBook.progress_message);
+  //           } else {
+  //             switch (updatedBook.status) {
+  //               case "QUEUED":
+  //                 setProcessingStatus("Queued for processing...");
+  //                 break;
+  //               case "PROCESSING":
+  //                 setProcessingStatus("Extracting content...");
+  //                 break;
+  //               case "GENERATING":
+  //                 setProcessingStatus("Generating chapters with AI...");
+  //                 break;
+  //               case "READY":
+  //                 setProcessingStatus("Book is ready!");
+  //                 break;
+  //               case "FAILED":
+  //                 setProcessingStatus("Processing failed");
+  //                 break;
+  //               default:
+  //                 setProcessingStatus("Processing...");
+  //             }
+  //           }
+
+  //           // Stop polling if the book processing has failed
+  //           if (updatedBook.status === "FAILED") {
+  //             clearInterval(pollInterval);
+  //             setProcessingFailed(true);
+  //             toast.error(
+  //               updatedBook.error_message ||
+  //                 "Book processing failed. Please try again."
+  //             );
+  //             setIsProcessing(false);
+  //             setProcessingStatus("");
+  //           } else if (updatedBook.status === "READY") {
+  //             // Proceed to the next step only when the book is fully ready
+  //             clearInterval(pollInterval);
+
+  //             // Set editable chapters for review
+  //             if (updatedBook.chapters) {
+  //               setEditableChapters(
+  //                 updatedBook.chapters.map((ch: Chapter) => ({
+  //                   title: ch.title || "",
+  //                   content: ch.content || "",
+  //                 }))
+  //               );
+  //             }
+
+  //             // Set book structure data if available
+  //             if (updatedBook.structure_data) {
+  //               setBookStructure(updatedBook.structure_data);
+  //             } else if (updatedBook.chapters) {
+  //               // Fallback: create basic structure from chapters
+  //               setBookStructure({
+  //                 id: updatedBook.id,
+  //                 title: updatedBook.title || "",
+  //                 has_sections: updatedBook.has_sections || false,
+  //                 structure_type: updatedBook.structure_type || "flat",
+  //                 sections: [],
+  //                 chapters: updatedBook.chapters || [],
+  //               });
+  //             }
+
+  //             setDetails({
+  //               title: updatedBook.title || "",
+  //               author_name: updatedBook.author_name || "",
+  //               description: updatedBook.description || "",
+  //               cover_image_url: updatedBook.cover_image_url || "",
+  //               book_type: updatedBook.book_type || bookMode,
+  //               difficulty: updatedBook.difficulty || "medium",
+  //               tags: updatedBook.tags || [],
+  //               language: updatedBook.language || "en",
+  //               estimated_duration: updatedBook.estimated_duration
+  //                 ? String(updatedBook.estimated_duration)
+  //                 : "",
+  //             });
+  //             setStep(4); // Go to chapter review step
+  //             setIsProcessing(false);
+  //             setProcessingStatus("");
+  //           }
+  //         } catch (error) {
+  //           console.error("Error polling book status:", error);
+  //           clearInterval(pollInterval);
+  //           setIsProcessing(false);
+  //           setProcessingStatus("");
+  //           toast.error(
+  //             "Could not get book status. Please check the dashboard."
+  //           );
+  //         }
+  //       }, 7000); // Poll every 7 seconds
+
+  //       // Cleanup polling on component unmount
+  //       return () => clearInterval(pollInterval);
+  //     } catch (uploadError: any) {
+  //       console.log("Upload error:", uploadError);
+  //       setIsProcessing(false);
+  //       setProcessingStatus("");
+
+  //       //Show the actual error message
+  //       const errorMessage =
+  //         uploadError?.response?.data?.details ||
+  //         uploadError?.message ||
+  //         "Upload failed";
+  //       toast.error(`Upload failed: ${errorMessage}`);
+  //       return;
+  //     }
+  //   } catch (e: unknown) {
+  //     const error = e as Error;
+  //     toast.error(error.message || "AI processing failed.");
+  //     setIsProcessing(false);
+  //     setProcessingStatus("");
+  //   } finally {
+  //     setIsUploading(false);
+  //   }
+  // };
 
   // Handle payment for book upload
   const handlePayment = async () => {
@@ -1416,6 +1539,19 @@ export default function BookUpload() {
 
               <div className="flex flex-col sm:flex-row justify-end gap-3 sm:gap-0 mt-6 sm:mt-8">
                 <button
+                  onClick={handleNext} // ✅ Changed from handleUpload
+                  disabled={
+                    (uploadMethod === "file" && !file) ||
+                    (uploadMethod === "text" && !textContent.trim())
+                  }
+                  className="w-full sm:w-auto px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+
+              {/* <div className="flex flex-col sm:flex-row justify-end gap-3 sm:gap-0 mt-6 sm:mt-8">
+                <button
                   onClick={handleUpload} // Changed from handleUploadBookClick
                   disabled={
                     (uploadMethod === "file" && !file) ||
@@ -1426,8 +1562,8 @@ export default function BookUpload() {
                 >
                   {isUploading ? "Uploading..." : "Next"}
                 </button>
-              </div>
-{/* 
+              </div> */}
+              {/* 
               <div className="flex flex-col sm:flex-row justify-end gap-3 sm:gap-0 mt-6 sm:mt-8">
                 <button
                   onClick={handleUploadBookClick}
@@ -1435,8 +1571,6 @@ export default function BookUpload() {
                 >
                   Next
                 </button> */}
-
-              
             </div>
           )}
 
@@ -1522,7 +1656,7 @@ export default function BookUpload() {
               </p>
 
               {/* Payment Required Section */}
-              {paymentRequired && aiBook && (
+              {/* {paymentRequired && aiBook && (
                 <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-xl p-6 mb-6">
                   <div className="flex items-start space-x-4">
                     <div className="flex-shrink-0">
@@ -1580,7 +1714,7 @@ export default function BookUpload() {
                     </div>
                   </div>
                 </div>
-              )}
+              )} */}
 
               <div className="flex flex-col items-center justify-center min-h-[120px]">
                 {isProcessing ? (
@@ -1608,16 +1742,18 @@ export default function BookUpload() {
                       Retry Processing
                     </button>
                   </div>
-                ) : paymentRequired ? (
-                  <div className="flex flex-col items-center">
-                    <AlertCircle className="h-12 w-12 text-blue-600 mb-4" />
-                    <p className="text-gray-600 text-center">
-                      Complete payment above to continue with AI processing
-                    </p>
-                  </div>
                 ) : (
+                  // paymentRequired ? (
+                  //   <div className="flex flex-col items-center">
+                  //     <AlertCircle className="h-12 w-12 text-blue-600 mb-4" />
+                  //     <p className="text-gray-600 text-center">
+                  //       Complete payment above to continue with AI processing
+                  //     </p>
+                  //   </div>
+                  // ) :
                   <button
-                    onClick={handleProcessAI}
+                    // onClick={handleProcessAI}
+                    onClick={handleUploadBookClick}
                     className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg"
                   >
                     Process with AI
@@ -1899,76 +2035,78 @@ export default function BookUpload() {
                     rows={4}
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                {/* In Step 5 Book Details form */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-700">
                     Cover Image
                   </label>
-                  <div className="flex items-center space-x-4 mb-2">
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        checked={coverSource === "upload"}
-                        onChange={() => setCoverSource("upload")}
-                      />
-                      <span>Upload New Cover</span>
-                    </label>
-                    <label className="flex items-center space-x-2">
-                      <input
-                        type="radio"
-                        checked={coverSource === "extract"}
-                        onChange={() => setCoverSource("extract")}
-                      />
-                      <span>Extract from PDF</span>
-                    </label>
-                  </div>
 
-                  {coverSource === "upload" && (
-                    <div className="p-4 border-2 border-dashed rounded-xl">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleCoverFileChange}
-                        ref={coverInputRef}
-                        className="hidden"
-                      />
-                      <div
-                        className="cursor-pointer"
-                        onClick={() => coverInputRef.current?.click()}
-                      >
-                        {coverPreview ? (
-                          <img
-                            src={coverPreview}
-                            alt="Cover preview"
-                            className="w-full h-auto rounded-lg"
-                          />
-                        ) : (
-                          <div className="text-center text-gray-500">
-                            <p>Click to upload a cover image</p>
-                            <p className="text-sm">(e.g., PNG, JPG, WEBP)</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {coverSource === "extract" && (
-                    <div>
-                      <input
-                        type="text"
-                        placeholder="Enter page number for cover"
-                        value={coverPage}
-                        onChange={(e) => setCoverPage(e.target.value)}
-                        className="w-full border border-gray-300 rounded-xl px-3 py-2"
+                  {/* Show extracted cover if available */}
+                  {details.cover_image_url && (
+                    <div className="mb-4">
+                      <p className="text-sm text-green-600 mb-2">
+                        ✅ Cover extracted from book:
+                      </p>
+                      <img
+                        src={details.cover_image_url}
+                        alt="Extracted cover"
+                        className="w-32 h-40 object-cover rounded border"
                       />
                       <button
-                        onClick={handleExtractCover}
-                        className="mt-2 bg-indigo-500 text-white px-4 py-2 rounded-xl"
+                        type="button"
+                        onClick={() =>
+                          setDetails({ ...details, cover_image_url: "" })
+                        }
+                        className="mt-2 text-sm text-red-600 hover:text-red-800"
                       >
-                        Extract Cover
+                        Remove extracted cover
                       </button>
                     </div>
                   )}
-                  {coverError && (
-                    <p className="text-red-500 text-sm mt-1">{coverError}</p>
+
+                  <div className="flex gap-4 mb-4">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        value="upload"
+                        checked={coverSource === "upload"}
+                        onChange={(e) =>
+                          setCoverSource(e.target.value as "upload" | "extract")
+                        }
+                        className="mr-2"
+                      />
+                      Upload New Cover
+                    </label>
+
+                    {/* Only show extract option if we have an extracted cover */}
+                    {details.cover_image_url && (
+                      <label className="flex items-center">
+                        <input
+                          type="radio"
+                          value="extract"
+                          checked={coverSource === "extract"}
+                          onChange={(e) =>
+                            setCoverSource(
+                              e.target.value as "upload" | "extract"
+                            )
+                          }
+                          className="mr-2"
+                        />
+                        Use Extracted Cover
+                      </label>
+                    )}
+                  </div>
+
+                  {/* Upload interface - only show if no extracted cover or user wants to upload new */}
+                  {(coverSource === "upload" || !details.cover_image_url) && (
+                    <div
+                      className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors cursor-pointer"
+                      onClick={() =>
+                        document.getElementById("cover-upload")?.click()
+                      }
+                    >
+                      {/* ... existing upload UI ... */}
+                    </div>
                   )}
                 </div>
                 <div>

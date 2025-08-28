@@ -770,20 +770,26 @@ async def delete_book(
             
                 # Delete the specific book file from users folder
         try:
-            # Try to construct the expected path for the book file
-            if book.get("title"):
-                # Assume the book file has the same name as the title (you might need to adjust this)
-                possible_extensions = ['.pdf', '.docx', '.txt']
-                for ext in possible_extensions:
-                    book_file_path = f"users/{user_id}/{book['title']}{ext}"
-                    try:
-                        supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([book_file_path])
-                        print(f"Deleted book file: {book_file_path}")
-                        break  # Stop trying other extensions if successful
-                    except:
-                        continue  # Try next extension
+            original_file_storage_path = book.get("original_file_storage_path")
+            if original_file_storage_path:
+                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove([original_file_storage_path])
+                print(f"Deleted book file: {original_file_storage_path}")
+            else:
+                # If no original_file_storage_path, try to find files in the user's folder
+                try:
+                    # List all files in the user's root folder
+                    user_files = supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).list(path=f"users/{user_id}")
+                    if user_files:
+                        # Filter out folders (covers, audio, videos)
+                        book_files = [f for f in user_files if f['name'] not in ['covers', 'audio', 'videos'] and 'metadata' in f]
+                        if book_files:
+                            file_paths = [f"users/{user_id}/{file['name']}" for file in book_files]
+                            supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove(file_paths)
+                            print(f"Deleted {len(file_paths)} book files for user {user_id}")
+                except Exception as e:
+                    print(f"Warning: Could not list/delete book files: {e}")
         except Exception as e:
-            print(f"Warning: Could not delete book file from users folder: {e}")
+            print(f"Warning: Could not delete book file: {e}")
 
 
     except Exception as e:
@@ -922,7 +928,7 @@ class ChapterInput(BaseModel):
     content: str = ""
 
 
-@router.post("/books/{book_id}/save-structure", status_code=status.HTTP_200_OK)
+@router.post("/{book_id}/save-structure", status_code=status.HTTP_200_OK)
 async def save_book_structure(
     book_id: str,
     structure_data: dict,  # Contains confirmed_chapters array
@@ -932,7 +938,7 @@ async def save_book_structure(
     """Save confirmed book structure to database"""
     try:
         # Verify book ownership
-        book_response = supabase_client.table("books").select("*").eq("id", book_id).eq("user_id", str(current_user.id)).single().execute()
+        book_response = supabase_client.table("books").select("*").eq("id", book_id).eq("user_id", str(current_user["id"])).single().execute()
         if not book_response.data:
             raise HTTPException(status_code=404, detail="Book not found")
             

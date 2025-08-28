@@ -2,6 +2,7 @@ import openai
 from typing import List, Dict, Any, Optional
 import json
 import asyncio
+import re  
 import os
 from app.core.config import settings
 from openai import AsyncOpenAI
@@ -288,6 +289,7 @@ Ensure the entire output is a single valid JSON object.
             print(f"AI service error: {e}")
             return "medium"
     
+    
     # Helper methods for mock data
     def _get_mock_quiz(self, difficulty: str) -> List[Dict[str, Any]]:
         """Return mock quiz data"""
@@ -512,3 +514,49 @@ Return only the list of scene descriptions.
             scenes = [line.strip('- ').strip() for line in response_text.split('\n') if line.strip()]
             return scenes
         return []
+    
+     # In ai_service.py (if you have one) or wherever extract_real_chapters_from_list is defined
+    async def extract_real_chapters_from_list(self, prompt: str) -> Dict[str, Any]:
+        """Extract real chapters using the provided prompt with book content"""
+        try:
+            if not self.client:
+                raise Exception("OpenAI client is not initialized.")
+            
+            response = await self.client.chat.completions.create(
+                model="gpt-4",  # or whatever model you're using
+                messages=[
+                    {"role": "system", "content": "You are an expert at analyzing book structure."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
+            
+            # Parse the response
+            text = response.choices[0].message.content
+            
+            # Extract chapter numbers
+            chapters_match = re.search(r'CHAPTERS:\s*\[(.*?)\]', text, re.IGNORECASE)
+            if chapters_match:
+                chapters_str = chapters_match.group(1)
+                chapters = [int(x.strip()) for x in chapters_str.split(',') if x.strip().isdigit()]
+            else:
+                chapters = []
+            
+            # Extract total
+            total_match = re.search(r'TOTAL:\s*(\d+)', text, re.IGNORECASE)
+            total = int(total_match.group(1)) if total_match else len(chapters)
+            
+            # Extract reason
+            reason_match = re.search(r'REASON:\s*(.+)', text, re.IGNORECASE)
+            reason = reason_match.group(1).strip() if reason_match else "Analysis based on book content"
+            
+            return {
+                'chapters': chapters,
+                'total_chapters': total,
+                'reasoning': reason
+            }
+            
+        except Exception as e:
+            print(f"[AI SERVICE] Error: {e}")
+            raise
+    
