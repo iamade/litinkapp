@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Body
 from supabase import Client
 import time
@@ -132,45 +133,150 @@ async def generate_tutorial_video(
     except Exception as e:
         print(f"Error generating tutorial video: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+ 
 @router.post("/generate-entertainment-video")
 async def generate_entertainment_video(
-    chapter_id: str,
-    
-    animation_style: str = "cinematic",
+    request: dict = Body(...),
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Generate entertainment video from chapter using RAG system with OpenAI enhancement"""
+    """Generate entertainment video using already saved script"""
     try:
-        # Verify chapter access
-        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
-        if not chapter_response.data:
-            raise HTTPException(status_code=404, detail="Chapter not found")
+        # Extract parameters from request body
+        chapter_id = request.get('chapter_id')
+        quality_tier = request.get('quality_tier', 'basic')
+        video_style = request.get('video_style', 'realistic')  # This is for visual styling
         
-        chapter_data = chapter_response.data
-        book_data = chapter_data['books']
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required")
+
+        # Step 1: Get the most recent script for this chapter (regardless of style)
+        script_response = supabase_client.table('scripts')\
+            .select('*')\
+            .eq('chapter_id', chapter_id)\
+            .eq('user_id', current_user['id'])\
+            .order('created_at', desc=True)\
+            .limit(1)\
+            .execute()
         
-        # Check access permissions
-        if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
-            raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
+        if not script_response.data:
+            raise HTTPException(
+                status_code=400, 
+                detail="No script found for this chapter. Please generate script first using 'Generate Script & Scene'."
+            )
         
-        # Generate entertainment video
-        video_service = VideoService(supabase_client)
-        video_result = await video_service.generate_entertainment_video(
-            chapter_id=chapter_id,
-            animation_style=animation_style,
-            supabase_client=supabase_client
-        )
+        script_data = script_response.data[0]
+
+        # Step 2: Create video generation record
+        video_generation = supabase_client.table('video_generations').insert({
+            'chapter_id': chapter_id,
+            'script_id': script_data['id'],
+            'user_id': current_user['id'],
+            'generation_status': 'pending',
+            'quality_tier': quality_tier,
+            'script_data': {
+                'script': script_data['script'],
+                'scene_descriptions': script_data['scene_descriptions'],
+                'characters': script_data['characters'],
+                'script_style': script_data['script_style'],  # Preserve original style
+                'video_style': video_style  # New: visual styling for video generation
+            }
+        }).execute()
+
+        video_gen_id = video_generation.data[0]['id']
+
+        # Step 3: Return success (later this will trigger background processing)
+        return {
+            "video_generation_id": video_gen_id,
+            "script_id": script_data['id'],
+            "status": "queued",
+            "message": "Video generation started using saved script",
+            "script_info": {
+                "script_style": script_data['script_style'],  # What type of script (movie/narration)
+                "video_style": video_style,  # How the video should look (realistic/cinematic/etc)
+                "scenes": len(script_data.get('scene_descriptions', [])),
+                "characters": len(script_data.get('characters', [])),
+                "created_at": script_data['created_at']
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))   
+    
+@router.get("/video-generation-status/{video_gen_id}")
+async def get_video_generation_status(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get video generation status"""
+    try:
+        response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
         
-        if not video_result:
-            raise HTTPException(status_code=500, detail="Failed to generate entertainment video")
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
         
-        return video_result
+        data = response.data
+        return {
+            'status': data['generation_status'],
+            'quality_tier': data['quality_tier'],
+            'video_url': data.get('video_url'),
+            'created_at': data['created_at'],
+            'script_id': data.get('script_id')
+        }
         
     except Exception as e:
-        print(f"Error generating entertainment video: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/scripts/{chapter_id}")
+async def list_chapter_scripts(
+    chapter_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """List all scripts for a chapter by current user"""
+    try:
+        scripts = supabase_client.table('scripts')\
+            .select('*')\
+            .eq('chapter_id', chapter_id)\
+            .eq('user_id', current_user['id'])\
+            .order('created_at', desc=True)\
+            .execute()
+        
+        return {
+            'chapter_id': chapter_id,
+            'scripts': scripts.data or []
+        }
+        
+    except Exception as e:
+        print(f"Error listing scripts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/script/{script_id}")
+async def get_script_details(
+    script_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get detailed script information"""
+    try:
+        script = supabase_client.table('scripts')\
+            .select('*')\
+            .eq('id', script_id)\
+            .eq('user_id', current_user['id'])\
+            .single().execute()
+        
+        if not script.data:
+            raise HTTPException(status_code=404, detail="Script not found")
+        
+        return script.data
+        
+    except Exception as e:
+        print(f"Error getting script details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @router.post("/generate-video-avatar")
 async def generate_video_avatar(
@@ -1034,13 +1140,19 @@ async def combine_tavus_videos(
 
 @router.post("/generate-script-and-scenes")
 async def generate_script_and_scenes(
-    chapter_id: str,
-    script_style: str = "cinematic_movie",
+    request: dict = Body(...),  # Accept body instead of query params
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
     """Generate only the AI script and scene descriptions for a chapter (no video generation)"""
     try:
+          # Extract from request body
+        chapter_id = request.get('chapter_id')
+        script_style = request.get('script_style', 'cinematic_movie')
+       
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required")
+
         # Verify chapter access
         chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
         if not chapter_response.data:
@@ -1127,7 +1239,7 @@ async def generate_script_and_scenes(
         
         return {
             'chapter_id': chapter_id,
-            script_id:script_id,
+            'script_id':script_id,
             'script': script,
             'scene_descriptions': scene_descriptions,
             'characters': characters,

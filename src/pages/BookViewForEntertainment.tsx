@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { userService } from "../services/userService";
-import { videoService, VideoScene } from "../services/videoService";
 import { toast } from "react-hot-toast";
+import { FileText } from "lucide-react";
+import { VideoScene } from "../services/videoService";
 
 interface Chapter {
   id: string;
@@ -34,6 +35,11 @@ export default function BookViewForEntertainment() {
   const [videoScenes, setVideoScenes] = useState<Record<string, VideoScene>>(
     {}
   );
+  const [videoGenerationId, setVideoGenerationId] = useState<string | null>(
+    null
+  );
+  const [videoStatus, setVideoStatus] = useState<string>("idle");
+
   const [showFullScript, setShowFullScript] = useState(false);
   const [animationStyle, setAnimationStyle] = useState<
     "cartoon" | "realistic" | "cinematic" | "fantasy"
@@ -53,6 +59,57 @@ export default function BookViewForEntertainment() {
     >
   >({});
   const [loadingScript, setLoadingScript] = useState(false);
+  const [generatedScripts, setGeneratedScripts] = useState<any[]>([]);
+  const [selectedScript, setSelectedScript] = useState<any>(null);
+  const [loadingScripts, setLoadingScripts] = useState(false);
+
+  const [showScriptModal, setShowScriptModal] = useState(false);
+  const [modalScript, setModalScript] = useState<any>(null);
+
+  // Add function to fetch scripts
+  const fetchGeneratedScripts = async (chapterId: string) => {
+    if (!chapterId) return;
+
+    try {
+      setLoadingScripts(true);
+      const data = await userService.getChapterScripts(chapterId);
+      setGeneratedScripts(data.scripts || []);
+    } catch (error) {
+      console.error("Error fetching scripts:", error);
+      toast.error("Failed to fetch scripts");
+    } finally {
+      setLoadingScripts(false);
+    }
+  };
+
+  // Add function to select a script
+  const handleSelectScript = async (script: any) => {
+    setSelectedScript(script);
+
+    // Update the aiScriptResults to show this script is available
+    setAiScriptResults((prev) => ({
+      ...prev,
+      [script.chapter_id]: {
+        script: script.script,
+        scene_descriptions: script.scene_descriptions,
+        characters: script.characters,
+        character_details: script.character_details,
+        script_style: script.script_style,
+        script_id: script.id,
+      },
+    }));
+
+    toast.success(
+      `Selected ${script.script_style} script for video generation`
+    );
+  };
+
+  // Update your useEffect to fetch scripts when chapter changes
+  useEffect(() => {
+    if (selectedChapter) {
+      fetchGeneratedScripts(selectedChapter.id);
+    }
+  }, [selectedChapter]);
 
   // Load book data
   const loadBook = async (bookId: string) => {
@@ -73,50 +130,107 @@ export default function BookViewForEntertainment() {
     }
   };
 
-  // Handle video generation
   const handleGenerateVideo = async () => {
     if (!selectedChapter) return;
 
     try {
-      const result = await videoService.generateEntertainmentVideo(
+      setVideoStatus("starting");
+
+      // Check if we have a selected script
+      if (!selectedScript) {
+        toast.error("Please select a script first!");
+        return;
+      }
+
+      // Start video generation with the selected script
+      const result = await userService.generateEntertainmentVideo(
         selectedChapter.id,
-        animationStyle,
-        scriptStyle
+        "basic", // quality_tier
+        animationStyle, // video_style
+        selectedScript.id // script_id
       );
 
-      if (result.video_url) {
-        setVideoUrls((prev) => ({
-          ...prev,
-          [selectedChapter.id]: result.video_url,
-        }));
+      if (result.video_generation_id) {
+        setVideoGenerationId(result.video_generation_id);
+        setVideoStatus("processing");
+        toast.success(
+          `Video generation started! Using: ${selectedScript.script_style} script`
+        );
 
-        setVideoScenes((prev) => ({
-          ...prev,
-          [selectedChapter.id]: result,
-        }));
-
-        toast.success("Video generated successfully!");
+        // Start polling for status
+        pollVideoStatus(result.video_generation_id);
       }
     } catch (error) {
       console.error("Error generating video:", error);
-      toast.error("Failed to generate video");
+      toast.error(error.message || "Failed to start video generation");
+      setVideoStatus("error");
     }
+  };
+
+  // Add status polling
+  const pollVideoStatus = async (videoGenId: string) => {
+    const checkStatus = async () => {
+      try {
+        const data = await userService.getVideoGenerationStatus(videoGenId);
+
+        setVideoStatus(data.status);
+
+        if (data.status === "completed" && data.video_url) {
+          setVideoUrls((prev) => ({
+            ...prev,
+            [selectedChapter!.id]: data.video_url!,
+          }));
+          toast.success("Video generation completed!");
+          return;
+        }
+
+        if (data.status === "failed") {
+          toast.error("Video generation failed");
+          return;
+        }
+
+        // Continue polling if still processing
+        if (
+          [
+            "pending",
+            "generating_audio",
+            "generating_images",
+            "generating_video",
+            "combining",
+          ].includes(data.status)
+        ) {
+          setTimeout(checkStatus, 3000); // Poll every 3 seconds
+        }
+      } catch (error) {
+        console.error("Error checking status:", error);
+        toast.error("Error checking video status");
+      }
+    };
+
+    checkStatus();
   };
 
   const handleGenerateScript = async () => {
     if (!selectedChapter) return;
     setLoadingScript(true);
     try {
-      const result = await videoService.generateScriptAndScenes(
+      const result = await userService.generateScriptAndScenes(
         selectedChapter.id,
         scriptStyle
       );
+
+      // Update local state
       setAiScriptResults((prev) => ({
         ...prev,
         [selectedChapter.id]: result,
       }));
+
+      // Refresh the scripts list
+      await fetchGeneratedScripts(selectedChapter.id);
+
       toast.success("AI Script & Scene Descriptions generated!");
-    } catch {
+    } catch (error) {
+      console.error("Error generating script:", error);
       toast.error("Failed to generate script/scene descriptions");
     } finally {
       setLoadingScript(false);
@@ -242,11 +356,8 @@ export default function BookViewForEntertainment() {
                   <div className="prose max-w-none text-gray-700 leading-relaxed">
                     {renderChapterContent()}
                   </div>
-
                   {/* Video Generation Controls */}
                   <div className="flex items-center gap-4 mt-6">
-                  
-
                     <div className="mb-4">
                       <label
                         htmlFor="script-style"
@@ -269,8 +380,6 @@ export default function BookViewForEntertainment() {
                       </select>
                     </div>
 
-                   
-
                     <button
                       className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded mb-4"
                       onClick={handleGenerateScript}
@@ -281,7 +390,7 @@ export default function BookViewForEntertainment() {
                         : "Generate Script & Scene"}
                     </button>
 
-                      <div className="mb-4">
+                    <div className="mb-4">
                       <label
                         htmlFor="script-style"
                         className="block text-sm font-medium text-gray-700 mb-1"
@@ -289,32 +398,152 @@ export default function BookViewForEntertainment() {
                         Video Style:
                       </label>
                       <select
-                      className="border rounded-lg px-3 py-2 text-sm"
-                      value={animationStyle}
-                      onChange={(e) =>
-                        setAnimationStyle(
-                          e.target.value as
-                            | "cartoon"
-                            | "realistic"
-                            | "cinematic"
-                            | "fantasy"
-                        )
-                      }
-                    >
-                      <option value="cartoon">Cartoon Style</option>
-                      <option value="realistic">Realistic Style</option>
-                      <option value="cinematic">Cinematic Style</option>
-                      <option value="fantasy">Fantasy Style</option>
-                    </select>
+                        className="border rounded-lg px-3 py-2 text-sm"
+                        value={animationStyle}
+                        onChange={(e) =>
+                          setAnimationStyle(
+                            e.target.value as
+                              | "cartoon"
+                              | "realistic"
+                              | "cinematic"
+                              | "fantasy"
+                          )
+                        }
+                      >
+                        <option value="cartoon">Cartoon Style</option>
+                        <option value="realistic">Realistic Style</option>
+                        <option value="cinematic">Cinematic Style</option>
+                        <option value="fantasy">Fantasy Style</option>
+                      </select>
                     </div>
 
-                     <button
+                    <button
                       className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded mb-4"
                       onClick={handleGenerateVideo}
                     >
                       Generate Video
                     </button>
                   </div>
+                  {/* Add the Generated Scripts Card to your JSX (place it afteryour script generation card) */}
+                  {selectedChapter && (
+                    <div className="bg-white p-6 rounded-lg shadow-md">
+                      <h3 className="text-lg font-semibold mb-4 flex items-center">
+                        <FileText className="mr-2" />
+                        Generated Scripts
+                      </h3>
+
+                      {loadingScripts ? (
+                        <div className="flex items-center justify-center py-4">
+                          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                          <span className="ml-2">Loading scripts...</span>
+                        </div>
+                      ) : generatedScripts.length === 0 ? (
+                        <div className="text-gray-500 text-center py-4">
+                          <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                          <p>No scripts generated yet.</p>
+                          <p className="text-sm">
+                            Use "Generate Script & Scene" above to create your
+                            first script.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {generatedScripts.map((script) => (
+                            <div
+                              key={script.id}
+                              className={`border rounded-lg p-4 cursor-pointer transition-all hover:shadow-md ${
+                                selectedScript?.id === script.id
+                                  ? "border-blue-500 bg-blue-50"
+                                  : "border-gray-200 hover:border-gray-300"
+                              }`}
+                              onClick={() => handleSelectScript(script)}
+                            >
+                              <div className="flex justify-between items-start mb-2">
+                                <div>
+                                  <h4 className="font-medium text-gray-900">
+                                    {script.script_style === "cinematic_movie"
+                                      ? "Character Dialog"
+                                      : "Voice-over Narration"}
+                                  </h4>
+                                  <p className="text-sm text-gray-500">
+                                    Created:{" "}
+                                    {new Date(
+                                      script.created_at
+                                    ).toLocaleDateString()}
+                                  </p>
+                                </div>
+                                {selectedScript?.id === script.id && (
+                                  <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">
+                                    Selected
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-4 text-sm text-gray-600">
+                                <div>
+                                  <span className="font-medium">Scenes:</span>{" "}
+                                  {script.scene_descriptions?.length || 0}
+                                </div>
+                                <div>
+                                  <span className="font-medium">
+                                    Characters:
+                                  </span>{" "}
+                                  {script.characters?.length || 0}
+                                </div>
+                                <div>
+                                  <span className="font-medium">Length:</span>{" "}
+                                  {script.script?.length || 0} chars
+                                </div>
+                              </div>
+
+                              {script.script && (
+                                <div className="mt-2">
+                                  <p className="text-sm text-gray-700 line-clamp-2">
+                                    {script.script.substring(0, 150)}...
+                                  </p>
+                                </div>
+                              )}
+
+                              <div className="mt-2 flex items-center justify-between">
+                                <span
+                                  className={`text-xs px-2 py-1 rounded-full ${
+                                    script.status === "ready"
+                                      ? "bg-green-100 text-green-800"
+                                      : "bg-yellow-100 text-yellow-800"
+                                  }`}
+                                >
+                                  {script.status}
+                                </span>
+
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    // Preview script in modal or expand
+                                    setSelectedScript(script);
+                                  }}
+                                  className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                                >
+                                  View Details
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {generatedScripts.length > 0 && (
+                        <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                          <p className="text-sm text-blue-800">
+                            💡 <strong>Tip:</strong> Click on any script to
+                            select it for video generation.
+                            {selectedScript
+                              ? ` Currently selected: ${selectedScript.script_style}`
+                              : " No script selected yet."}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Generated Video Display */}
                   {currentVideoUrl && (
@@ -338,7 +567,6 @@ export default function BookViewForEntertainment() {
                       />
                     </div>
                   )}
-
                   {/* AI Script & Scene Descriptions Display (separate from video) */}
                   {selectedChapter && aiScriptResults[selectedChapter.id] && (
                     <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
@@ -373,6 +601,7 @@ export default function BookViewForEntertainment() {
                   )}
                 </div>
               )}
+              
             </div>
           </div>
         </div>
