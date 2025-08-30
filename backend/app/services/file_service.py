@@ -1,3 +1,4 @@
+import uuid
 import aiofiles
 from fastapi import UploadFile
 from typing import Dict, Any, Optional, List
@@ -3558,3 +3559,65 @@ Chapters:
     def _clean_text_content(self, content: str) -> str:
             """Clean text content to handle Unicode escape sequences and problematic characters"""
             return TextSanitizer.sanitize_text(content)
+        
+    
+    async def upload_file(self, local_path: str, remote_path: str) -> Optional[str]:
+        """Upload file to Supabase storage"""
+        
+        try:
+            # Read file
+            async with aiofiles.open(local_path, 'rb') as f:
+                file_data = await f.read()
+            
+            # Upload to Supabase storage
+            bucket_name = "video-files"  # Make sure this bucket exists
+            
+            result = self.supabase.storage.from_(bucket_name).upload(
+                remote_path, 
+                file_data,
+                file_options={"content-type": "video/mp4"}
+            )
+            
+            if result.error:
+                print(f"[FILE UPLOAD ERROR] {result.error}")
+                return None
+            
+            # Get public URL
+            public_url_result = self.supabase.storage.from_(bucket_name).get_public_url(remote_path)
+            
+            if public_url_result:
+                print(f"[FILE UPLOAD SUCCESS] {remote_path} -> {public_url_result}")
+                return public_url_result
+            else:
+                print(f"[FILE UPLOAD ERROR] Failed to get public URL for {remote_path}")
+                return None
+                
+        except Exception as e:
+            print(f"[FILE UPLOAD ERROR] {str(e)}")
+            return None
+    
+    async def download_file(self, url: str, local_path: str) -> bool:
+        """Download file from URL to local path"""
+        
+        try:
+            import aiohttp
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        async with aiofiles.open(local_path, 'wb') as f:
+                            async for chunk in response.content.iter_chunked(8192):
+                                await f.write(chunk)
+                        print(f"[FILE DOWNLOAD SUCCESS] {url} -> {local_path}")
+                        return True
+                    else:
+                        print(f"[FILE DOWNLOAD ERROR] HTTP {response.status} for {url}")
+                        return False
+                        
+        except Exception as e:
+            print(f"[FILE DOWNLOAD ERROR] {str(e)}")
+            return False
+
+    def get_temp_filename(self, prefix: str = "temp", extension: str = ".mp4") -> str:
+        """Generate unique temporary filename"""
+        return f"{prefix}_{uuid.uuid4().hex}{extension}"

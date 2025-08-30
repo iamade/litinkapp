@@ -185,7 +185,10 @@ async def generate_entertainment_video(
 
         video_gen_id = video_generation.data[0]['id']
 
-        # Step 3: Return success (later this will trigger background processing)
+        # Step 3: Start audio generation (first step in pipeline)
+        from app.tasks.audio_tasks import generate_all_audio_for_video
+        generate_all_audio_for_video.delay(video_gen_id)
+        
         return {
             "video_generation_id": video_gen_id,
             "script_id": script_data['id'],
@@ -209,7 +212,7 @@ async def get_video_generation_status(
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Get video generation status"""
+    """Get video generation status with detailed progress"""
     try:
         response = supabase_client.table('video_generations')\
             .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
@@ -218,12 +221,371 @@ async def get_video_generation_status(
             raise HTTPException(status_code=404, detail="Video generation not found")
         
         data = response.data
-        return {
-            'status': data['generation_status'],
+        status = data['generation_status']
+        
+        # Base response
+        result = {
+            'status': status,
             'quality_tier': data['quality_tier'],
             'video_url': data.get('video_url'),
             'created_at': data['created_at'],
             'script_id': data.get('script_id')
+        }
+        
+        # Add audio information if available
+        if data.get('audio_files'):
+            audio_data = data['audio_files']
+            result['audio_progress'] = {
+                'narrator_files': len(audio_data.get('narrator', [])),
+                'character_files': len(audio_data.get('characters', [])),
+                'sound_effects': len(audio_data.get('sound_effects', [])),
+                'background_music': len(audio_data.get('background_music', []))
+            }
+        
+        # Add image information if available
+        if data.get('image_data'):
+            image_data = data['image_data']
+            result['image_progress'] = image_data.get('statistics', {})
+            
+            # Include character images for frontend display
+            if status in ['images_completed', 'generating_video', 'completed']:
+                character_images = image_data.get('character_images', [])
+                result['character_images'] = [
+                    img for img in character_images if img is not None
+                ]
+        
+        #  Add video information if available
+        if data.get('video_data'):
+            video_data = data['video_data']
+            result['video_progress'] = video_data.get('statistics', {})
+            
+            # Include scene videos for frontend display
+            if status in ['video_completed', 'merging_audio', 'completed']:
+                scene_videos = video_data.get('scene_videos', [])
+                result['scene_videos'] = [
+                    video for video in scene_videos if video is not None
+                ]
+        
+        # Add merge information if available
+        if data.get('merge_data'):
+            merge_data = data['merge_data']
+            result['merge_progress'] = merge_data.get('merge_statistics', {})
+            
+            # Include final video information if completed
+            if status == 'completed':
+                result['final_video_ready'] = True
+                result['merge_details'] = {
+                    'processing_time': merge_data.get('merge_statistics', {}).get('processing_time', 0),
+                    'file_size_mb': merge_data.get('merge_statistics', {}).get('file_size_mb', 0),
+                    'scenes_merged': merge_data.get('merge_statistics', {}).get('total_scenes_merged', 0),
+                    'audio_tracks_mixed': merge_data.get('merge_statistics', {}).get('audio_tracks_mixed', 0)
+                }
+        
+         # ✅ NEW: Add lip sync information if available
+        if data.get('lipsync_data'):
+            lipsync_data = data['lipsync_data']
+            result['lipsync_progress'] = lipsync_data.get('statistics', {})
+            
+            # Include lip sync details if completed
+            if status in ['lipsync_completed', 'completed']:
+                result['lipsync_completed'] = True
+                result['lipsync_details'] = {
+                    'characters_lip_synced': lipsync_data.get('statistics', {}).get('characters_lip_synced', 0),
+                    'scenes_processed': lipsync_data.get('statistics', {}).get('total_scenes_processed', 0),
+                    'processing_method': lipsync_data.get('statistics', {}).get('processing_method', 'unknown')
+                }
+                
+                # Include lip synced scenes
+                lip_synced_scenes = lipsync_data.get('lip_synced_scenes', [])
+                result['lip_synced_scenes'] = [
+                    scene for scene in lip_synced_scenes if scene is not None
+                ]
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+# Add this new endpoint after get_character_images function (around line 310):
+
+@router.get("/scene-videos/{video_gen_id}")
+async def get_scene_videos(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get scene videos for a video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        # Get scene videos
+        videos_response = supabase_client.table('video_segments')\
+            .select('*')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('status', 'completed')\
+            .order('scene_id')\
+            .execute()
+        
+        scene_videos = []
+        total_duration = 0.0
+        
+        for video in videos_response.data or []:
+            # Calculate resolution from width and height
+            width = video.get('width', 1024)
+            height = video.get('height', 576)
+            resolution = f"{width}x{height}"
+            
+            scene_videos.append({
+                'id': video['id'],
+                'scene_id': video['scene_id'],
+                'scene_description': video['scene_description'],
+                'video_url': video['video_url'],
+                'duration': video['duration_seconds'],
+                'resolution': video['resolution'],
+                'width': width,  # ✅ Include individual dimensions too
+                'height': height,  # ✅ Include individual dimensions too
+                'fps': video['fps'],
+                'generation_method': video['generation_method'],
+                'created_at': video['created_at']
+            })
+            total_duration += video['duration_seconds']
+        
+        return {
+            'video_generation_id': video_gen_id,
+            'scene_videos': scene_videos,
+            'total_scenes': len(scene_videos),
+            'total_duration': total_duration
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# Add this new endpoint after get_scene_videos function (around line 380):
+
+@router.get("/final-video/{video_gen_id}")
+async def get_final_video(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get final merged video for a video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        data = video_response.data
+        
+        if data['generation_status'] != 'completed':
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Video generation not completed. Current status: {data['generation_status']}"
+            )
+        
+        final_video_url = data.get('video_url')
+        merge_data = data.get('merge_data', {})
+        
+        if not final_video_url:
+            raise HTTPException(status_code=404, detail="Final video not found")
+        
+        return {
+            'video_generation_id': video_gen_id,
+            'final_video_url': final_video_url,
+            'status': 'completed',
+            'merge_statistics': merge_data.get('merge_statistics', {}),
+            'quality_versions': merge_data.get('quality_versions', []),
+            'processing_details': merge_data.get('processing_details', {})
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/merge-status/{video_gen_id}")
+async def get_merge_status(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get detailed merge status and progress"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        data = video_response.data
+        status = data['generation_status']
+        merge_data = data.get('merge_data', {})
+        
+        result = {
+            'video_generation_id': video_gen_id,
+            'merge_status': status,
+            'is_merging': status == 'merging_audio',
+            'is_completed': status == 'completed',
+            'final_video_url': data.get('video_url'),
+            'error_message': data.get('error_message')
+        }
+        
+        # Add merge statistics if available
+        if merge_data:
+            result['merge_statistics'] = merge_data.get('merge_statistics', {})
+            result['processing_details'] = merge_data.get('processing_details', {})
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# Add these new endpoints after get_merge_status function (around line 450):
+
+@router.get("/lip-sync-status/{video_gen_id}")
+async def get_lip_sync_status(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get detailed lip sync status and progress"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        data = video_response.data
+        status = data['generation_status']
+        lipsync_data = data.get('lipsync_data', {})
+        
+        result = {
+            'video_generation_id': video_gen_id,
+            'lipsync_status': status,
+            'is_applying_lipsync': status == 'applying_lipsync',
+            'is_lipsync_completed': status in ['lipsync_completed', 'completed'],
+            'error_message': data.get('error_message')
+        }
+        
+        # Add lip sync statistics if available
+        if lipsync_data:
+            result['lipsync_statistics'] = lipsync_data.get('statistics', {})
+            result['lip_synced_scenes'] = lipsync_data.get('lip_synced_scenes', [])
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/lip-synced-videos/{video_gen_id}")
+async def get_lip_synced_videos(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get lip synced scene videos for a video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        # Get lip synced video segments
+        lipsync_response = supabase_client.table('video_segments')\
+            .select('*')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('generation_method', 'lip_sync')\
+            .eq('status', 'completed')\
+            .order('scene_id')\
+            .execute()
+        
+        lip_synced_videos = []
+        total_duration = 0.0
+        
+        for video in lipsync_response.data or []:
+            metadata = video.get('metadata', {})
+            lip_synced_videos.append({
+                'id': video['id'],
+                'scene_id': video['scene_id'],
+                'original_video_url': metadata.get('original_video_url'),
+                'lipsync_video_url': video['video_url'],
+                'duration': video['duration_seconds'],
+                'characters_processed': metadata.get('characters_processed', []),
+                'faces_detected': metadata.get('faces_detected', 0),
+                'processing_model': video['processing_model'],
+                'created_at': video['created_at']
+            })
+            total_duration += video['duration_seconds']
+        
+        return {
+            'video_generation_id': video_gen_id,
+            'lip_synced_videos': lip_synced_videos,
+            'total_scenes': len(lip_synced_videos),
+            'total_duration': total_duration,
+            'characters_with_lipsync': len(set([
+                char for video in lip_synced_videos 
+                for char in video.get('characters_processed', [])
+            ]))
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/trigger-lip-sync/{video_gen_id}")
+async def trigger_lip_sync_manually(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Manually trigger lip sync processing for a video generation"""
+    try:
+        # Verify access and status
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        data = video_response.data
+        status = data['generation_status']
+        
+        # Check if lip sync can be applied
+        if status not in ['video_completed', 'completed', 'lipsync_failed']:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot apply lip sync. Current status: {status}. Video generation must be completed first."
+            )
+        
+        # Check if character dialogue exists
+        audio_files = data.get('audio_files', {})
+        character_audio = audio_files.get('characters', [])
+        
+        if not character_audio:
+            raise HTTPException(
+                status_code=400,
+                detail="No character dialogue found. Lip sync requires character audio."
+            )
+        
+        # Trigger lip sync task
+        from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
+        task = apply_lip_sync_to_generation.delay(video_gen_id)
+        
+        return {
+            'message': 'Lip sync processing started',
+            'task_id': task.id,
+            'video_generation_id': video_gen_id,
+            'character_dialogues': len(character_audio)
         }
         
     except Exception as e:
@@ -276,7 +638,49 @@ async def get_script_details(
         print(f"Error getting script details: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# get_character_images endpoint:
 
+@router.get("/character-images/{video_gen_id}")
+async def get_character_images(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get character images for a video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        # Get character images
+        images_response = supabase_client.table('image_generations')\
+            .select('*')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('image_type', 'character')\
+            .eq('status', 'completed')\
+            .execute()
+        
+        character_images = []
+        for img in images_response.data or []:
+            character_images.append({
+                'id': img['id'],
+                'character_name': img['character_name'],
+                'image_url': img['image_url'],
+                'prompt': img['image_prompt'],
+                'created_at': img['created_at']
+            })
+        
+        return {
+            'video_generation_id': video_gen_id,
+            'character_images': character_images,
+            'total_characters': len(character_images)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/generate-video-avatar")
 async def generate_video_avatar(

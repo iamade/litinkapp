@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     KLINGAI_ACCESS_KEY_ID: str = os.getenv("KLINGAI_ACCESS_KEY_ID", "")
     KLINGAI_ACCESS_KEY_SECRET: str = os.getenv("KLINGAI_ACCESS_KEY_SECRET", "")
     
+     # ModelsLab
+    MODELSLAB_API_KEY: str = ""
+    MODELSLAB_BASE_URL: str = "https://modelslab.com/api/v6"
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
