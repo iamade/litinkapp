@@ -15,23 +15,23 @@ class ModelsLabAudioService:
         
         # Voice mappings for different character types
         self.narrator_voices = [
-            "en-US-JennyNeural",  # Professional female narrator
-            "en-US-GuyNeural",    # Professional male narrator
+            "madison",            # Female narrator from docs
+            "leo",               # Male narrator from docs
         ]
         
         self.character_voices = {
-            "male_young": "en-US-ChristopherNeural",
-            "male_adult": "en-US-EricNeural", 
-            "male_old": "en-US-GuyNeural",
-            "female_young": "en-US-AriaNeural",
-            "female_adult": "en-US-JennyNeural",
-            "female_old": "en-US-NancyNeural",
+            "male_young": "dan",
+            "male_adult": "leo", 
+            "male_old": "zac",
+            "female_young": "mia",
+            "female_adult": "tara",
+            "female_old": "leah",
         }
 
     async def generate_tts_audio(
         self,
         text: str,
-        voice_id: str = "en-US-JennyNeural",
+        voice_id: str = "madison",
         audio_format: str = "mp3",
         speed: float = 1.0,
         pitch: float = 1.0,
@@ -40,68 +40,104 @@ class ModelsLabAudioService:
     ) -> Dict[str, Any]:
         """Generate TTS audio using ModelsLab API"""
         
+       
         payload = {
             "key": self.api_key,
-            "text": text,
-            "voice": voice_id,
-            "audio_format": audio_format,
-            "speed": speed,
-            "pitch": pitch,
-            "webhook": webhook,
-            "track_id": track_id
+            "prompt": text,  # Use prompt instead of text
+            "voice_id": voice_id,  # Use 'voice' not 'voice_id' 
+            "language": "en-us",
+            "output_format": audio_format,
+            "speed": str(speed),  # Convert to string
+            "bitrate": "320k",
+            "emotion": False,
+            "temp": False
         }
+        
+        if webhook:
+            payload["webhook"] = webhook
+        if track_id:
+            payload["track_id"] = track_id
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/tts",
+                    f"{self.base_url}/voice/text_to_speech",
                     json=payload,
                     headers=self.headers
                 ) as response:
+                    result = await response.json()
+                    print(f"[MODELSLAB TTS] API Response: {result}")
+                    
                     if response.status == 200:
-                        result = await response.json()
-                        return result
+                        # ✅ Handle both sync and async responses
+                        if result.get('status') == 'success':
+                            # Synchronous response - audio ready immediately
+                            return result
+                        elif result.get('status') == 'processing':
+                            # Asynchronous response - need to fetch later
+                            request_id = result.get('id')
+                            if request_id:
+                                # Wait for completion
+                                final_result = await self.wait_for_completion(request_id)
+                                return final_result
+                            else:
+                                raise Exception("No request ID provided for async processing")
+                        else:
+                            raise Exception(f"API returned error: {result.get('message', 'Unknown error')}")
                     else:
                         error_text = await response.text()
                         raise Exception(f"ModelsLab TTS API error: {response.status} - {error_text}")
+                    
         except Exception as e:
             print(f"[MODELSLAB TTS ERROR]: {str(e)}")
             raise e
 
     async def generate_sound_effect(
-        self,
-        description: str,
-        duration: float = 5.0,
-        audio_format: str = "mp3",
-        webhook: Optional[str] = None,
-        track_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Generate sound effects using ModelsLab API"""
+    self,
+    description: str,
+    duration: float = 10.0,  # ✅ Changed default to 10 (API default)
+    audio_format: str = "wav",  # ✅ Changed default to wav (API default)
+    bitrate: str = "128k",  # ✅ Added bitrate parameter
+    temp: bool = False,  # ✅ Added temp parameter
+    webhook: Optional[str] = None,
+    track_id: Optional[str] = None
+) -> Dict[str, Any]:
+        """Generate sound effects using ModelsLab SFX API"""
         
+        # ✅ CORRECTED: Use proper SFX API payload format
         payload = {
             "key": self.api_key,
-            "prompt": f"Generate sound effect: {description}",
-            "duration": duration,
-            "audio_format": audio_format,
-            "webhook": webhook,
-            "track_id": track_id
+            "prompt": description,  # Direct description, no prefix needed
+            "duration": int(duration),  # Must be integer, 3-15 seconds range
+            "output_format": audio_format,  # wav, mp3, flac
+            "bitrate": bitrate,  # 128k, 192k, 320k
+            "temp": temp  # TRUE or FALSE
         }
+        
+        if webhook:
+            payload["webhook"] = webhook
+        if track_id:
+            payload["track_id"] = track_id
 
         try:
             async with aiohttp.ClientSession() as session:
+                # ✅ CORRECTED: Use the proper SFX endpoint from docs
                 async with session.post(
-                    f"{self.base_url}/audio-generation", 
+                    f"{self.base_url}/voice/sfx",  # Correct SFX endpoint
                     json=payload,
                     headers=self.headers
                 ) as response:
-                    if response.status == 200:
-                        result = await response.json()
+                    result = await response.json()
+                    print(f"[MODELSLAB SFX] API Response: {result}")
+                    
+                    if response.status == 200 and result.get('status') == 'success':
                         return result
                     else:
-                        error_text = await response.text()
-                        raise Exception(f"ModelsLab Audio Generation API error: {response.status} - {error_text}")
+                        print(f"[MODELSLAB SFX ERROR] {response.status}: {result}")
+                        raise Exception(f"ModelsLab SFX API error: {result.get('message', 'Unknown error')}")
+                        
         except Exception as e:
-            print(f"[MODELSLAB SOUND EFFECT ERROR]: {str(e)}")
+            print(f"[MODELSLAB SFX ERROR]: {str(e)}")
             raise e
 
     def assign_character_voice(self, character_name: str, character_description: str = "") -> str:
@@ -123,51 +159,56 @@ class ModelsLabAudioService:
             return self.character_voices.get("male_adult")
 
     async def wait_for_completion(
-        self,
-        request_id: str,
-        max_wait_time: int = 120,  # 2 minutes for audio
-        check_interval: int = 5    # 5 seconds
-    ) -> Dict[str, Any]:
-        """Wait for audio generation to complete"""
+    self,
+    request_id: str,
+    max_wait_time: int = 300,
+    check_interval: int = 10
+) -> Dict[str, Any]:
+        """Wait for async generation to complete"""
         
         elapsed_time = 0
         while elapsed_time < max_wait_time:
             try:
-                # Check status payload
-                status_payload = {
+                payload = {
                     "key": self.api_key,
-                    "request_id": request_id
+                    "request_id": str(request_id)
                 }
                 
                 async with aiohttp.ClientSession() as session:
+                    # ✅ Use the fetch endpoint from ModelsLab response
                     async with session.post(
-                        f"{self.base_url}/fetch",
-                        json=status_payload,
+                        f"{self.base_url}/voice/fetch/{request_id}",
+                        json=payload,
                         headers=self.headers
                     ) as response:
                         if response.status == 200:
                             result = await response.json()
                             
-                            status = result.get('status')
-                            if status == 'success':
+                            if result.get('status') == 'success':
+                                print(f"[MODELSLAB] Audio generation completed: {result.get('output', [])}")
                                 return result
-                            elif status == 'failed':
-                                raise Exception(f"Audio generation failed: {result.get('message', 'Unknown error')}")
-                            elif status in ['processing', 'queued']:
+                            elif result.get('status') == 'failed':
+                                raise Exception(f"Generation failed: {result.get('message', 'Unknown error')}")
+                            elif result.get('status') in ['processing', 'queued']:
+                                print(f"[MODELSLAB] Still processing... waiting {check_interval}s")
+                                await asyncio.sleep(check_interval)
+                                elapsed_time += check_interval
+                                continue
+                            else:
+                                # Unknown status, wait and retry
                                 await asyncio.sleep(check_interval)
                                 elapsed_time += check_interval
                                 continue
                         else:
-                            # If status check fails, wait and retry
                             await asyncio.sleep(check_interval)
                             elapsed_time += check_interval
                             continue
                             
             except Exception as e:
+                print(f"[MODELSLAB] Fetch error: {str(e)}")
                 if elapsed_time >= max_wait_time - check_interval:
-                    raise Exception(f"Audio generation timeout after {max_wait_time} seconds: {str(e)}")
+                    raise Exception(f"Generation timeout after {max_wait_time} seconds: {str(e)}")
                 await asyncio.sleep(check_interval)
                 elapsed_time += check_interval
-                continue
 
-        raise Exception(f"Audio generation timeout after {max_wait_time} seconds")
+        raise Exception(f"Generation timeout after {max_wait_time} seconds")

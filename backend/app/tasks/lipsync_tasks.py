@@ -1,4 +1,4 @@
-from app.core.celery_app import celery_app
+from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List, Optional
 from app.services.modelslab_service import ModelsLabService

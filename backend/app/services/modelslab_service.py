@@ -64,7 +64,7 @@ class ModelsLabService:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/text2img",
+                    f"{self.base_url}/realtime/text2img",
                     json=payload,
                     headers=self.headers
                 ) as response:
@@ -174,7 +174,7 @@ class ModelsLabService:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/image2video",
+                    f"{self.base_url}/video/img2video",
                     json=payload,
                     headers=self.headers
                 ) as response:
@@ -219,7 +219,7 @@ class ModelsLabService:
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    f"{self.base_url}/text2video",
+                    f"{self.base_url}/video/text2video",
                     json=payload,
                     headers=self.headers
                 ) as response:

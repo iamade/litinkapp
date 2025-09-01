@@ -11,6 +11,22 @@ interface Chapter {
   content: string;
 }
 
+interface VideoGenerationResponse {
+  video_generation_id: string;
+  script_id: string;
+  status: string;
+  audio_task_id?: string;
+  task_status?: string;
+  message: string;
+  script_info: {
+    script_style: string;
+    video_style: string;
+    scenes: number;
+    characters: number;
+    created_at: string;
+  };
+}
+
 interface Book {
   id: string;
   title: string;
@@ -38,7 +54,7 @@ export default function BookViewForEntertainment() {
   const [videoGenerationId, setVideoGenerationId] = useState<string | null>(
     null
   );
-  const [videoStatus, setVideoStatus] = useState<string>("idle");
+  const [videoStatus, setVideoStatus] = useState<string | null>("idle");
 
   const [showFullScript, setShowFullScript] = useState(false);
   const [animationStyle, setAnimationStyle] = useState<
@@ -65,6 +81,10 @@ export default function BookViewForEntertainment() {
 
   const [showScriptModal, setShowScriptModal] = useState(false);
   const [modalScript, setModalScript] = useState<any>(null);
+
+  // Add new state for task tracking
+  const [audioTaskId, setAudioTaskId] = useState<string | null>(null);
+  const [taskStatus, setTaskStatus] = useState<string | null>(null);
 
   // Add function to fetch scripts
   const fetchGeneratedScripts = async (chapterId: string) => {
@@ -142,24 +162,24 @@ export default function BookViewForEntertainment() {
         return;
       }
 
-      // Start video generation with the selected script
+      // Use the enhanced service method
       const result = await userService.generateEntertainmentVideo(
         selectedChapter.id,
-        "basic", // quality_tier
-        animationStyle, // video_style
-        selectedScript.id // script_id
+        "basic",
+        animationStyle,
+        selectedScript.id
       );
 
-      if (result.video_generation_id) {
-        setVideoGenerationId(result.video_generation_id);
-        setVideoStatus("processing");
-        toast.success(
-          `Video generation started! Using: ${selectedScript.script_style} script`
-        );
+      // Store task info for monitoring
+      setVideoGenerationId(result.video_generation_id);
+      setAudioTaskId(result.audio_task_id || null);
+      setTaskStatus(result.task_status || null);
+      setVideoStatus("processing");
 
-        // Start polling for status
-        pollVideoStatus(result.video_generation_id);
-      }
+      toast.success(`Video generation started! ${result.message}`);
+
+      // Start polling for status updates
+      pollVideoStatus(result.video_generation_id);
     } catch (error) {
       console.error("Error generating video:", error);
       toast.error(error.message || "Failed to start video generation");
@@ -173,9 +193,14 @@ export default function BookViewForEntertainment() {
       try {
         const data = await userService.getVideoGenerationStatus(videoGenId);
 
-        setVideoStatus(data.status);
+        setVideoStatus(data.generation_status);
 
-        if (data.status === "completed" && data.video_url) {
+        // Update task status if available
+        if (data.task_metadata?.audio_task_state) {
+          setTaskStatus(data.task_metadata.audio_task_state);
+        }
+
+        if (data.generation_status === "completed" && data.video_url) {
           setVideoUrls((prev) => ({
             ...prev,
             [selectedChapter!.id]: data.video_url!,
@@ -184,8 +209,8 @@ export default function BookViewForEntertainment() {
           return;
         }
 
-        if (data.status === "failed") {
-          toast.error("Video generation failed");
+        if (data.generation_status === "failed") {
+          toast.error(data.error_message || "Video generation failed");
           return;
         }
 
@@ -197,7 +222,9 @@ export default function BookViewForEntertainment() {
             "generating_images",
             "generating_video",
             "combining",
-          ].includes(data.status)
+            "merging_audio",
+            "applying_lipsync",
+          ].includes(data.generation_status)
         ) {
           setTimeout(checkStatus, 3000); // Poll every 3 seconds
         }
@@ -208,6 +235,11 @@ export default function BookViewForEntertainment() {
     };
 
     checkStatus();
+  };
+
+  const formatStatus = (status: string | null | undefined): string => {
+    if (!status) return "Initializing";
+    return status.replace(/_/g, " ");
   };
 
   const handleGenerateScript = async () => {
@@ -567,6 +599,109 @@ export default function BookViewForEntertainment() {
                       />
                     </div>
                   )}
+
+                  {/* Add Task Status Display after video generation controls */}
+                  {audioTaskId && (
+                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                      <h4 className="font-medium text-blue-900 mb-2">
+                        Task Information
+                      </h4>
+                      <div className="text-sm space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-blue-700">Audio Task ID:</span>
+                          <code className="text-blue-800 bg-blue-100 px-1 rounded">
+                            {audioTaskId.substring(0, 12)}...
+                          </code>
+                        </div>
+                        {taskStatus && (
+                          <div className="flex justify-between">
+                            <span className="text-blue-700">Task Status:</span>
+                            <span className="text-blue-800 font-medium">
+                              {taskStatus}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex justify-between">
+                          <span className="text-blue-700">
+                            Generation Status:
+                          </span>
+                          <span className="text-blue-800 font-medium capitalize">
+                            {formatStatus(videoStatus)}
+                          </span>
+                          {/* <span className="text-blue-800 font-medium capitalize">
+                            {videoStatus.replace("_", " ")}
+                          </span> */}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Enhanced Video Status Display - replace your existing video status display */}
+                  {videoStatus !== "idle" && !currentVideoUrl && (
+                    <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
+                      <div className="flex items-center gap-3">
+                        {videoStatus === "starting" && (
+                          <>
+                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span>Initializing video generation...</span>
+                          </>
+                        )}
+                        {videoStatus === "generating_audio" && (
+                          <>
+                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span>
+                              Step 1/5: Generating audio and voices...
+                            </span>
+                          </>
+                        )}
+                        {videoStatus === "generating_images" && (
+                          <>
+                            <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span>Step 2/5: Creating character images...</span>
+                          </>
+                        )}
+                        {videoStatus === "generating_video" && (
+                          <>
+                            <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span>Step 3/5: Generating video scenes...</span>
+                          </>
+                        )}
+                        {videoStatus === "merging_audio" && (
+                          <>
+                            <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span>Step 4/5: Merging audio and video...</span>
+                          </>
+                        )}
+                        {videoStatus === "applying_lipsync" && (
+                          <>
+                            <div className="w-4 h-4 border-2 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span>Step 5/5: Applying lip sync...</span>
+                          </>
+                        )}
+                        {videoStatus === "processing" && (
+                          <>
+                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                            <span>Processing your video...</span>
+                          </>
+                        )}
+                        {videoStatus === "error" && (
+                          <>
+                            <div className="w-4 h-4 bg-red-500 rounded-full"></div>
+                            <span className="text-red-600">
+                              Generation failed. Please try again.
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      {audioTaskId && (
+                        <div className="mt-2 text-xs text-gray-500">
+                          Tracking ID: {audioTaskId.substring(0, 8)}...
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* AI Script & Scene Descriptions Display (separate from video) */}
                   {selectedChapter && aiScriptResults[selectedChapter.id] && (
                     <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
@@ -601,7 +736,6 @@ export default function BookViewForEntertainment() {
                   )}
                 </div>
               )}
-              
             </div>
           </div>
         </div>

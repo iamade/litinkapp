@@ -1,5 +1,6 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Body
+from app.schemas.video import VideoGenerationRequest, VideoGenerationResponse
 from supabase import Client
 import time
 
@@ -134,18 +135,22 @@ async def generate_tutorial_video(
         print(f"Error generating tutorial video: {e}")
         raise HTTPException(status_code=500, detail=str(e))
  
-@router.post("/generate-entertainment-video")
+@router.post("/generate-entertainment-video", response_model=VideoGenerationResponse)
 async def generate_entertainment_video(
-    request: dict = Body(...),
+    request: VideoGenerationRequest, 
+    # request: dict = Body(...),
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
     """Generate entertainment video using already saved script"""
     try:
+        chapter_id = request.chapter_id
+        quality_tier = request.quality_tier
+        video_style = request.video_style
         # Extract parameters from request body
-        chapter_id = request.get('chapter_id')
-        quality_tier = request.get('quality_tier', 'basic')
-        video_style = request.get('video_style', 'realistic')  # This is for visual styling
+        # chapter_id = request.get('chapter_id')
+        # quality_tier = request.get('quality_tier', 'basic')
+        # video_style = request.get('video_style', 'realistic')  # This is for visual styling
         
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
@@ -184,24 +189,68 @@ async def generate_entertainment_video(
         }).execute()
 
         video_gen_id = video_generation.data[0]['id']
-
-        # Step 3: Start audio generation (first step in pipeline)
-        from app.tasks.audio_tasks import generate_all_audio_for_video
-        generate_all_audio_for_video.delay(video_gen_id)
         
-        return {
-            "video_generation_id": video_gen_id,
-            "script_id": script_data['id'],
-            "status": "queued",
-            "message": "Video generation started using saved script",
-            "script_info": {
-                "script_style": script_data['script_style'],  # What type of script (movie/narration)
-                "video_style": video_style,  # How the video should look (realistic/cinematic/etc)
+        try:
+            # Step 3: Start audio generation (first step in pipeline)
+            from app.tasks.audio_tasks import generate_all_audio_for_video
+            print(f"✅ Starting audio generation for video: {video_gen_id}")
+    
+            task = generate_all_audio_for_video.delay(video_gen_id)
+            print(f"✅ Audio task queued successfully: {task.id}")
+            
+            # Store task ID and update status in database
+            supabase_client.table('video_generations').update({
+                'audio_task_id': task.id,
+                'generation_status': 'generating_audio',
+                'task_metadata': {
+                    'audio_task_id': task.id,
+                    'audio_task_state': task.state,
+                    'started_at': datetime.now().isoformat()
+                }
+            }).eq('id', video_gen_id).execute()
+
+        
+        except Exception as e:
+            print(f"❌ Failed to queue audio task: {e}")
+            
+            supabase_client.table('video_generations').update({
+                'generation_status': 'failed',
+                'error_message': f"Failed to start audio generation: {str(e)}"
+            }).eq('id', video_gen_id).execute()
+            
+            raise e
+        
+        return VideoGenerationResponse(
+            video_generation_id=video_gen_id,
+            script_id=script_data['id'],
+            status="queued",
+            audio_task_id=task.id,
+            task_status=task.state,
+            message="Video generation started using saved script",
+            script_info={
+                "script_style": script_data['script_style'],
+                "video_style": video_style,  # ✅ Now this works
                 "scenes": len(script_data.get('scene_descriptions', [])),
                 "characters": len(script_data.get('characters', [])),
                 "created_at": script_data['created_at']
             }
-        }
+        )
+            
+        # return VideoGenerationResponse(
+        #     video_generation_id=video_gen_id,
+        #     script_id=script_data['id'],
+        #     status="queued",
+        #     audio_task_id=task.id,
+        #     task_status=task.state,
+        #     message="Video generation started using saved script",
+        #     script_info={
+        #         "script_style": script_data['script_style'],
+        #         "video_style": request.get('video_style', 'realistic'), 
+        #         "scenes": len(script_data.get('scene_descriptions', [])),
+        #         "characters": len(script_data.get('characters', [])),
+        #         "created_at": script_data['created_at']
+        #     }
+        # )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))   
@@ -223,13 +272,41 @@ async def get_video_generation_status(
         data = response.data
         status = data['generation_status']
         
+        task_metadata = data.get('task_metadata', {})
+        audio_task_id = task_metadata.get('audio_task_id') or data.get('audio_task_id')
+        
+        if audio_task_id and status in ['generating_audio', 'pending']:
+            try:
+                from app.tasks.celery_app import celery_app
+                task_result = celery_app.AsyncResult(audio_task_id)
+                
+                if task_result.state == 'SUCCESS':
+                    # Task completed but DB not updated yet
+                    status = 'audio_completed'
+                elif task_result.state == 'FAILURE':
+                    status = 'failed'
+                    data['error_message'] = str(task_result.result)
+                elif task_result.state == 'PENDING':
+                    status = 'generating_audio'
+                
+                # Add task info to response
+                data['task_info'] = {
+                    'task_id': audio_task_id,
+                    'task_state': task_result.state,
+                    'task_result': str(task_result.result) if task_result.result else None
+                }
+            except Exception as e:
+                print(f"Error checking task status: {e}")
+        
         # Base response
         result = {
             'status': status,
+            'generation_status': status, 
             'quality_tier': data['quality_tier'],
             'video_url': data.get('video_url'),
             'created_at': data['created_at'],
-            'script_id': data.get('script_id')
+            'script_id': data.get('script_id'),
+            'error_message': data.get('error_message')
         }
         
         # Add audio information if available
@@ -241,6 +318,10 @@ async def get_video_generation_status(
                 'sound_effects': len(audio_data.get('sound_effects', [])),
                 'background_music': len(audio_data.get('background_music', []))
             }
+            
+        # Add task info if available
+        if 'task_info' in data:
+            result['task_info'] = data['task_info']
         
         # Add image information if available
         if data.get('image_data'):

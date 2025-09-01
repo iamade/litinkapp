@@ -1,4 +1,4 @@
-from celery import Celery
+from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List
 from app.services.modelslab_audio_service import ModelsLabAudioService
@@ -8,7 +8,7 @@ from app.core.config import settings
 from datetime import datetime
 import json
 
-celery_app = Celery('audio_tasks')
+# celery_app = Celery('audio_tasks')
 
 @celery_app.task(bind=True)
 def generate_all_audio_for_video(self, video_generation_id: str):
@@ -63,7 +63,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
         ))
         
         # 3. Generate sound effects
-        sound_effect_results = asyncio.run(generate_sound_effects(
+        sound_effect_results = asyncio.run(generate_sound_effects_audio(
             audio_service, video_generation_id, audio_components['sound_effects']
         ))
         
@@ -139,6 +139,9 @@ def generate_all_audio_for_video(self, video_generation_id: str):
         # })
         
         raise Exception(error_message)
+    
+
+# Fix database insert operations throughout the file
 
 async def generate_narrator_audio(
     audio_service: ModelsLabAudioService, 
@@ -151,8 +154,8 @@ async def generate_narrator_audio(
     narrator_results = []
     supabase = get_supabase()
     
-    # Use consistent narrator voice
-    narrator_voice = audio_service.narrator_voices[0]  # Default female narrator
+    # Use consistent narrator voice - fix voice access
+    narrator_voice = "madison"  # Direct string instead of list access
     
     for i, segment in enumerate(narrator_segments):
         try:
@@ -162,67 +165,311 @@ async def generate_narrator_audio(
             result = await audio_service.generate_tts_audio(
                 text=segment['text'],
                 voice_id=narrator_voice,
-                speed=1.0,
-                pitch=1.0
+                speed=1.0
             )
             
-            # Handle async response
+            # ✅ FIXED: Extract audio URL from correct response structure
+            audio_url = None
+            duration = 0
+            
             if result.get('status') == 'success':
-                audio_url = result.get('output', [{}])[0].get('audio_url')
-            else:
-                # Wait for completion if async
-                request_id = result.get('id')
-                if request_id:
-                    final_result = await audio_service.wait_for_completion(request_id)
-                    audio_url = final_result.get('output', [{}])[0].get('audio_url')
+                output_urls = result.get('output', [])
+                if output_urls:
+                    audio_url = output_urls[0]
+                    duration = result.get('audio_time', 0) or result.get('meta', {}).get('duration', 0)
                 else:
-                    raise Exception("Failed to get audio URL")
+                    raise Exception("No audio URL in response")
+            else:
+                raise Exception(f"Audio generation failed: {result.get('message', 'Unknown error')}")
             
-            # Estimate duration
-            duration = ScriptParser().estimate_audio_duration(segment['text'])
-            
-            # Store in database
-            audio_record = supabase.table('audio_generations').insert({
+            # ✅ FIXED: Use correct column names for database
+            audio_record_data = {
                 'video_generation_id': video_gen_id,
                 'audio_type': 'narrator',
-                'scene_id': f"scene_{segment['scene']}",
                 'text_content': segment['text'],
                 'voice_id': narrator_voice,
                 'audio_url': audio_url,
-                'duration_seconds': duration,
-                'status': 'completed',
+                'duration': float(duration),  # Use 'duration' not 'duration_seconds'
+                'generation_status': 'completed',  # Use 'generation_status' not 'status'
+                'sequence_order': i + 1,
                 'metadata': {
-                    'line_number': segment['line_number'],
+                    'line_number': segment.get('line_number', i + 1),
+                    'scene': segment.get('scene', 1),
                     'service': 'modelslab'
                 }
-            }).execute()
+            }
+            
+            # Insert to database
+            audio_record = supabase.table('audio_generations').insert(audio_record_data).execute()
             
             narrator_results.append({
                 'id': audio_record.data[0]['id'],
-                'scene': segment['scene'],
+                'scene': segment.get('scene', 1),
                 'audio_url': audio_url,
                 'duration': duration,
                 'text': segment['text']
             })
             
-            print(f"[NARRATOR AUDIO] ✅ Generated segment {i+1} - Duration: {duration:.1f}s")
+            print(f"[NARRATOR AUDIO] ✅ Generated segment {i+1} - Duration: {duration}s")
             
         except Exception as e:
             print(f"[NARRATOR AUDIO] ❌ Failed segment {i+1}: {str(e)}")
             
-            # Store failed record
-            supabase.table('audio_generations').insert({
+            # ✅ FIXED: Use correct column names for failed records
+            failed_record_data = {
                 'video_generation_id': video_gen_id,
                 'audio_type': 'narrator',
-                'scene_id': f"scene_{segment['scene']}",
                 'text_content': segment['text'],
                 'voice_id': narrator_voice,
-                'status': 'failed',
-                'error_message': str(e)
-            }).execute()
+                'generation_status': 'failed',
+                'error_message': str(e),
+                'sequence_order': i + 1,
+                'metadata': {
+                    'line_number': segment.get('line_number', i + 1),
+                    'scene': segment.get('scene', 1)
+                }
+            }
+            supabase.table('audio_generations').insert(failed_record_data).execute()
     
     print(f"[NARRATOR AUDIO] Completed: {len(narrator_results)}/{len(narrator_segments)} segments")
     return narrator_results
+
+async def generate_sound_effects_audio(
+    audio_service: ModelsLabAudioService,
+    video_gen_id: str, 
+    sound_effects: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Generate sound effects audio"""
+    
+    print(f"[SOUND EFFECTS] Generating sound effects...")
+    effects_results = []
+    supabase = get_supabase()
+    
+    for i, effect in enumerate(sound_effects):
+        try:
+            print(f"[SOUND EFFECTS] Processing effect {i+1}/{len(sound_effects)}: {effect['description']}")
+            
+            # ✅ UPDATED: Use proper SFX API call
+            result = await audio_service.generate_sound_effect(
+                description=effect['description'],
+                duration=min(15.0, max(3.0, effect.get('duration', 10.0))),
+                audio_format="wav",
+                bitrate="192k",
+                temp=False
+            )
+            
+            if result.get('status') == 'success':
+                output_urls = result.get('output', [])
+                if output_urls:
+                    audio_url = output_urls[0]
+                    duration = result.get('audio_time', 10) or result.get('meta', {}).get('duration', 10)
+                    
+                    # ✅ FIXED: Correct column names
+                    audio_data = {
+                        'video_generation_id': video_gen_id,
+                        'audio_type': 'sfx',
+                        'text_content': effect['description'],
+                        'audio_url': audio_url,
+                        'duration': float(duration),  # Use 'duration'
+                        'sequence_order': i + 1,
+                        'generation_status': 'completed',  # Use 'generation_status'
+                        'metadata': {
+                            'effect_type': 'ambient',
+                            'service': 'modelslab'
+                        }
+                    }
+                    
+                    db_result = supabase.table('audio_generations').insert(audio_data).execute()
+                    
+                    effects_results.append({
+                        'effect_id': i + 1,
+                        'audio_url': audio_url,
+                        'description': effect['description'],
+                        'duration': duration,
+                        'db_id': db_result.data[0]['id'] if db_result.data else None
+                    })
+                    
+                    print(f"[SOUND EFFECTS] ✅ Effect {i+1} completed: {audio_url}")
+                else:
+                    raise Exception("No audio URL in response")
+            else:
+                raise Exception(f"API returned error: {result.get('message', 'Unknown error')}")
+                
+        except Exception as e:
+            print(f"[SOUND EFFECTS] ❌ Failed: {effect['description']} - {str(e)}")
+            
+            # ✅ FIXED: Correct column names for failed records
+            failed_audio_data = {
+                'video_generation_id': video_gen_id,
+                'audio_type': 'sfx',
+                'text_content': effect['description'],
+                'error_message': str(e),
+                'sequence_order': i + 1,
+                'generation_status': 'failed'  # Use 'generation_status'
+            }
+            supabase.table('audio_generations').insert(failed_audio_data).execute()
+            continue
+    
+    print(f"[SOUND EFFECTS] Completed: {len(effects_results)}/{len(sound_effects)} effects")
+    return effects_results
+
+# async def generate_narrator_audio(
+#     audio_service: ModelsLabAudioService, 
+#     video_gen_id: str, 
+#     narrator_segments: List[Dict[str, Any]]
+# ) -> List[Dict[str, Any]]:
+#     """Generate narrator voice audio"""
+    
+#     print(f"[NARRATOR AUDIO] Generating narrator voice...")
+#     narrator_results = []
+#     supabase = get_supabase()
+    
+#     # Use consistent narrator voice
+#     narrator_voice = audio_service.narrator_voices[0]  # Default female narrator
+    
+#     for i, segment in enumerate(narrator_segments):
+#         try:
+#             print(f"[NARRATOR AUDIO] Processing segment {i+1}/{len(narrator_segments)}")
+            
+#             # Generate audio
+#             result = await audio_service.generate_tts_audio(
+#                 text=segment['text'],
+#                 voice_id=narrator_voice,
+#                 speed=1.0,
+#                 pitch=1.0
+#             )
+            
+#             # Handle async response
+#             if result.get('status') == 'success':
+#                 audio_url = result.get('output', [{}])[0].get('audio_url')
+#             else:
+#                 # Wait for completion if async
+#                 request_id = result.get('id')
+#                 if request_id:
+#                     final_result = await audio_service.wait_for_completion(request_id)
+#                     audio_url = final_result.get('output', [{}])[0].get('audio_url')
+#                 else:
+#                     raise Exception("Failed to get audio URL")
+            
+#             # Estimate duration
+#             duration = ScriptParser().estimate_audio_duration(segment['text'])
+            
+#             # Store in database
+#             audio_record = supabase.table('audio_generations').insert({
+#                 'video_generation_id': video_gen_id,
+#                 'audio_type': 'narrator',
+#                 'scene_id': f"scene_{segment['scene']}",
+#                 'text_content': segment['text'],
+#                 'voice_id': narrator_voice,
+#                 'audio_url': audio_url,
+#                 'duration_seconds': duration,
+#                 'status': 'completed',
+#                 'metadata': {
+#                     'line_number': segment['line_number'],
+#                     'service': 'modelslab'
+#                 }
+#             }).execute()
+            
+#             narrator_results.append({
+#                 'id': audio_record.data[0]['id'],
+#                 'scene': segment['scene'],
+#                 'audio_url': audio_url,
+#                 'duration': duration,
+#                 'text': segment['text']
+#             })
+            
+#             print(f"[NARRATOR AUDIO] ✅ Generated segment {i+1} - Duration: {duration:.1f}s")
+            
+#         except Exception as e:
+#             print(f"[NARRATOR AUDIO] ❌ Failed segment {i+1}: {str(e)}")
+            
+#             # Store failed record
+#             supabase.table('audio_generations').insert({
+#                 'video_generation_id': video_gen_id,
+#                 'audio_type': 'narrator',
+#                 'scene_id': f"scene_{segment['scene']}",
+#                 'text_content': segment['text'],
+#                 'voice_id': narrator_voice,
+#                 'status': 'failed',
+#                 'error_message': str(e)
+#             }).execute()
+    
+#     print(f"[NARRATOR AUDIO] Completed: {len(narrator_results)}/{len(narrator_segments)} segments")
+#     return narrator_results
+
+# async def generate_sound_effects_audio(
+#     audio_service: ModelsLabAudioService,
+#     video_gen_id: str, 
+#     sound_effects: List[Dict[str, Any]]
+# ) -> List[Dict[str, Any]]:
+#     """Generate sound effects audio"""
+    
+#     print(f"[SOUND EFFECTS] Generating sound effects...")
+#     effects_results = []
+#     supabase = get_supabase()
+    
+#     for i, effect in enumerate(sound_effects):
+#         try:
+#             print(f"[SOUND EFFECTS] Processing effect {i+1}/{len(sound_effects)}: {effect['description']}")
+            
+#             # ✅ UPDATED: Use proper SFX API call
+#             result = await audio_service.generate_sound_effect(
+#                 description=effect['description'],
+#                 duration=min(15.0, max(3.0, effect.get('duration', 10.0))),  # Clamp to 3-15 seconds
+#                 audio_format="wav",  # Use WAV for better quality
+#                 bitrate="192k",  # Higher quality
+#                 temp=False
+#             )
+            
+#             if result.get('status') == 'success':
+#                 output_urls = result.get('output', [])
+#                 if output_urls:
+#                     audio_url = output_urls[0]
+                    
+#                     # Create database record
+#                     audio_data = {
+#                         'video_generation_id': video_gen_id,
+#                         'audio_type': 'sound_effect',
+#                         'text_content': effect['description'],
+#                         'audio_url': audio_url,
+#                         'duration': result.get('meta', {}).get('duration', effect.get('duration', 10)),
+#                         'sequence_order': i + 1,
+#                         'generation_status': 'completed'
+#                     }
+                    
+#                     db_result = supabase.table('audio_generations').insert(audio_data).execute()
+                    
+#                     effects_results.append({
+#                         'effect_id': i + 1,
+#                         'audio_url': audio_url,
+#                         'description': effect['description'],
+#                         'duration': result.get('meta', {}).get('duration', effect.get('duration', 10)),
+#                         'db_id': db_result.data[0]['id'] if db_result.data else None
+#                     })
+                    
+#                     print(f"[SOUND EFFECTS] ✅ Effect {i+1} completed: {audio_url}")
+#                 else:
+#                     raise Exception("No audio URL in response")
+#             else:
+#                 raise Exception(f"API returned error: {result.get('message', 'Unknown error')}")
+                
+#         except Exception as e:
+#             print(f"[SOUND EFFECTS] ❌ Failed: {effect['description']} - {str(e)}")
+            
+#             # Log failed generation
+#             failed_audio_data = {
+#                 'video_generation_id': video_gen_id,
+#                 'audio_type': 'sound_effect',
+#                 'text_content': effect['description'],
+#                 'error_message': str(e),
+#                 'sequence_order': i + 1,
+#                 'generation_status': 'failed'
+#             }
+#             supabase.table('audio_generations').insert(failed_audio_data).execute()
+#             continue
+    
+#     print(f"[SOUND EFFECTS] Completed: {len(effects_results)}/{len(sound_effects)} effects")
+#     return effects_results
 
 async def generate_character_audio(
     audio_service: ModelsLabAudioService,
@@ -316,79 +563,6 @@ async def generate_character_audio(
     print(f"[CHARACTER AUDIO] Completed: {len(character_results)} dialogues for {unique_characters} characters")
     return character_results
 
-async def generate_sound_effects(
-    audio_service: ModelsLabAudioService,
-    video_gen_id: str,
-    sound_effects: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
-    """Generate sound effects audio"""
-    
-    print(f"[SOUND EFFECTS] Generating sound effects...")
-    sound_results = []
-    supabase = get_supabase()
-    
-    for i, effect in enumerate(sound_effects):
-        try:
-            print(f"[SOUND EFFECTS] Processing effect {i+1}/{len(sound_effects)}: {effect['description']}")
-            
-            # Generate sound effect
-            result = await audio_service.generate_sound_effect(
-                description=effect['description'],
-                duration=5.0  # Default 5 seconds
-            )
-            
-            # Handle response
-            if result.get('status') == 'success':
-                audio_url = result.get('output', [{}])[0].get('audio_url')
-            else:
-                request_id = result.get('id')
-                if request_id:
-                    final_result = await audio_service.wait_for_completion(request_id)
-                    audio_url = final_result.get('output', [{}])[0].get('audio_url')
-                else:
-                    raise Exception("Failed to get audio URL")
-            
-            # Store in database
-            audio_record = supabase.table('audio_generations').insert({
-                'video_generation_id': video_gen_id,
-                'audio_type': 'sound_effects',
-                'scene_id': f"scene_{effect.get('scene', 1)}",
-                'text_content': effect['description'],
-                'audio_url': audio_url,
-                'duration_seconds': 5.0,
-                'status': 'completed',
-                'metadata': {
-                    'effect_type': effect.get('type', 'general'),
-                    'line_number': effect.get('line_number'),
-                    'service': 'modelslab'
-                }
-            }).execute()
-            
-            sound_results.append({
-                'id': audio_record.data[0]['id'],
-                'scene': effect.get('scene', 1),
-                'audio_url': audio_url,
-                'description': effect['description'],
-                'duration': 5.0
-            })
-            
-            print(f"[SOUND EFFECTS] ✅ Generated: {effect['description']}")
-            
-        except Exception as e:
-            print(f"[SOUND EFFECTS] ❌ Failed: {effect['description']} - {str(e)}")
-            
-            supabase.table('audio_generations').insert({
-                'video_generation_id': video_gen_id,
-                'audio_type': 'sound_effects',
-                'scene_id': f"scene_{effect.get('scene', 1)}",
-                'text_content': effect['description'],
-                'status': 'failed',
-                'error_message': str(e)
-            }).execute()
-    
-    print(f"[SOUND EFFECTS] Completed: {len(sound_results)}/{len(sound_effects)} effects")
-    return sound_results
-
 async def generate_background_music(
     audio_service: ModelsLabAudioService,
     video_gen_id: str,
@@ -404,7 +578,7 @@ async def generate_background_music(
         try:
             print(f"[BACKGROUND MUSIC] Processing scene {music_cue['scene']}: {music_cue['description']}")
             
-            # Generate background music
+            # Generate background music using sound effect API
             result = await audio_service.generate_sound_effect(
                 description=music_cue['description'],
                 duration=30.0  # Longer duration for background music
@@ -412,52 +586,126 @@ async def generate_background_music(
             
             # Handle response
             if result.get('status') == 'success':
-                audio_url = result.get('output', [{}])[0].get('audio_url')
-            else:
-                request_id = result.get('id')
-                if request_id:
-                    final_result = await audio_service.wait_for_completion(request_id)
-                    audio_url = final_result.get('output', [{}])[0].get('audio_url')
+                output_urls = result.get('output', [])
+                if output_urls:
+                    audio_url = output_urls[0]
+                    duration = result.get('audio_time', 30) or 30.0
+                    
+                    # ✅ FIXED: Use correct enum value
+                    audio_record = supabase.table('audio_generations').insert({
+                        'video_generation_id': video_gen_id,
+                        'audio_type': 'music',  # ✅ Use 'music' instead of 'background_music'
+                        'text_content': music_cue['description'],
+                        'audio_url': audio_url,
+                        'duration': float(duration),
+                        'generation_status': 'completed',
+                        'sequence_order': i + 1,
+                        'metadata': {
+                            'music_type': music_cue.get('type', 'background_music'),
+                            'scene': music_cue['scene'],
+                            'service': 'modelslab'
+                        }
+                    }).execute()
+                    
+                    music_results.append({
+                        'id': audio_record.data[0]['id'],
+                        'scene': music_cue['scene'],
+                        'audio_url': audio_url,
+                        'description': music_cue['description'],
+                        'duration': duration
+                    })
+                    
+                    print(f"[BACKGROUND MUSIC] ✅ Generated for Scene {music_cue['scene']}")
                 else:
-                    raise Exception("Failed to get audio URL")
-            
-            # Store in database
-            audio_record = supabase.table('audio_generations').insert({
-                'video_generation_id': video_gen_id,
-                'audio_type': 'background_music',
-                'scene_id': f"scene_{music_cue['scene']}",
-                'text_content': music_cue['description'],
-                'audio_url': audio_url,
-                'duration_seconds': 30.0,
-                'status': 'completed',
-                'metadata': {
-                    'music_type': music_cue.get('type', 'background_music'),
-                    'scene': music_cue['scene'],
-                    'service': 'modelslab'
-                }
-            }).execute()
-            
-            music_results.append({
-                'id': audio_record.data[0]['id'],
-                'scene': music_cue['scene'],
-                'audio_url': audio_url,
-                'description': music_cue['description'],
-                'duration': 30.0
-            })
-            
-            print(f"[BACKGROUND MUSIC] ✅ Generated for Scene {music_cue['scene']}")
+                    raise Exception("No audio URL in response")
+            else:
+                raise Exception(f"API returned error: {result.get('message', 'Unknown error')}")
             
         except Exception as e:
             print(f"[BACKGROUND MUSIC] ❌ Failed for Scene {music_cue['scene']}: {str(e)}")
             
+            # ✅ FIXED: Use correct enum value for failed records
             supabase.table('audio_generations').insert({
                 'video_generation_id': video_gen_id,
-                'audio_type': 'background_music',
-                'scene_id': f"scene_{music_cue['scene']}",
+                'audio_type': 'music',  # ✅ Use 'music'
                 'text_content': music_cue['description'],
-                'status': 'failed',
-                'error_message': str(e)
+                'generation_status': 'failed',
+                'error_message': str(e),
+                'sequence_order': i + 1
             }).execute()
     
     print(f"[BACKGROUND MUSIC] Completed: {len(music_results)}/{len(music_cues)} music tracks")
     return music_results
+
+# async def generate_background_music(
+#     audio_service: ModelsLabAudioService,
+#     video_gen_id: str,
+#     music_cues: List[Dict[str, Any]]
+# ) -> List[Dict[str, Any]]:
+#     """Generate background music"""
+    
+#     print(f"[BACKGROUND MUSIC] Generating background music...")
+#     music_results = []
+#     supabase = get_supabase()
+    
+#     for i, music_cue in enumerate(music_cues):
+#         try:
+#             print(f"[BACKGROUND MUSIC] Processing scene {music_cue['scene']}: {music_cue['description']}")
+            
+#             # Generate background music
+#             result = await audio_service.generate_sound_effect(
+#                 description=music_cue['description'],
+#                 duration=30.0  # Longer duration for background music
+#             )
+            
+#             # Handle response
+#             if result.get('status') == 'success':
+#                 audio_url = result.get('output', [{}])[0].get('audio_url')
+#             else:
+#                 request_id = result.get('id')
+#                 if request_id:
+#                     final_result = await audio_service.wait_for_completion(request_id)
+#                     audio_url = final_result.get('output', [{}])[0].get('audio_url')
+#                 else:
+#                     raise Exception("Failed to get audio URL")
+            
+#             # Store in database
+#             audio_record = supabase.table('audio_generations').insert({
+#                 'video_generation_id': video_gen_id,
+#                 'audio_type': 'background_music',
+#                 'scene_id': f"scene_{music_cue['scene']}",
+#                 'text_content': music_cue['description'],
+#                 'audio_url': audio_url,
+#                 'duration_seconds': 30.0,
+#                 'status': 'completed',
+#                 'metadata': {
+#                     'music_type': music_cue.get('type', 'background_music'),
+#                     'scene': music_cue['scene'],
+#                     'service': 'modelslab'
+#                 }
+#             }).execute()
+            
+#             music_results.append({
+#                 'id': audio_record.data[0]['id'],
+#                 'scene': music_cue['scene'],
+#                 'audio_url': audio_url,
+#                 'description': music_cue['description'],
+#                 'duration': 30.0
+#             })
+            
+#             print(f"[BACKGROUND MUSIC] ✅ Generated for Scene {music_cue['scene']}")
+            
+#         except Exception as e:
+#             print(f"[BACKGROUND MUSIC] ❌ Failed for Scene {music_cue['scene']}: {str(e)}")
+            
+#             supabase.table('audio_generations').insert({
+#                 'video_generation_id': video_gen_id,
+#                 'audio_type': 'background_music',
+#                 'scene_id': f"scene_{music_cue['scene']}",
+#                 'text_content': music_cue['description'],
+#                 'status': 'failed',
+#                 'error_message': str(e)
+#             }).execute()
+    
+#     print(f"[BACKGROUND MUSIC] Completed: {len(music_results)}/{len(music_cues)} music tracks")
+#     return music_results

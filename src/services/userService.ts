@@ -1,5 +1,36 @@
 import { apiClient } from "../lib/api";
 
+interface VideoGenerationResponse {
+  video_generation_id: string;
+  script_id: string;
+  status: string;
+  audio_task_id?: string;
+  task_status?: string;
+  message: string;
+  script_info: {
+    script_style: string;
+    video_style: string;
+    scenes: number;
+    characters: number;
+    created_at: string;
+  };
+}
+
+// Update VideoStatus interface to include task metadata
+interface VideoStatus {
+  generation_status: string;
+  quality_tier: string;
+  video_url?: string;
+  created_at: string;
+  script_id?: string;
+  error_message?: string;
+  task_metadata?: {
+    audio_task_id?: string;
+    audio_task_state?: string;
+    started_at?: string;
+  };
+}
+
 interface UserProfile {
   id: string;
   email: string;
@@ -47,26 +78,7 @@ interface GeneratedScript {
   chapter_id: string;
 }
 
-interface VideoGenerationResult {
-  video_generation_id: string;
-  script_id: string;
-  status: string;
-  message: string;
-  script_info: {
-    script_style: string;
-    video_style: string;
-    scenes: number;
-    characters: number;
-  };
-}
 
-interface VideoStatus {
-  status: string;
-  quality_tier: string;
-  video_url?: string;
-  created_at: string;
-  script_id?: string;
-}
 
 export const userService = {
   getProfile: async (): Promise<UserProfile> => {
@@ -148,8 +160,8 @@ export const userService = {
     qualityTier: string = "basic",
     videoStyle: string = "realistic",
     scriptId?: string
-  ): Promise<VideoGenerationResult> => {
-    return apiClient.post<VideoGenerationResult>(`/ai/generate-entertainment-video`, {
+  ): Promise<VideoGenerationResponse> => {
+    return apiClient.post<VideoGenerationResponse>(`/ai/generate-entertainment-video`, {
       chapter_id: chapterId,
       quality_tier: qualityTier,
       video_style: videoStyle,

@@ -1,4 +1,4 @@
-from app.core.celery_app import celery_app
+from app.tasks.celery_app import celery_app
 import asyncio
 import subprocess
 import os

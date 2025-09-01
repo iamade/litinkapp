@@ -9,6 +9,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - DEBUG=${DEBUG:-false}              
       - ENVIRONMENT=${ENVIRONMENT:-production} 
+      - CELERY_BROKER_URL=redis://redis:6379/0     # ✅ Add this
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0  #
     depends_on:
       # - db  # Commented out, using Supabase cloud
       - redis
