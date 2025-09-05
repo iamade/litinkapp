@@ -1,9 +1,14 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { userService } from "../services/userService";
 import { toast } from "react-hot-toast";
 import { FileText } from "lucide-react";
 import { VideoScene } from "../services/videoService";
+import { aiService } from "../services/aiService";
+import { PipelineStatus } from "../components/VideoGeneration/PipelineStatus";
+import type { PipelineStatus as PipelineStatusType } from "../types/pipelinestatus";
+import ExistingGenerations from "../components/VideoGeneration/ExistingGenerations";
+import videoGenerationAPI from "../lib/videoGenerationApi";
 
 interface Chapter {
   id: string;
@@ -79,12 +84,97 @@ export default function BookViewForEntertainment() {
   const [selectedScript, setSelectedScript] = useState<any>(null);
   const [loadingScripts, setLoadingScripts] = useState(false);
 
-  const [showScriptModal, setShowScriptModal] = useState(false);
-  const [modalScript, setModalScript] = useState<any>(null);
+  const [pipelineStatus, setPipelineStatus] =
+    useState<PipelineStatusType>(null);
+  const [showPipelineStatus, setShowPipelineStatus] = useState(false);
 
   // Add new state for task tracking
   const [audioTaskId, setAudioTaskId] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState<string | null>(null);
+
+  const [showExistingGenerations, setShowExistingGenerations] = useState(true);
+  const [currentVideoToWatch, setCurrentVideoToWatch] = useState<string | null>(
+    null
+  );
+
+  const [lastUpdated, setLastUpdated] = useState(Date.now());
+  const [existingGenerations, setExistingGenerations] = useState<any[]>([]);
+
+
+
+  // Add these handler functions after your existing function
+  const handleContinueGeneration = async (videoGenId: string) => {
+    try {
+      setVideoGenerationId(videoGenId);
+      setVideoStatus("resuming");
+
+      // Call retry endpoint to continue generation
+      const response = await aiService.retryVideoGeneration(videoGenId);
+
+      console.log("✅ Retry response:", response);
+
+      // Show more detailed success message with safe property access
+      const progressInfo = response?.existing_progress;
+      let message = `Resuming from ${response?.retry_step || "next step"}`;
+
+      if (progressInfo) {
+        const existing = [];
+        if (
+          progressInfo.audio_files_count &&
+          progressInfo.audio_files_count > 0
+        ) {
+          existing.push(`${progressInfo.audio_files_count} audio files`);
+        }
+        if (progressInfo.images_count && progressInfo.images_count > 0) {
+          existing.push(`${progressInfo.images_count} images`);
+        }
+        if (progressInfo.videos_count && progressInfo.videos_count > 0) {
+          existing.push(`${progressInfo.videos_count} videos`);
+        }
+
+        if (existing.length > 0) {
+          message += `. Existing: ${existing.join(", ")}`;
+        }
+
+        if (progressInfo.progress_percentage) {
+          message += ` (${progressInfo.progress_percentage.toFixed(
+            0
+          )}% complete)`;
+        }
+      }
+
+      toast.success(message);
+
+      // Start polling for status updates
+      pollVideoStatus(videoGenId);
+
+      // Hide existing generations during active generation
+      setShowExistingGenerations(false);
+    } catch (error: any) {
+      console.error("Error continuing generation:", error);
+
+      let errorMessage = "Failed to continue video generation";
+
+      // Safe error handling with proper type checking
+      if (error?.response?.data?.detail) {
+        errorMessage = error.response.data.detail;
+      } else if (error?.message) {
+        errorMessage = error.message;
+      } else if (typeof error === "string") {
+        errorMessage = error;
+      }
+
+      toast.error(`Retry failed: ${errorMessage}`);
+      setVideoStatus("error");
+      setShowExistingGenerations(true);
+    }
+  };
+
+  const handleWatchVideo = (videoUrl: string) => {
+    setCurrentVideoToWatch(videoUrl);
+    // You can also open in a modal or new tab
+    // window.open(videoUrl, '_blank');
+  };
 
   // Add function to fetch scripts
   const fetchGeneratedScripts = async (chapterId: string) => {
@@ -187,56 +277,133 @@ export default function BookViewForEntertainment() {
     }
   };
 
+  useEffect(() => {
+    if (selectedChapter) {
+      fetchGeneratedScripts(selectedChapter.id);
+      fetchExistingGenerations(); // ✅ Add this line
+    }
+  }, [selectedChapter]);
+
+  // Add this useEffect to handle status changes
+
+// Update the existing generations fetch to be more reliable
+const fetchExistingGenerations = useCallback(async () => {
+  if (!selectedChapter) return;
+
+  try {
+    console.log('[FETCH] Getting existing generations for chapter:', selectedChapter.id);
+    const response = await videoGenerationAPI.getChapterVideoGenerations(selectedChapter.id);
+    
+    // ✅ Fix: Extract the generations array from the response
+    const generations = response.generations || [];
+    console.log('[FETCH] Found generations:', generations.length);
+    
+    setExistingGenerations(generations); // ✅ Now using the array
+    
+    // If we have generations, show them
+    if (generations.length > 0) {
+      setShowExistingGenerations(true);
+    }
+  } catch (error) {
+    console.error("Error fetching existing generations:", error);
+    // Even on error, show the generation interface
+    setShowExistingGenerations(true);
+  }
+}, [selectedChapter]);
+
+
+useEffect(() => {
+  if (videoStatus === "failed" && selectedChapter) {
+    // Delay to ensure backend has updated the status
+    const timer = setTimeout(() => {
+      fetchExistingGenerations();
+      setShowExistingGenerations(true);
+    }, 500);
+    
+    return () => clearTimeout(timer);
+  }
+}, [videoStatus, selectedChapter]);
+
+
   // Add status polling
+   // Update the pollVideoStatus function:
+  
   const pollVideoStatus = async (videoGenId: string) => {
-    const checkStatus = async () => {
+  const checkStatus = async () => {
+    try {
+      const data = await userService.getVideoGenerationStatus(videoGenId);
+      
+      console.log('[POLLING] Status update:', data.generation_status);
+      
+      // Update video status immediately
+      setVideoStatus(data.generation_status);
+      
+      // Also fetch pipeline status for detailed view
       try {
-        const data = await userService.getVideoGenerationStatus(videoGenId);
-
-        setVideoStatus(data.generation_status);
-
-        // Update task status if available
-        if (data.task_metadata?.audio_task_state) {
-          setTaskStatus(data.task_metadata.audio_task_state);
-        }
-
-        if (data.generation_status === "completed" && data.video_url) {
-          setVideoUrls((prev) => ({
-            ...prev,
-            [selectedChapter!.id]: data.video_url!,
-          }));
-          toast.success("Video generation completed!");
-          return;
-        }
-
-        if (data.generation_status === "failed") {
-          toast.error(data.error_message || "Video generation failed");
-          return;
-        }
-
-        // Continue polling if still processing
-        if (
-          [
-            "pending",
-            "generating_audio",
-            "generating_images",
-            "generating_video",
-            "combining",
-            "merging_audio",
-            "applying_lipsync",
-          ].includes(data.generation_status)
-        ) {
-          setTimeout(checkStatus, 3000); // Poll every 3 seconds
-        }
-      } catch (error) {
-        console.error("Error checking status:", error);
-        toast.error("Error checking video status");
+        const pipelineData = await aiService.getPipelineStatus(videoGenId);
+        setPipelineStatus(pipelineData);
+        
+        // Force a re-render by updating a timestamp
+        setLastUpdated(Date.now());
+      } catch (pipelineError) {
+        console.warn("Pipeline status not available:", pipelineError);
       }
-    };
 
-    checkStatus();
+      // Update task status if available
+      if (data.task_metadata?.audio_task_state) {
+        setTaskStatus(data.task_metadata.audio_task_state);
+      }
+
+      if (data.generation_status === "completed" && data.video_url) {
+        setVideoUrls((prev) => ({
+          ...prev,
+          [selectedChapter!.id]: data.video_url!,
+        }));
+        toast.success("Video generation completed!");
+        setShowPipelineStatus(false);
+        setShowExistingGenerations(true);
+        return;
+      }
+
+      if (data.generation_status === "failed") {
+        toast.error(data.error_message || "Video generation failed");
+        setShowExistingGenerations(true);
+        // Force refresh of existing generations
+        setTimeout(() => {
+          fetchExistingGenerations();
+        }, 1000);
+        return;
+      }
+
+      // Continue polling if still processing
+      if (
+        [
+          "pending",
+          "generating_audio", 
+          "audio_completed",           // ✅ Added
+          "generating_images",
+          "images_completed",          // ✅ Added  
+          "generating_video",
+          "video_completed",           // ✅ Added
+          "combining",
+          "merging_audio",
+          "applying_lipsync",
+        ].includes(data.generation_status)
+      ) {
+        setTimeout(checkStatus, 2000); // Poll every 2 seconds for faster updates
+      } else {
+        // Unknown status, show existing generations
+        setShowExistingGenerations(true);
+      }
+    } catch (error) {
+      console.error("Error checking status:", error);
+      toast.error("Error checking video status");
+      setShowExistingGenerations(true);
+    }
   };
 
+  checkStatus();
+};
   const formatStatus = (status: string | null | undefined): string => {
     if (!status) return "Initializing";
     return status.replace(/_/g, " ");
@@ -268,6 +435,46 @@ export default function BookViewForEntertainment() {
       setLoadingScript(false);
     }
   };
+
+  // Add the retry handler function after your existing functions
+  const handleRetry = async () => {
+    if (!videoGenerationId) return;
+
+    setIsLoading(true);
+    try {
+      // Call your retry API endpoint
+      await aiService.retryVideoGeneration(videoGenerationId);
+
+      // Show success message
+      toast.success("Retrying video generation...");
+
+      // Restart status polling
+      pollVideoStatus(videoGenerationId);
+    } catch (error) {
+      console.error("Retry failed:", error);
+      toast.error("Failed to retry video generation. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Add refresh handler for pipeline status
+  const handleRefreshStatus = async () => {
+    if (!videoGenerationId) return;
+
+    setIsLoading(true);
+    try {
+      const status = await aiService.getPipelineStatus(videoGenerationId);
+      setPipelineStatus(status);
+    } catch (error) {
+      console.error("Failed to refresh status:", error);
+      toast.error("Failed to refresh status");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  
 
   // Load book on component mount
   useEffect(() => {
@@ -576,7 +783,16 @@ export default function BookViewForEntertainment() {
                       )}
                     </div>
                   )}
-
+                  {selectedChapter && showExistingGenerations && (
+                    <div className="mt-6">
+                      <ExistingGenerations
+                        chapterId={selectedChapter.id}
+                        onContinueGeneration={handleContinueGeneration}
+                        onWatchVideo={handleWatchVideo}
+                        className="mb-6"
+                      />
+                    </div>
+                  )}
                   {/* Generated Video Display */}
                   {currentVideoUrl && (
                     <div className="mt-6">
@@ -599,7 +815,6 @@ export default function BookViewForEntertainment() {
                       />
                     </div>
                   )}
-
                   {/* Add Task Status Display after video generation controls */}
                   {audioTaskId && (
                     <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -635,73 +850,138 @@ export default function BookViewForEntertainment() {
                       </div>
                     </div>
                   )}
+                  {/* Also add a video player modal for watching completed  videos: */}
 
+                  {currentVideoToWatch && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75">
+                      <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4">
+                        <div className="flex justify-between items-center mb-4">
+                          <h3 className="text-lg font-semibold">
+                            Generated Video
+                          </h3>
+                          <button
+                            onClick={() => setCurrentVideoToWatch(null)}
+                            className="text-gray-500 hover:text-gray-700"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                        <video
+                          src={currentVideoToWatch}
+                          controls
+                          className="w-full max-h-96 rounded"
+                        />
+                        <div className="mt-4 flex justify-end space-x-2">
+                          <a
+                            href={currentVideoToWatch}
+                            download
+                            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                          >
+                            Download
+                          </a>
+                          <button
+                            onClick={() => setCurrentVideoToWatch(null)}
+                            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {/* Enhanced Video Status Display - replace your existing video status display */}
                   {videoStatus !== "idle" && !currentVideoUrl && (
-                    <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
-                      <div className="flex items-center gap-3">
-                        {videoStatus === "starting" && (
-                          <>
-                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            <span>Initializing video generation...</span>
-                          </>
+                    <>
+                      {/* Basic Status Display */}
+                      <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
+                        <div className="flex items-center gap-3">
+                          {videoStatus === "starting" && (
+                            <>
+                              <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                              <span>Initializing video generation...</span>
+                            </>
+                          )}
+                          {videoStatus === "generating_audio" && (
+                            <>
+                              <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                              <span>
+                                Step 1/5: Generating audio and voices...
+                              </span>
+                            </>
+                          )}
+                          {videoStatus === "generating_images" && (
+                            <>
+                              <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+                              <span>
+                                Step 2/5: Creating character images...
+                              </span>
+                            </>
+                          )}
+                          {videoStatus === "generating_video" && (
+                            <>
+                              <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                              <span>Step 3/5: Generating video scenes...</span>
+                            </>
+                          )}
+                          {videoStatus === "merging_audio" && (
+                            <>
+                              <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
+                              <span>Step 4/5: Merging audio and video...</span>
+                            </>
+                          )}
+                          {videoStatus === "applying_lipsync" && (
+                            <>
+                              <div className="w-4 h-4 border-2 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
+                              <span>Step 5/5: Applying lip sync...</span>
+                            </>
+                          )}
+                          {videoStatus === "failed" && (
+                            <>
+                              <div className="w-4 h-4 bg-red-500 rounded-full"></div>
+                              <span className="text-red-600">
+                                Generation failed. Please try again.
+                              </span>
+                            </>
+                          )}
+                        </div>
+
+                        {audioTaskId && (
+                          <div className="mt-2 text-xs text-gray-500">
+                            Tracking ID: {audioTaskId.substring(0, 8)}...
+                          </div>
                         )}
-                        {videoStatus === "generating_audio" && (
-                          <>
-                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            <span>
-                              Step 1/5: Generating audio and voices...
-                            </span>
-                          </>
-                        )}
-                        {videoStatus === "generating_images" && (
-                          <>
-                            <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
-                            <span>Step 2/5: Creating character images...</span>
-                          </>
-                        )}
-                        {videoStatus === "generating_video" && (
-                          <>
-                            <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-                            <span>Step 3/5: Generating video scenes...</span>
-                          </>
-                        )}
-                        {videoStatus === "merging_audio" && (
-                          <>
-                            <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
-                            <span>Step 4/5: Merging audio and video...</span>
-                          </>
-                        )}
-                        {videoStatus === "applying_lipsync" && (
-                          <>
-                            <div className="w-4 h-4 border-2 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
-                            <span>Step 5/5: Applying lip sync...</span>
-                          </>
-                        )}
-                        {videoStatus === "processing" && (
-                          <>
-                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            <span>Processing your video...</span>
-                          </>
-                        )}
-                        {videoStatus === "error" && (
-                          <>
-                            <div className="w-4 h-4 bg-red-500 rounded-full"></div>
-                            <span className="text-red-600">
-                              Generation failed. Please try again.
-                            </span>
-                          </>
+
+                        {/* Toggle for detailed pipeline view */}
+                        {pipelineStatus && (
+                          <div className="mt-3 pt-3 border-t border-gray-200">
+                            <button
+                              onClick={() =>
+                                setShowPipelineStatus(!showPipelineStatus)
+                              }
+                              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                            >
+                              {showPipelineStatus
+                                ? "Hide Detailed Status"
+                                : "Show Detailed Status"}
+                            </button>
+                          </div>
                         )}
                       </div>
 
-                      {audioTaskId && (
-                        <div className="mt-2 text-xs text-gray-500">
-                          Tracking ID: {audioTaskId.substring(0, 8)}...
+                      {/* Detailed Pipeline Status */}
+                      {pipelineStatus && showPipelineStatus && (
+                        <div className="mt-4">
+                          <PipelineStatus
+                            pipelineStatus={pipelineStatus}
+                            isLoading={isLoading}
+                            onRefresh={handleRefreshStatus}
+                            onRetry={handleRetry}
+                            className="border-t-4 border-t-blue-500"
+                          />
                         </div>
                       )}
-                    </div>
+                    </>
                   )}
-
                   {/* AI Script & Scene Descriptions Display (separate from video) */}
                   {selectedChapter && aiScriptResults[selectedChapter.id] && (
                     <div className="mt-6 p-4 bg-gray-50 border rounded-lg">

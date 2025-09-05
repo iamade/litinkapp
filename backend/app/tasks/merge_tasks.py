@@ -496,7 +496,7 @@ async def concatenate_final_video(
             
             # Get file size
             file_size_bytes = os.path.getsize(final_output)
-            file_size_mb = file_size_bytes / (1024 * 1024)
+            file_size_mb = file_size_bytes / (512 * 512)
             
             # Upload final video
             file_service = FileService()

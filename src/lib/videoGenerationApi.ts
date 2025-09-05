@@ -336,7 +336,17 @@ class VideoGenerationAPI {
   }> {
     return apiClient.post(`/ai/cancel-generation/${videoGenId}`, {});
   }
+
+  async getChapterVideoGenerations(chapterId: string): Promise<{
+    chapter_id: string;
+    generations: any[];
+    total: number;
+  }> {
+    return apiClient.get(`/ai/chapter-video-generations/${chapterId}`);
+  }
 }
+
+
 
 // Export singleton instance
 export const videoGenerationAPI = new VideoGenerationAPI();

@@ -1,9 +1,38 @@
 from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List
-from app.services.modelslab_service import ModelsLabService
+from app.services.modelslab_image_service import ModelsLabImageService
+from app.services.modelslab_video_service import ModelsLabVideoService
 from app.core.database import get_supabase
 import json
+
+def update_pipeline_step(video_generation_id: str, step_name: str, status: str, error_message: str = None):
+    """Update pipeline step status"""
+    try:
+        supabase = get_supabase()
+        
+        update_data = {
+            'status': status,
+            # ✅ FIX: Remove 'updated_at' field since it's not in schema
+        }
+        
+        if status == 'processing':
+            update_data['started_at'] = 'now()'
+        elif status in ['completed', 'failed']:
+            update_data['completed_at'] = 'now()'
+            
+        if error_message:
+            update_data['error_message'] = error_message
+            
+        # ✅ FIX: Only update existing columns
+        result = supabase.table('pipeline_steps').update(update_data).eq(
+            'video_generation_id', video_generation_id
+        ).eq('step_name', step_name).execute()
+        
+        print(f"[PIPELINE] Updated step {step_name} to {status}")
+        
+    except Exception as e:
+        print(f"[PIPELINE] Error updating step {step_name}: {e}")
 
 @celery_app.task(bind=True)
 def generate_all_videos_for_generation(self, video_generation_id: str):
@@ -11,6 +40,9 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
     
     try:
         print(f"[VIDEO GENERATION] Starting video generation for: {video_generation_id}")
+        
+        # ✅ Update pipeline step to processing
+        update_pipeline_step(video_generation_id, 'video_generation', 'processing')
         
         # Get video generation data
         supabase = get_supabase()
@@ -45,7 +77,7 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         print(f"- Scene Images: {len(image_data.get('scene_images', []))}")
         
         # Generate videos
-        modelslab_service = ModelsLabService()
+        modelslab_service = ModelsLabVideoService()
         
         # Generate scene videos
         video_results = asyncio.run(generate_scene_videos(
@@ -77,6 +109,9 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
             'generation_status': 'video_completed'
         }).eq('id', video_generation_id).execute()
         
+        # ✅ Update pipeline step to completed
+        update_pipeline_step(video_generation_id, 'video_generation', 'completed')
+        
         success_message = f"Video generation completed! {successful_videos} videos created for {total_scenes} scenes"
         print(f"[VIDEO GENERATION SUCCESS] {success_message}")
         
@@ -86,21 +121,10 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         print(f"- Total video duration: {total_duration:.1f} seconds")
         print(f"- Success rate: {success_rate:.1f}%")
         
-        # ✅ NEW: Trigger audio/video merge after video completion
+        # ✅ Trigger audio/video merge after video completion
         print(f"[PIPELINE] Starting audio/video merge after video completion")
         from app.tasks.merge_tasks import merge_audio_video_for_generation
         merge_audio_video_for_generation.delay(video_generation_id)
-        
-        
-        # TODO: Send WebSocket update to frontend
-        # send_websocket_update(video_generation_id, {
-        #     'step': 'video_generation',
-        #     'status': 'completed',
-        #     'message': success_message,
-        #     'progress': 100,
-        #     'videos_generated': successful_videos,
-        #     'statistics': video_data_result['statistics']
-        # })
         
         return {
             'status': 'success',
@@ -110,26 +134,12 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
             'next_step': 'audio_video_merge'
         }
         
-        # # APPROACH 2: Parallel (merge and lip sync simultaneously)
-        # print(f"[PIPELINE] Starting audio/video merge and lip sync in parallel")
-        # from app.tasks.merge_tasks import merge_audio_video_for_generation
-        # from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
-        
-        # # Start both tasks
-        # merge_task = merge_audio_video_for_generation.delay(video_generation_id)
-        # lipsync_task = apply_lip_sync_to_generation.delay(video_generation_id)
-        
-        # return {
-        #     'status': 'success',
-        #     'message': success_message + " - Starting merge and lip sync...",
-        #     'statistics': video_data_result['statistics'],
-        #     'video_results': video_results,
-        #     'next_steps': ['audio_video_merge', 'lip_sync']
-        # }
-        
     except Exception as e:
         error_message = f"Video generation failed: {str(e)}"
         print(f"[VIDEO GENERATION ERROR] {error_message}")
+        
+        # ✅ Update pipeline step to failed
+        update_pipeline_step(video_generation_id, 'video_generation', 'failed', error_message)
         
         # Update status to failed
         try:
@@ -141,17 +151,11 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         except:
             pass
         
-        # TODO: Send error to frontend
-        # send_websocket_update(video_generation_id, {
-        #     'step': 'video_generation',
-        #     'status': 'failed',
-        #     'message': error_message
-        # })
-        
         raise Exception(error_message)
-
+    
+    
 async def generate_scene_videos(
-    modelslab_service: ModelsLabService,
+    modelslab_service: ModelsLabVideoService,
     video_gen_id: str,
     scene_descriptions: List[str],
     audio_files: Dict[str, Any],
@@ -167,26 +171,50 @@ async def generate_scene_videos(
     scene_images = image_data.get('scene_images', [])
     model_id = modelslab_service.get_video_model_for_style(video_style)
     
+    # ✅ DEBUG: Print what we have
+    print(f"[SCENE VIDEOS DEBUG] Available scene images: {len(scene_images)}")
+    print(f"[SCENE VIDEOS DEBUG] Scene descriptions: {len(scene_descriptions)}")
+    for i, img in enumerate(scene_images):
+        if img:
+            print(f"[SCENE VIDEOS DEBUG] Scene image {i}: scene_id={img.get('scene_id')}, has_url={bool(img.get('image_url'))}")
+    
     for i, scene_description in enumerate(scene_descriptions):
         try:
             scene_id = f"scene_{i+1}"
             print(f"[SCENE VIDEOS] Processing {scene_id}/{len(scene_descriptions)}")
             
-            # Find corresponding scene image
+            # ✅ FIX: Improve scene image lookup
             scene_image = None
-            for img in scene_images:
-                if img and img.get('scene_id') == scene_id:
-                    scene_image = img
-                    break
             
-            if not scene_image:
-                print(f"[SCENE VIDEOS] ⚠️ No image found for {scene_id}, using text-to-video")
+            # Method 1: Direct index lookup (preferred)
+            if i < len(scene_images) and scene_images[i] is not None:
+                scene_image = scene_images[i]
+                print(f"[SCENE VIDEOS] ✅ Found image by index for {scene_id}")
+            else:
+                # Method 2: Search by scene_id
+                for img in scene_images:
+                    if img and img.get('scene_id') == scene_id:
+                        scene_image = img
+                        print(f"[SCENE VIDEOS] ✅ Found image by scene_id for {scene_id}")
+                        break
+                
+                # Method 3: Search by scene number in metadata
+                if not scene_image:
+                    for img in scene_images:
+                        if img and img.get('metadata', {}).get('scene_number') == i + 1:
+                            scene_image = img
+                            print(f"[SCENE VIDEOS] ✅ Found image by scene_number for {scene_id}")
+                            break
+            
+            if not scene_image or not scene_image.get('image_url'):
+                print(f"[SCENE VIDEOS] ⚠️ No valid image found for {scene_id}, using text-to-video")
                 # Fall back to text-to-video if no image available
                 video_result = await generate_text_to_video_scene(
                     modelslab_service, video_gen_id, scene_id, scene_description, 
                     audio_files, video_style, model_id
                 )
             else:
+                print(f"[SCENE VIDEOS] ✅ Using image-to-video for {scene_id}: {scene_image['image_url']}")
                 # Use image-to-video generation
                 video_result = await generate_image_to_video_scene(
                     modelslab_service, video_gen_id, scene_id, scene_description,
@@ -208,8 +236,9 @@ async def generate_scene_videos(
     print(f"[SCENE VIDEOS] Completed: {successful_videos}/{len(scene_descriptions)} videos")
     return video_results
 
+
 async def generate_image_to_video_scene(
-    modelslab_service: ModelsLabService,
+    modelslab_service: ModelsLabVideoService,
     video_gen_id: str,
     scene_id: str,
     scene_description: str,
@@ -231,54 +260,82 @@ async def generate_image_to_video_scene(
         )
         video_duration = modelslab_service.calculate_video_duration_from_audio(all_audio, scene_id)
         
-        # Generate video from image
-        result = await modelslab_service.generate_image_to_video(
-            image_url=scene_image['image_url'],
-            duration=video_duration,
-            motion_strength=0.8,
-            fps=24,
-            width=1024,
-            height=576,
-            model_id=model_id
-        )
+         # Generate video from image with retry logic for rate limiting
+        max_retries = 3
+        retry_delay = 30  # seconds
         
-        # Handle response
-        if result.get('status') == 'success':
-            video_url = result.get('output', [{}])[0] if result.get('output') else None
-            if isinstance(video_url, dict):
-                video_url = video_url.get('url') or video_url.get('video_url')
-        else:
-            # Wait for completion if async
-            request_id = result.get('id')
-            if request_id:
-                final_result = await modelslab_service.wait_for_completion(request_id, max_wait_time=600)  # 10 minutes
-                output = final_result.get('output', [])
-                video_url = output[0] if output else None
-                if isinstance(video_url, dict):
-                    video_url = video_url.get('url') or video_url.get('video_url')
-            else:
-                raise Exception("Failed to get video URL")
+        for attempt in range(max_retries):
+            try:
+                result = await modelslab_service.generate_image_to_video(
+                    image_url=scene_image['image_url'],
+                    duration=video_duration,
+                    motion_strength=0.8,
+                    fps=24,
+                    width=512,
+                    height=288,
+                    model_id=model_id
+                )
+                
+                # Check for rate limiting
+                if result.get('status') == 'error' and 'rate limit' in result.get('message', '').lower():
+                    if attempt < max_retries - 1:
+                        print(f"[VIDEO] Rate limited, waiting {retry_delay}s before retry {attempt + 1}/{max_retries}")
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    else:
+                        raise Exception(f"Rate limit exceeded after {max_retries} attempts")
+                
+                # Handle successful response
+                if result.get('status') == 'success':
+                    output = result.get('output', [])
+                    if output:
+                        video_url = output[0] if isinstance(output[0], str) else output[0].get('video_url')
+                    else:
+                        raise Exception("No video URL in success response")
+                elif result.get('status') == 'processing':
+                    # Wait for completion
+                    request_id = result.get('id')
+                    if request_id:
+                        final_result = await modelslab_service.wait_for_completion(request_id)
+                        output = final_result.get('output', [])
+                        if output:
+                            video_url = output[0] if isinstance(output[0], str) else output[0].get('video_url')
+                        else:
+                            raise Exception("No video URL after completion")
+                    else:
+                        raise Exception("No request ID for async processing")
+                else:
+                    raise Exception(f"API error: {result.get('message', 'Unknown error')}")
+                
+                break  # Success, exit retry loop
+                
+            except Exception as e:
+                if attempt < max_retries - 1 and 'rate limit' in str(e).lower():
+                    print(f"[VIDEO] Retry {attempt + 1}/{max_retries} failed: {e}")
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    raise e
         
         if not video_url:
             raise Exception("No video URL returned from API")
         
         # Store in database
         video_record = supabase.table('video_segments').insert({
-          'video_generation_id': video_gen_id,
+            'video_generation_id': video_gen_id,
             'scene_id': scene_id,
-            'segment_index': int(scene_id.split('_')[1]) if '_' in scene_id else 1,  # ✅ Existing column
-            'scene_description': scene_description,  # ✅ New column
-            'source_image_url': scene_image['image_url'],  # ✅ New column
+            'segment_index': int(scene_id.split('_')[1]) if '_' in scene_id else 1,
+            'scene_description': scene_description,
+            'source_image_url': scene_image['image_url'],
             'video_url': video_url,
-            # 'resolution': '1024x576',  # ❌ REMOVE - column doesn't exist
-            'fps': 24,  # ✅ New column
-            'width': 1024,  # ✅ Existing column
-            'height': 576,  # ✅ Existing column
+            'fps': 24,
+            'width': 512,
+            'height': 288,
             'duration_seconds': video_duration,
-            'generation_method': 'image_to_video',  # ✅ New column
+            'generation_method': 'image_to_video',
             'status': 'completed',
-            'processing_service': 'modelslab',  # ✅ Existing column
-            'processing_model': model_id,  # ✅ Existing column
+            'processing_service': 'modelslab',
+            'processing_model': model_id,
             'metadata': {
                 'model_id': model_id,
                 'video_style': video_style,
@@ -326,7 +383,7 @@ async def generate_image_to_video_scene(
         return None
 
 async def generate_text_to_video_scene(
-    modelslab_service: ModelsLabService,
+    modelslab_service: ModelsLabVideoService,
     video_gen_id: str,
     scene_id: str,
     scene_description: str,
@@ -355,8 +412,8 @@ async def generate_text_to_video_scene(
             prompt=video_prompt,
             duration=video_duration,
             fps=24,
-            width=1024,
-            height=576,
+            width=512,
+            height=288,
             model_id=model_id
         )
         
@@ -387,10 +444,9 @@ async def generate_text_to_video_scene(
             'segment_index': int(scene_id.split('_')[1]) if '_' in scene_id else 1,  # ✅ Existing column
             'scene_description': scene_description,  # ✅ New column
             'video_url': video_url,
-            # 'resolution': '1024x576',  # ❌ REMOVE - column doesn't exist
             'fps': 24,  # ✅ New column
-            'width': 1024,  # ✅ Existing column
-            'height': 576,  # ✅ Existing column
+            'width': 512,  # ✅ Existing column
+            'height': 288,  # ✅ Existing column
             'duration_seconds': video_duration,
             'generation_method': 'text_to_video',  # ✅ New column
             'status': 'completed',

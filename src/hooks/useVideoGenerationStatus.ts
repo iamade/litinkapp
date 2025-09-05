@@ -49,25 +49,41 @@ export const useVideoGenerationStatus = (
   const currentVideoGenId = useRef<string | null>(null);
 
   // Calculate overall progress
+   // Update the calculateOverallProgress function:
   const calculateOverallProgress = (status: GenerationStatus | null): number => {
     if (!status) return 0;
     
     switch (status) {
-      case 'generating_audio': return 15;
-      case 'audio_completed': return 25;
-      case 'generating_images': 
-        return 25 + ((generation?.image_progress?.success_rate || 0) * 0.25);
-      case 'images_completed': return 50;
-      case 'generating_video': 
-        return 50 + ((generation?.video_progress?.success_rate || 0) * 0.25);
-      case 'video_completed': return 75;
-      case 'merging_audio': return 85;
-      case 'applying_lipsync': return 95;
+      case 'generating_audio':
+        return 15;
+      case 'audio_completed':
+        return 25;
+      case 'generating_images': {
+        // ✅ Fix: Wrap in braces
+        const imageProgress = generation?.image_progress;
+        return 25 + ((imageProgress?.success_rate || 0) * 0.25);
+      }
+      case 'images_completed':
+        return 50;
+      case 'generating_video': {
+        // ✅ Fix: Wrap in braces
+        const videoProgress = generation?.video_progress;
+        return 50 + ((videoProgress?.success_rate || 0) * 0.25);
+      }
+      case 'video_completed':
+        return 75;
+      case 'merging_audio':
+        return 85;
+      case 'applying_lipsync':
+        return 95;
       case 'lipsync_completed':
-      case 'completed': return 100;
+      case 'completed':
+        return 100;
       case 'failed':
-      case 'lipsync_failed': return 0;
-      default: return 0;
+      case 'lipsync_failed':
+        return 0;
+      default:
+        return 0;
     }
   };
 
@@ -192,41 +208,48 @@ export const useGenerationProgress = (videoGenId?: string) => {
 export const useGenerationMessages = (videoGenId?: string) => {
   const { generation, status } = useVideoGenerationStatus(videoGenId);
   
+    // Update the getStatusMessage function in useGenerationMessages:
   const getStatusMessage = (): string => {
     if (!status) return '';
     
     switch (status) {
-      case 'generating_audio':
+      case 'generating_audio': {
+        // ✅ Fix: Wrap in braces to create block scope
         const audioFiles = generation?.audio_progress;
         if (audioFiles) {
           const total = audioFiles.narrator_files + audioFiles.character_files + audioFiles.sound_effects;
           return `Generating audio files... (${total} files created)`;
         }
         return 'Generating narrator voice and character dialogue...';
-        
-      case 'generating_images':
+      }
+      
+      case 'generating_images': {
+        // ✅ Fix: Wrap in braces to create block scope
         const imageProgress = generation?.image_progress;
         if (imageProgress) {
           return `Creating character images (${imageProgress.characters_completed}/${imageProgress.total_characters} completed)`;
         }
         return 'Generating character images and scene visuals...';
-        
-      case 'generating_video':
+      }
+      
+      case 'generating_video': {
+        // ✅ Fix: Wrap in braces to create block scope
         const videoProgress = generation?.video_progress;
         if (videoProgress) {
           return `Processing Scene ${videoProgress.scenes_completed} of ${videoProgress.total_scenes}...`;
         }
         return 'Creating video segments for each scene...';
-        
+      }
+      
       case 'merging_audio':
         return 'Merging audio tracks with video content...';
-        
+      
       case 'applying_lipsync':
         return 'Applying lip sync to character dialogue...';
-        
+      
       case 'completed':
         return 'Video generation completed successfully!';
-        
+      
       default:
         return 'Processing...';
     }

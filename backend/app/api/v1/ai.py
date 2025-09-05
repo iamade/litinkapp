@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Body
 from app.schemas.video import VideoGenerationRequest, VideoGenerationResponse
 from supabase import Client
@@ -13,6 +14,7 @@ from app.services.elevenlabs_service import ElevenLabsService
 from app.services.embeddings_service import EmbeddingsService
 from app.core.database import get_supabase
 from app.core.auth import get_current_active_user
+from app.services.pipeline_manager import PipelineManager, PipelineStep
 
 router = APIRouter()
 
@@ -179,6 +181,8 @@ async def generate_entertainment_video(
             'user_id': current_user['id'],
             'generation_status': 'pending',
             'quality_tier': quality_tier,
+            'can_resume': True,  # ✅ Add this field
+            'retry_count': 0,    # ✅ Add this field
             'script_data': {
                 'script': script_data['script'],
                 'scene_descriptions': script_data['scene_descriptions'],
@@ -386,6 +390,73 @@ async def get_video_generation_status(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chapter-video-generations/{chapter_id}")
+async def get_chapter_video_generations(
+    chapter_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get all video generations for a chapter"""
+    try:
+        print(f"🔍 DEBUG: Getting video generations for chapter: {chapter_id}")
+        print(f"🔍 DEBUG: User ID: {current_user.get('id', 'Unknown')}")
+        
+        # First check if chapter exists
+        chapter_check = supabase_client.table('chapters')\
+            .select('id, title')\
+            .eq('id', chapter_id)\
+            .execute()
+        
+        print(f"🔍 DEBUG: Chapter found: {len(chapter_check.data or [])}")
+        
+        
+        response = supabase_client.table('video_generations')\
+            .select('*')\
+            .eq('chapter_id', chapter_id)\
+            .eq('user_id', current_user['id'])\
+            .order('created_at', desc=True)\
+            .execute()
+            
+        print(f"🔍 DEBUG: Video generations found: {len(response.data or [])}")
+        
+        
+        generations = []
+        for gen in response.data or []:
+            # Add pipeline status for each generation
+            try:
+                pipeline_manager = PipelineManager()
+                pipeline_status = pipeline_manager.get_pipeline_status(gen['id'])
+                gen['pipeline_status'] = pipeline_status
+                
+                # Add retry capability flag
+                gen['can_resume'] = (
+                    gen.get('generation_status') in ['failed', 'audio_completed', 'images_completed', 'video_completed'] or
+                    (pipeline_status and pipeline_status.get('can_resume', False))
+                )
+                
+            except Exception as e:
+                print(f"Error getting pipeline status for {gen['id']}: {e}")
+                gen['pipeline_status'] = None
+                gen['can_resume'] = gen.get('generation_status') == 'failed'
+            
+            generations.append(gen)
+        
+        result = {
+            'chapter_id': chapter_id,
+            'generations': generations,
+            'total': len(generations)
+        }
+        
+        print(f"🔍 DEBUG: Returning result with {len(generations)} generations")
+        return result
+        
+    except Exception as e:
+        print(f"❌ ERROR in get_chapter_video_generations: {e}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
     
 
 # Add this new endpoint after get_character_images function (around line 310):
@@ -418,8 +489,8 @@ async def get_scene_videos(
         
         for video in videos_response.data or []:
             # Calculate resolution from width and height
-            width = video.get('width', 1024)
-            height = video.get('height', 576)
+            width = video.get('width', 512)
+            height = video.get('height', 288)
             resolution = f"{width}x{height}"
             
             scene_videos.append({
@@ -1825,3 +1896,478 @@ async def delete_script_and_scenes(
     except Exception as e:
         print(f"Error deleting script and scenes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+# Add the missing pipeline status endpoint (around line 450)
+@router.get("/pipeline-status/{video_gen_id}")
+async def get_pipeline_status(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get detailed pipeline status for video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        video_data = video_response.data
+        
+        # Get pipeline steps
+        steps_response = supabase_client.table('pipeline_steps')\
+            .select('*').eq('video_generation_id', video_gen_id)\
+            .order('step_order').execute()
+        
+        pipeline_steps = steps_response.data or []
+        
+        # Calculate progress
+        total_steps = len(pipeline_steps) or 5  # Default to 5 steps
+        completed_steps = len([s for s in pipeline_steps if s.get('status') == 'completed'])
+        failed_steps = len([s for s in pipeline_steps if s.get('status') == 'failed'])
+        
+        # Determine current step
+        current_step = None
+        next_step = None
+        
+        processing_steps = [s for s in pipeline_steps if s.get('status') == 'processing']
+        if processing_steps:
+            current_step = processing_steps[0].get('step_name')
+        else:
+            # Find next pending step
+            pending_steps = [s for s in pipeline_steps if s.get('status') == 'pending']
+            if pending_steps:
+                next_step = pending_steps[0].get('step_name')
+        
+        # Calculate percentage
+        percentage = (completed_steps / total_steps * 100) if total_steps > 0 else 0
+        
+        # Determine overall status
+        overall_status = video_data.get('generation_status', 'pending')
+        
+        # Build response
+        pipeline_status = {
+            'overall_status': overall_status,
+            'failed_at_step': video_data.get('failed_at_step'),
+            'can_resume': video_data.get('can_resume', False),
+            'retry_count': video_data.get('retry_count', 0),
+            'progress': {
+                'completed_steps': completed_steps,
+                'failed_steps': failed_steps,
+                'total_steps': total_steps,
+                'percentage': percentage,
+                'current_step': current_step,
+                'next_step': next_step
+            },
+            'steps': [
+                {
+                    'step_name': step.get('step_name'),
+                    'status': step.get('status', 'pending'),
+                    'started_at': step.get('started_at'),
+                    'completed_at': step.get('completed_at'),
+                    'error_message': step.get('error_message'),
+                    'retry_count': step.get('retry_count', 0)
+                }
+                for step in pipeline_steps
+            ]
+        }
+        
+        return pipeline_status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting pipeline status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@router.post("/retry-generation/{video_gen_id}")
+async def retry_video_generation(
+    video_gen_id: str,
+    request: dict = Body(default={}),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Retry video generation from failed step or specific step - with smart resume logic"""
+    try:
+        print(f"🔄 Starting retry for video generation: {video_gen_id}")
+        print(f"🔄 Request body: {request}")
+        
+        # Extract retry_from_step from request body
+        retry_from_step = request.get('retry_from_step') if request else None
+        
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        video_data = video_response.data
+        current_status = video_data.get('generation_status')
+        
+        print(f"🔄 Current status: {current_status}")
+        
+        # ✅ NEW: Smart step determination based on existing data
+        next_step = await determine_next_step_from_database(video_gen_id, video_data, supabase_client)
+        
+        if retry_from_step:
+            try:
+                requested_step = PipelineStep(retry_from_step)
+                # Warn if they're trying to redo a completed step
+                if next_step.value > requested_step.value:
+                    print(f"⚠️  WARNING: User requested step {requested_step.value} but {next_step.value} is the next logical step")
+                step_to_retry = requested_step
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid step: {retry_from_step}")
+        else:
+            step_to_retry = next_step
+            
+        print(f"🔄 Determined retry step: {step_to_retry.value}")
+        
+        # Update retry count
+        retry_count = video_data.get('retry_count', 0) + 1
+        
+        # Update video generation status based on step
+        new_status = get_status_for_step(step_to_retry)
+        
+        supabase_client.table('video_generations').update({
+            'generation_status': new_status,
+            'failed_at_step': None,
+            'error_message': None,
+            'retry_count': retry_count,
+            'can_resume': False,
+            'updated_at': datetime.now().isoformat()
+        }).eq('id', video_gen_id).execute()
+        
+        # Trigger the appropriate task
+        task_id = await trigger_task_for_step(step_to_retry, video_gen_id, supabase_client)
+        
+        return {
+            'message': f'Retrying from step: {step_to_retry.value}',
+            'video_generation_id': video_gen_id,
+            'retry_step': step_to_retry.value,
+            'task_id': task_id,
+            'retry_count': retry_count,
+            'new_status': new_status,
+            'existing_progress': await get_existing_progress_summary(video_gen_id, supabase_client)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error in retry: {e}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def determine_next_step_from_database(video_gen_id: str, video_data: dict, supabase_client: Client) -> PipelineStep:
+    """Determine the next step based on existing SUCCESSFUL data in the database"""
+    
+    print(f"🔍 Analyzing existing data for video generation: {video_gen_id}")
+    
+    # ✅ FIXED: Check for actual successful completions, not just existence
+    audio_files = video_data.get('audio_files') or {}
+    
+    # Count actual successful audio files
+    narrator_count = len(audio_files.get('narrator', []))
+    characters_count = len(audio_files.get('characters', []))
+    sound_effects_count = len(audio_files.get('sound_effects', []))
+    background_music_count = len(audio_files.get('background_music', []))
+    total_audio_count = narrator_count + characters_count + sound_effects_count + background_music_count
+    
+    has_audio = total_audio_count > 0
+    
+    # ✅ FIXED: Check image statistics for successful generations
+    image_data = video_data.get('image_data') or {}
+    image_stats = image_data.get('statistics', {})
+    successful_images = image_stats.get('total_images_generated', 0)
+    character_images_generated = image_stats.get('character_images_generated', 0)
+    scene_images_generated = image_stats.get('scene_images_generated', 0)
+    
+    has_images = successful_images > 0 or (character_images_generated > 0 or scene_images_generated > 0)
+    
+    # ✅ FIXED: Check video statistics for successful generations  
+    video_data_obj = video_data.get('video_data') or {}
+    video_stats = video_data_obj.get('statistics', {})
+    successful_videos = video_stats.get('videos_generated', 0)
+    
+    has_videos = successful_videos > 0
+    
+    # ✅ FIXED: Check for actual final video URL
+    has_merged_video = bool(video_data.get('video_url'))
+    
+    # ✅ FIXED: Check lipsync statistics
+    lipsync_data = video_data.get('lipsync_data') or {}
+    lipsync_stats = lipsync_data.get('statistics', {})
+    lipsync_scenes = lipsync_stats.get('scenes_processed', 0)
+    
+    has_lipsync = lipsync_scenes > 0
+    
+    # Also check database tables for more accuracy - but check for COMPLETED status
+    try:
+        # Check audio_generations table - only count completed
+        audio_check = supabase_client.table('audio_generations')\
+            .select('id')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('status', 'completed')\
+            .execute()
+        
+        db_audio_count = len(audio_check.data or [])
+        
+        # Check image_generations table - only count completed
+        image_check = supabase_client.table('image_generations')\
+            .select('id')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('status', 'completed')\
+            .execute()
+            
+        db_image_count = len(image_check.data or [])
+        
+        # Check video_segments table - only count completed
+        video_check = supabase_client.table('video_segments')\
+            .select('id')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('status', 'completed')\
+            .execute()
+            
+        db_video_count = len(video_check.data or [])
+        
+        # Use database data as the source of truth with counts
+        has_audio = has_audio or (db_audio_count > 0)
+        has_images = has_images or (db_image_count > 0)  
+        has_videos = has_videos or (db_video_count > 0)
+        
+        print(f"📊 Database verification:")
+        print(f"   - DB Audio files: {db_audio_count}")
+        print(f"   - DB Image files: {db_image_count}")
+        print(f"   - DB Video files: {db_video_count}")
+        
+    except Exception as db_error:
+        print(f"⚠️  Database check error: {db_error}")
+        # Continue with original data if DB check fails
+    
+    print(f"📊 Existing progress (CORRECTED):")
+    print(f"   - Audio: {'✅' if has_audio else '❌'} ({total_audio_count} files)")
+    print(f"   - Images: {'✅' if has_images else '❌'} ({successful_images} generated)")  
+    print(f"   - Videos: {'✅' if has_videos else '❌'} ({successful_videos} generated)")
+    print(f"   - Merged: {'✅' if has_merged_video else '❌'}")
+    print(f"   - Lipsync: {'✅' if has_lipsync else '❌'} ({lipsync_scenes} scenes)")
+    
+    # Determine next step based on what's actually missing
+    if not has_audio:
+        print(f"🎯 Next step: AUDIO_GENERATION (missing audio)")
+        return PipelineStep.AUDIO_GENERATION
+        
+    if not has_images:
+        print(f"🎯 Next step: IMAGE_GENERATION (missing images)")
+        return PipelineStep.IMAGE_GENERATION
+        
+    if not has_videos:
+        print(f"🎯 Next step: VIDEO_GENERATION (missing videos)")
+        return PipelineStep.VIDEO_GENERATION
+        
+    if not has_merged_video:
+        print(f"🎯 Next step: AUDIO_VIDEO_MERGE (missing final video)")
+        return PipelineStep.AUDIO_VIDEO_MERGE
+        
+    # Check if lipsync is needed (only if there are character dialogues)
+    script_data = video_data.get('script_data') or {}
+    characters = script_data.get('characters', [])
+    character_audio = audio_files.get('characters', [])
+    
+    needs_lipsync = bool(characters and character_audio)
+    
+    if needs_lipsync and not has_lipsync:
+        print(f"🎯 Next step: LIP_SYNC (missing lipsync for {len(characters)} characters)")
+        return PipelineStep.LIP_SYNC
+    
+    # If everything exists, just return the status-based step
+    current_status = video_data.get('generation_status', 'failed')
+    if current_status == 'completed':
+        print(f"🎯 All steps completed, but retrying LIP_SYNC as final step")
+        return PipelineStep.LIP_SYNC
+    else:
+        print(f"🎯 Defaulting to AUDIO_GENERATION as fallback")
+        return PipelineStep.AUDIO_GENERATION
+
+async def get_existing_progress_summary(video_gen_id: str, supabase_client: Client) -> dict:
+    """Get a summary of existing progress for the frontend - CORRECTED VERSION"""
+    try:
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).single().execute()
+            
+        if not video_response.data:
+            return {}
+            
+        video_data = video_response.data
+        
+        # ✅ FIXED: Count actual successful items, not just existence
+        audio_files = video_data.get('audio_files') or {}
+        image_data = video_data.get('image_data') or {}
+        video_data_obj = video_data.get('video_data') or {}
+        
+        # Count actual audio files
+        audio_count = (
+            len(audio_files.get('narrator', [])) + 
+            len(audio_files.get('characters', [])) + 
+            len(audio_files.get('sound_effects', [])) + 
+            len(audio_files.get('background_music', []))
+        )
+        
+        # Get actual successful counts from statistics
+        image_stats = image_data.get('statistics', {})
+        image_count = image_stats.get('total_images_generated', 0)
+        
+        video_stats = video_data_obj.get('statistics', {})
+        video_count = video_stats.get('videos_generated', 0)
+        
+        return {
+            'audio_files_count': audio_count,
+            'images_count': image_count, 
+            'videos_count': video_count,
+            'has_final_video': bool(video_data.get('video_url')),
+            'last_completed_step': get_last_completed_step_corrected(video_data),
+            'progress_percentage': calculate_progress_percentage_corrected(video_data)
+        }
+        
+    except Exception as e:
+        print(f"Error getting progress summary: {e}")
+        return {}
+
+def get_last_completed_step_corrected(video_data: dict) -> str:
+    """Determine the last completed step - CORRECTED VERSION"""
+    
+    # Check actual successful counts
+    audio_files = video_data.get('audio_files') or {}
+    total_audio = (
+        len(audio_files.get('narrator', [])) + 
+        len(audio_files.get('characters', [])) + 
+        len(audio_files.get('sound_effects', [])) + 
+        len(audio_files.get('background_music', []))
+    )
+    
+    image_data = video_data.get('image_data') or {}
+    image_stats = image_data.get('statistics', {})
+    total_images = image_stats.get('total_images_generated', 0)
+    
+    video_data_obj = video_data.get('video_data') or {}
+    video_stats = video_data_obj.get('statistics', {})
+    total_videos = video_stats.get('videos_generated', 0)
+    
+    lipsync_data = video_data.get('lipsync_data') or {}
+    lipsync_stats = lipsync_data.get('statistics', {})
+    lipsync_scenes = lipsync_stats.get('scenes_processed', 0)
+    
+    has_final_video = bool(video_data.get('video_url'))
+    
+    # Return the last successfully completed step
+    if lipsync_scenes > 0:
+        return 'lipsync_completed'
+    elif has_final_video:
+        return 'merge_completed'  
+    elif total_videos > 0:
+        return 'video_completed'
+    elif total_images > 0:
+        return 'images_completed'
+    elif total_audio > 0:
+        return 'audio_completed'
+    else:
+        return 'none'
+
+def calculate_progress_percentage_corrected(video_data: dict) -> float:
+    """Calculate overall progress percentage - CORRECTED VERSION"""
+    steps_completed = 0
+    total_steps = 5  # audio, image, video, merge, lipsync
+    
+    # Check actual successful completions
+    audio_files = video_data.get('audio_files') or {}
+    total_audio = (
+        len(audio_files.get('narrator', [])) + 
+        len(audio_files.get('characters', [])) + 
+        len(audio_files.get('sound_effects', [])) + 
+        len(audio_files.get('background_music', []))
+    )
+    
+    if total_audio > 0:
+        steps_completed += 1
+        
+    image_data = video_data.get('image_data') or {}
+    if image_data.get('statistics', {}).get('total_images_generated', 0) > 0:
+        steps_completed += 1
+        
+    video_data_obj = video_data.get('video_data') or {}
+    if video_data_obj.get('statistics', {}).get('videos_generated', 0) > 0:
+        steps_completed += 1
+        
+    if video_data.get('video_url'):
+        steps_completed += 1
+        
+    lipsync_data = video_data.get('lipsync_data') or {}
+    if lipsync_data.get('statistics', {}).get('scenes_processed', 0) > 0:
+        steps_completed += 1
+        
+    return (steps_completed / total_steps) * 100
+
+
+def get_status_for_step(step: PipelineStep) -> str:
+    """Get the appropriate status for a pipeline step"""
+    status_mapping = {
+        PipelineStep.AUDIO_GENERATION: 'generating_audio',
+        PipelineStep.IMAGE_GENERATION: 'generating_images', 
+        PipelineStep.VIDEO_GENERATION: 'generating_video',
+        PipelineStep.AUDIO_VIDEO_MERGE: 'merging_audio',
+        PipelineStep.LIP_SYNC: 'applying_lipsync'
+    }
+    return status_mapping.get(step, 'retrying')
+
+async def trigger_task_for_step(step: PipelineStep, video_gen_id: str, supabase_client: Client) -> str:
+    """Trigger the appropriate task for a pipeline step"""
+    try:
+        task_id = None
+        
+        if step == PipelineStep.AUDIO_GENERATION:
+            from app.tasks.audio_tasks import generate_all_audio_for_video
+            task = generate_all_audio_for_video.delay(video_gen_id)
+            task_id = task.id
+            print(f"🎵 Started audio generation task: {task_id}")
+            
+        elif step == PipelineStep.IMAGE_GENERATION:
+            from app.tasks.image_tasks import generate_all_images_for_video
+            task = generate_all_images_for_video.delay(video_gen_id)
+            task_id = task.id
+            print(f"🖼️  Started image generation task: {task_id}")
+            
+        elif step == PipelineStep.VIDEO_GENERATION:
+            from app.tasks.video_tasks import generate_all_videos_for_generation
+            task = generate_all_videos_for_generation.delay(video_gen_id)
+            task_id = task.id
+            print(f"🎬 Started video generation task: {task_id}")
+            
+        elif step == PipelineStep.AUDIO_VIDEO_MERGE:
+            from app.tasks.merge_tasks import merge_audio_video_for_generation
+            task = merge_audio_video_for_generation.delay(video_gen_id)
+            task_id = task.id
+            print(f"🔗 Started merge task: {task_id}")
+            
+        elif step == PipelineStep.LIP_SYNC:
+            from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
+            task = apply_lip_sync_to_generation.delay(video_gen_id)
+            task_id = task.id
+            print(f"💋 Started lipsync task: {task_id}")
+            
+        return task_id
+        
+    except Exception as task_error:
+        print(f"❌ Failed to start task for step {step.value}: {task_error}")
+        
+        # Revert status back to failed
+        supabase_client.table('video_generations').update({
+            'generation_status': 'failed',
+            'error_message': f"Failed to start retry task: {str(task_error)}",
+            'can_resume': True
+        }).eq('id', video_gen_id).execute()
+        
+        raise HTTPException(status_code=500, detail=f"Failed to start retry task: {str(task_error)}")
+

@@ -1,7 +1,7 @@
 from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List, Optional
-from app.services.modelslab_service import ModelsLabService
+from app.services.modelslab_image_service import ModelsLabImageService
 from app.core.database import get_supabase
 import json
 
@@ -46,7 +46,7 @@ def apply_lip_sync_to_generation(self, video_generation_id: str):
         print(f"- Quality tier: {quality_tier}")
         
         # Apply lip sync
-        modelslab_service = ModelsLabService()
+        modelslab_service = ModelsLabImageService()
         
         lipsync_results = asyncio.run(apply_lip_sync_to_scenes(
             modelslab_service, video_generation_id, scene_videos, 
@@ -128,7 +128,7 @@ def apply_lip_sync_to_generation(self, video_generation_id: str):
         raise Exception(error_message)
 
 async def apply_lip_sync_to_scenes(
-    modelslab_service: ModelsLabService,
+    modelslab_service: ModelsLabImageService,
     video_gen_id: str,
     scene_videos: List[Dict[str, Any]],
     audio_files: Dict[str, Any],
@@ -200,7 +200,7 @@ def find_character_audio_for_scene(scene_id: str, character_audio_files: List[Di
     return scene_audio
 
 async def apply_lip_sync_to_single_scene(
-    modelslab_service: ModelsLabService,
+    modelslab_service: ModelsLabImageService,
     video_gen_id: str,
     scene_video: Dict[str, Any],
     character_audio: List[Dict[str, Any]],
@@ -306,8 +306,8 @@ async def apply_lip_sync_to_single_scene(
             'scene_description': f"Lip-synced version of {scene_id}",
             'video_url': final_lipsync_url,
             'duration_seconds': scene_video.get('duration', 3.0),
-            'width': 1024,
-            'height': 576,
+            'width': 512,
+            'height': 288,
             'fps': 24,
             'generation_method': 'lip_sync',
             'status': 'completed',

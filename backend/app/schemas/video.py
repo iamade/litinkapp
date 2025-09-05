@@ -6,11 +6,17 @@ from enum import Enum
 class VideoGenerationStatus(str, Enum):
     PENDING = "pending"
     GENERATING_AUDIO = "generating_audio"
+    AUDIO_COMPLETED = "audio_completed"
     GENERATING_IMAGES = "generating_images"
+    IMAGES_COMPLETED = "images_completed"
     GENERATING_VIDEO = "generating_video"
+    VIDEO_COMPLETED = "video_completed"
+    MERGING_AUDIO = "merging_audio"
+    APPLYING_LIPSYNC = "applying_lipsync"
     COMBINING = "combining"
     COMPLETED = "completed"
     FAILED = "failed"
+    RETRYING = "retrying"
 
 class VideoQualityTier(str, Enum):
     BASIC = "basic"
@@ -52,15 +58,28 @@ class AudioGeneration(BaseModel):
     status: str = "pending"
     created_at: datetime
 
+# ✅ Updated ImageGeneration schema to match actual database structure
 class ImageGeneration(BaseModel):
     id: str
     video_generation_id: str
+    image_type: Optional[str] = None  # character, scene, etc.
     scene_id: Optional[str] = None
-    shot_index: int = 0
+    character_name: Optional[str] = None
+    shot_index: Optional[int] = 0
     scene_description: Optional[str] = None
-    image_prompt: Optional[str] = None
+    image_prompt: Optional[str] = None  # This exists in DB
+    text_prompt: Optional[str] = None   # This is the new column we're adding
+    style: Optional[str] = None         # This is the new column we're adding
     image_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    file_size_bytes: Optional[int] = None
+    generation_time_seconds: Optional[float] = None
+    sequence_order: Optional[int] = None
     status: str = "pending"
+    error_message: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
 
 class VideoGeneration(BaseModel):
@@ -73,5 +92,12 @@ class VideoGeneration(BaseModel):
     video_url: Optional[str] = None
     audio_task_id: Optional[str] = None
     task_metadata: Optional[Dict[str, Any]] = None
+    # Add the data fields that are used in the code
+    script_data: Optional[Dict[str, Any]] = None
+    audio_files: Optional[Dict[str, Any]] = None
+    image_data: Optional[Dict[str, Any]] = None
+    video_data: Optional[Dict[str, Any]] = None
+    merge_data: Optional[Dict[str, Any]] = None
+    lipsync_data: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime

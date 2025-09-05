@@ -29,28 +29,27 @@ class ModelsLabAudioService:
         }
 
     async def generate_tts_audio(
-        self,
-        text: str,
-        voice_id: str = "madison",
-        audio_format: str = "mp3",
-        speed: float = 1.0,
-        pitch: float = 1.0,
-        webhook: Optional[str] = None,
-        track_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    self,
+    text: str,
+    voice_id: str = "madison",
+    audio_format: str = "mp3",
+    speed: float = 1.0,
+    pitch: float = 1.0,
+    webhook: Optional[str] = None,
+    track_id: Optional[str] = None
+) -> Dict[str, Any]:
         """Generate TTS audio using ModelsLab API"""
         
-       
+        # ✅ CORRECTED: Fixed parameter names to match API docs exactly
         payload = {
             "key": self.api_key,
-            "prompt": text,  # Use prompt instead of text
-            "voice_id": voice_id,  # Use 'voice' not 'voice_id' 
-            "language": "en-us",
+            "prompt": text,  # ✅ Correct: Use 'prompt' for text
+            "voice_id": voice_id,  # ✅ Keep as voice_id - this is correct per docs
+            "language": "american english",  # ✅ Use full language name
             "output_format": audio_format,
-            "speed": str(speed),  # Convert to string
-            "bitrate": "320k",
-            "emotion": False,
-            "temp": False
+            "speed": int(speed),  # ✅ Convert to integer as per docs
+            "emotion": False,  # ✅ This is correct and valid!
+            "temp": False   # ✅ Add temp parameter
         }
         
         if webhook:

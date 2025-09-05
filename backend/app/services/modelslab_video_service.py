@@ -1,11 +1,11 @@
-import requests
-import asyncio
+from typing import Any, Dict, List, Optional
 import aiohttp
-from typing import Dict, Any, Optional, List
 from app.core.config import settings
-import json
+import time
+import asyncio
 
-class ModelsLabService:
+
+class ModelsLabVideoService:
     def __init__(self):
         self.api_key = settings.MODELSLAB_API_KEY
         self.base_url = settings.MODELSLAB_BASE_URL
@@ -13,188 +13,64 @@ class ModelsLabService:
             "Content-Type": "application/json"
         }
 
-    async def generate_image(
-        self,
-        prompt: str,
-        negative_prompt: str = "blurry, low quality, distorted, ugly, deformed",
-        model_id: str = "midjourney",  # or "realistic-vision-v5", "juggernaut-xl-v9"
-        width: int = 1024,
-        height: int = 576,  # 16:9 aspect ratio for video
-        samples: int = 1,
-        steps: int = 30,
-        guidance_scale: float = 7.5,
-        safety_checker: bool = False,
-        enhance_prompt: bool = True,
-        seed: Optional[int] = None,
-        webhook: Optional[str] = None,
-        track_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Generate image using ModelsLab Text to Image API"""
-        
-        payload = {
-            "key": self.api_key,
-            "model_id": model_id,
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "width": str(width),
-            "height": str(height),
-            "samples": str(samples),
-            "num_inference_steps": str(steps),
-            "safety_checker": "yes" if safety_checker else "no",
-            "enhance_prompt": "yes" if enhance_prompt else "no",
-            "guidance_scale": guidance_scale,
-            "multi_lingual": "no",
-            "panorama": "no",
-            "self_attention": "no",
-            "upscale": "no",
-            "embeddings_model": "",
-            "lora_model": "",
-            "tomesd": "yes",
-            "use_karras_sigmas": "yes",
-            "vae": "",
-            "lora_strength": "",
-            "scheduler": "UniPCMultistepScheduler",
-            "webhook": webhook,
-            "track_id": track_id
-        }
-
-        if seed:
-            payload["seed"] = str(seed)
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/realtime/text2img",
-                    json=payload,
-                    headers=self.headers
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        return result
-                    else:
-                        error_text = await response.text()
-                        raise Exception(f"ModelsLab Image API error: {response.status} - {error_text}")
-        except Exception as e:
-            print(f"[MODELSLAB IMAGE ERROR]: {str(e)}")
-            raise e
-
-    async def wait_for_completion(
-        self,
-        request_id: str,
-        max_wait_time: int = 300,  # 5 minutes
-        check_interval: int = 10   # 10 seconds
-    ) -> Dict[str, Any]:
-        """Wait for generation to complete and return the result"""
-        
-        elapsed_time = 0
-        while elapsed_time < max_wait_time:
-            try:
-                # Check status payload
-                status_payload = {
-                    "key": self.api_key,
-                    "request_id": request_id
-                }
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{self.base_url}/fetch",
-                        json=status_payload,
-                        headers=self.headers
-                    ) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            
-                            status = result.get('status')
-                            if status == 'success':
-                                return result
-                            elif status == 'failed':
-                                raise Exception(f"Generation failed: {result.get('message', 'Unknown error')}")
-                            elif status in ['processing', 'queued']:
-                                await asyncio.sleep(check_interval)
-                                elapsed_time += check_interval
-                                continue
-                        else:
-                            await asyncio.sleep(check_interval)
-                            elapsed_time += check_interval
-                            continue
-                            
-            except Exception as e:
-                if elapsed_time >= max_wait_time - check_interval:
-                    raise Exception(f"Generation timeout after {max_wait_time} seconds: {str(e)}")
-                await asyncio.sleep(check_interval)
-                elapsed_time += check_interval
-                continue
-
-        raise Exception(f"Generation timeout after {max_wait_time} seconds")
-
-    def get_model_for_style(self, style: str) -> str:
-        """Get appropriate ModelsLab model based on style"""
+    def get_video_model_for_style(self, style: str) -> str:
+        """Get appropriate ModelsLab video model based on style"""
         model_map = {
-            "realistic": "realistic-vision-v5",
-            "cinematic": "midjourney",
-            "animated": "dreamshaper-v8",
-            "fantasy": "juggernaut-xl-v9",
-            "comic": "absolute-reality-v1.6",
-            "artistic": "epicrealism-v5"
+            "realistic": "stable-video-diffusion",
+            "cinematic": "animatediff-v3",
+            "animated": "animatediff-v3",
+            "fantasy": "stable-video-diffusion",
+            "comic": "animatediff-v3",
+            "artistic": "stable-video-diffusion"
         }
-        return model_map.get(style.lower(), "midjourney")
+        return model_map.get(style.lower(), "stable-video-diffusion")
     
-    # Add these methods to the existing ModelsLabService class after line 120
-
     async def generate_image_to_video(
         self,
         image_url: str,
         duration: float = 3.0,
         motion_strength: float = 0.8,
         fps: int = 24,
-        width: int = 1024,
-        height: int = 576,
-        model_id: str = "stable-video-diffusion",  # or "animatediff-v3"
-        webhook: Optional[str] = None,
-        track_id: Optional[str] = None
+        width: int = 512,    # ✅ FIXED: Must be ≤ 512
+        height: int = 288,   # ✅ FIXED: 16:9 ratio within limits
+        model_id: str = "stable-video-diffusion"
     ) -> Dict[str, Any]:
-        """Generate video from image using ModelsLab Image-to-Video API"""
+        """Generate video from image using ModelsLab"""
+        
+        url = f"{self.base_url}/video/img2video"
         
         payload = {
             "key": self.api_key,
             "model_id": model_id,
             "init_image": image_url,
-            "duration": str(duration),
-            "motion_strength": motion_strength,
-            "fps": str(fps),
-            "width": str(width),
-            "height": str(height),
-            "steps": "25",
-            "guidance_scale": 7.5,
-            "scheduler": "DPMSolverMultistepScheduler",
-            "webhook": webhook,
-            "track_id": track_id
+            "duration": int(duration),
+            "motion_bucket_id": int(motion_strength * 255),  # Convert to 0-255 range
+            "fps": fps,
+            "width": width,
+            "height": height,
+            "webhook": None,
+            "track_id": None
         }
-
+        
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/video/img2video",
-                    json=payload,
-                    headers=self.headers
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        return result
-                    else:
-                        error_text = await response.text()
-                        raise Exception(f"ModelsLab Image-to-Video API error: {response.status} - {error_text}")
+                async with session.post(url, json=payload) as response:
+                    result = await response.json()
+                    
+                    print(f"[MODELSLAB VIDEO] API Response: {result}")
+                    return result
+                    
         except Exception as e:
             print(f"[MODELSLAB VIDEO ERROR]: {str(e)}")
             raise e
-
+        
     async def generate_text_to_video(
         self,
         prompt: str,
         duration: float = 3.0,
         fps: int = 24,
-        width: int = 1024,
-        height: int = 576,
+        width: int = 512,
+        height: int = 288,
         model_id: str = "animatediff-v3",
         webhook: Optional[str] = None,
         track_id: Optional[str] = None
@@ -232,29 +108,26 @@ class ModelsLabService:
         except Exception as e:
             print(f"[MODELSLAB VIDEO ERROR]: {str(e)}")
             raise e
-
-    def get_video_model_for_style(self, style: str) -> str:
-        """Get appropriate ModelsLab video model based on style"""
-        model_map = {
-            "realistic": "stable-video-diffusion",
-            "cinematic": "animatediff-v3",
-            "animated": "animatediff-v3",
-            "fantasy": "stable-video-diffusion",
-            "comic": "animatediff-v3",
-            "artistic": "stable-video-diffusion"
-        }
-        return model_map.get(style.lower(), "stable-video-diffusion")
-
-    def calculate_video_duration_from_audio(self, audio_segments: List[Dict[str, Any]], scene_id: str) -> float:
-        """Calculate video duration based on corresponding audio segments"""
+        
+    
+    def calculate_video_duration_from_audio(
+        self,
+        audio_files: List[Dict],
+        scene_id: str
+    ) -> float:
+        """Calculate video duration based on audio files for a scene"""
+        
         total_duration = 0.0
+        scene_number = int(scene_id.split('_')[1]) if '_' in scene_id else 1
         
-        for segment in audio_segments:
-            if segment.get('scene') == scene_id or segment.get('scene_id') == scene_id:
-                total_duration += segment.get('duration', 3.0)
+        # Find audio files for this scene
+        for audio in audio_files:
+            audio_scene = audio.get('scene', 1)
+            if audio_scene == scene_number:
+                total_duration += audio.get('duration', 3.0)
         
-        # Minimum 3 seconds, maximum 30 seconds per scene
-        return max(3.0, min(total_duration, 30.0))
+        # Ensure minimum duration of 3 seconds, maximum of 10 seconds
+        return max(3.0, min(total_duration, 10.0))
     
     # Add these methods to the existing ModelsLabService class after line 200
 
@@ -422,3 +295,45 @@ class ModelsLabService:
         except Exception as e:
             print(f"[MODELSLAB AUDIO TO VISEME ERROR]: {str(e)}")
             raise e
+        
+       
+    async def wait_for_completion(
+        self,
+        request_id: str,
+        max_wait_time: int = 300,
+        check_interval: int = 10
+    ) -> Dict[str, Any]:
+        """Wait for async video generation to complete"""
+        
+        # ✅ FIX: Use correct URL format with request_id in path
+        url = f"{self.base_url}/video/fetch/{request_id}"
+        
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait_time:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    # ✅ FIXED: Send POST request with just API key in body
+                    payload = {
+                        "key": self.api_key
+                    }
+                    
+                    async with session.post(url, json=payload) as response:
+                        result = await response.json()
+                        
+                        print(f"[MODELSLAB VIDEO] Fetch response: {result}")
+                        
+                        if result.get('status') == 'success':
+                            return result
+                        elif result.get('status') == 'error':
+                            raise Exception(f"Video generation failed: {result.get('message', 'Unknown error')}")
+                        
+                        # Still processing, wait and retry
+                        print(f"[MODELSLAB VIDEO] Still processing request {request_id}...")
+                        await asyncio.sleep(check_interval)
+                        
+            except Exception as e:
+                print(f"[MODELSLAB VIDEO] Error checking status: {e}")
+                await asyncio.sleep(check_interval)
+        
+        raise Exception(f"Video generation timed out after {max_wait_time} seconds")
