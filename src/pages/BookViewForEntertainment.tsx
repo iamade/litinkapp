@@ -46,6 +46,26 @@ interface Book {
   user_id: string;
 }
 
+interface SceneDescription {
+  scene_number: number;
+  location: string;
+  time_of_day: string;
+  characters: string[];
+  key_actions: string;
+  estimated_duration: number;
+  visual_description: string;
+  audio_requirements: string;
+}
+
+interface AIScriptResult {
+  script: string;
+  scene_descriptions: (string | SceneDescription)[]; // ✅ Union type to handle both formats
+  characters: string[];
+  character_details: string;
+  script_style: string;
+  script_id?: string;
+}
+
 export default function BookViewForEntertainment() {
   const { id } = useParams<{ id: string }>();
 
@@ -68,17 +88,20 @@ export default function BookViewForEntertainment() {
   const [scriptStyle, setScriptStyle] = useState("cinematic_movie");
   const [isLoading, setIsLoading] = useState(true);
   const [aiScriptResults, setAiScriptResults] = useState<
-    Record<
-      string,
-      {
-        script: string;
-        scene_descriptions: string[];
-        characters: string[];
-        character_details: string;
-        script_style: string;
-      }
-    >
+    Record<string, AIScriptResult>
   >({});
+  // const [aiScriptResults, setAiScriptResults] = useState<
+  //   Record<
+  //     string,
+  //     {
+  //       script: string;
+  //       scene_descriptions: string[];
+  //       characters: string[];
+  //       character_details: string;
+  //       script_style: string;
+  //     }
+  //   >
+  // >({});
   const [loadingScript, setLoadingScript] = useState(false);
   const [generatedScripts, setGeneratedScripts] = useState<any[]>([]);
   const [selectedScript, setSelectedScript] = useState<any>(null);
@@ -99,8 +122,6 @@ export default function BookViewForEntertainment() {
 
   const [lastUpdated, setLastUpdated] = useState(Date.now());
   const [existingGenerations, setExistingGenerations] = useState<any[]>([]);
-
-
 
   // Add these handler functions after your existing function
   const handleContinueGeneration = async (videoGenId: string) => {
@@ -201,9 +222,9 @@ export default function BookViewForEntertainment() {
       ...prev,
       [script.chapter_id]: {
         script: script.script,
-        scene_descriptions: script.scene_descriptions,
-        characters: script.characters,
-        character_details: script.character_details,
+        scene_descriptions: script.scene_descriptions || [],
+        characters: script.characters || [],
+        character_details: script.character_details || "",
         script_style: script.script_style,
         script_id: script.id,
       },
@@ -286,124 +307,127 @@ export default function BookViewForEntertainment() {
 
   // Add this useEffect to handle status changes
 
-// Update the existing generations fetch to be more reliable
-const fetchExistingGenerations = useCallback(async () => {
-  if (!selectedChapter) return;
+  // Update the existing generations fetch to be more reliable
+  const fetchExistingGenerations = useCallback(async () => {
+    if (!selectedChapter) return;
 
-  try {
-    console.log('[FETCH] Getting existing generations for chapter:', selectedChapter.id);
-    const response = await videoGenerationAPI.getChapterVideoGenerations(selectedChapter.id);
-    
-    // ✅ Fix: Extract the generations array from the response
-    const generations = response.generations || [];
-    console.log('[FETCH] Found generations:', generations.length);
-    
-    setExistingGenerations(generations); // ✅ Now using the array
-    
-    // If we have generations, show them
-    if (generations.length > 0) {
-      setShowExistingGenerations(true);
-    }
-  } catch (error) {
-    console.error("Error fetching existing generations:", error);
-    // Even on error, show the generation interface
-    setShowExistingGenerations(true);
-  }
-}, [selectedChapter]);
-
-
-useEffect(() => {
-  if (videoStatus === "failed" && selectedChapter) {
-    // Delay to ensure backend has updated the status
-    const timer = setTimeout(() => {
-      fetchExistingGenerations();
-      setShowExistingGenerations(true);
-    }, 500);
-    
-    return () => clearTimeout(timer);
-  }
-}, [videoStatus, selectedChapter]);
-
-
-  // Add status polling
-   // Update the pollVideoStatus function:
-  
-  const pollVideoStatus = async (videoGenId: string) => {
-  const checkStatus = async () => {
     try {
-      const data = await userService.getVideoGenerationStatus(videoGenId);
-      
-      console.log('[POLLING] Status update:', data.generation_status);
-      
-      // Update video status immediately
-      setVideoStatus(data.generation_status);
-      
-      // Also fetch pipeline status for detailed view
-      try {
-        const pipelineData = await aiService.getPipelineStatus(videoGenId);
-        setPipelineStatus(pipelineData);
-        
-        // Force a re-render by updating a timestamp
-        setLastUpdated(Date.now());
-      } catch (pipelineError) {
-        console.warn("Pipeline status not available:", pipelineError);
-      }
+      console.log(
+        "[FETCH] Getting existing generations for chapter:",
+        selectedChapter.id
+      );
+      const response = await videoGenerationAPI.getChapterVideoGenerations(
+        selectedChapter.id
+      );
 
-      // Update task status if available
-      if (data.task_metadata?.audio_task_state) {
-        setTaskStatus(data.task_metadata.audio_task_state);
-      }
+      // ✅ Fix: Extract the generations array from the response
+      const generations = response.generations || [];
+      console.log("[FETCH] Found generations:", generations.length);
 
-      if (data.generation_status === "completed" && data.video_url) {
-        setVideoUrls((prev) => ({
-          ...prev,
-          [selectedChapter!.id]: data.video_url!,
-        }));
-        toast.success("Video generation completed!");
-        setShowPipelineStatus(false);
-        setShowExistingGenerations(true);
-        return;
-      }
+      setExistingGenerations(generations); // ✅ Now using the array
 
-      if (data.generation_status === "failed") {
-        toast.error(data.error_message || "Video generation failed");
-        setShowExistingGenerations(true);
-        // Force refresh of existing generations
-        setTimeout(() => {
-          fetchExistingGenerations();
-        }, 1000);
-        return;
-      }
-
-      // Continue polling if still processing
-      if (
-        [
-          "pending",
-          "generating_audio", 
-          "audio_completed",           // ✅ Added
-          "generating_images",
-          "images_completed",          // ✅ Added  
-          "generating_video",
-          "video_completed",           // ✅ Added
-          "combining",
-          "merging_audio",
-          "applying_lipsync",
-        ].includes(data.generation_status)
-      ) {
-        setTimeout(checkStatus, 2000); // Poll every 2 seconds for faster updates
-      } else {
-        // Unknown status, show existing generations
+      // If we have generations, show them
+      if (generations.length > 0) {
         setShowExistingGenerations(true);
       }
     } catch (error) {
-      console.error("Error checking status:", error);
-      toast.error("Error checking video status");
+      console.error("Error fetching existing generations:", error);
+      // Even on error, show the generation interface
       setShowExistingGenerations(true);
     }
-  };
+  }, [selectedChapter]);
 
-  checkStatus();
-};
+  useEffect(() => {
+    if (videoStatus === "failed" && selectedChapter) {
+      // Delay to ensure backend has updated the status
+      const timer = setTimeout(() => {
+        fetchExistingGenerations();
+        setShowExistingGenerations(true);
+      }, 500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [videoStatus, selectedChapter]);
+
+  // Add status polling
+  // Update the pollVideoStatus function:
+
+  const pollVideoStatus = async (videoGenId: string) => {
+    const checkStatus = async () => {
+      try {
+        const data = await userService.getVideoGenerationStatus(videoGenId);
+
+        console.log("[POLLING] Status update:", data.generation_status);
+
+        // Update video status immediately
+        setVideoStatus(data.generation_status);
+
+        // Also fetch pipeline status for detailed view
+        try {
+          const pipelineData = await aiService.getPipelineStatus(videoGenId);
+          setPipelineStatus(pipelineData);
+
+          // Force a re-render by updating a timestamp
+          setLastUpdated(Date.now());
+        } catch (pipelineError) {
+          console.warn("Pipeline status not available:", pipelineError);
+        }
+
+        // Update task status if available
+        if (data.task_metadata?.audio_task_state) {
+          setTaskStatus(data.task_metadata.audio_task_state);
+        }
+
+        if (data.generation_status === "completed" && data.video_url) {
+          setVideoUrls((prev) => ({
+            ...prev,
+            [selectedChapter!.id]: data.video_url!,
+          }));
+          toast.success("Video generation completed!");
+          setShowPipelineStatus(false);
+          setShowExistingGenerations(true);
+          return;
+        }
+
+        if (data.generation_status === "failed") {
+          toast.error(data.error_message || "Video generation failed");
+          setShowExistingGenerations(true);
+          // Force refresh of existing generations
+          setTimeout(() => {
+            fetchExistingGenerations();
+          }, 1000);
+          return;
+        }
+
+        // Continue polling if still processing
+        if (
+          [
+            "pending",
+            "generating_audio",
+            "audio_completed", // ✅ Added
+            "generating_images",
+            "images_completed", // ✅ Added
+            "generating_video",
+            "video_completed", // ✅ Added
+            "combining",
+            "merging_audio",
+            "applying_lipsync",
+          ].includes(data.generation_status)
+        ) {
+          setTimeout(checkStatus, 2000); // Poll every 2 seconds for faster updates
+        } else {
+          // Unknown status, show existing generations
+          setShowExistingGenerations(true);
+        }
+      } catch (error) {
+        console.error("Error checking status:", error);
+        toast.error("Error checking video status");
+        setShowExistingGenerations(true);
+      }
+    };
+
+    checkStatus();
+  };
   const formatStatus = (status: string | null | undefined): string => {
     if (!status) return "Initializing";
     return status.replace(/_/g, " ");
@@ -473,8 +497,6 @@ useEffect(() => {
       setIsLoading(false);
     }
   };
-
-  
 
   // Load book on component mount
   useEffect(() => {
@@ -663,7 +685,7 @@ useEffect(() => {
                       Generate Video
                     </button>
                   </div>
-                  {/* Add the Generated Scripts Card to your JSX (place it afteryour script generation card) */}
+                  {/* Add the Generated Scripts Card to your JSX (place it after your script generation card) */}
                   {selectedChapter && (
                     <div className="bg-white p-6 rounded-lg shadow-md">
                       <h3 className="text-lg font-semibold mb-4 flex items-center">
@@ -740,6 +762,47 @@ useEffect(() => {
                                   <p className="text-sm text-gray-700 line-clamp-2">
                                     {script.script.substring(0, 150)}...
                                   </p>
+                                </div>
+                              )}
+
+                              {script.scene_descriptions && (
+                                <div className="mt-2">
+                                  <span className="text-xs font-medium text-gray-600">
+                                    Scene Descriptions:
+                                  </span>
+                                  <div className="mt-1 space-y-1">
+                                    {script.scene_descriptions
+                                      .slice(0, 2)
+                                      .map((scene: any, idx: number) => (
+                                        <div
+                                          key={idx}
+                                          className="text-xs text-gray-600"
+                                        >
+                                          {typeof scene === "object" &&
+                                          scene !== null
+                                            ? `${
+                                                scene.scene_number || idx + 1
+                                              }. ${
+                                                scene.location
+                                              } - ${scene.key_actions?.substring(
+                                                0,
+                                                50
+                                              )}...`
+                                            : typeof scene === "string"
+                                            ? `${idx + 1}. ${scene.substring(
+                                                0,
+                                                50
+                                              )}...`
+                                            : `Scene ${idx + 1}`}
+                                        </div>
+                                      ))}
+                                    {script.scene_descriptions.length > 2 && (
+                                      <div className="text-xs text-gray-500">
+                                        +{script.scene_descriptions.length - 2}{" "}
+                                        more scenes...
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               )}
 
@@ -982,8 +1045,94 @@ useEffect(() => {
                       )}
                     </>
                   )}
+
+                  {/* Scene Descriptions Display - FIXED VERSION */}
+                  {aiScriptResults[selectedChapter.id] && (
+                    <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
+                      <h4 className="font-semibold text-gray-800 mb-2">
+                        AI-Generated Script
+                      </h4>
+                      <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-white p-2 rounded border mb-4 overflow-x-auto">
+                        {aiScriptResults[selectedChapter.id].script ||
+                          "No script available."}
+                      </pre>
+
+                      <h4 className="font-semibold text-gray-800 mb-2">
+                        Scene Descriptions
+                      </h4>
+
+                      {/* ✅ FIXED: Properly handle scene descriptions objects */}
+                      {aiScriptResults[selectedChapter.id].scene_descriptions &&
+                      aiScriptResults[selectedChapter.id].scene_descriptions
+                        .length > 0 ? (
+                        <div className="space-y-3">
+                          {aiScriptResults[
+                            selectedChapter.id
+                          ].scene_descriptions.map((scene, idx) => {
+                            // ✅ Handle both object and string formats
+                            if (typeof scene === "object" && scene !== null) {
+                              return (
+                                <div
+                                  key={idx}
+                                  className="bg-white p-3 rounded border"
+                                >
+                                  <div className="flex justify-between items-start mb-2">
+                                    <h5 className="font-medium text-gray-900">
+                                      Scene {scene.scene_number || idx + 1}:{" "}
+                                      {scene.location}
+                                    </h5>
+                                    <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                      {scene.time_of_day}
+                                    </span>
+                                  </div>
+
+                                  <p className="text-sm text-gray-700 mb-2">
+                                    {scene.visual_description}
+                                  </p>
+
+                                  <div className="text-xs text-gray-600 mb-1">
+                                    <strong>Key Actions:</strong>{" "}
+                                    {scene.key_actions}
+                                  </div>
+
+                                  {scene.characters &&
+                                    scene.characters.length > 0 && (
+                                      <div className="text-xs text-gray-600 mb-1">
+                                        <strong>Characters:</strong>{" "}
+                                        {scene.characters.join(", ")}
+                                      </div>
+                                    )}
+
+                                  {scene.estimated_duration && (
+                                    <div className="text-xs text-gray-600">
+                                      <strong>Duration:</strong> ~
+                                      {scene.estimated_duration}s
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            } else {
+                              // ✅ Handle legacy string format
+                              return (
+                                <li key={idx} className="mb-1 text-gray-700">
+                                  {typeof scene === "string"
+                                    ? scene
+                                    : JSON.stringify(scene)}
+                                </li>
+                              );
+                            }
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-gray-600">
+                          No scene descriptions available.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {/* AI Script & Scene Descriptions Display (separate from video) */}
-                  {selectedChapter && aiScriptResults[selectedChapter.id] && (
+                  {/* {selectedChapter && aiScriptResults[selectedChapter.id] && (
                     <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
                       <h4 className="font-semibold text-gray-800 mb-2">
                         AI-Generated Script
@@ -1013,7 +1162,7 @@ useEffect(() => {
                         </p>
                       )}
                     </div>
-                  )}
+                  )} */}
                 </div>
               )}
             </div>

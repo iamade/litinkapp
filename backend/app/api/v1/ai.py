@@ -15,6 +15,8 @@ from app.services.embeddings_service import EmbeddingsService
 from app.core.database import get_supabase
 from app.core.auth import get_current_active_user
 from app.services.pipeline_manager import PipelineManager, PipelineStep
+from app.services.deepseek_script_service import DeepSeekScriptService
+
 
 router = APIRouter()
 
@@ -1694,8 +1696,194 @@ async def combine_tavus_videos(
         print(f"🔍 Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
+
+# Update the generate_script_and_scenes endpoint
 @router.post("/generate-script-and-scenes")
 async def generate_script_and_scenes(
+    request: dict = Body(...),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Generate only the AI script and scene descriptions for a chapter using DeepSeek (no video generation)"""
+    try:
+        # Extract from request body
+        chapter_id = request.get('chapter_id')
+        script_style = request.get('script_style', 'cinematic_movie')
+       
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required")
+
+        # Verify chapter access
+        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        
+        chapter_data = chapter_response.data
+        book_data = chapter_data['books']
+        
+        # Check access permissions
+        if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
+        
+        # ✅ NEW: Use DeepSeek for script generation
+        print(f"[DEEPSEEK] Generating script with style: {script_style}")
+        
+        # Initialize DeepSeek service
+        deepseek_service = DeepSeekScriptService()
+        
+        # Get chapter context for DeepSeek
+        rag_service = RAGService(supabase_client)
+        chapter_context = await rag_service.get_chapter_with_context(chapter_id, include_adjacent=True)
+        
+        # Prepare content for DeepSeek based on script style
+        content_for_script = chapter_context.get('total_context', chapter_data['content'])
+        
+        # ✅ Generate script using DeepSeek with style-specific prompts
+        if script_style == 'cinematic_movie':
+            # Use the standard screenplay system prompt for dialogue-based scripts
+            script_result = await deepseek_service.generate_screenplay(
+                content=content_for_script,
+                target_duration=3,  # 3 minutes target
+                use_reasoning=False
+            )
+        elif script_style == 'narration':
+            # Use a modified approach for narration-style scripts
+            script_result = await deepseek_service.generate_narration_script(
+                content=content_for_script,
+                target_duration=3,
+                use_reasoning=False
+            )
+        else:
+            # Default to cinematic_movie
+            script_result = await deepseek_service.generate_screenplay(
+                content=content_for_script,
+                target_duration=3,
+                use_reasoning=False
+            )
+        
+        if script_result.get('status') != 'success':
+            raise HTTPException(
+                status_code=500, 
+                detail=f"DeepSeek script generation failed: {script_result.get('error', 'Unknown error')}"
+            )
+        
+        script = script_result.get('screenplay', '')
+        parsed_data = script_result.get('parsed_data', {})
+        
+        # Extract characters and scenes from parsed data
+        characters = parsed_data.get('characters', [])
+        scenes = parsed_data.get('scenes', [])
+        
+        # ✅ Generate scene breakdown using DeepSeek
+        scene_breakdown_result = await deepseek_service.generate_scene_breakdown(
+            screenplay=script,
+            max_scenes=10
+        )
+        
+        scene_descriptions = []
+        if scene_breakdown_result.get('status') == 'success':
+            breakdown_data = scene_breakdown_result.get('scene_breakdown', {})
+            if isinstance(breakdown_data, dict) and 'scenes' in breakdown_data:
+                scene_descriptions = breakdown_data['scenes']
+            elif isinstance(breakdown_data, list):
+                scene_descriptions = breakdown_data
+        
+        # ✅ Generate character profiles using DeepSeek
+        character_profiles_result = await deepseek_service.generate_character_profiles(screenplay=script)
+        
+        character_details = ""
+        if character_profiles_result.get('status') == 'success':
+            profiles_data = character_profiles_result.get('character_profiles', {})
+            if isinstance(profiles_data, dict) and 'characters' in profiles_data:
+                character_details = str(profiles_data['characters'])
+            else:
+                character_details = str(profiles_data)
+        
+        # Enhanced script data with metadata
+        script_data = {
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "script_style": script_style,
+            "user_id": current_user['id'],
+            "created_at": datetime.now().isoformat(),
+            "metadata": {
+                "total_scenes": len(scene_descriptions),
+                "estimated_duration": len(script) * 0.01,  # Rough estimate
+                "has_characters": len(characters) > 0,
+                "script_length": len(script),
+                "deepseek_model": script_result.get('model_used', 'deepseek-chat'),
+                "tokens_used": script_result.get('tokens_used', 0)
+            }
+        }
+        
+        # Store in chapters table (your existing approach)
+        ai_content = chapter_data.get('ai_generated_content') or {}
+        if not isinstance(ai_content, dict):
+            ai_content = {}
+        key = f"{current_user['id']}:{script_style}"
+        ai_content[key] = script_data
+        
+        supabase_client.table('chapters').update({
+            "ai_generated_content": ai_content
+        }).eq('id', chapter_id).execute()
+        
+        # ALSO create a dedicated scripts table entry for easier access
+        script_record = {
+            "chapter_id": chapter_id,
+            "user_id": current_user['id'],
+            "script_style": script_style,
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "metadata": script_data["metadata"],
+            "status": "ready",
+            "service_used": "deepseek"
+        }
+        
+        # Insert or update in scripts table
+        existing_script = supabase_client.table('scripts')\
+            .select('id')\
+            .eq('chapter_id', chapter_id)\
+            .eq('user_id', current_user['id'])\
+            .eq('script_style', script_style)\
+            .execute()
+        
+        if existing_script.data:
+            # Update existing
+            script_result = supabase_client.table('scripts')\
+                .update(script_record)\
+                .eq('id', existing_script.data[0]['id'])\
+                .execute()
+            script_id = existing_script.data[0]['id']
+        else:
+            # Insert new
+            script_result = supabase_client.table('scripts').insert(script_record).execute()
+            script_id = script_result.data[0]['id']
+        
+        print(f"[DEEPSEEK] Successfully generated {script_style} script with {len(characters)} characters and {len(scene_descriptions)} scenes")
+        
+        return {
+            'chapter_id': chapter_id,
+            'script_id': script_id,
+            'script': script,
+            'scene_descriptions': scene_descriptions,
+            'characters': characters,
+            'character_details': character_details,
+            'script_style': script_style,
+            'metadata': script_data["metadata"],
+            'service_used': 'deepseek'
+        }
+        
+    except Exception as e:
+        print(f"Error generating script and scenes with DeepSeek: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-script-and-scenes")
+async def generate_script_and_scenes_with_gpt(
     request: dict = Body(...),  # Accept body instead of query params
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
@@ -1801,7 +1989,7 @@ async def generate_script_and_scenes(
             'characters': characters,
             'character_details': character_details,
             'script_style': script_style,
-            'metadata': script_data["metadata"]
+            'metadata': script_data["metadata"],
         }
     except Exception as e:
         print(f"Error generating script and scenes: {e}")

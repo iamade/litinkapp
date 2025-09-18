@@ -10,6 +10,7 @@ from typing import Dict, Any, List
 from app.services.modelslab_image_service import ModelsLabImageService
 from app.core.database import get_supabase
 from app.services.pipeline_manager import PipelineManager, PipelineStep
+from app.services.modelslab_v7_image_service import ModelsLabV7ImageService
 
 @celery_app.task(bind=True)
 def generate_all_images_for_video(self, video_generation_id: str):
@@ -117,13 +118,13 @@ def generate_all_images_for_video(self, video_generation_id: str):
             raise Exception("No scene descriptions or characters found in script data")
         
         # ✅ FIXED: Generate images using asyncio.run() instead of await
-        image_service = ModelsLabImageService()
+        image_service = ModelsLabV7ImageService()
         
         # 1. Generate character reference images
         character_images = []
         if characters:
             print(f"[IMAGE GENERATION] Generating {len(characters)} character images...")
-            character_images = asyncio.run(generate_character_images(
+            character_images = asyncio.run(generate_character_images_optimized(
                 image_service, video_generation_id, characters, video_style
             ))
         
@@ -131,7 +132,8 @@ def generate_all_images_for_video(self, video_generation_id: str):
         scene_images = []
         if scene_descriptions:
             print(f"[IMAGE GENERATION] Generating {len(scene_descriptions)} scene images...")
-            scene_images = asyncio.run(generate_scene_images(
+            scene_images = asyncio.run(generate_scene_images_optimized(
+            # scene_images = asyncio.run(generate_scene_images(
                 image_service, video_generation_id, scene_descriptions, video_style
             ))
         
@@ -237,216 +239,415 @@ def generate_all_images_for_video(self, video_generation_id: str):
         
         raise Exception(error_message)
     
-async def generate_character_images(
-    image_service: ModelsLabImageService,
+# ✅ NEW: Optimized async function for character images  
+async def generate_character_images_optimized(
+    image_service: ModelsLabV7ImageService,
     video_gen_id: str,
     characters: List[str],
-    video_style: str
+    style: str = "realistic"
 ) -> List[Dict[str, Any]]:
-    """Generate character reference images with proper error handling"""
+    """Generate character images with optimizations"""
     
-    print(f"[CHARACTER IMAGES] Generating character reference images...")
+    print(f"[CHARACTER IMAGES OPTIMIZED] Generating images for {len(characters)} characters...")
     character_results = []
     supabase = get_supabase()
     
     for i, character in enumerate(characters):
         try:
-            print(f"[CHARACTER IMAGES] Processing character {i+1}/{len(characters)}: {character}")
+            print(f"[CHARACTER IMAGE {i+1}] Processing: {character}")
             
-            # Create character description
-            character_description = f"detailed portrait of {character}, clear facial features, expressive"
+            character_description = f"Detailed character portrait, {style} style, expressive features"
             
-            # Use the updated service method
-            result = await image_service.generate_character_reference_image(
+            result = await image_service.generate_character_image(
                 character_name=character,
                 character_description=character_description,
-                style=video_style
+                style=style,
+                aspect_ratio="3:4"
             )
             
-            # Handle response
             if result.get('status') == 'success':
-                output_urls = result.get('output', [])
-                if output_urls:
-                    image_url = output_urls[0]
-                    
-                    # ✅ Use the correct column names that exist in database
-                    try:
-                        image_record = supabase.table('image_generations').insert({
-                            'video_generation_id': video_gen_id,
-                            'image_type': 'character',
-                            'character_name': character,
-                            'image_prompt': f"Character: {character}",  # Using existing column
-                            'text_prompt': character_description,        # Using new column
-                            'style': video_style,                        # Using new column
-                            'image_url': image_url,
-                            'sequence_order': i + 1,
-                            'status': 'completed',
-                            'metadata': {
-                                'character_name': character,
-                                'service': 'modelslab',
-                                'model': image_service.get_image_model_for_style(video_style),
-                                'width': 512,
-                                'height': 768,
-                                'generation_order': i + 1
-                            }
-                        }).execute()
-                        
-                        character_results.append({
-                            'id': image_record.data[0]['id'],
-                            'character': character,
-                            'image_url': image_url,
-                            'style': video_style
-                        })
-                        
-                        print(f"[CHARACTER IMAGES] ✅ Generated {character}: {image_url}")
-                        
-                    except Exception as db_error:
-                        print(f"[CHARACTER IMAGES] Database insert error: {db_error}")
-                        # Fallback to minimal required fields
-                        try:
-                            image_record = supabase.table('image_generations').insert({
-                                'video_generation_id': video_gen_id,
-                                'image_url': image_url,
-                                'status': 'completed'
-                            }).execute()
-                            
-                            character_results.append({
-                                'id': image_record.data[0]['id'],
-                                'character': character,
-                                'image_url': image_url,
-                                'style': video_style
-                            })
-                            print(f"[CHARACTER IMAGES] ✅ Generated {character} (minimal data): {image_url}")
-                        except Exception as fallback_error:
-                            print(f"[CHARACTER IMAGES] Fallback insert also failed: {fallback_error}")
-                            character_results.append(None)
-                else:
-                    raise Exception("No image URL in response")
-            else:
-                raise Exception(f"API returned error: {result.get('message', 'Unknown error')}")
-            
-        except Exception as e:
-            print(f"[CHARACTER IMAGES] ❌ Failed {character}: {str(e)}")
-            
-            # Store failed record
-            try:
-                supabase.table('image_generations').insert({
+                image_url = result.get('image_url')
+                
+                if not image_url:
+                    raise Exception("No image URL in V7 response")
+                
+                # Store in database
+                image_record_data = {
                     'video_generation_id': video_gen_id,
                     'image_type': 'character',
+                    'prompt': f"Character: {character}, {character_description}",
+                    'image_url': image_url,
                     'character_name': character,
-                    'text_prompt': f"Character: {character}",
-                    'style': video_style,
-                    'status': 'failed',
-                    'error_message': str(e),
-                    'sequence_order': i + 1
-                }).execute()
-            except Exception as db_error:
-                print(f"[CHARACTER IMAGES] Database error logging failure: {str(db_error)}")
+                    'style': style,
+                    'status': 'completed',
+                    'sequence_order': i + 1,
+                    'model_id': result.get('model_used', 'gen4_image'),
+                    'aspect_ratio': '3:4',
+                    'service_provider': 'modelslab_v7',
+                    'generation_time_seconds': result.get('generation_time', 0),
+                    'metadata': {
+                        'service': 'modelslab_v7',
+                        'model_used': result.get('model_used', 'gen4_image'),
+                        'generation_time': result.get('generation_time', 0)
+                    }
+                }
+                
+                db_result = supabase.table('image_generations').insert(image_record_data).execute()
+                
+                character_results.append({
+                    'id': db_result.data[0]['id'] if db_result.data else None,
+                    'character': character,
+                    'image_url': image_url,
+                    'style': style,
+                    'status': 'success'
+                })
+                
+                print(f"[CHARACTER IMAGE {i+1}] ✅ Success: {character}")
+                
+            else:
+                raise Exception(f"V7 Image generation failed: {result.get('error', 'Unknown error')}")
             
-            character_results.append(None)
+            # Brief pause between requests
+            await asyncio.sleep(1)
+                
+        except Exception as e:
+            print(f"[CHARACTER IMAGE {i+1}] ❌ Failed {character}: {str(e)}")
+            
+            # Store failed record
+            failed_record_data = {
+                'video_generation_id': video_gen_id,
+                'image_type': 'character',
+                'character_name': character,
+                'style': style,
+                'status': 'failed',
+                'error_message': str(e),
+                'sequence_order': i + 1,
+                'prompt': f"Character: {character}, {character_description}",
+                'model_id': 'gen4_image',
+                'aspect_ratio': '3:4',
+                'service_provider': 'modelslab_v7',
+                'metadata': {'service': 'modelslab_v7', 'error': str(e)}
+            }
+            supabase.table('image_generations').insert(failed_record_data).execute()
+            
+            character_results.append({
+                'character': character,
+                'status': 'failed',
+                'error': str(e)
+            })
     
-    successful_characters = len([r for r in character_results if r is not None])
-    print(f"[CHARACTER IMAGES] Completed: {successful_characters}/{len(characters)} characters")
+    successful_count = len([r for r in character_results if r.get('status') == 'success'])
+    print(f"[CHARACTER IMAGES OPTIMIZED] Completed: {successful_count}/{len(characters)} characters")
     return character_results
 
-async def generate_scene_images(
-    image_service: ModelsLabImageService,
+
+async def generate_scene_images_optimized(
+    image_service: ModelsLabV7ImageService,
     video_gen_id: str,
-    scene_descriptions: List[str],
-    video_style: str
+    scene_descriptions: List[Dict[str, Any]],
+    style: str = "cinematic"
 ) -> List[Dict[str, Any]]:
-    """Generate scene images with proper error handling"""
+    """Generate scene images sequentially with optimizations"""
     
-    print(f"[SCENE IMAGES] Generating scene images...")
+    print(f"[SCENE IMAGES OPTIMIZED] Generating images for {len(scene_descriptions)} scenes...")
     scene_results = []
     supabase = get_supabase()
     
-    for i, scene_desc in enumerate(scene_descriptions):
+    for i, scene in enumerate(scene_descriptions):
         try:
-            scene_id = f"scene_{i+1}"
-            print(f"[SCENE IMAGES] Processing {scene_id}/{len(scene_descriptions)}")
+            # Handle different scene description formats
+            if isinstance(scene, dict):
+                scene_text = scene.get('description', scene.get('text', str(scene)))
+                scene_number = scene.get('scene_number', i + 1)
+            else:
+                scene_text = str(scene)
+                scene_number = i + 1
             
-            # ✅ FIXED: Use video-compatible dimensions (512x288 for 16:9 ratio)
+            print(f"[SCENE IMAGE {i+1}] Processing: {scene_text[:50]}...")
+            
+            # ✅ OPTIMIZATION: Try with shorter timeout first
             result = await image_service.generate_scene_image(
-                scene_description=scene_desc,
-                style=video_style,
-                width=512,  # ✅ Fixed: Max 512 for video compatibility
-                height=288  # ✅ Fixed: 16:9 ratio within limits
+                scene_description=scene_text,
+                style=style,
+                aspect_ratio="16:9"
             )
             
-            # Handle response
             if result.get('status') == 'success':
-                output_urls = result.get('output', [])
-                if output_urls:
-                    image_url = output_urls[0]
-                    
-                    try:
-                        image_record = supabase.table('image_generations').insert({
-                            'video_generation_id': video_gen_id,
-                            'image_type': 'scene',
-                            'scene_id': scene_id,
-                            'scene_description': scene_desc,
-                            'image_prompt': f"Scene: {scene_desc[:100]}...",
-                            'text_prompt': scene_desc,
-                            'style': video_style,
-                            'image_url': image_url,
-                            'width': 512,      # ✅ Fixed: Update metadata
-                            'height': 288,     # ✅ Fixed: Update metadata
-                            'sequence_order': i + 1,
-                            'status': 'completed',
-                            'metadata': {
-                                'scene_number': i + 1,
-                                'scene_id': scene_id,
-                                'service': 'modelslab',
-                                'model': image_service.get_image_model_for_style(video_style),
-                                'width': 512,      # ✅ Fixed: Video-compatible width
-                                'height': 288,     # ✅ Fixed: Video-compatible height
-                                'generation_order': i + 1
-                            }
-                        }).execute()
-                        
-                        scene_result = {
-                            'id': image_record.data[0]['id'],
-                            'scene_id': scene_id,
-                            'image_url': image_url,
-                            'description': scene_desc,
-                            'style': video_style,
-                            'width': 512,      # ✅ Fixed: Add dimensions to result
-                            'height': 288,     # ✅ Fixed: Add dimensions to result
-                            'metadata': {
-                                'scene_number': i + 1,
-                                'generation_order': i + 1
-                            }
-                        }
-                        scene_results.append(scene_result)
-                        
-                        print(f"[SCENE IMAGES] ✅ Generated {scene_id}: {image_url}")
-                        
-                    except Exception as db_error:
-                        print(f"[SCENE IMAGES] Database insert error: {db_error}")
-                        # Even if DB insert fails, try to continue with the image URL
-                        scene_result = {
-                            'scene_id': scene_id,
-                            'image_url': image_url,
-                            'description': scene_desc,
-                            'style': video_style,
-                            'width': 512,
-                            'height': 288
-                        }
-                        scene_results.append(scene_result)
-                        print(f"[SCENE IMAGES] ✅ Generated {scene_id} (no DB): {image_url}")
-                else:
-                    raise Exception("No image URL in response")
+                image_url = result.get('image_url')
+                
+                if not image_url:
+                    raise Exception("No image URL in V7 response")
+                
+                # Store in database
+                image_record_data = {
+                    'video_generation_id': video_gen_id,
+                    'image_type': 'scene',
+                    'prompt': f"Scene: {scene_text}",
+                    'image_url': image_url,
+                    'scene_number': scene_number,
+                    'style': style,
+                    'status': 'completed',
+                    'sequence_order': i + 1,
+                    'model_id': result.get('model_used', 'gen4_image'),
+                    'aspect_ratio': '16:9',
+                    'service_provider': 'modelslab_v7',
+                    'generation_time_seconds': result.get('generation_time', 0),
+                    'metadata': {
+                        'service': 'modelslab_v7',
+                        'model_used': result.get('model_used', 'gen4_image'),
+                        'generation_time': result.get('generation_time', 0)
+                    }
+                }
+                
+                db_result = supabase.table('image_generations').insert(image_record_data).execute()
+                
+                scene_results.append({
+                    'id': db_result.data[0]['id'] if db_result.data else None,
+                    'scene_number': scene_number,
+                    'image_url': image_url,
+                    'description': scene_text,
+                    'style': style,
+                    'status': 'success'
+                })
+                
+                print(f"[SCENE IMAGE {i+1}] ✅ Success: {image_url[:50]}...")
+                
             else:
-                raise Exception(f"API returned error: {result.get('message', 'Unknown error')}")
+                raise Exception(f"V7 Image generation failed: {result.get('error', 'Unknown error')}")
+            
+            # ✅ OPTIMIZATION: Brief pause between requests
+            await asyncio.sleep(2)
                 
         except Exception as e:
-            print(f"[SCENE IMAGES] ❌ Failed scene {i+1}: {str(e)}")
-            scene_results.append(None)
+            print(f"[SCENE IMAGE {i+1}] ❌ Failed: {str(e)}")
+            
+            # Store failed record
+            failed_record_data = {
+                'video_generation_id': video_gen_id,
+                'image_type': 'scene',
+                'scene_number': scene_number if 'scene_number' in locals() else i + 1,
+                'prompt': scene_text if 'scene_text' in locals() else 'Unknown scene',
+                'style': style,
+                'status': 'failed',
+                'error_message': str(e),
+                'sequence_order': i + 1,
+                'model_id': 'gen4_image',
+                'aspect_ratio': '16:9',
+                'service_provider': 'modelslab_v7',
+                'metadata': {'service': 'modelslab_v7', 'error': str(e)}
+            }
+            supabase.table('image_generations').insert(failed_record_data).execute()
+            
+            scene_results.append({
+                'scene_number': scene_number if 'scene_number' in locals() else i + 1,
+                'status': 'failed',
+                'error': str(e)
+            })
     
-    successful_scenes = len([r for r in scene_results if r is not None])
-    print(f"[SCENE IMAGES] Completed: {successful_scenes}/{len(scene_descriptions)} scenes")
+    successful_count = len([r for r in scene_results if r.get('status') == 'success'])
+    print(f"[SCENE IMAGES OPTIMIZED] Completed: {successful_count}/{len(scene_descriptions)} scenes")
     return scene_results
+
+
+    
+# async def generate_character_images(
+#     image_service: ModelsLabV7ImageService,
+#     video_gen_id: str,
+#     characters: List[str],
+#     style: str = "realistic"
+# ) -> List[Dict[str, Any]]:
+#     """Generate character images using V7 service"""
+    
+#     print(f"[CHARACTER IMAGES] Generating images for {len(characters)} characters...")
+#     character_results = []
+#     supabase = get_supabase()
+    
+#     for i, character in enumerate(characters):
+#         try:
+#             print(f"[CHARACTER IMAGES] Processing character {i+1}/{len(characters)}: {character}")
+            
+#             character_description = f"Detailed character portrait, {style} style, expressive features"
+            
+#             result = await image_service.generate_character_image(
+#                 character_name=character,
+#                 character_description=character_description,
+#                 style=style,
+#                 aspect_ratio="3:4"
+#             )
+            
+#             if result.get('status') == 'success':
+#                 image_url = result.get('image_url')
+                
+#                 if not image_url:
+#                     raise Exception("No image URL in V7 response")
+                
+#                 # ✅ FIXED: Use ALL available columns
+#                 image_record_data = {
+#                     'video_generation_id': video_gen_id,
+#                     'image_type': 'character',
+#                     'prompt': f"Character: {character}, {character_description}",
+#                     'image_url': image_url,
+#                     'character_name': character,
+#                     'style': style,
+#                     'status': 'completed',
+#                     'sequence_order': i + 1,
+#                     'model_id': result.get('model_used', 'gen4_image'),
+#                     'aspect_ratio': '3:4',
+#                     'service_provider': 'modelslab_v7',
+#                     'generation_time_seconds': result.get('generation_time', 0),
+#                     'metadata': {
+#                         'service': 'modelslab_v7',
+#                         'model_used': result.get('model_used', 'gen4_image'),
+#                         'generation_time': result.get('generation_time', 0)
+#                     }
+#                 }
+                
+#                 db_result = supabase.table('image_generations').insert(image_record_data).execute()
+                
+#                 character_results.append({
+#                     'id': db_result.data[0]['id'] if db_result.data else None,
+#                     'character': character,
+#                     'image_url': image_url,
+#                     'style': style,
+#                     'status': 'success'
+#                 })
+                
+#                 print(f"[CHARACTER IMAGES] ✅ Generated {character}")
+                
+#             else:
+#                 raise Exception(f"V7 Image generation failed: {result.get('error', 'Unknown error')}")
+                
+#         except Exception as e:
+#             print(f"[CHARACTER IMAGES] ❌ Failed {character}: {str(e)}")
+            
+#             # ✅ FIXED: Use ALL available columns for failed records too
+#             failed_record_data = {
+#                 'video_generation_id': video_gen_id,
+#                 'image_type': 'character',
+#                 'character_name': character,
+#                 'style': style,
+#                 'status': 'failed',
+#                 'error_message': str(e),
+#                 'sequence_order': i + 1,
+#                 'prompt': f"Character: {character}, {character_description}",
+#                 'model_id': 'gen4_image',
+#                 'aspect_ratio': '3:4',
+#                 'service_provider': 'modelslab_v7',
+#                 'metadata': {'service': 'modelslab_v7'}
+#             }
+#             supabase.table('image_generations').insert(failed_record_data).execute()
+            
+#             character_results.append({
+#                 'character': character,
+#                 'status': 'failed',
+#                 'error': str(e)
+#             })
+    
+#     print(f"[CHARACTER IMAGES] Completed: {len([r for r in character_results if r.get('status') == 'success'])}/{len(characters)} characters")
+#     return character_results
+
+
+# async def generate_scene_images(
+#     image_service: ModelsLabV7ImageService,
+#     video_gen_id: str,
+#     scene_descriptions: List[Dict[str, Any]],
+#     style: str = "cinematic"
+# ) -> List[Dict[str, Any]]:
+#     """Generate scene images using V7 service"""
+    
+#     print(f"[SCENE IMAGES] Generating images for {len(scene_descriptions)} scenes...")
+#     scene_results = []
+#     supabase = get_supabase()
+    
+#     for i, scene in enumerate(scene_descriptions):
+#         try:
+#             # Handle different scene description formats
+#             if isinstance(scene, dict):
+#                 scene_text = scene.get('description', scene.get('text', str(scene)))
+#                 scene_number = scene.get('scene_number', i + 1)
+#             else:
+#                 scene_text = str(scene)
+#                 scene_number = i + 1
+            
+#             print(f"[SCENE IMAGES] Processing scene {i+1}/{len(scene_descriptions)}: {scene_text[:50]}...")
+            
+#             result = await image_service.generate_scene_image(
+#                 scene_description=scene_text,
+#                 style=style,
+#                 aspect_ratio="16:9"
+#             )
+            
+#             if result.get('status') == 'success':
+#                 image_url = result.get('image_url')
+                
+#                 if not image_url:
+#                     raise Exception("No image URL in V7 response")
+                
+#                 # ✅ FIXED: Use ALL available columns including scene_number
+#                 image_record_data = {
+#                     'video_generation_id': video_gen_id,
+#                     'image_type': 'scene',
+#                     'prompt': f"Scene: {scene_text}",
+#                     'image_url': image_url,
+#                     'scene_number': scene_number,  # ✅ Now this column exists
+#                     'style': style,
+#                     'status': 'completed',
+#                     'sequence_order': i + 1,
+#                     'model_id': result.get('model_used', 'gen4_image'),
+#                     'aspect_ratio': '16:9',
+#                     'service_provider': 'modelslab_v7',
+#                     'generation_time_seconds': result.get('generation_time', 0),
+#                     'metadata': {
+#                         'service': 'modelslab_v7',
+#                         'model_used': result.get('model_used', 'gen4_image'),
+#                         'generation_time': result.get('generation_time', 0)
+#                     }
+#                 }
+                
+#                 db_result = supabase.table('image_generations').insert(image_record_data).execute()
+                
+#                 scene_results.append({
+#                     'id': db_result.data[0]['id'] if db_result.data else None,
+#                     'scene_number': scene_number,
+#                     'image_url': image_url,
+#                     'description': scene_text,
+#                     'style': style,
+#                     'status': 'success'
+#                 })
+                
+#                 print(f"[SCENE IMAGES] ✅ Generated scene {scene_number}")
+                
+#             else:
+#                 raise Exception(f"V7 Image generation failed: {result.get('error', 'Unknown error')}")
+                
+#         except Exception as e:
+#             print(f"[SCENE IMAGES] ❌ Failed scene {i+1}: {str(e)}")
+            
+#             # ✅ FIXED: Use ALL available columns for failed records
+#             failed_record_data = {
+#                 'video_generation_id': video_gen_id,
+#                 'image_type': 'scene',
+#                 'scene_number': scene_number if 'scene_number' in locals() else i + 1,
+#                 'prompt': scene_text if 'scene_text' in locals() else 'Unknown scene',
+#                 'style': style,
+#                 'status': 'failed',
+#                 'error_message': str(e),
+#                 'sequence_order': i + 1,
+#                 'model_id': 'gen4_image',
+#                 'aspect_ratio': '16:9',
+#                 'service_provider': 'modelslab_v7',
+#                 'metadata': {'service': 'modelslab_v7'}
+#             }
+#             supabase.table('image_generations').insert(failed_record_data).execute()
+            
+#             scene_results.append({
+#                 'scene_number': scene_number if 'scene_number' in locals() else i + 1,
+#                 'status': 'failed',
+#                 'error': str(e)
+#             })
+    
+#     print(f"[SCENE IMAGES] Completed: {len([r for r in scene_results if r.get('status') == 'success'])}/{len(scene_descriptions)} scenes")
+#     return scene_results
 
 def create_character_image_prompt(character: str, style: str) -> str:
     """Create detailed prompt for character image generation"""

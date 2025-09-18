@@ -1,10 +1,150 @@
 from app.tasks.celery_app import celery_app
 import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.services.modelslab_image_service import ModelsLabImageService
 from app.services.modelslab_video_service import ModelsLabVideoService
 from app.core.database import get_supabase
 import json
+
+from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
+
+
+# Update the service initialization in generate_all_videos_for_generation
+async def generate_scene_videos(
+    modelslab_service: ModelsLabV7VideoService,  # ✅ Updated type hint
+    video_gen_id: str,
+    scene_descriptions: List[str],
+    audio_files: Dict[str, Any],
+    image_data: Dict[str, Any],
+    video_style: str
+) -> List[Dict[str, Any]]:
+    """Generate videos for each scene using V7 Veo 2 image-to-video"""
+    
+    print(f"[SCENE VIDEOS V7] Generating scene videos with Veo 2...")
+    video_results = []
+    supabase = get_supabase()
+    
+    scene_images = image_data.get('scenes', [])  # Updated to match V7 response format
+    model_id = modelslab_service.get_video_model_for_style(video_style)
+    
+    for i, scene_description in enumerate(scene_descriptions):
+        try:
+            scene_id = f"scene_{i+1}"
+            print(f"[SCENE VIDEOS V7] Processing {scene_id}/{len(scene_descriptions)}")
+            
+            # Find scene image
+            scene_image = None
+            if i < len(scene_images) and scene_images[i] is not None:
+                scene_image = scene_images[i]
+            
+            if not scene_image or not scene_image.get('image_url'):
+                print(f"[SCENE VIDEOS V7] ⚠️ No valid image found for {scene_id}")
+                video_results.append(None)
+                continue
+            
+            # Find audio for lip sync
+            scene_audio = find_scene_audio(scene_id, audio_files)
+            
+            # ✅ Generate video using V7 Veo 2
+            result = await modelslab_service.enhance_video_for_scene(
+                scene_description=scene_description,
+                image_url=scene_image['image_url'],
+                audio_url=scene_audio.get('audio_url') if scene_audio else None,
+                style=video_style,
+                include_lipsync=bool(scene_audio)
+            )
+            
+            if result.get('status') == 'success':
+                enhanced_video = result.get('enhanced_video', {})
+                video_url = enhanced_video.get('video_url')
+                has_lipsync = enhanced_video.get('has_lipsync', False)
+                
+                if video_url:
+                    # Store in database
+                    video_record = supabase.table('video_segments').insert({
+                        'video_generation_id': video_gen_id,
+                        'scene_id': scene_id,
+                        'segment_index': i + 1,
+                        'scene_description': scene_description,
+                        'source_image_url': scene_image['image_url'],
+                        'video_url': video_url,
+                        'duration_seconds': 5.0,  # Veo 2 default
+                        'generation_method': 'veo2_image_to_video',
+                        'status': 'completed',
+                        'processing_service': 'modelslab_v7',
+                        'processing_model': model_id,
+                        'metadata': {
+                            'model_id': model_id,
+                            'video_style': video_style,
+                            'service': 'modelslab_v7',
+                            'has_lipsync': has_lipsync,
+                            'veo2_enhanced': True
+                        }
+                    }).execute()
+                    
+                    video_results.append({
+                        'id': video_record.data[0]['id'],
+                        'scene_id': scene_id,
+                        'video_url': video_url,
+                        'duration': 5.0,
+                        'source_image': scene_image['image_url'],
+                        'method': 'veo2_image_to_video',
+                        'model': model_id,
+                        'has_lipsync': has_lipsync
+                    })
+                    
+                    print(f"[SCENE VIDEOS V7] ✅ Generated {scene_id} - Lip sync: {has_lipsync}")
+                else:
+                    raise Exception("No video URL in V7 response")
+            else:
+                raise Exception(f"V7 Video generation failed: {result.get('error', 'Unknown error')}")
+                
+        except Exception as e:
+            print(f"[SCENE VIDEOS V7] ❌ Failed {scene_id}: {str(e)}")
+            
+            # Store failed record
+            try:
+                supabase.table('video_segments').insert({
+                    'video_generation_id': video_gen_id,
+                    'scene_id': scene_id,
+                    'segment_index': i + 1,
+                    'scene_description': scene_description,
+                    'generation_method': 'veo2_image_to_video',
+                    'status': 'failed',
+                    'error_message': str(e),
+                    'processing_service': 'modelslab_v7',
+                    'processing_model': model_id,
+                    'metadata': {'service': 'modelslab_v7', 'veo2_enhanced': False}
+                }).execute()
+            except:
+                pass
+            
+            video_results.append(None)
+    
+    successful_videos = len([r for r in video_results if r is not None])
+    print(f"[SCENE VIDEOS V7] Completed: {successful_videos}/{len(scene_descriptions)} videos")
+    return video_results
+
+def find_scene_audio(scene_id: str, audio_files: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Find the primary audio file for a scene (for lip sync)"""
+    
+    # Priority: Character dialogue > Narrator > None
+    character_audio = audio_files.get('characters', [])
+    narrator_audio = audio_files.get('narrator', [])
+    
+    scene_number = int(scene_id.split('_')[1]) if '_' in scene_id else 1
+    
+    # Look for character dialogue first
+    for audio in character_audio:
+        if audio.get('scene') == scene_number and audio.get('audio_url'):
+            return audio
+    
+    # Fall back to narrator audio
+    for audio in narrator_audio:
+        if audio.get('scene') == scene_number and audio.get('audio_url'):
+            return audio
+    
+    return None
 
 def update_pipeline_step(video_generation_id: str, step_name: str, status: str, error_message: str = None):
     """Update pipeline step status"""
@@ -155,85 +295,118 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
     
     
 async def generate_scene_videos(
-    modelslab_service: ModelsLabVideoService,
+    modelslab_service: ModelsLabV7VideoService,  # ✅ Updated type hint
     video_gen_id: str,
     scene_descriptions: List[str],
     audio_files: Dict[str, Any],
     image_data: Dict[str, Any],
     video_style: str
 ) -> List[Dict[str, Any]]:
-    """Generate videos for each scene using image-to-video"""
+    """Generate videos for each scene using V7 Veo 2 image-to-video"""
     
-    print(f"[SCENE VIDEOS] Generating scene videos...")
+    print(f"[SCENE VIDEOS V7] Generating scene videos with Veo 2...")
     video_results = []
     supabase = get_supabase()
     
-    scene_images = image_data.get('scene_images', [])
+    scene_images = image_data.get('scenes', [])  # Updated to match V7 response format
     model_id = modelslab_service.get_video_model_for_style(video_style)
-    
-    # ✅ DEBUG: Print what we have
-    print(f"[SCENE VIDEOS DEBUG] Available scene images: {len(scene_images)}")
-    print(f"[SCENE VIDEOS DEBUG] Scene descriptions: {len(scene_descriptions)}")
-    for i, img in enumerate(scene_images):
-        if img:
-            print(f"[SCENE VIDEOS DEBUG] Scene image {i}: scene_id={img.get('scene_id')}, has_url={bool(img.get('image_url'))}")
     
     for i, scene_description in enumerate(scene_descriptions):
         try:
             scene_id = f"scene_{i+1}"
-            print(f"[SCENE VIDEOS] Processing {scene_id}/{len(scene_descriptions)}")
+            print(f"[SCENE VIDEOS V7] Processing {scene_id}/{len(scene_descriptions)}")
             
-            # ✅ FIX: Improve scene image lookup
+            # Find scene image
             scene_image = None
-            
-            # Method 1: Direct index lookup (preferred)
             if i < len(scene_images) and scene_images[i] is not None:
                 scene_image = scene_images[i]
-                print(f"[SCENE VIDEOS] ✅ Found image by index for {scene_id}")
-            else:
-                # Method 2: Search by scene_id
-                for img in scene_images:
-                    if img and img.get('scene_id') == scene_id:
-                        scene_image = img
-                        print(f"[SCENE VIDEOS] ✅ Found image by scene_id for {scene_id}")
-                        break
-                
-                # Method 3: Search by scene number in metadata
-                if not scene_image:
-                    for img in scene_images:
-                        if img and img.get('metadata', {}).get('scene_number') == i + 1:
-                            scene_image = img
-                            print(f"[SCENE VIDEOS] ✅ Found image by scene_number for {scene_id}")
-                            break
             
             if not scene_image or not scene_image.get('image_url'):
-                print(f"[SCENE VIDEOS] ⚠️ No valid image found for {scene_id}, using text-to-video")
-                # Fall back to text-to-video if no image available
-                video_result = await generate_text_to_video_scene(
-                    modelslab_service, video_gen_id, scene_id, scene_description, 
-                    audio_files, video_style, model_id
-                )
+                print(f"[SCENE VIDEOS V7] ⚠️ No valid image found for {scene_id}")
+                video_results.append(None)
+                continue
+            
+            # Find audio for lip sync
+            scene_audio = find_scene_audio(scene_id, audio_files)
+            
+            # ✅ Generate video using V7 Veo 2
+            result = await modelslab_service.enhance_video_for_scene(
+                scene_description=scene_description,
+                image_url=scene_image['image_url'],
+                audio_url=scene_audio.get('audio_url') if scene_audio else None,
+                style=video_style,
+                include_lipsync=bool(scene_audio)
+            )
+            
+            if result.get('status') == 'success':
+                enhanced_video = result.get('enhanced_video', {})
+                video_url = enhanced_video.get('video_url')
+                has_lipsync = enhanced_video.get('has_lipsync', False)
+                
+                if video_url:
+                    # Store in database
+                    video_record = supabase.table('video_segments').insert({
+                        'video_generation_id': video_gen_id,
+                        'scene_id': scene_id,
+                        'segment_index': i + 1,
+                        'scene_description': scene_description,
+                        'source_image_url': scene_image['image_url'],
+                        'video_url': video_url,
+                        'duration_seconds': 5.0,  # Veo 2 default
+                        'generation_method': 'veo2_image_to_video',
+                        'status': 'completed',
+                        'processing_service': 'modelslab_v7',
+                        'processing_model': model_id,
+                        'metadata': {
+                            'model_id': model_id,
+                            'video_style': video_style,
+                            'service': 'modelslab_v7',
+                            'has_lipsync': has_lipsync,
+                            'veo2_enhanced': True
+                        }
+                    }).execute()
+                    
+                    video_results.append({
+                        'id': video_record.data[0]['id'],
+                        'scene_id': scene_id,
+                        'video_url': video_url,
+                        'duration': 5.0,
+                        'source_image': scene_image['image_url'],
+                        'method': 'veo2_image_to_video',
+                        'model': model_id,
+                        'has_lipsync': has_lipsync
+                    })
+                    
+                    print(f"[SCENE VIDEOS V7] ✅ Generated {scene_id} - Lip sync: {has_lipsync}")
+                else:
+                    raise Exception("No video URL in V7 response")
             else:
-                print(f"[SCENE VIDEOS] ✅ Using image-to-video for {scene_id}: {scene_image['image_url']}")
-                # Use image-to-video generation
-                video_result = await generate_image_to_video_scene(
-                    modelslab_service, video_gen_id, scene_id, scene_description,
-                    scene_image, audio_files, video_style, model_id
-                )
-            
-            video_results.append(video_result)
-            
-            if video_result:
-                print(f"[SCENE VIDEOS] ✅ Generated {scene_id} - Duration: {video_result.get('duration', 0):.1f}s")
-            else:
-                print(f"[SCENE VIDEOS] ❌ Failed {scene_id}")
-            
+                raise Exception(f"V7 Video generation failed: {result.get('error', 'Unknown error')}")
+                
         except Exception as e:
-            print(f"[SCENE VIDEOS] ❌ Failed {scene_id}: {str(e)}")
+            print(f"[SCENE VIDEOS V7] ❌ Failed {scene_id}: {str(e)}")
+            
+            # Store failed record
+            try:
+                supabase.table('video_segments').insert({
+                    'video_generation_id': video_gen_id,
+                    'scene_id': scene_id,
+                    'segment_index': i + 1,
+                    'scene_description': scene_description,
+                    'generation_method': 'veo2_image_to_video',
+                    'status': 'failed',
+                    'error_message': str(e),
+                    'processing_service': 'modelslab_v7',
+                    'processing_model': model_id,
+                    'metadata': {'service': 'modelslab_v7', 'veo2_enhanced': False}
+                }).execute()
+            except:
+                pass
+            
             video_results.append(None)
     
     successful_videos = len([r for r in video_results if r is not None])
-    print(f"[SCENE VIDEOS] Completed: {successful_videos}/{len(scene_descriptions)} videos")
+    print(f"[SCENE VIDEOS V7] Completed: {successful_videos}/{len(scene_descriptions)} videos")
     return video_results
 
 

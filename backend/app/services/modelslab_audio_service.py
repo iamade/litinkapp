@@ -28,68 +28,68 @@ class ModelsLabAudioService:
             "female_old": "leah",
         }
 
-    async def generate_tts_audio(
-    self,
-    text: str,
-    voice_id: str = "madison",
-    audio_format: str = "mp3",
-    speed: float = 1.0,
-    pitch: float = 1.0,
-    webhook: Optional[str] = None,
-    track_id: Optional[str] = None
-) -> Dict[str, Any]:
-        """Generate TTS audio using ModelsLab API"""
+#     async def generate_tts_audio(
+#     self,
+#     text: str,
+#     voice_id: str = "madison",
+#     audio_format: str = "mp3",
+#     speed: float = 1.0,
+#     pitch: float = 1.0,
+#     webhook: Optional[str] = None,
+#     track_id: Optional[str] = None
+# ) -> Dict[str, Any]:
+#         """Generate TTS audio using ModelsLab API"""
         
-        # ✅ CORRECTED: Fixed parameter names to match API docs exactly
-        payload = {
-            "key": self.api_key,
-            "prompt": text,  # ✅ Correct: Use 'prompt' for text
-            "voice_id": voice_id,  # ✅ Keep as voice_id - this is correct per docs
-            "language": "american english",  # ✅ Use full language name
-            "output_format": audio_format,
-            "speed": int(speed),  # ✅ Convert to integer as per docs
-            "emotion": False,  # ✅ This is correct and valid!
-            "temp": False   # ✅ Add temp parameter
-        }
+#         # ✅ CORRECTED: Fixed parameter names to match API docs exactly
+#         payload = {
+#             "key": self.api_key,
+#             "prompt": text,  # ✅ Correct: Use 'prompt' for text
+#             "voice_id": voice_id,  # ✅ Keep as voice_id - this is correct per docs
+#             "language": "american english",  # ✅ Use full language name
+#             "output_format": audio_format,
+#             "speed": int(speed),  # ✅ Convert to integer as per docs
+#             "emotion": False,  # ✅ This is correct and valid!
+#             "temp": False   # ✅ Add temp parameter
+#         }
         
-        if webhook:
-            payload["webhook"] = webhook
-        if track_id:
-            payload["track_id"] = track_id
+#         if webhook:
+#             payload["webhook"] = webhook
+#         if track_id:
+#             payload["track_id"] = track_id
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.base_url}/voice/text_to_speech",
-                    json=payload,
-                    headers=self.headers
-                ) as response:
-                    result = await response.json()
-                    print(f"[MODELSLAB TTS] API Response: {result}")
+#         try:
+#             async with aiohttp.ClientSession() as session:
+#                 async with session.post(
+#                     f"{self.base_url}/voice/text_to_speech",
+#                     json=payload,
+#                     headers=self.headers
+#                 ) as response:
+#                     result = await response.json()
+#                     print(f"[MODELSLAB TTS] API Response: {result}")
                     
-                    if response.status == 200:
-                        # ✅ Handle both sync and async responses
-                        if result.get('status') == 'success':
-                            # Synchronous response - audio ready immediately
-                            return result
-                        elif result.get('status') == 'processing':
-                            # Asynchronous response - need to fetch later
-                            request_id = result.get('id')
-                            if request_id:
-                                # Wait for completion
-                                final_result = await self.wait_for_completion(request_id)
-                                return final_result
-                            else:
-                                raise Exception("No request ID provided for async processing")
-                        else:
-                            raise Exception(f"API returned error: {result.get('message', 'Unknown error')}")
-                    else:
-                        error_text = await response.text()
-                        raise Exception(f"ModelsLab TTS API error: {response.status} - {error_text}")
+#                     if response.status == 200:
+#                         # ✅ Handle both sync and async responses
+#                         if result.get('status') == 'success':
+#                             # Synchronous response - audio ready immediately
+#                             return result
+#                         elif result.get('status') == 'processing':
+#                             # Asynchronous response - need to fetch later
+#                             request_id = result.get('id')
+#                             if request_id:
+#                                 # Wait for completion
+#                                 final_result = await self.wait_for_completion(request_id)
+#                                 return final_result
+#                             else:
+#                                 raise Exception("No request ID provided for async processing")
+#                         else:
+#                             raise Exception(f"API returned error: {result.get('message', 'Unknown error')}")
+#                     else:
+#                         error_text = await response.text()
+#                         raise Exception(f"ModelsLab TTS API error: {response.status} - {error_text}")
                     
-        except Exception as e:
-            print(f"[MODELSLAB TTS ERROR]: {str(e)}")
-            raise e
+#         except Exception as e:
+#             print(f"[MODELSLAB TTS ERROR]: {str(e)}")
+#             raise e
 
     async def generate_sound_effect(
     self,

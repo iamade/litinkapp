@@ -1604,8 +1604,8 @@ class FileService:
         
         all_chapters = []
         
-        # Search first 15 pages for ANY chapter entries
-        for page_num in range(min(15, len(doc))):
+        # Search first 25 pages for ANY chapter entries
+        for page_num in range(min(25, len(doc))):
             page = doc[page_num]
             text = page.get_text()
             
