@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.embeddings_service import EmbeddingsService
@@ -37,6 +37,25 @@ class UserBookStatus(str, Enum):
 
 
 router = APIRouter()
+
+@router.get("/structure-types", response_model=Dict[str, Any])
+async def get_structure_types():
+    """Get available structure types and their metadata"""
+    from app.services.file_service import BookStructureDetector
+    
+    detector = BookStructureDetector()
+    structure_types = {}
+    
+    # Get metadata for all known structure types
+    known_types = ['flat', 'hierarchical', 'tablet', 'book', 'part', 'act', 'movement', 'canto']
+    
+    for structure_type in known_types:
+        structure_types[structure_type] = detector.get_structure_metadata(structure_type)
+    
+    return {
+        "structure_types": structure_types,
+        "default": "flat"
+    }
 
 
 @router.get("/superadmin-learning-books", response_model=List[BookWithChapters])
@@ -324,11 +343,23 @@ async def upload_book(
         raise HTTPException(status_code=400, detail="Either file or text content is required")
 
     try:
+        
+        # FIX: Add validation and null safety for form inputs
+        if not book_type or not isinstance(book_type, str):
+            book_type = "entertainment"  # Default fallback
+        
+        if not title or not isinstance(title, str):
+            title = "Untitled Book"
+            
+        # Ensure description is a string or None
+        if description is not None and not isinstance(description, str):
+            description = str(description) if description else None
+        
         # Create initial book record
         book_data = {
             "title": title,
             "description": description,
-            "book_type": book_type,
+            "book_type": book_type.lower().strip(),
             "user_id": str(current_user["id"]),
             "status": "PROCESSING",  # Initial status
         }
@@ -690,7 +721,8 @@ async def retry_book_processing(
         
         # Add the processing task to the background
         background_tasks.add_task(
-            file_service.process_uploaded_book,
+            # file_service.process_uploaded_book,
+            file_service.process_uploaded_book_preview,
             storage_path=None,  # Content is already extracted
             original_filename=None,
             text_content=content,

@@ -47,44 +47,74 @@ class SectionInput(BaseModel):
     section_number: str  # "1", "I", "III", etc.
     order_index: int
     description: Optional[str] = None
-
+    
 
 class BookStructureInput(BaseModel):
-    structure_type: Optional[str] = "flat"  # "flat", "hierarchical"
+    structure_type: Optional[str] = "flat"
     has_sections: Optional[bool] = False
     sections: Optional[List[Dict[str, Any]]] = []
     chapters: Optional[List[Dict[str, Any]]] = []
-    
-    # Add this method if it's missing
-    def get(self, key: str, default=None):
-        """Add dict-like get method for backward compatibility"""
-        return getattr(self, key, default)
+    structure_metadata: Optional[Dict[str, Any]] = {}  # Add this
     
     class Config:
         schema_extra = {
             "example": {
-                "structure_type": "hierarchical",
+                "structure_type": "tablet",
                 "has_sections": True,
+                "structure_metadata": {
+                    "display_name": "Tablet Structure",
+                    "icon": "🏺",
+                    "section_label": "Tablet",
+                    "chapter_label": "Section"
+                },
                 "sections": [
                     {
-                        "title": "Part I: Introduction",
-                        "section_type": "part",
+                        "title": "Tablet I: The Wild Man",
+                        "section_type": "tablet",
                         "section_number": "I",
                         "order_index": 1
-                    }
-                ],
-                "chapters": [
-                    {
-                        "title": "Chapter 1: Getting Started",
-                        "content": "Chapter content here...",
-                        "chapter_number": 1,
-                        "section_title": "Part I: Introduction",
-                        "section_type": "part",
-                        "section_number": "I"
                     }
                 ]
             }
         }
+
+
+# class BookStructureInput(BaseModel):
+#     structure_type: Optional[str] = "flat"  # "flat", "hierarchical"
+#     has_sections: Optional[bool] = False
+#     sections: Optional[List[Dict[str, Any]]] = []
+#     chapters: Optional[List[Dict[str, Any]]] = []
+    
+#     # Add this method if it's missing
+#     def get(self, key: str, default=None):
+#         """Add dict-like get method for backward compatibility"""
+#         return getattr(self, key, default)
+    
+#     class Config:
+#         schema_extra = {
+#             "example": {
+#                 "structure_type": "hierarchical",
+#                 "has_sections": True,
+#                 "sections": [
+#                     {
+#                         "title": "Part I: Introduction",
+#                         "section_type": "part",
+#                         "section_number": "I",
+#                         "order_index": 1
+#                     }
+#                 ],
+#                 "chapters": [
+#                     {
+#                         "title": "Chapter 1: Getting Started",
+#                         "content": "Chapter content here...",
+#                         "chapter_number": 1,
+#                         "section_title": "Part I: Introduction",
+#                         "section_type": "part",
+#                         "section_number": "I"
+#                     }
+#                 ]
+#             }
+#         }
         
 
 class ChapterBase(BaseModel):
