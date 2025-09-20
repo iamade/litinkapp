@@ -2425,10 +2425,8 @@ class FileService:
         
         return pattern_chapters
     
-    
-   
     async def _extract_toc_with_ai(self, toc_text_blocks: List[Dict], doc) -> List[Dict[str, Any]]:
-        """Generic AI TOC parsing for any book - NO HARDCODING"""
+        """Generic AI TOC parsing for any book - completely generic approach"""
         print("[AI TOC EXTRACTION] Using AI to parse TOC structure...")
         
         # Combine all TOC text with better separation
@@ -2436,51 +2434,52 @@ class FileService:
             f"PAGE {block['page_num']}:\n{block['text']}" for block in toc_text_blocks
         ])
         
-        # ✅ FIX: Generic prompt that works for ANY book
+        # ✅ COMPLETELY GENERIC PROMPT - no hardcoding
         prompt = f"""
-        You are analyzing a Table of Contents from a book. This TOC spans multiple pages and may have a complex layout.
+        You are analyzing a Table of Contents from a book. Extract ALL chapters and sections from this TOC.
         
         INSTRUCTIONS:
         1. Extract EVERY chapter entry you can find across ALL pages
-        2. Look for patterns like Roman numerals (I, II, III) or Arabic numbers (1, 2, 3) paired with chapter titles
-        3. Some chapters may be in columnar format - match numbers with nearby titles
-        4. Include ALL sections/books/parts mentioned (there could be 2, 3, 4, or more sections)
-        5. Don't miss chapters just because the layout is complex
-        6. Look carefully at ALL pages of the TOC
-        7. Extract the complete structure - find ALL sections and their chapters
+        2. Look for any numbering system: Roman numerals (I, II, III), Arabic numbers (1, 2, 3), or word numbers (One, Two)
+        3. Identify any major sections/books/parts that group chapters together
+        4. The TOC may span multiple pages - analyze ALL pages thoroughly
+        5. Don't miss any chapters just because the layout is complex or they appear on later pages
+        6. Include ALL sections mentioned (there could be 2, 3, 4, or more major divisions)
+        7. Look for patterns like columnar layouts where numbers and titles may be separated
         
-        Common TOC patterns to look for:
+        Common patterns to look for:
         - "CHAPTER 1. Title Name ... Page"
         - "I. Title Name ... Page" (Roman numerals)
-        - "BOOK THE FIRST: Section Name" followed by chapters
-        - "PART I: Section Name" followed by chapters
-        - Columnar layouts where numbers and titles may be separated
+        - "BOOK/PART/SECTION [Name]" followed by chapters
+        - Multi-level hierarchies with sections containing chapters
+        - Any numbered content that represents story/learning divisions
         
-        TOC Text (Multiple Pages):
+        TOC Text (spans multiple pages):
         {combined_toc_text[:12000]}
         
-        Return JSON with ALL chapters found. For books with multiple sections, include section information:
+        Return JSON with ALL chapters found. If the book has sections/parts/books, include that information:
         {{
             "chapters": [
                 {{
                     "number": 1,
-                    "title": "Chapter Title Here",
+                    "title": "First Chapter Title",
                     "page": 1,
-                    "section": "Section Title Here (if any)"
+                    "section": "Section Name (if any, otherwise leave empty)"
                 }},
                 {{
                     "number": 2,
-                    "title": "Another Chapter Title",
+                    "title": "Second Chapter Title", 
                     "page": 15,
-                    "section": "Section Title Here (if any)"
+                    "section": "Section Name (if any, otherwise leave empty)"
                 }}
             ]
         }}
         
-        IMPORTANT: 
-        - Find ALL chapters from ALL sections
-        - Extract the complete book structure
-        - If no clear sections exist, leave section field empty or as "Main"
+        CRITICAL:
+        - Extract the COMPLETE structure - don't stop early
+        - If chapters are grouped under sections/books/parts, include that section information
+        - If no clear sections exist, leave section field empty
+        - Look at ALL pages of the TOC provided
         - Return ONLY valid JSON, no other text
         """
         
@@ -2488,10 +2487,10 @@ class FileService:
             response = await self.ai_service.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are an expert at parsing Table of Contents from any book. Extract ALL chapters comprehensively. Return only valid JSON."},
+                    {"role": "system", "content": "You are an expert at parsing Table of Contents from any book. Extract ALL chapters comprehensively from any book structure. Return only valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=4000,
+                max_tokens=5000,
                 temperature=0.1
             )
         
@@ -2515,6 +2514,15 @@ class FileService:
             chapters = result.get('chapters', [])
             
             print(f"[AI TOC EXTRACTION] AI extracted {len(chapters)} chapters")
+            
+            # ✅ ADD: Count chapters per section to verify we got all sections
+            section_counts = {}
+            for ch in chapters:
+                section = ch.get('section', 'No Section')
+                if section and section.strip():  # Only count non-empty sections
+                    section_counts[section] = section_counts.get(section, 0) + 1
+            
+            print(f"[AI TOC EXTRACTION] Chapters per section: {section_counts}")
             
             # Convert to our format with better validation
             formatted_chapters = []
@@ -2547,22 +2555,33 @@ class FileService:
                     
                     # Add section info if present
                     section_info = ch.get('section', '')
-                    if section_info and isinstance(section_info, str) and section_info.strip() and section_info.strip().lower() != 'main':
+                    if section_info and isinstance(section_info, str) and section_info.strip():
                         formatted_chapter.update({
                             'section_title': section_info.strip(),
                             'section_type': self._extract_section_type(section_info),
                             'section_number': self._extract_section_number(section_info),
                         })
+                        
+                        print(f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: {title} (Section: {section_info})")
+                    else:
+                        print(f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: {title} (No section)")
                     
                     formatted_chapters.append(formatted_chapter)
-                    print(f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: {title} (Section: {section_info or 'None'})")
                     chapter_counter += 1
                     
                 except (ValueError, TypeError) as e:
                     print(f"[AI TOC EXTRACTION] Error processing chapter {ch}: {e}")
                     continue
             
+            # ✅ FINAL VERIFICATION: Check section distribution
+            final_section_counts = {}
+            for ch in formatted_chapters:
+                section = ch.get('section_title', 'No Section')
+                final_section_counts[section] = final_section_counts.get(section, 0) + 1
+            
+            print(f"[AI TOC EXTRACTION] Final chapters per section: {final_section_counts}")
             print(f"[AI TOC EXTRACTION] Total formatted chapters: {len(formatted_chapters)}")
+            
             return formatted_chapters
             
         except json.JSONDecodeError as e:
@@ -2571,9 +2590,156 @@ class FileService:
             return []
         except Exception as e:
             print(f"[AI TOC EXTRACTION] Failed: {e}")
-            import traceback
             print(f"[AI TOC EXTRACTION] Full error: {traceback.format_exc()}")
             return []
+   
+    # async def _extract_toc_with_ai(self, toc_text_blocks: List[Dict], doc) -> List[Dict[str, Any]]:
+    #     """Generic AI TOC parsing for any book - NO HARDCODING"""
+    #     print("[AI TOC EXTRACTION] Using AI to parse TOC structure...")
+        
+    #     # Combine all TOC text with better separation
+    #     combined_toc_text = "\n\n=== NEW PAGE ===\n\n".join([
+    #         f"PAGE {block['page_num']}:\n{block['text']}" for block in toc_text_blocks
+    #     ])
+        
+    #     # ✅ FIX: Generic prompt that works for ANY book
+    #     prompt = f"""
+    #     You are analyzing a Table of Contents from a book. This TOC spans multiple pages and may have a complex layout.
+        
+    #     INSTRUCTIONS:
+    #     1. Extract EVERY chapter entry you can find across ALL pages
+    #     2. Look for patterns like Roman numerals (I, II, III) or Arabic numbers (1, 2, 3) paired with chapter titles
+    #     3. Some chapters may be in columnar format - match numbers with nearby titles
+    #     4. Include ALL sections/books/parts mentioned (there could be 2, 3, 4, or more sections)
+    #     5. Don't miss chapters just because the layout is complex
+    #     6. Look carefully at ALL pages of the TOC
+    #     7. Extract the complete structure - find ALL sections and their chapters
+        
+    #     Common TOC patterns to look for:
+    #     - "CHAPTER 1. Title Name ... Page"
+    #     - "I. Title Name ... Page" (Roman numerals)
+    #     - "BOOK THE FIRST: Section Name" followed by chapters
+    #     - "PART I: Section Name" followed by chapters
+    #     - Columnar layouts where numbers and titles may be separated
+        
+    #     TOC Text (Multiple Pages):
+    #     {combined_toc_text[:12000]}
+        
+    #     Return JSON with ALL chapters found. For books with multiple sections, include section information:
+    #     {{
+    #         "chapters": [
+    #             {{
+    #                 "number": 1,
+    #                 "title": "Chapter Title Here",
+    #                 "page": 1,
+    #                 "section": "Section Title Here (if any)"
+    #             }},
+    #             {{
+    #                 "number": 2,
+    #                 "title": "Another Chapter Title",
+    #                 "page": 15,
+    #                 "section": "Section Title Here (if any)"
+    #             }}
+    #         ]
+    #     }}
+        
+    #     IMPORTANT: 
+    #     - Find ALL chapters from ALL sections
+    #     - Extract the complete book structure
+    #     - If no clear sections exist, leave section field empty or as "Main"
+    #     - Return ONLY valid JSON, no other text
+    #     """
+        
+    #     try:
+    #         response = await self.ai_service.client.chat.completions.create(
+    #             model="gpt-4o-mini",
+    #             messages=[
+    #                 {"role": "system", "content": "You are an expert at parsing Table of Contents from any book. Extract ALL chapters comprehensively. Return only valid JSON."},
+    #                 {"role": "user", "content": prompt}
+    #             ],
+    #             max_tokens=4000,
+    #             temperature=0.1
+    #         )
+        
+    #         # Clean the response
+    #         content = response.choices[0].message.content.strip()
+            
+    #         # Remove markdown formatting if present
+    #         if content.startswith('```'):
+    #             lines = content.split('\n')
+    #             content = '\n'.join(lines[1:-1])
+            
+    #         # Additional cleaning
+    #         content = content.strip()
+    #         if content.startswith('json\n'):
+    #             content = content[5:]
+            
+    #         print(f"[AI TOC EXTRACTION] AI response length: {len(content)}")
+    #         print(f"[AI TOC EXTRACTION] First 200 chars: {content[:200]}")
+            
+    #         result = json.loads(content)
+    #         chapters = result.get('chapters', [])
+            
+    #         print(f"[AI TOC EXTRACTION] AI extracted {len(chapters)} chapters")
+            
+    #         # Convert to our format with better validation
+    #         formatted_chapters = []
+    #         chapter_counter = 1
+            
+    #         for ch in chapters:
+    #             if not ch.get('title') or not ch.get('page'):
+    #                 print(f"[AI TOC EXTRACTION] Skipping chapter with missing title or page: {ch}")
+    #                 continue
+                
+    #             try:
+    #                 chapter_number = int(ch.get('number', chapter_counter))
+    #                 page_hint = int(ch.get('page', 1))
+    #                 title = str(ch.get('title', 'Unknown')).strip()
+                    
+    #                 # Clean the title
+    #                 title = re.sub(r'\.{3,}.*$', '', title)
+    #                 title = re.sub(r'\s+\d+\s*$', '', title)
+    #                 title = title.strip()
+                    
+    #                 if not title or len(title) < 2:
+    #                     continue
+                    
+    #                 formatted_chapter = {
+    #                     'number': chapter_number,
+    #                     'title': f"Chapter {chapter_number}: {title}",
+    #                     'raw_title': title,
+    #                     'page_hint': page_hint,
+    #                 }
+                    
+    #                 # Add section info if present
+    #                 section_info = ch.get('section', '')
+    #                 if section_info and isinstance(section_info, str) and section_info.strip() and section_info.strip().lower() != 'main':
+    #                     formatted_chapter.update({
+    #                         'section_title': section_info.strip(),
+    #                         'section_type': self._extract_section_type(section_info),
+    #                         'section_number': self._extract_section_number(section_info),
+    #                     })
+                    
+    #                 formatted_chapters.append(formatted_chapter)
+    #                 print(f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: {title} (Section: {section_info or 'None'})")
+    #                 chapter_counter += 1
+                    
+    #             except (ValueError, TypeError) as e:
+    #                 print(f"[AI TOC EXTRACTION] Error processing chapter {ch}: {e}")
+    #                 continue
+            
+    #         print(f"[AI TOC EXTRACTION] Total formatted chapters: {len(formatted_chapters)}")
+    #         return formatted_chapters
+            
+    #     except json.JSONDecodeError as e:
+    #         print(f"[AI TOC EXTRACTION] JSON decode failed: {e}")
+    #         print(f"[AI TOC EXTRACTION] Raw response: {response.choices[0].message.content if 'response' in locals() else 'No response'}")
+    #         return []
+    #     except Exception as e:
+    #         print(f"[AI TOC EXTRACTION] Failed: {e}")
+    #         import traceback
+    #         print(f"[AI TOC EXTRACTION] Full error: {traceback.format_exc()}")
+    #         return []
     
         
     def _extract_section_type(self, section_text: str) -> str:
@@ -4109,58 +4275,206 @@ class FileService:
         user_id: str
     ) -> None:
         """Persist user-confirmed structure and create embeddings."""
-        # Clean old data
-        self.db.table("chapter_embeddings").delete().eq("book_id", book_id).execute()
-        self.db.table("chapters").delete().eq("book_id", book_id).execute()
-        self.db.table("book_sections").delete().eq("book_id", book_id).execute()
-    
-        # Build sections (if present)
-        section_id_map: Dict[str, str] = {}
-        order = 0
-        for ch in confirmed_chapters:
-            order += 1
-            section_id = None
-            if ch.get("section_title"):
-                key = f"{ch.get('section_title')}|{ch.get('section_type')}|{ch.get('section_number')}"
-                if key not in section_id_map:
-                    sec_resp = self.db.table("book_sections").insert({
-                        "book_id": book_id,
-                        "title": ch.get("section_title"),
-                        "section_type": ch.get("section_type", "part"),
-                        "section_number": ch.get("section_number", ""),
-                        "order_index": len(section_id_map) + 1,
-                    }).execute()
-                    section_id_map[key] = sec_resp.data[0]["id"]
-                section_id = section_id_map[key]
-    
-            chap_resp = self.db.table("chapters").insert({
-                "book_id": book_id,
-                "section_id": section_id,
-                "chapter_number": ch.get("chapter_number", order),
-                "title": ch.get("title", f"Chapter {order}"),
-                "content": self._clean_text_content(ch.get("content", "")),
-                "summary": self._clean_text_content(ch.get("summary", "")),
-                "order_index": order,
-            }).execute()
-            chapter_id = chap_resp.data[0]["id"]
-    
-            # best-effort embeddings
+        print(f"[STRUCTURE SAVE] Starting to save structure for book {book_id}")
+        print(f"[STRUCTURE SAVE] Received {len(confirmed_chapters)} confirmed chapters")
+        
+        try:
+            # ✅ FIX: Clean old data in the CORRECT order to avoid foreign key violations
+            print("[STRUCTURE SAVE] Cleaning existing data...")
+            
+            # 1. Delete chapter embeddings first (they reference chapters)
             try:
-                from app.services.embeddings_service import EmbeddingsService
-                es = EmbeddingsService(self.db)
-                await es.create_chapter_embeddings(chapter_id, ch.get("content",""))
+                embed_result = self.db.table("chapter_embeddings").delete().eq("book_id", book_id).execute()
+                print(f"[STRUCTURE SAVE] Deleted {len(embed_result.data) if embed_result.data else 0} chapter embeddings")
             except Exception as e:
-                print(f"[EMBEDDINGS] Failed for chapter {chapter_id}: {e}")
+                print(f"[STRUCTURE SAVE] Warning: Failed to delete chapter embeddings: {e}")
+            
+            # 2. Delete book embeddings (they reference the book)
+            try:
+                book_embed_result = self.db.table("book_embeddings").delete().eq("book_id", book_id).execute()
+                print(f"[STRUCTURE SAVE] Deleted {len(book_embed_result.data) if book_embed_result.data else 0} book embeddings")
+            except Exception as e:
+                print(f"[STRUCTURE SAVE] Warning: Failed to delete book embeddings: {e}")
+            
+            # 3. Delete chapters (they might reference book_sections)
+            try:
+                chapters_result = self.db.table("chapters").delete().eq("book_id", book_id).execute()
+                print(f"[STRUCTURE SAVE] Deleted {len(chapters_result.data) if chapters_result.data else 0} chapters")
+            except Exception as e:
+                print(f"[STRUCTURE SAVE] Warning: Failed to delete chapters: {e}")
+            
+            # 4. Delete sections last (they're referenced by chapters, but chapters are now gone)
+            try:
+                sections_result = self.db.table("book_sections").delete().eq("book_id", book_id).execute()
+                print(f"[STRUCTURE SAVE] Deleted {len(sections_result.data) if sections_result.data else 0} book sections")
+            except Exception as e:
+                print(f"[STRUCTURE SAVE] Warning: Failed to delete book sections: {e}")
+        
+            # ✅ ADD: Additional safety check - try to delete any remaining chapters
+            try:
+                print("[STRUCTURE SAVE] Safety check - ensuring no chapters remain...")
+                remaining_chapters = self.db.table("chapters").delete().eq("book_id", book_id).execute()
+                if remaining_chapters.data:
+                    print(f"[STRUCTURE SAVE] Cleaned up {len(remaining_chapters.data)} remaining chapters")
+            except Exception as e:
+                print(f"[STRUCTURE SAVE] Safety check failed: {e}")
     
-        # Update book meta
-        self.db.table("books").update({
-            "has_sections": bool(section_id_map),
-            "structure_type": "hierarchical" if section_id_map else "flat",
-            "total_chapters": order,
-            "status": "READY",
-            "progress": 100,
-            "progress_message": "Book structure saved successfully"
-        }).eq("id", book_id).execute()
+            # Build sections (if present)
+            section_id_map: Dict[str, str] = {}
+            order = 0
+            
+            for ch in confirmed_chapters:
+                order += 1
+                section_id = None
+                
+                # Create sections if chapter has section data
+                if ch.get("section_title"):
+                    key = f"{ch.get('section_title')}|{ch.get('section_type')}|{ch.get('section_number')}"
+                    if key not in section_id_map:
+                        print(f"[STRUCTURE SAVE] Creating section: {ch.get('section_title')}")
+                        
+                        try:
+                            sec_resp = self.db.table("book_sections").insert({
+                                "book_id": book_id,
+                                "title": ch.get("section_title"),
+                                "section_type": ch.get("section_type", "part"),
+                                "section_number": ch.get("section_number", ""),
+                                "order_index": len(section_id_map) + 1,
+                            }).execute()
+                            section_id_map[key] = sec_resp.data[0]["id"]
+                            print(f"[STRUCTURE SAVE] Created section with ID: {sec_resp.data[0]['id']}")
+                        except Exception as e:
+                            print(f"[STRUCTURE SAVE] Failed to create section: {e}")
+                            continue
+                            
+                    section_id = section_id_map[key]
+                
+                # Create chapter
+                print(f"[STRUCTURE SAVE] Creating chapter {order}: {ch.get('title', 'Untitled')}")
+                
+                try:
+                    chap_resp = self.db.table("chapters").insert({
+                        "book_id": book_id,
+                        "section_id": section_id,
+                        "chapter_number": ch.get("chapter_number", order),
+                        "title": ch.get("title", f"Chapter {order}"),
+                        "content": self._clean_text_content(ch.get("content", "")),
+                        "summary": self._clean_text_content(ch.get("summary", "")),
+                        "order_index": order,
+                    }).execute()
+                    chapter_id = chap_resp.data[0]["id"]
+                    print(f"[STRUCTURE SAVE] Created chapter with ID: {chapter_id}")
+                except Exception as e:
+                    print(f"[STRUCTURE SAVE] Failed to create chapter {order}: {e}")
+                    # Try with a different chapter number to avoid duplicates
+                    try:
+                        alt_chapter_num = order + 1000  # Use a high number to avoid conflicts
+                        chap_resp = self.db.table("chapters").insert({
+                            "book_id": book_id,
+                            "section_id": section_id,
+                            "chapter_number": alt_chapter_num,
+                            "title": ch.get("title", f"Chapter {order}"),
+                            "content": self._clean_text_content(ch.get("content", "")),
+                            "summary": self._clean_text_content(ch.get("summary", "")),
+                            "order_index": order,
+                        }).execute()
+                        chapter_id = chap_resp.data[0]["id"]
+                        print(f"[STRUCTURE SAVE] Created chapter with alternative ID: {chapter_id}")
+                    except Exception as e2:
+                        print(f"[STRUCTURE SAVE] Failed to create chapter even with alternative number: {e2}")
+                        continue
+        
+                # Create embeddings (best-effort)
+                try:
+                    from app.services.embeddings_service import EmbeddingsService
+                    es = EmbeddingsService(self.db)
+                    await es.create_chapter_embeddings(chapter_id, ch.get("content", ""))
+                    print(f"[STRUCTURE SAVE] Created embeddings for chapter {chapter_id}")
+                except Exception as e:
+                    print(f"[EMBEDDINGS] Failed for chapter {chapter_id}: {e}")
+        
+            # Update book metadata
+            print(f"[STRUCTURE SAVE] Updating book metadata...")
+            try:
+                self.db.table("books").update({
+                    "has_sections": bool(section_id_map),
+                    "structure_type": "hierarchical" if section_id_map else "flat",
+                    "total_chapters": order,
+                    "status": "READY",
+                    "progress": 100,
+                    "progress_message": "Book structure saved successfully"
+                }).eq("id", book_id).execute()
+                
+                print(f"[STRUCTURE SAVE] ✅ Successfully saved structure for book {book_id}")
+                print(f"[STRUCTURE SAVE] - {len(section_id_map)} sections created")
+                print(f"[STRUCTURE SAVE] - {order} chapters created")
+            except Exception as e:
+                print(f"[STRUCTURE SAVE] Failed to update book metadata: {e}")
+                
+        except Exception as e:
+            print(f"[STRUCTURE SAVE] ❌ Error saving structure: {e}")
+            print(f"[STRUCTURE SAVE] Full error: {traceback.format_exc()}")
+            raise e
+    
+    # async def confirm_book_structure(
+    #     self,
+    #     book_id: str,
+    #     confirmed_chapters: List[Dict[str, Any]],
+    #     user_id: str
+    # ) -> None:
+    #     """Persist user-confirmed structure and create embeddings."""
+    #     # Clean old data
+    #     self.db.table("chapter_embeddings").delete().eq("book_id", book_id).execute()
+    #     self.db.table("chapters").delete().eq("book_id", book_id).execute()
+    #     self.db.table("book_sections").delete().eq("book_id", book_id).execute()
+    
+    #     # Build sections (if present)
+    #     section_id_map: Dict[str, str] = {}
+    #     order = 0
+    #     for ch in confirmed_chapters:
+    #         order += 1
+    #         section_id = None
+    #         if ch.get("section_title"):
+    #             key = f"{ch.get('section_title')}|{ch.get('section_type')}|{ch.get('section_number')}"
+    #             if key not in section_id_map:
+    #                 sec_resp = self.db.table("book_sections").insert({
+    #                     "book_id": book_id,
+    #                     "title": ch.get("section_title"),
+    #                     "section_type": ch.get("section_type", "part"),
+    #                     "section_number": ch.get("section_number", ""),
+    #                     "order_index": len(section_id_map) + 1,
+    #                 }).execute()
+    #                 section_id_map[key] = sec_resp.data[0]["id"]
+    #             section_id = section_id_map[key]
+    
+    #         chap_resp = self.db.table("chapters").insert({
+    #             "book_id": book_id,
+    #             "section_id": section_id,
+    #             "chapter_number": ch.get("chapter_number", order),
+    #             "title": ch.get("title", f"Chapter {order}"),
+    #             "content": self._clean_text_content(ch.get("content", "")),
+    #             "summary": self._clean_text_content(ch.get("summary", "")),
+    #             "order_index": order,
+    #         }).execute()
+    #         chapter_id = chap_resp.data[0]["id"]
+    
+    #         # best-effort embeddings
+    #         try:
+    #             from app.services.embeddings_service import EmbeddingsService
+    #             es = EmbeddingsService(self.db)
+    #             await es.create_chapter_embeddings(chapter_id, ch.get("content",""))
+    #         except Exception as e:
+    #             print(f"[EMBEDDINGS] Failed for chapter {chapter_id}: {e}")
+    
+    #     # Update book meta
+    #     self.db.table("books").update({
+    #         "has_sections": bool(section_id_map),
+    #         "structure_type": "hierarchical" if section_id_map else "flat",
+    #         "total_chapters": order,
+    #         "status": "READY",
+    #         "progress": 100,
+    #         "progress_message": "Book structure saved successfully"
+    #     }).eq("id", book_id).execute()
     
     
     
