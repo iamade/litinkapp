@@ -816,46 +816,221 @@ class BookStructureDetector:
         
         return final_chapters
     
+    # def _find_actual_page_by_number(self, doc, target_page_num: int) -> Optional[int]:
+    #     """Find the actual PDF page where a specific page number is printed"""
+    #     print(f"[PAGE FINDER] Looking for printed page number {target_page_num}")
+        
+    #     # Common page number patterns
+    #     page_patterns = [
+    #         rf'\b{target_page_num}\b',  # Just the number
+    #         rf'^{target_page_num}$',    # Number alone on line
+    #         rf'^\s*{target_page_num}\s*$',  # Number with whitespace
+    #     ]
+        
+    #     # Search in a reasonable range around the expected position
+    #     search_start = max(0, target_page_num - 10)
+    #     search_end = min(len(doc), target_page_num + 20)
+        
+    #     for page_idx in range(search_start, search_end):
+    #         page = doc[page_idx]
+    #         text = page.get_text()
+            
+    #         # Look for the page number in various positions
+    #         lines = text.split('\n')
+            
+    #         # Check first few lines (headers)
+    #         for line_idx in range(min(5, len(lines))):
+    #             line = lines[line_idx].strip()
+    #             for pattern in page_patterns:
+    #                 if re.search(pattern, line):
+    #                     print(f"[PAGE FINDER] Found page {target_page_num} on PDF page {page_idx + 1} (header)")
+    #                     return page_idx
+            
+    #         # Check last few lines (footers)
+    #         for line_idx in range(max(0, len(lines) - 5), len(lines)):
+    #             line = lines[line_idx].strip()
+    #             for pattern in page_patterns:
+    #                 if re.search(pattern, line):
+    #                     print(f"[PAGE FINDER] Found page {target_page_num} on PDF page {page_idx + 1} (footer)")
+    #                     return page_idx
+        
+    #     print(f"[PAGE FINDER] Could not find printed page number {target_page_num}")
+    #     return None
+    
+    
     def _find_actual_page_by_number(self, doc, target_page_num: int) -> Optional[int]:
-        """Find the actual PDF page where a specific page number is printed"""
+        """Find the actual PDF page where a specific page number is printed - IMPROVED with numbering system detection"""
         print(f"[PAGE FINDER] Looking for printed page number {target_page_num}")
         
-        # Common page number patterns
-        page_patterns = [
-            rf'\b{target_page_num}\b',  # Just the number
-            rf'^{target_page_num}$',    # Number alone on line
-            rf'^\s*{target_page_num}\s*$',  # Number with whitespace
-        ]
+        # First, analyze the TOC to determine the numbering system used
+        numbering_system = self._detect_numbering_system(doc, target_page_num)
+        print(f"[PAGE FINDER] Detected numbering system: {numbering_system}")
         
-        # Search in a reasonable range around the expected position
-        search_start = max(0, target_page_num - 10)
-        search_end = min(len(doc), target_page_num + 20)
+        # Convert target page to expected formats
+        if numbering_system == "roman":
+            target_roman = self._arabic_to_roman(target_page_num)
+            search_patterns = [
+                rf'\b{target_roman}\b',
+                rf'^\s*{target_roman}\s*$',
+                rf'^\s*{target_page_num}\s*$',  # Fallback to Arabic
+            ]
+        elif numbering_system == "arabic":
+            search_patterns = [
+                rf'\b{target_page_num}\b',
+                rf'^\s*{target_page_num}\s*$',
+            ]
+        else:  # mixed or unknown
+            target_roman = self._arabic_to_roman(target_page_num) if target_page_num <= 50 else None
+            search_patterns = [
+                rf'\b{target_page_num}\b',
+                rf'^\s*{target_page_num}\s*$',
+            ]
+            if target_roman:
+                search_patterns.extend([
+                    rf'\b{target_roman}\b',
+                    rf'^\s*{target_roman}\s*$',
+                ])
+        
+        print(f"[PAGE FINDER] Search patterns: {search_patterns}")
+        
+        # Calculate search range - be more intelligent about where to look
+        if target_page_num <= 20:
+            # Early pages might use Roman numerals, search from beginning
+            search_start = 0
+            search_end = min(len(doc), 50)
+        else:
+            # Later pages likely use Arabic, search around expected position
+            search_start = max(0, target_page_num - 10)
+            search_end = min(len(doc), target_page_num + 30)
+        
+        print(f"[PAGE FINDER] Searching PDF pages {search_start + 1} to {search_end}")
         
         for page_idx in range(search_start, search_end):
             page = doc[page_idx]
             text = page.get_text()
             
-            # Look for the page number in various positions
+            # Get lines for better analysis
             lines = text.split('\n')
             
-            # Check first few lines (headers)
+            # Check headers (first 5 lines)
             for line_idx in range(min(5, len(lines))):
                 line = lines[line_idx].strip()
-                for pattern in page_patterns:
-                    if re.search(pattern, line):
+                if self._matches_page_number(line, search_patterns, page_idx):
+                    # Additional validation - make sure this isn't a figure/list reference
+                    if not self._is_false_page_match(text, line, target_page_num):
                         print(f"[PAGE FINDER] Found page {target_page_num} on PDF page {page_idx + 1} (header)")
                         return page_idx
             
-            # Check last few lines (footers)
+            # Check footers (last 5 lines)
             for line_idx in range(max(0, len(lines) - 5), len(lines)):
                 line = lines[line_idx].strip()
-                for pattern in page_patterns:
-                    if re.search(pattern, line):
+                if self._matches_page_number(line, search_patterns, page_idx):
+                    # Additional validation
+                    if not self._is_false_page_match(text, line, target_page_num):
                         print(f"[PAGE FINDER] Found page {target_page_num} on PDF page {page_idx + 1} (footer)")
                         return page_idx
         
         print(f"[PAGE FINDER] Could not find printed page number {target_page_num}")
         return None
+    
+    def _detect_numbering_system(self, doc, target_page_num: int) -> str:
+        """Detect whether the book uses Roman numerals, Arabic numbers, or mixed"""
+        
+        # Look at the first few pages to see what numbering system is used
+        roman_indicators = 0
+        arabic_indicators = 0
+        
+        for page_idx in range(min(20, len(doc))):
+            page = doc[page_idx]
+            text = page.get_text()
+            lines = text.split('\n')
+            
+            # Check headers and footers for numbering patterns
+            check_lines = lines[:3] + lines[-3:]  # First 3 and last 3 lines
+            
+            for line in check_lines:
+                line = line.strip()
+                if len(line) < 10:  # Short lines are more likely to be page numbers
+                    # Check for Roman numerals
+                    if re.match(r'^[ivxlcdm]+$', line.lower()):
+                        roman_indicators += 1
+                    # Check for Arabic numbers (but not years or other large numbers)
+                    elif re.match(r'^\d{1,3}$', line) and int(line) < 200:
+                        arabic_indicators += 1
+        
+        print(f"[NUMBERING DETECTION] Roman indicators: {roman_indicators}, Arabic indicators: {arabic_indicators}")
+        
+        if roman_indicators > arabic_indicators * 2:
+            return "roman"
+        elif arabic_indicators > roman_indicators * 2:
+            return "arabic"
+        else:
+            return "mixed"
+    
+    def _arabic_to_roman(self, num: int) -> str:
+        """Convert Arabic number to Roman numeral"""
+        if num > 50:  # Don't convert large numbers
+            return str(num)
+        
+        roman_numerals = [
+            (50, 'L'), (40, 'XL'), (10, 'X'), (9, 'IX'),
+            (5, 'V'), (4, 'IV'), (1, 'I')
+        ]
+        
+        result = ''
+        for value, numeral in roman_numerals:
+            count = num // value
+            result += numeral * count
+            num -= value * count
+        
+        return result
+    
+    def _matches_page_number(self, line: str, patterns: List[str], page_idx: int) -> bool:
+        """Check if a line matches any of the page number patterns"""
+        for pattern in patterns:
+            if re.search(pattern, line):
+                return True
+        return False
+    
+    def _is_false_page_match(self, page_text: str, matched_line: str, target_page_num: int) -> bool:
+        """Check if this is a false positive (like figure numbers, list items, etc.)"""
+        
+        # Check if we're in a "List of Figures" or similar section
+        page_text_lower = page_text.lower()
+        if any(indicator in page_text_lower for indicator in [
+            'list of illustrations',
+            'list of figures', 
+            'table of contents',
+            'contents',
+            'bibliography',
+            'index'
+        ]):
+            print(f"[PAGE FINDER] Rejecting match in list/index section: {matched_line}")
+            return True
+        
+        # Check if the matched line contains other text that suggests it's not a page number
+        if len(matched_line.split()) > 2:  # Page numbers are usually standalone
+            print(f"[PAGE FINDER] Rejecting match with extra text: {matched_line}")
+            return True
+        
+        # Check for figure/illustration patterns around the match
+        lines_around = page_text.split('\n')
+        for i, line in enumerate(lines_around):
+            if matched_line in line:
+                # Check surrounding lines for figure/illustration keywords
+                start_idx = max(0, i - 2)
+                end_idx = min(len(lines_around), i + 3)
+                context = ' '.join(lines_around[start_idx:end_idx]).lower()
+                
+                if any(keyword in context for keyword in [
+                    'figure', 'illustration', 'plate', 'diagram', 
+                    'chart', 'table', 'by gustav', 'by singleton'
+                ]):
+                    print(f"[PAGE FINDER] Rejecting match near figure/illustration: {context[:100]}")
+                    return True
+                break
+        
+        return False
     
     def _extract_pages_content(self, doc, start_page: int, end_page: int) -> str:
         """Extract text content from a range of pages"""
@@ -1750,16 +1925,16 @@ class FileService:
             }]
         print(f"DEBUG: Total chapters extracted: {len(chapters)}")
         return chapters[:self.MAX_CHAPTERS]
-
+    
     
     async def extract_chapters_from_pdf_with_toc(self, file_path: str) -> Optional[List[Dict[str, Any]]]:
-        """Multi-strategy TOC extraction for various book formats"""
+        """Updated Multi-strategy TOC extraction with better complexity detection"""
         try:
             doc = fitz.open(file_path)
             
-            print("[TOC EXTRACTION] Starting multi-strategy extraction...")
+            print("[TOC EXTRACTION] Starting updated multi-strategy extraction...")
             
-            # Strategy 1: Try PDF bookmarks first
+            # Strategy 1: Try PDF bookmarks first (most reliable)
             toc = doc.get_toc()
             if toc and len(toc) >= 3:
                 bookmark_chapters = self._process_pdf_bookmarks(doc, toc)
@@ -1768,30 +1943,42 @@ class FileService:
                     doc.close()
                     return bookmark_chapters
             
-            # Strategy 2: AI-powered text extraction
-            text_chapters = await self._extract_toc_from_text(doc)
-            if len(text_chapters) >= 8:
-                print(f"[TOC EXTRACTION] SUCCESS: Text extraction yielded {len(text_chapters)} chapters")
-                doc.close()
-                return text_chapters
-            
-            # Strategy 3: Layout-based analysis (for complex columnar TOCs)
+            # Strategy 2: Analyze TOC complexity to choose appropriate method
             toc_pages = self._find_toc_pages(doc)
             if toc_pages:
+                toc_complexity = self._analyze_toc_complexity(doc, toc_pages)
+                print(f"[TOC EXTRACTION] TOC complexity assessment: {toc_complexity}")
+                
+                if toc_complexity == "simple":
+                    # Strategy 2A: Simple pattern-based extraction for straightforward TOCs
+                    simple_chapters = await self._extract_simple_toc_patterns(doc, toc_pages)
+                    if len(simple_chapters) >= 3:
+                        print(f"[TOC EXTRACTION] SUCCESS: Simple pattern extraction yielded {len(simple_chapters)} chapters")
+                        doc.close()
+                        return simple_chapters
+                        
+                elif toc_complexity == "complex":
+                    # Strategy 2B: AI-powered extraction for complex columnar TOCs
+                    ai_chapters = await self._extract_complex_toc_with_ai(doc, toc_pages)
+                    if len(ai_chapters) >= 5:
+                        print(f"[TOC EXTRACTION] SUCCESS: AI complex extraction yielded {len(ai_chapters)} chapters")
+                        doc.close()
+                        return ai_chapters
+                        
+                # Strategy 3: Pattern-based fallback
+                pattern_chapters = await self._extract_toc_with_patterns(doc, True, toc_pages[0], min(75, len(doc)))
+                if len(pattern_chapters) >= 3:
+                    print(f"[TOC EXTRACTION] SUCCESS: Pattern fallback yielded {len(pattern_chapters)} chapters")
+                    doc.close()
+                    return pattern_chapters
+            
+            # Strategy 4: Layout analysis with coordinates (last resort for very complex TOCs)
+            if toc_pages:
                 layout_chapters = await self._analyze_toc_layout_with_coordinates(doc, toc_pages)
-                if len(layout_chapters) >= 5:
+                if len(layout_chapters) >= 3:
                     print(f"[TOC EXTRACTION] SUCCESS: Layout analysis yielded {len(layout_chapters)} chapters")
                     doc.close()
                     return layout_chapters
-            
-            # Strategy 4: Hybrid AI + Pattern approach
-            if len(text_chapters) >= 3:  # Some chapters found but not enough
-                print(f"[TOC EXTRACTION] Partial success: Found {len(text_chapters)} chapters, trying enhancement...")
-                enhanced_chapters = await self._enhance_partial_toc_with_ai(doc, text_chapters)
-                if len(enhanced_chapters) >= 5:
-                    print(f"[TOC EXTRACTION] SUCCESS: Enhanced extraction yielded {len(enhanced_chapters)} chapters")
-                    doc.close()
-                    return enhanced_chapters
             
             doc.close()
             print("[TOC EXTRACTION] All strategies failed")
@@ -1800,26 +1987,385 @@ class FileService:
         except Exception as e:
             print(f"[TOC EXTRACTION] Error: {e}")
             return []
+        
+        
+    def _analyze_toc_complexity(self, doc, toc_pages: List[int]) -> str:
+        """Analyze TOC complexity to determine extraction strategy"""
+        
+        complexity_indicators = {
+            'simple_patterns': 0,
+            'complex_patterns': 0,
+            'section_indicators': 0,
+            'columnar_layout': 0
+        }
+        
+        for page_num in toc_pages[:3]:  # Check first 3 TOC pages
+            page = doc[page_num]
+            text = page.get_text()
+            
+            # ✅ FIX: Better TOC header detection
+            has_contents_header = bool(re.search(r'\b(contents|table\s+of\s+contents)\b', text, re.IGNORECASE))
+        
+            
+            # Check for simple chapter patterns
+            simple_chapter_patterns = [
+                r'CHAPTER\s+\d+[\.\s]+[A-Z]',      # "CHAPTER 1. Title"
+                r'Chapter\s+\d+[\.\s]+[A-Z]',      # "Chapter 1. Title"  
+                r'^\s*\d+\.\s+[A-Z]',              # "1. Title"
+                r'CHAPTER\s+\d+\s+[A-Z]',          # "CHAPTER 1 Title" (no dot)
+                r'Chapter\s+\d+\s+[A-Z]',          # "Chapter 1 Title" (no dot)
+            ]
+            
+            for pattern in simple_chapter_patterns:
+                matches = len(re.findall(pattern, text, re.MULTILINE))
+                complexity_indicators['simple_patterns'] += matches
+            
+            # Check for complex/hierarchical patterns
+            complex_patterns = [
+                r'BOOK\s+THE\s+(FIRST|SECOND|THIRD)',  # "BOOK THE FIRST"
+                r'PART\s+[IVX]+',                       # "PART I", "PART II"
+                r'ACT\s+[IVX]+',                        # "ACT I"
+                r'SECTION\s+[IVX]+',                    # "SECTION I"
+            ]
+            
+            for pattern in complex_patterns:
+                matches = len(re.findall(pattern, text, re.IGNORECASE))
+                complexity_indicators['section_indicators'] += matches
+            
+            # Check for columnar layout indicators
+            lines = text.split('\n')
+            for line in lines:
+                # Look for multiple page numbers on one line (columnar format)
+                page_numbers = re.findall(r'\b\d{2,3}\b', line)
+                if len(page_numbers) >= 2:
+                    complexity_indicators['columnar_layout'] += 1
+        
+        print(f"[TOC COMPLEXITY] Indicators: {complexity_indicators}")
+        
+        # Determine complexity
+        # if complexity_indicators['section_indicators'] >= 2 or complexity_indicators['columnar_layout'] >= 3:
+        #     return "complex"
+        # elif complexity_indicators['simple_patterns'] >= 5:
+        #     return "simple"
+        # else:
+        #     return "moderate"
+        
+        if complexity_indicators['section_indicators'] >= 2:
+            return "complex"
+        elif complexity_indicators['columnar_layout'] >= 3:
+            return "complex" 
+        elif complexity_indicators['simple_patterns'] >= 3:  # Lowered threshold
+            return "simple"
+        else:
+            return "moderate"  # This will still use pattern-based extraction
+        
+    
+    async def _extract_simple_toc_patterns(self, doc, toc_pages: List[int]) -> List[Dict[str, Any]]:
+        """Extract chapters from simple, straightforward TOCs (like Angel Magic book)"""
+        print("[SIMPLE TOC] Extracting from simple TOC structure...")
+        
+        all_chapters = []
+        
+        for page_num in toc_pages:
+            page = doc[page_num]
+            text = page.get_text()
+            
+            print(f"[SIMPLE TOC] Processing page {page_num + 1}")
+            print(f"[SIMPLE TOC] First 500 chars: {text[:500]}")
+            
+            # Focus on clear chapter patterns only
+            chapter_patterns = [
+               # Standard patterns
+                r'CHAPTER\s+(\d+)[\.\s]*(.+?)\s+(\d+)',     # "CHAPTER 1. Title 123"
+                r'Chapter\s+(\d+)[\.\s]*(.+?)\s+(\d+)',     # "Chapter 1. Title 123"
+                r'^(\d+)\.\s+(.+?)\s+(\d+)',               # "1. Title 123"
+                
+                # ✅ NEW: Angel Magic specific patterns
+                r'CHAPTER\s+(\d+)[\.\s]+([A-Z][^\.]+?)\s+(\d+)', # "CHAPTER 1. Introduction to Angel Magic 1"
+                r'Chapter\s+(\d+)[\.\s]+([A-Z][^\.]+?)\s+(\d+)', # "Chapter 1. Introduction to Angel Magic 1"
+                
+                # Flexible dot patterns
+                r'CHAPTER\s+(\d+)\s+([A-Z][^\n]+?)\s+(\d+)$',    # "CHAPTER 1 Title 123" (no dots)
+                r'Chapter\s+(\d+)\s+([A-Z][^\n]+?)\s+(\d+)$',    # "Chapter 1 Title 123" (no dots)           # "1. Title 123"
+            ]
+            
+            for pattern_idx, pattern in enumerate(chapter_patterns):
+                matches = re.findall(pattern, text, re.MULTILINE)
+                print(f"[SIMPLE TOC] Pattern {pattern_idx} found {len(matches)} matches")
+            
+                for match in matches:
+                    chapter_num, title, page_str = match
+                    
+                    clean_title = title.strip()
+                    # Clean title - remove dots and extra whitespace
+                    clean_title = re.sub(r'\.+$', '', title.strip())
+                    clean_title = re.sub(r'\s+', ' ', clean_title)
+                    
+                    # Skip if title is too short, contains appendix materials, or looks like page number
+                    if (len(clean_title) < 3 or 
+                        clean_title.isdigit() or 
+                        any(word in clean_title.lower() for word in ['appendix', 'index', 'bibliography', 'notes', 'figures', 'illustrations', 'notes only', 'references only'])):
+                        print(f"[SIMPLE TOC] Skipping: '{clean_title}' (too short or appendix)")
+                        continue
+                    
+                    try:
+                        all_chapters.append({
+                            'number': int(chapter_num),
+                            'title': f"Chapter {chapter_num}: {clean_title}",
+                            'raw_title': clean_title,
+                            'page_hint': int(page_str),
+                            'is_main_chapter': True
+                        })
+                        print(f"[SIMPLE TOC] Found: Chapter {chapter_num}: {clean_title}")
+                    except ValueError:
+                        print(f"[SIMPLE TOC] ❌ Error parsing chapter {chapter_num}: {e}")
+                        continue
+        
+        # Remove duplicates and sort
+        unique_chapters = {}
+        for ch in all_chapters:
+            if ch['number'] not in unique_chapters:
+                unique_chapters[ch['number']] = ch
+        
+        sorted_chapters = sorted(unique_chapters.values(), key=lambda x: x['number'])
+        
+        print(f"[SIMPLE TOC] Extracted {len(sorted_chapters)} simple chapters")
+        for ch in sorted_chapters:
+            print(f"[SIMPLE TOC] Final: {ch['title']}")
+        
+        if len(sorted_chapters) >= 3:
+            return await self._parse_toc_with_ai_improved(sorted_chapters, doc)
+        
+        return []
+    
+    
+    async def _extract_complex_toc_with_ai(self, doc, toc_pages: List[int]) -> List[Dict[str, Any]]:
+        """AI extraction specifically for complex columnar TOCs with multiple sections"""
+        print("[COMPLEX TOC AI] Using AI for complex columnar TOC extraction...")
+        
+        # Get raw text from all TOC pages
+        toc_text_blocks = []
+        for page_num in toc_pages:
+            page = doc[page_num]
+            text = page.get_text()
+            toc_text_blocks.append({
+                'page_num': page_num + 1,
+                'text': text,
+                'lines': text.split('\n')
+            })
+        
+        combined_toc_text = "\n\n=== PAGE BREAK ===\n\n".join([
+            f"PAGE {block['page_num']}:\n{block['text']}" for block in toc_text_blocks
+        ])
+        
+        # Specialized prompt for complex TOCs
+        prompt = f"""
+        You are analyzing a complex Table of Contents that spans multiple pages and has a hierarchical structure with sections/books/parts.
+
+        CRITICAL INSTRUCTIONS:
+        1. This TOC has MULTIPLE MAJOR SECTIONS (like "BOOK THE FIRST", "BOOK THE SECOND", "BOOK THE THIRD", etc.)
+        2. Each section contains multiple chapters with Roman numerals (I, II, III, etc.) or Arabic numbers
+        3. Extract ALL sections and ALL chapters within each section
+        4. Look carefully across ALL pages - sections may continue across pages
+        5. DO NOT miss any sections - there are typically 3+ major sections
+        6. IGNORE front/back matter: preface, appendix, notes, bibliography, index
+        7. The layout may be columnar with chapters and page numbers separated
+
+        Look for patterns like:
+        - "BOOK THE FIRST: Section Title"
+        - "BOOK THE SECOND: Section Title" 
+        - "BOOK THE THIRD: Section Title"
+        - Roman numeral chapters: "I. Chapter Title ... page"
+        - Arabic chapters: "1. Chapter Title ... page"
+
+        TOC Text (Multiple Pages):
+        {combined_toc_text[:15000]}
+
+        Return JSON with ALL sections and their chapters:
+        {{
+            "sections": [
+                {{
+                    "section_title": "BOOK THE FIRST",
+                    "section_type": "book",
+                    "section_number": "1",
+                    "chapters": [
+                        {{
+                            "number": 1,
+                            "title": "Chapter Title",
+                            "page": 1
+                        }}
+                    ]
+                }}
+            ]
+        }}
+
+        CRITICAL: Extract ALL sections mentioned in the TOC. Don't stop at 2 sections if there are 3 or more.
+        """
+        
+        try:
+            response = await self.ai_service.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are an expert at analyzing complex hierarchical Table of Contents. Extract ALL sections and chapters comprehensively."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=6000,
+                temperature=0.1
+            )
+            
+            content = response.choices[0].message.content.strip()
+            
+            # Clean response
+            if content.startswith('```'):
+                lines = content.split('\n')
+                content = '\n'.join(lines[1:-1])
+            
+            result = json.loads(content)
+            sections = result.get('sections', [])
+            
+            print(f"[COMPLEX TOC AI] AI found {len(sections)} sections")
+            
+            # Convert to flat chapter list with section information
+            all_chapters = []
+            chapter_counter = 1
+            
+            for section in sections:
+                section_title = section.get('section_title', '')
+                section_type = section.get('section_type', 'book')
+                section_number = section.get('section_number', '')
+                
+                print(f"[COMPLEX TOC AI] Processing section: {section_title}")
+                
+                for ch in section.get('chapters', []):
+                    try:
+                        chapter_number = int(ch.get('number', chapter_counter))
+                        title = str(ch.get('title', 'Unknown')).strip()
+                        page_hint = int(ch.get('page', 1))
+                        
+                        if not title or len(title) < 2:
+                            continue
+                        
+                        formatted_chapter = {
+                            'number': chapter_counter,
+                            'title': f"Chapter {chapter_number}: {title}",
+                            'raw_title': title,
+                            'page_hint': page_hint,
+                            'section_title': section_title,
+                            'section_type': section_type,
+                            'section_number': section_number,
+                            'is_main_chapter': True
+                        }
+                        
+                        all_chapters.append(formatted_chapter)
+                        print(f"[COMPLEX TOC AI] Added: {title} (Section: {section_title})")
+                        chapter_counter += 1
+                        
+                    except (ValueError, TypeError) as e:
+                        print(f"[COMPLEX TOC AI] Error processing chapter {ch}: {e}")
+                        continue
+            
+            print(f"[COMPLEX TOC AI] Total chapters extracted: {len(all_chapters)}")
+            return all_chapters
+            
+        except json.JSONDecodeError as e:
+            print(f"[COMPLEX TOC AI] JSON decode failed: {e}")
+            return []
+        except Exception as e:
+            print(f"[COMPLEX TOC AI] Failed: {e}")
+            return []
+    
+    # async def extract_chapters_from_pdf_with_toc(self, file_path: str) -> Optional[List[Dict[str, Any]]]:
+    #     """Multi-strategy TOC extraction for various book formats"""
+    #     try:
+    #         doc = fitz.open(file_path)
+            
+    #         print("[TOC EXTRACTION] Starting multi-strategy extraction...")
+            
+    #         # Strategy 1: Try PDF bookmarks first
+    #         toc = doc.get_toc()
+    #         if toc and len(toc) >= 3:
+    #             bookmark_chapters = self._process_pdf_bookmarks(doc, toc)
+    #             if len(bookmark_chapters) >= 3:
+    #                 print(f"[TOC EXTRACTION] SUCCESS: PDF bookmarks yielded {len(bookmark_chapters)} chapters")
+    #                 doc.close()
+    #                 return bookmark_chapters
+            
+    #         # Strategy 2: AI-powered text extraction
+    #         text_chapters = await self._extract_toc_from_text(doc)
+    #         if len(text_chapters) >= 8:
+    #             print(f"[TOC EXTRACTION] SUCCESS: Text extraction yielded {len(text_chapters)} chapters")
+    #             doc.close()
+    #             return text_chapters
+            
+    #         # Strategy 3: Layout-based analysis (for complex columnar TOCs)
+    #         toc_pages = self._find_toc_pages(doc)
+    #         if toc_pages:
+    #             layout_chapters = await self._analyze_toc_layout_with_coordinates(doc, toc_pages)
+    #             if len(layout_chapters) >= 5:
+    #                 print(f"[TOC EXTRACTION] SUCCESS: Layout analysis yielded {len(layout_chapters)} chapters")
+    #                 doc.close()
+    #                 return layout_chapters
+            
+    #         # Strategy 4: Hybrid AI + Pattern approach
+    #         if len(text_chapters) >= 3:  # Some chapters found but not enough
+    #             print(f"[TOC EXTRACTION] Partial success: Found {len(text_chapters)} chapters, trying enhancement...")
+    #             enhanced_chapters = await self._enhance_partial_toc_with_ai(doc, text_chapters)
+    #             if len(enhanced_chapters) >= 5:
+    #                 print(f"[TOC EXTRACTION] SUCCESS: Enhanced extraction yielded {len(enhanced_chapters)} chapters")
+    #                 doc.close()
+    #                 return enhanced_chapters
+            
+    #         doc.close()
+    #         print("[TOC EXTRACTION] All strategies failed")
+    #         return []
+            
+    #     except Exception as e:
+    #         print(f"[TOC EXTRACTION] Error: {e}")
+    #         return []
     
     def _find_toc_pages(self, doc) -> List[int]:
-        """Find pages that likely contain TOC"""
+        """Find pages that likely contain TOC - IMPROVED"""
         toc_pages = []
         
         for page_num in range(min(30, len(doc))):
             page = doc[page_num]
             text = page.get_text()
             
-            # Look for TOC indicators
-            if re.search(r'\b(CONTENTS|TABLE OF CONTENTS)\b', text, re.IGNORECASE):
-                toc_pages.append(page_num)
+            # ✅ FIX: Better TOC detection
+            # Look for TOC indicators - more flexible
+            toc_indicators = [
+                r'\b(contents|table\s+of\s+contents)\b',
+                r'CHAPTER\s+\d+.*?\d+\s*$',  # Chapter with page number
+                r'Chapter\s+\d+.*?\d+\s*$',   # Chapter with page number
+            ]
             
-            # Look for chapter listing patterns
-            chapter_pattern_count = len(re.findall(r'\b[IVX]+\.\s+[A-Z]', text))
-            if chapter_pattern_count >= 3:  # At least 3 chapter-like entries
+            found_toc_indicator = False
+            for pattern in toc_indicators:
+                if re.search(pattern, text, re.IGNORECASE | re.MULTILINE):
+                    found_toc_indicator = True
+                    break
+            
+            if found_toc_indicator:
                 toc_pages.append(page_num)
+                print(f"[TOC PAGES] Found TOC page at {page_num + 1}")
+            
+            # Look for chapter listing patterns - more flexible
+            chapter_patterns = [
+                r'CHAPTER\s+\d+',
+                r'Chapter\s+\d+',
+                r'^\s*\d+\.\s+[A-Z]',  # "1. Title"
+            ]
+            
+            chapter_matches = 0
+            for pattern in chapter_patterns:
+                chapter_matches += len(re.findall(pattern, text, re.MULTILINE))
+            
+            if chapter_matches >= 3:  # At least 3 chapter-like entries
+                toc_pages.append(page_num)
+                print(f"[TOC PAGES] Found chapter listing page at {page_num + 1} ({chapter_matches} matches)")
         
         return list(set(toc_pages))
-    
+        
     async def _enhance_partial_toc_with_ai(self, doc, partial_chapters: List[Dict]) -> List[Dict]:
         """Use AI to find missing chapters when partial TOC is detected"""
         print(f"[TOC ENHANCEMENT] Enhancing {len(partial_chapters)} partial chapters with AI...")
