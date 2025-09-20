@@ -140,156 +140,23 @@ class BookStructureDetector:
             r'(?i)^appendix[\s\-:]*(.*)$',
         ]
         
-        
-    
-        
-        # """Enhanced structure detection that skips TOC sections"""
-        # lines = content.split('\n')
-        
-        # # Try the improved chapter detection first for books with number + title format
-        # chapter_headers = self._find_chapter_number_and_title(lines)
-        
-        # if len(chapter_headers) >= 8:  # Expect at least 8-9 chapters
-        #     print(f"[STRUCTURE DETECTION] Using direct chapter detection: {len(chapter_headers)} chapters")
-        #     flat_chapters = []
-            
-        #     for header in chapter_headers:
-        #         content_text = self._extract_chapter_content(content, header, lines)
-        #         flat_chapters.append({
-        #             'title': header['title'],
-        #             'number': header['number'],
-        #             'content': content_text
-        #         })
-            
-        #     return {
-        #         "has_sections": False,
-        #         "sections": None,
-        #         "chapters": flat_chapters,
-        #         "structure_type": "flat"
-        #     }
-            
-        # # Fallback to comprehensive pattern matching
-        # print("[STRUCTURE DETECTION] Using comprehensive pattern matching")
-    
-    
-        # sections = []
-        # current_section = None
-        # flat_chapters = []
-        # in_toc_section = False
-        
-        # for line_num, line in enumerate(lines):
-        #     line = line.strip()
-        #     if not line:
-        #         continue
-            
-        #     # Skip if we're in a TOC section
-        #     if self._is_toc_section(line):
-        #         in_toc_section = True
-        #         continue
-            
-        #     # Check if we've moved past TOC (substantial content indicates real chapters)
-        #     if in_toc_section and len(line) > 100:  # Substantial content indicates we're past TOC
-        #         in_toc_section = False
-            
-        #     if in_toc_section:
-        #         continue
-            
-        #     # Skip obvious TOC entries
-        #     if self._is_toc_entry(line):
-        #         continue
-                
-        #     # Check if line matches any section pattern
-        #     section_match = self._match_section_patterns(line)
-        #     if section_match:
-        #         # Verify this isn't a TOC entry by checking following content
-        #         if self._has_substantial_following_content(lines, line_num):
-        #             # Save previous section if exists
-        #             if current_section:
-        #                 sections.append(current_section)
-                    
-        #             # Start new section
-        #             current_section = {
-        #                 "title": line,
-        #                 "number": section_match["number"],
-        #                 "type": section_match["type"],
-        #                 "chapters": [],
-        #                 "content": self._extract_section_content(content, line, lines, line_num)
-        #             }
-        #         continue
-            
-        #     # Check for special sections (preface, introduction, etc.)
-        #     special_match = self._match_special_sections(line)
-        #     if special_match and self._has_substantial_following_content(lines, line_num):
-        #         # Save previous section if exists
-        #         if current_section:
-        #             sections.append(current_section)
-                
-        #         # Create special section
-        #         current_section = {
-        #             "title": line,
-        #             "number": special_match["number"],
-        #             "type": "special",
-        #             "chapters": [],
-        #             "content": self._extract_section_content(content, line, lines, line_num)
-        #         }
-        #         continue
-            
-        #     # Check if line matches chapter pattern (only if we're in a section)
-        #     if current_section:
-        #         chapter_match = self._match_chapter_patterns(line)
-        #         if chapter_match and self._has_substantial_following_content(lines, line_num):
-        #             chapter_content = self._extract_chapter_content(content, line, lines, line_num)
-        #             # Only add if content is substantial
-        #             if len(chapter_content.strip()) > 500:  # Minimum content length
-        #                 chapter_data = {
-        #                     "title": line,
-        #                     "number": chapter_match["number"],
-        #                     "content": self._extract_chapter_content(content, line, lines, line_num)
-        #                 }
-        #                 current_section["chapters"].append(chapter_data)
-        
-        # # Add last section
-        # if current_section:
-        #     sections.append(current_section)
-            
-        # # Remove duplicate chapters based on normalized numbers
-        # sections = self._remove_duplicate_chapters(sections)
-        
-        # # If no sections found, try to extract flat chapters
-        # if not sections:
-        #     flat_chapters = self._extract_flat_chapters(content)
-            
-        
-        # # Determine structure type
-        # has_sections = len(sections) > 0
-        
-        #     # Add deduplication logic
-        # seen_titles = set()
-        # unique_sections = []
-        
-        # for section in sections:  # 'sections' should already exist from your current code
-        #     title_key = f"{section['title'].lower().strip()}"
-        #     if title_key not in seen_titles:
-        #         seen_titles.add(title_key)
-        #         unique_sections.append(section)
-        
-        # # Also add minimum content length validation
-        # filtered_sections = []
-        # for section in unique_sections:
-        #     if len(section.get('content', '').strip()) > 100:  # Minimum content threshold
-        #         filtered_sections.append(section)
-        
-        # # Update the sections variable to use filtered_sections
-        # sections = filtered_sections
-            
-        # return {
-        #     "has_sections": has_sections,
-        #     "sections": sections if has_sections else None,
-        #     "chapters": flat_chapters if not has_sections else [],
-        #     "structure_type": self._determine_structure_type(sections) if has_sections else "flat"
-        # }
-        
-    
+        # Special sections that should be treated as standalone or excluded
+        self.SPECIAL_SECTIONS = [
+            r'(?i)^preface[\s\-:]*(.*)$',
+            r'(?i)^introduction[\s\-:]*(.*)$',
+            r'(?i)^foreword[\s\-:]*(.*)$',
+            r'(?i)^prologue[\s\-:]*(.*)$',
+            r'(?i)^epilogue[\s\-:]*(.*)$',
+            r'(?i)^conclusion[\s\-:]*(.*)$',
+            r'(?i)^appendix[\s\-:]*(.*)$',
+            r'(?i)^notes[\s\-:]*(.*)$',
+            r'(?i)^suggested\s+reading[\s\-:]*(.*)$',
+            r'(?i)^bibliography[\s\-:]*(.*)$',
+            r'(?i)^index[\s\-:]*(.*)$',
+            r'(?i)^references[\s\-:]*(.*)$',
+            r'(?i)^glossary[\s\-:]*(.*)$',
+        ]
+
     
     
     def detect_structure(self, content: str) -> Dict[str, Any]:
@@ -2446,7 +2313,25 @@ class FileService:
         5. Don't miss any chapters just because the layout is complex or they appear on later pages
         6. Include ALL sections mentioned (there could be 2, 3, 4, or more major divisions)
         7. Look for patterns like columnar layouts where numbers and titles may be separated
+        8. Look for the PRIMARY content divisions (main chapters, books, parts, acts, etc.)
+        9. IGNORE front/back matter: preface, acknowledgments, bibliography, index, appendix, notes
+        10. IGNORE subsections and detailed breakdowns - focus on major divisions
+        11. Look for numbered or titled main content sections
+        12. Typically books have 3-25 main content divisions
         
+        WHAT TO EXTRACT (examples):
+        - Numbered chapters: "Chapter 1", "Chapter 2"
+        - Named sections: "The Beginning", "The Journey" 
+        - Books/Parts: "Book One", "Part I"
+        - Acts/Movements: "Act 1", "First Movement"
+        - Any major story/content divisions
+        
+        WHAT TO IGNORE:
+        - Table of contents, list of figures, preface, acknowledgments
+        - Bibliography, index, appendix, notes, references
+        - Detailed subsections within main chapters
+        - Publication information, copyright pages
+    
         Common patterns to look for:
         - "CHAPTER 1. Title Name ... Page"
         - "I. Title Name ... Page" (Roman numerals)
@@ -4832,6 +4717,8 @@ Chapters:
                     
                 os.unlink(temp_file_path)
                 print(f"[TOC EXTRACTION] Cleaned up temporary file: {temp_file_path}")
+            
+                
             except Exception as e:
                 print(f"[TOC EXTRACTION] Failed: {e}")
                 print(f"[TOC EXTRACTION] Full error: {traceback.format_exc()}")
