@@ -83,6 +83,7 @@ interface BookStructure {
 interface EditableChapter {
   title: string;
   content: string;
+   summary?: string;
 }
 
 // Define Book type based on backend BookSchema
@@ -387,156 +388,156 @@ export default function BookUpload() {
 
   // Step 3: AI Processing with Payment Logic
 
-  const handleUploadBookClick = async () => {
-    if (!user) return;
+  // const handleUploadBookClick = async () => {
+  //   if (!user) return;
 
-    setIsUploading(true);
-    setIsProcessing(true);
-    setProcessingStatus("Uploading...");
+  //   setIsUploading(true);
+  //   setIsProcessing(true);
+  //   setProcessingStatus("Uploading...");
 
-    try {
-      // Prepare form data
-      const formData = new FormData();
-      formData.append("book_type", bookMode);
-      formData.append("title", `Uploaded Book - ${new Date().toISOString()}`);
-      formData.append("description", "Book uploaded for processing");
+  //   try {
+  //     // Prepare form data
+  //     const formData = new FormData();
+  //     formData.append("book_type", bookMode);
+  //     formData.append("title", `Uploaded Book - ${new Date().toISOString()}`);
+  //     formData.append("description", "Book uploaded for processing");
 
-      if (uploadMethod === "file" && file) {
-        formData.append("file", file);
-      } else if (uploadMethod === "text" && textContent) {
-        formData.append("text_content", textContent);
-      } else {
-        toast.error("Please provide a file or text content.");
-        setIsUploading(false);
-        setIsProcessing(false);
-        setProcessingStatus("");
-        return;
-      }
+  //     if (uploadMethod === "file" && file) {
+  //       formData.append("file", file);
+  //     } else if (uploadMethod === "text" && textContent) {
+  //       formData.append("text_content", textContent);
+  //     } else {
+  //       toast.error("Please provide a file or text content.");
+  //       setIsUploading(false);
+  //       setIsProcessing(false);
+  //       setProcessingStatus("");
+  //       return;
+  //     }
 
-      // Call upload endpoint
-      const uploadResponse = (await apiClient.upload(
-        "/books/upload",
-        formData
-      )) as Book;
+  //     // Call upload endpoint
+  //     const uploadResponse = (await apiClient.upload(
+  //       "/books/upload",
+  //       formData
+  //     )) as Book;
 
-      console.log("Upload response:", uploadResponse);
-        console.log("=== UPLOAD RESPONSE DEBUG ===");
-      console.log("Full response:", uploadResponse);
-      console.log("Has structure_data:", !!uploadResponse.structure_data);
-      console.log("Structure_data:", uploadResponse.structure_data);
-      console.log("============================");
+  //     console.log("Upload response:", uploadResponse);
+  //       console.log("=== UPLOAD RESPONSE DEBUG ===");
+  //     console.log("Full response:", uploadResponse);
+  //     console.log("Has structure_data:", !!uploadResponse.structure_data);
+  //     console.log("Structure_data:", uploadResponse.structure_data);
+  //     console.log("============================");
 
 
-      // ✅ NEW PREVIEW FLOW: Check if this is the new preview response
-      if (
-        uploadResponse.status === "READY" &&
-        uploadResponse.preview_chapters
-      ) {
-        console.log("✅ NEW PREVIEW FLOW DETECTED");
+  //     // ✅ NEW PREVIEW FLOW: Check if this is the new preview response
+  //     if (
+  //       uploadResponse.status === "READY" &&
+  //       uploadResponse.preview_chapters
+  //     ) {
+  //       console.log("✅ NEW PREVIEW FLOW DETECTED");
 
-        setIsProcessing(false);
-        setProcessingStatus("");
-        setAiBook(uploadResponse);
+  //       setIsProcessing(false);
+  //       setProcessingStatus("");
+  //       setAiBook(uploadResponse);
 
-        // Set extracted chapters for preview
-        setEditableChapters(
-          uploadResponse.preview_chapters.map((ch) => ({
-            title: ch.title || "",
-            content: ch.content || "",
-          }))
-        );
+  //       // Set extracted chapters for preview
+  //       setEditableChapters(
+  //         uploadResponse.preview_chapters.map((ch) => ({
+  //           title: ch.title || "",
+  //           content: ch.content || "",
+  //         }))
+  //       );
 
-        // Set book structure data if available
-        // if (uploadResponse.structure_data) {
-        //   setBookStructure(uploadResponse.structure_data);
-        // }
-        if (uploadResponse.structure_data) {
-        console.log("✅ Setting bookStructure from response");
-        setBookStructure(uploadResponse.structure_data);
-      } else {
-        console.log("⚠️ No structure_data, creating fallback structure");
-        // Create a fallback structure
-        const fallbackStructure: BookStructure = {
-          id: uploadResponse.id,
-          title: uploadResponse.title || "",
-          has_sections: false,
-          structure_type: "flat",
-          sections: [],
-          chapters: uploadResponse.preview_chapters?.map((ch, index) => ({
-            id: `temp-${index}`,
-            book_id: uploadResponse.id,
-            chapter_number: index + 1,
-            title: ch.title,
-            content: ch.content,
-            summary: ch.summary || "",
-            order_index: index,
-          })) || [],
-          structure_metadata: {
-            display_name: 'Simple Chapters',
-            icon: '📖',
-            description: 'Traditional chapter-based structure',
-            section_label: null,
-            chapter_label: 'Chapter'
-          }
-        };
-        setBookStructure(fallbackStructure);
-      }
+  //       // Set book structure data if available
+  //       // if (uploadResponse.structure_data) {
+  //       //   setBookStructure(uploadResponse.structure_data);
+  //       // }
+  //       if (uploadResponse.structure_data) {
+  //       console.log("✅ Setting bookStructure from response");
+  //       setBookStructure(uploadResponse.structure_data);
+  //     } else {
+  //       console.log("⚠️ No structure_data, creating fallback structure");
+  //       // Create a fallback structure
+  //       const fallbackStructure: BookStructure = {
+  //         id: uploadResponse.id,
+  //         title: uploadResponse.title || "",
+  //         has_sections: false,
+  //         structure_type: "flat",
+  //         sections: [],
+  //         chapters: uploadResponse.preview_chapters?.map((ch, index) => ({
+  //           id: `temp-${index}`,
+  //           book_id: uploadResponse.id,
+  //           chapter_number: index + 1,
+  //           title: ch.title,
+  //           content: ch.content,
+  //           summary: ch.summary || "",
+  //           order_index: index,
+  //         })) || [],
+  //         structure_metadata: {
+  //           display_name: 'Simple Chapters',
+  //           icon: '📖',
+  //           description: 'Traditional chapter-based structure',
+  //           section_label: null,
+  //           chapter_label: 'Chapter'
+  //         }
+  //       };
+  //       setBookStructure(fallbackStructure);
+  //     }
 
-        // Set basic details from extracted data
-        setDetails({
-          title: uploadResponse.title || "",
-          author_name: uploadResponse.author_name || "",
-          description: uploadResponse.description || "",
-          cover_image_url: uploadResponse.cover_image_url || "",
-          book_type: uploadResponse.book_type || bookMode,
-          difficulty: uploadResponse.difficulty || "medium",
-          tags: uploadResponse.tags || [],
-          language: uploadResponse.language || "en",
-          estimated_duration: uploadResponse.estimated_duration
-            ? String(uploadResponse.estimated_duration)
-            : "",
-        });
+  //       // Set basic details from extracted data
+  //       setDetails({
+  //         title: uploadResponse.title || "",
+  //         author_name: uploadResponse.author_name || "",
+  //         description: uploadResponse.description || "",
+  //         cover_image_url: uploadResponse.cover_image_url || "",
+  //         book_type: uploadResponse.book_type || bookMode,
+  //         difficulty: uploadResponse.difficulty || "medium",
+  //         tags: uploadResponse.tags || [],
+  //         language: uploadResponse.language || "en",
+  //         estimated_duration: uploadResponse.estimated_duration
+  //           ? String(uploadResponse.estimated_duration)
+  //           : "",
+  //       });
 
-        toast.success("Book processed! Please review the extracted chapters.");
-        setStep(4); // Go directly to chapter review
-        return;
-      }
+  //       toast.success("Book processed! Please review the extracted chapters.");
+  //       setStep(4); // Go directly to chapter review
+  //       return;
+  //     }
 
-      // ✅ PAYMENT FLOW - COMMENTED OUT
-      /*
-    if (uploadResponse.payment_required && uploadResponse.id) {
-      setPaymentRequired(true);
-      setAiBook(uploadResponse);
-      setIsProcessing(false);
-      setProcessingStatus("");
-      toast.success("Payment required for additional book uploads");
-      return;
-    }
-    */
+  //     // ✅ PAYMENT FLOW - COMMENTED OUT
+  //     /*
+  //   if (uploadResponse.payment_required && uploadResponse.id) {
+  //     setPaymentRequired(true);
+  //     setAiBook(uploadResponse);
+  //     setIsProcessing(false);
+  //     setProcessingStatus("");
+  //     toast.success("Payment required for additional book uploads");
+  //     return;
+  //   }
+  //   */
 
-      // ✅ OLD FLOW: If we have an ID but not preview, use polling
-      if (uploadResponse.id) {
-        console.log("✅ OLD FLOW: Found ID, starting polling");
-        setAiBook(uploadResponse);
-        startPollingForBookStatus(uploadResponse.id);
-      } else {
-        throw new Error("Invalid response from server");
-      }
-    } catch (error: any) {
-      console.error("Upload error:", error);
-      setIsProcessing(false);
-      setProcessingStatus("");
+  //     // ✅ OLD FLOW: If we have an ID but not preview, use polling
+  //     if (uploadResponse.id) {
+  //       console.log("✅ OLD FLOW: Found ID, starting polling");
+  //       setAiBook(uploadResponse);
+  //       startPollingForBookStatus(uploadResponse.id);
+  //     } else {
+  //       throw new Error("Invalid response from server");
+  //     }
+  //   } catch (error: any) {
+  //     console.error("Upload error:", error);
+  //     setIsProcessing(false);
+  //     setProcessingStatus("");
 
-      const errorMessage =
-        error?.response?.data?.detail ||
-        error?.response?.data?.details ||
-        error?.message ||
-        "Upload failed";
-      toast.error(`Upload failed: ${errorMessage}`);
-    } finally {
-      setIsUploading(false);
-    }
-  };
+  //     const errorMessage =
+  //       error?.response?.data?.detail ||
+  //       error?.response?.data?.details ||
+  //       error?.message ||
+  //       "Upload failed";
+  //     toast.error(`Upload failed: ${errorMessage}`);
+  //   } finally {
+  //     setIsUploading(false);
+  //   }
+  // };
 
   // const handleProcessAI = async () => {
   //   console.log("🚀 handleProcessAI called with bookMode:", bookMode);
@@ -710,6 +711,240 @@ export default function BookUpload() {
   //   }
   // };
 
+  const handleUploadBookClick = async () => {
+      console.log("🚀 handleUpload called with bookMode:", bookMode);
+    
+      if (!user) return;
+    
+      // Validate input
+      if (uploadMethod === "file" && !file) {
+        toast.error("Please select a file to upload.");
+        return;
+      }
+    
+      if (uploadMethod === "text" && !textContent.trim()) {
+        toast.error("Please provide text content.");
+        return;
+      }
+    
+      setIsUploading(true);
+      setIsProcessing(true);
+      setProcessingStatus("Uploading...");
+    
+      try {
+        const formData = new FormData();
+        formData.append("book_type", bookMode);
+        formData.append("title", `Uploaded Book - ${new Date().toISOString()}`);
+        formData.append("description", "Book uploaded for processing");
+    
+        if (uploadMethod === "file" && file) {
+          formData.append("file", file);
+        } else if (uploadMethod === "text" && textContent) {
+          formData.append("text_content", textContent);
+        }
+    
+        const uploadResponse = (await apiClient.upload("/books/upload", formData)) as any;
+    
+        console.log("=== UPLOAD RESPONSE DEBUG ===");
+        console.log("Full response:", uploadResponse);
+        console.log("Status:", uploadResponse.status);
+        console.log("Has chapters:", !!uploadResponse.chapters);
+        console.log("Has preview_chapters:", !!uploadResponse.preview_chapters);
+        console.log("Has structure_data:", !!uploadResponse.structure_data);
+        console.log("Structure has_sections:", uploadResponse.structure_data?.has_sections);
+        console.log("Preview chapters type:", Array.isArray(uploadResponse.preview_chapters) ? 'array' : typeof uploadResponse.preview_chapters);
+        console.log("First preview item:", uploadResponse.preview_chapters?.[0]);
+        console.log("============================");
+    
+        // Check if response is valid
+        if (!uploadResponse || typeof uploadResponse !== "object") {
+          throw new Error("Invalid response from server");
+        }
+    
+        // ✅ FIX: Check for preview_chapters instead of chapters
+        if (uploadResponse.status === "READY" && uploadResponse.preview_chapters) {
+          console.log("✅ NEW PREVIEW FLOW DETECTED");
+        
+          setIsProcessing(false);
+          setProcessingStatus("");
+          setAiBook(uploadResponse);
+        
+          // ✅ FIX: Use preview_chapters instead of chapters
+          const sectionsData = uploadResponse.preview_chapters;
+          
+          // ✅ FIX: Better structure detection using the backend's data
+          const isHierarchical = uploadResponse.total_preview_chapters > sectionsData.length;
+          
+          console.log("📊 Structure Analysis:");
+          console.log("- Total chapters:", uploadResponse.total_preview_chapters);
+          console.log("- Section count:", sectionsData.length); 
+          console.log("- Final isHierarchical:", isHierarchical);
+          console.log("- First item:", sectionsData?.[0]);
+        
+          if (isHierarchical) {
+            console.log("📚 HIERARCHICAL BOOK - Setting up sectioned structure");
+            
+            // ✅ FIX: Validate that we have sections with chapters
+            const hasValidSections = Array.isArray(sectionsData) && 
+                                    sectionsData.length > 0 &&
+                                    sectionsData.every(section => 
+                                      section && 
+                                      typeof section === 'object' && 
+                                      'title' in section &&
+                                      'chapters' in section &&
+                                      Array.isArray(section.chapters)
+                                    );
+        
+            console.log("📚 Section validation:", {
+              isArray: Array.isArray(sectionsData),
+              length: sectionsData?.length,
+              hasValidSections,
+              sampleSection: sectionsData?.[0]
+            });
+        
+            if (hasValidSections) {
+              console.log("📚 Valid sectioned structure found");
+              
+              // Log the sections and their chapters for debugging
+              sectionsData.forEach((section, idx) => {
+                console.log(`📚 Section ${idx + 1}: "${section.title}" with ${section.chapters?.length || 0} chapters`);
+                if (section.chapters && section.chapters.length > 0) {
+                  section.chapters.slice(0, 3).forEach((chapter, chIdx) => {
+                    console.log(`📚   Chapter ${chIdx + 1}: "${chapter.title}"`);
+                  });
+                  if (section.chapters.length > 3) {
+                    console.log(`📚   ... and ${section.chapters.length - 3} more chapters`);
+                  }
+                }
+              });
+              
+              // Set the complete structure
+              setBookStructure({
+                id: uploadResponse.id,
+                title: uploadResponse.title,
+                has_sections: true,
+                structure_type: "hierarchical",
+                sections: sectionsData,
+                chapters: [],
+                structure_metadata: {
+                  display_name: 'Multi-Level Structure',
+                  icon: '🏗️',
+                  description: 'Book with sections and subsections',
+                  section_label: 'Section',
+                  chapter_label: 'Chapter'
+                }
+              });
+              
+              // Don't set editableChapters for hierarchical books
+              setEditableChapters([]);
+              
+            } else {
+              console.log("⚠️ Invalid section structure, treating as flat chapters");
+              
+              // If the structure is invalid, treat items as individual chapters
+              const chapters = Array.isArray(sectionsData) ? sectionsData : [];
+              
+              setEditableChapters(
+                chapters.map((item: any, index: number) => ({
+                  title: item.title || `Chapter ${index + 1}`,
+                  content: item.content || "",
+                  summary: item.summary || ""
+                }))
+              );
+              
+              setBookStructure({
+                id: uploadResponse.id,
+                title: uploadResponse.title,
+                has_sections: false,
+                structure_type: "flat",
+                sections: [],
+                chapters: chapters,
+                structure_metadata: {
+                  display_name: 'Simple Chapters',
+                  icon: '📖',
+                  description: 'Traditional chapter-based structure',
+                  section_label: null,
+                  chapter_label: 'Chapter'
+                }
+              });
+            }
+            
+          } else {
+            console.log("📖 FLAT BOOK - Setting up flat structure");
+            
+            // For flat books, sectionsData contains individual chapters
+            const chapters = sectionsData || [];
+            
+            setEditableChapters(
+              chapters.map((ch: any) => ({
+                title: ch.title || "",
+                content: ch.content || "",
+                summary: ch.summary || ""
+              }))
+            );
+            
+            setBookStructure({
+              id: uploadResponse.id,
+              title: uploadResponse.title,
+              has_sections: false,
+              structure_type: "flat",
+              sections: [],
+              chapters: chapters,
+              structure_metadata: {
+                display_name: 'Simple Chapters',
+                icon: '📖',
+                description: 'Traditional chapter-based structure',
+                section_label: null,
+                chapter_label: 'Chapter'
+              }
+            });
+          }
+        
+          // Set basic details from extracted data
+          setDetails({
+            title: uploadResponse.title || "",
+            author_name: uploadResponse.author_name || "",
+            description: uploadResponse.description || "",
+            cover_image_url: uploadResponse.cover_image_url || "",
+            book_type: uploadResponse.book_type || bookMode,
+            difficulty: uploadResponse.difficulty || "medium",
+            tags: uploadResponse.tags || [],
+            language: uploadResponse.language || "en",
+            estimated_duration: uploadResponse.estimated_duration
+              ? String(uploadResponse.estimated_duration)
+              : "",
+          });
+        
+          toast.success("Book processed! Please review the extracted structure.");
+          setStep(4); // Go directly to chapter review
+          return;
+        }    
+        
+        // OLD FLOW: Process normally if we have an id
+        if (uploadResponse.id) {
+          console.log("✅ OLD FLOW: Found ID, starting polling");
+          setAiBook(uploadResponse);
+          startPollingForBookStatus(uploadResponse.id);
+        } else {
+          console.log("❌ NO ID AND NOT PREVIEW MODE");
+          throw new Error("No book ID returned from server and not in preview mode");
+        }
+      } catch (error: any) {
+        console.error("Upload error:", error);
+        setIsProcessing(false);
+        setProcessingStatus("");
+    
+        const errorMessage =
+          error?.response?.data?.detail ||
+          error?.response?.data?.details ||
+          error?.message ||
+          "Upload failed";
+        toast.error(`Upload failed: ${errorMessage}`);
+      } finally {
+        setIsUploading(false);
+      }
+    };
+    
   // Handle payment for book upload
   const handlePayment = async () => {
     if (!aiBook) return;
@@ -833,51 +1068,81 @@ export default function BookUpload() {
     }
   };
 
-  // Step 4: Save Chapters (after user review)
-  // const handleSaveChapters = async () => {
-  //   if (!aiBook) return;
-  //   setSavingChapters(true);
-  //   setChapterError("");
-  //   // Validate chapters
-  //   if (
-  //     !editableChapters.length ||
-  //     editableChapters.some((ch) => !ch.title.trim())
-  //   ) {
-  //     setChapterError("Each chapter must have a title.");
-  //     setSavingChapters(false);
+ 
+
+  // ADD THE handleSaveStructure FUNCTION HERE (after line 535)
+  // const handleSaveStructure = async () => {
+  //   if (!aiBook) {
+  //     toast.error("No book to save structure for");
   //     return;
   //   }
+
+  //   setSavingChapters(true);
+
   //   try {
-  //     await apiClient.post(
-  //       `/books/${aiBook.id}/save-chapters`,
-  //       editableChapters
-  //     );
-  //     setStep(5); // Proceed to Book Details
-  //     toast.success("Chapters saved! Now complete book details.");
-  //   } catch (e: unknown) {
-  //     const error = e as Error;
-  //     toast.error(error.message || "Failed to save chapters.");
-  //     setChapterError(error.message || "Failed to save chapters.");
+  //     // Prepare the data for the new confirm structure endpoint
+  //     const structureData = {
+  //       chapters: bookStructure?.has_sections
+  //         ? bookStructure.sections.flatMap((section) =>
+  //             section.chapters.map((ch) => ({
+  //               title: ch.title,
+  //               content: ch.content,
+  //               summary: ch.summary || "",
+  //               chapter_number: ch.chapter_number,
+  //               section_title: section.title,
+  //               section_type: section.section_type,
+  //               section_number: section.section_number,
+  //             }))
+  //           )
+  //         : editableChapters.map((ch, index) => ({
+  //             title: ch.title,
+  //             content: ch.content,
+  //             summary: "",
+  //             chapter_number: index + 1,
+  //           })),
+  //     };
+
+  //     console.log("Saving structure:", structureData);
+
+  //     // Call the NEW save-structure endpoint
+  //     await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
+
+  //     toast.success("Book structure confirmed! Processing chapters...");
+
+  //     // After successful save, book should be READY
+  //     // Redirect to book details or continue to step 5
+  //     setStep(5); // Move to book details step
+  //   } catch (error: any) {
+  //     console.error("Error saving book structure:", error);
+  //     const errorMessage =
+  //       error?.response?.data?.detail ||
+  //       error?.message ||
+  //       "Failed to save book structure";
+  //     toast.error(`Failed to save structure: ${errorMessage}`);
   //   } finally {
   //     setSavingChapters(false);
   //   }
   // };
 
-  // ADD THE handleSaveStructure FUNCTION HERE (after line 535)
-  const handleSaveStructure = async () => {
-    if (!aiBook) {
-      toast.error("No book to save structure for");
-      return;
-    }
-
-    setSavingChapters(true);
-
-    try {
-      // Prepare the data for the new confirm structure endpoint
-      const structureData = {
-        chapters: bookStructure?.has_sections
-          ? bookStructure.sections.flatMap((section) =>
-              section.chapters.map((ch) => ({
+        const handleSaveStructure = async () => {
+      if (!aiBook) {
+        toast.error("No book to save structure for");
+        return;
+      }
+    
+      setSavingChapters(true);
+    
+      try {
+        let structureData;
+    
+        // ✅ FIX: Handle both hierarchical and flat structures properly
+        if (bookStructure?.has_sections && bookStructure.sections?.length > 0) {
+          console.log("Saving hierarchical structure");
+          
+          // For hierarchical books, flatten sections into chapters with section info
+          structureData = {
+            chapters: bookStructure.sections.flatMap((section) =>
+              (section.chapters || []).map((ch) => ({
                 title: ch.title,
                 content: ch.content,
                 summary: ch.summary || "",
@@ -886,69 +1151,46 @@ export default function BookUpload() {
                 section_type: section.section_type,
                 section_number: section.section_number,
               }))
-            )
-          : editableChapters.map((ch, index) => ({
+            ),
+          };
+        } else {
+          console.log("Saving flat structure");
+          
+          // For flat books, use editableChapters or structure.chapters
+          const chaptersToSave = editableChapters.length > 0 
+            ? editableChapters 
+            : bookStructure?.chapters || [];
+          
+          structureData = {
+            chapters: chaptersToSave.map((ch, index) => ({
               title: ch.title,
               content: ch.content,
-              summary: "",
+              summary: (ch as any).summary || "", // ✅ FIX: Handle missing summary property
               chapter_number: index + 1,
             })),
-      };
+          };
+        }
+    
+        console.log("Saving structure:", structureData);
+    
+        // Call the save-structure endpoint
+        await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
+    
+        toast.success("Book structure confirmed! Processing chapters...");
+        setStep(5); // Move to book details step
+        
+      } catch (error: any) {
+        console.error("Error saving book structure:", error);
+        const errorMessage =
+          error?.response?.data?.detail ||
+          error?.message ||
+          "Failed to save book structure";
+        toast.error(`Failed to save structure: ${errorMessage}`);
+      } finally {
+        setSavingChapters(false);
+      }
+    };
 
-      console.log("Saving structure:", structureData);
-
-      // Call the NEW save-structure endpoint
-      await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
-
-      toast.success("Book structure confirmed! Processing chapters...");
-
-      // After successful save, book should be READY
-      // Redirect to book details or continue to step 5
-      setStep(5); // Move to book details step
-    } catch (error: any) {
-      console.error("Error saving book structure:", error);
-      const errorMessage =
-        error?.response?.data?.detail ||
-        error?.message ||
-        "Failed to save book structure";
-      toast.error(`Failed to save structure: ${errorMessage}`);
-    } finally {
-      setSavingChapters(false);
-    }
-  };
-
-  // const handleSaveStructure = async () => {
-  //   if (!aiBook || !bookStructure) {
-  //     toast.error("No book structure to save");
-  //     return;
-  //   }
-
-  //   setSavingChapters(true);
-
-  //   try {
-  //     // Convert bookStructure to the format expected by the backend
-  //     const structureData = {
-  //       book_id: aiBook.id,
-  //       has_sections: bookStructure.has_sections,
-  //       structure_type: bookStructure.structure_type,
-  //       sections: bookStructure.sections,
-  //       chapters: bookStructure.chapters,
-  //     };
-
-  //     console.log("Saving structure:", structureData);
-
-  //     // Save the hierarchical structure
-  //     await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
-
-  //     toast.success("Book structure saved successfully!");
-  //     setStep(5); // Move to next step
-  //   } catch (error) {
-  //     console.error("Error saving book structure:", error);
-  //     toast.error("Failed to save book structure. Please try again.");
-  //   } finally {
-  //     setSavingChapters(false);
-  //   }
-  // };
 
   // Step 4: Save/Update Book Details
   const handleDetailsChange = (
@@ -1147,186 +1389,7 @@ export default function BookUpload() {
     },
   ];
 
-  const handleUpload = async () => {
-    console.log("🚀 handleUpload called with bookMode:", bookMode);
-
-    if (!user) return;
-
-    // Validate input
-    if (uploadMethod === "file" && !file) {
-      toast.error("Please select a file to upload.");
-      return;
-    }
-
-    if (uploadMethod === "text" && !textContent.trim()) {
-      toast.error("Please provide text content.");
-      return;
-    }
-
-    setIsUploading(true);
-    setIsProcessing(true);
-    setProcessingStatus("Uploading...");
-
-    try {
-      const formData = new FormData();
-      formData.append("book_type", bookMode);
-      formData.append("title", `Uploaded Book - ${new Date().toISOString()}`);
-      formData.append("description", "Book uploaded for processing");
-
-      if (uploadMethod === "file" && file) {
-        formData.append("file", file);
-      } else if (uploadMethod === "text" && textContent) {
-        formData.append("text_content", textContent);
-      }
-
-      // Call the upload endpoint
-      const uploadResponse = (await apiClient.upload(
-        "/books/upload",
-        formData
-      )) as any;
-
-      // ENHANCED DEBUG LOGGING
-      console.log("=== UPLOAD RESPONSE DEBUG ===");
-      console.log("Full response:", uploadResponse);
-      console.log("Response type:", typeof uploadResponse);
-      console.log("Response constructor:", uploadResponse?.constructor?.name);
-      console.log("Response keys:", Object.keys(uploadResponse || {}));
-      console.log("Has id:", "id" in (uploadResponse || {}));
-      console.log("Has status:", "status" in (uploadResponse || {}));
-      console.log("Has chapters:", "chapters" in (uploadResponse || {}));
-      console.log("============================");
-
-      // Check if response is valid
-      if (!uploadResponse || typeof uploadResponse !== "object") {
-        throw new Error("Invalid response from server");
-      }
-
-      // Check if this is the new preview flow
-      // if (
-      //   uploadResponse.status === "PENDING_CONFIRMATION" &&
-      //   uploadResponse.chapters
-      // ) {
-
-      // Check if this is the new preview flow
-      if (uploadResponse.status === "PENDING_CONFIRMATION") {
-        console.log("✅ NEW PREVIEW FLOW DETECTED");
-
-        // Check if chapters exist
-        if (!uploadResponse.chapters) {
-          console.log("⚠️ No chapters in preview response");
-          throw new Error("Preview response missing chapters");
-        }
-        // NEW FLOW: Show preview
-        setIsProcessing(false);
-        setProcessingStatus("");
-        setAiBook(uploadResponse);
-
-        // Set extracted chapters for preview
-        setEditableChapters(
-          uploadResponse.chapters.map((ch: any) => ({
-            title: ch.title || "",
-            content: ch.content || "",
-          }))
-        );
-
-        // Set book structure data if available
-        if (uploadResponse.structure_data) {
-          setBookStructure(uploadResponse.structure_data);
-        }
-
-        // Set basic details from extracted data
-        setDetails({
-          title: uploadResponse.title || "",
-          author_name: uploadResponse.author_name || "",
-          description: uploadResponse.description || "",
-          cover_image_url: uploadResponse.cover_image_url || "",
-          book_type: uploadResponse.book_type || bookMode,
-          difficulty: uploadResponse.difficulty || "medium",
-          tags: uploadResponse.tags || [],
-          language: uploadResponse.language || "en",
-          estimated_duration: uploadResponse.estimated_duration
-            ? String(uploadResponse.estimated_duration)
-            : "",
-        });
-
-        toast.success("Book processed! Please review the extracted chapters.");
-        setStep(4); // Go directly to chapter review
-        return;
-      }
-
-      // IGNORE PAYMENT LOGIC FOR NOW - Skip payment checks completely
-      // if (uploadResponse.payment_required) {
-      //   setPaymentRequired(true);
-      //   setIsProcessing(false);
-      //   setProcessingStatus("");
-      //   toast.success("Payment required for additional book uploads");
-      //   return;
-      // }
-
-      // ADD THIS SAFETY CHECK HERE:
-      if (
-        !uploadResponse.id &&
-        uploadResponse.status !== "PENDING_CONFIRMATION"
-      ) {
-        console.log("❌ Response missing both ID and preview status");
-        console.log("Response:", JSON.stringify(uploadResponse, null, 2));
-
-        // Show user what happened
-        toast.error(
-          `Server response invalid. Status: ${
-            uploadResponse.status || "unknown"
-          }`
-        );
-
-        // Try to extract useful info anyway
-        if (uploadResponse.chapters) {
-          // Treat as preview even without explicit status
-          console.log("🔄 Treating as preview due to chapters presence");
-          setIsProcessing(false);
-          setProcessingStatus("");
-          setAiBook(uploadResponse);
-          setEditableChapters(
-            uploadResponse.chapters.map((ch: any) => ({
-              title: ch.title || "",
-              content: ch.content || "",
-            }))
-          );
-          setStep(4);
-          return;
-        }
-
-        return; // Don't proceed if we can't handle the response
-      }
-
-      // OLD FLOW: Process normally if we have an id
-      if (uploadResponse.id) {
-        console.log("✅ OLD FLOW: Found ID, starting polling");
-        setAiBook(uploadResponse);
-        startPollingForBookStatus(uploadResponse.id);
-      } else {
-        // If no ID and not preview flow, something went wrong
-        console.log("❌ NO ID AND NOT PREVIEW MODE");
-        console.log("Available fields:", Object.keys(uploadResponse));
-        throw new Error(
-          "No book ID returned from server and not in preview mode"
-        );
-      }
-    } catch (error: any) {
-      console.error("Upload error:", error);
-      setIsProcessing(false);
-      setProcessingStatus("");
-
-      const errorMessage =
-        error?.response?.data?.detail ||
-        error?.response?.data?.details ||
-        error?.message ||
-        "Upload failed";
-      toast.error(`Upload failed: ${errorMessage}`);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
+ 
   // Helper function to start polling (for old flow compatibility)
   const startPollingForBookStatus = (bookId: string) => {
     const pollInterval = setInterval(async () => {
@@ -1895,144 +1958,7 @@ export default function BookUpload() {
             </div>
           )}
 
-          {/* Step 4: Dynamic Chapter Review */}
-          {/* {step === 4 && (
-            <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">
-                Review & Edit{" "}
-                {bookStructure?.structure_type === "flat"
-                  ? "Chapters"
-                  : bookStructure?.has_sections
-                  ? `${getSectionLabel(bookStructure.structure_type)}s`
-                  : "Chapters"}
-              </h2>
-              <p className="text-gray-600 mb-4">
-                Review, edit, reorder, or add{" "}
-                {bookStructure?.has_sections
-                  ? "sections and chapters"
-                  : "chapters"}
-                . Only confirmed content will be saved.
-              </p>
-
-              {bookStructure?.has_sections ? (
-                <HierarchicalStructureReview
-                  structure={bookStructure}
-                  onStructureChange={setBookStructure}
-                />
-              ) : (
-                <div className="space-y-4">
-                  {editableChapters.map((ch, idx) => (
-                    <div
-                      key={idx}
-                      className="border border-gray-200 rounded-lg p-4"
-                    >
-                      <div className="flex justify-between items-center mb-2">
-                        <h3 className="text-lg font-semibold">
-                          Chapter {idx + 1}
-                        </h3>
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleMoveChapter(idx, "up")}
-                            disabled={idx === 0}
-                            className="text-blue-600 hover:text-blue-800 disabled:text-gray-400"
-                          >
-                            ↑
-                          </button>
-                          <button
-                            onClick={() => handleMoveChapter(idx, "down")}
-                            disabled={idx === editableChapters.length - 1}
-                            className="text-blue-600 hover:text-blue-800 disabled:text-gray-400"
-                          >
-                            ↓
-                          </button>
-                          <button
-                            onClick={() => handleRemoveChapter(idx)}
-                            className="text-red-600 hover:text-red-800"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                      <input
-                        type="text"
-                        className="w-full border border-gray-300 rounded-xl px-3 py-2 mb-2"
-                        placeholder="Chapter Title"
-                        value={ch.title}
-                        onChange={(e) =>
-                          handleChapterChange(idx, "title", e.target.value)
-                        }
-                      />
-                      <textarea
-                        className="w-full border border-gray-300 rounded-xl px-3 py-2"
-                        placeholder="Chapter Content"
-                        rows={4}
-                        value={ch.content}
-                        onChange={(e) =>
-                          handleChapterChange(idx, "content", e.target.value)
-                        }
-                      />
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="mt-2 px-4 py-2 bg-green-100 text-green-700 rounded hover:bg-green-200"
-                    onClick={handleAddChapter}
-                  >
-                    + Add Chapter
-                  </button>
-                </div>
-              )}
-
-              <div className="flex justify-between mt-8">
-                <button
-                  onClick={handleBack}
-                  className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
-                  disabled={savingChapters}
-                >
-                  Back
-                </button>
-                <button
-                  onClick={handleSaveStructure}
-                  disabled={savingChapters}
-                  className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
-                >
-                  {savingChapters ? "Saving..." : "Confirm Structure"}
-                </button>
-              </div>
-            </div>
-          )} */}
-
-          {/* {step === 4 && (
-            <div className="space-y-6">
-              {bookStructure?.has_sections ? (
-                <HierarchicalStructureReview
-                  structure={bookStructure}
-                  onStructureChange={setBookStructure}
-                />
-              ) : (
-                <FlatStructureReview
-                  chapters={editableChapters}
-                  onChaptersChange={setEditableChapters}
-                />
-              )}
-              <div className="flex justify-between">
-                <button
-                  onClick={handleBack}
-                  className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl"
-                >
-                  Back
-                </button>
-                <button
-                  onClick={handleSaveStructure}
-                  disabled={savingChapters}
-                  className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
-                >
-                  {savingChapters ? "Saving..." : "Confirm Structure"}
-                </button>
-              </div>
-            </div>
-          )} */}
-
+         
           {step === 4 && (
             <div className="space-y-6">
               {bookStructure ? (
@@ -2506,8 +2432,48 @@ const HierarchicalStructureReview: React.FC<{
   onStructureChange: (structure: BookStructure) => void;
 }> = ({ structure, onStructureChange }) => {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
-    new Set()
+    new Set(structure.sections?.map(s => s.id) || [])
   );
+
+  const toggleSection = (sectionId: string) => {
+    const newExpanded = new Set(expandedSections);
+    if (newExpanded.has(sectionId)) {
+      newExpanded.delete(sectionId);
+    } else {
+      newExpanded.add(sectionId);
+    }
+    setExpandedSections(newExpanded);
+  };
+
+  const updateChapterContent = (
+    sectionIndex: number,
+    chapterIndex: number,
+    field: 'title' | 'content',
+    value: string
+  ) => {
+    const newStructure = { ...structure };
+    const section = newStructure.sections[sectionIndex];
+    const updatedChapters = [...section.chapters];
+    
+    if (field === 'title') {
+      updatedChapters[chapterIndex] = {
+        ...updatedChapters[chapterIndex],
+        title: value
+      };
+    } else {
+      updatedChapters[chapterIndex] = {
+        ...updatedChapters[chapterIndex],
+        content: value
+      };
+    }
+    
+    newStructure.sections[sectionIndex] = {
+      ...section,
+      chapters: updatedChapters
+    };
+    
+    onStructureChange(newStructure);
+  };
 
   const moveChapter = (
     sectionIndex: number,
@@ -2518,14 +2484,14 @@ const HierarchicalStructureReview: React.FC<{
     const section = newStructure.sections[sectionIndex];
     const chapters = [...section.chapters];
 
-    const targetIndex =
-      direction === "up" ? chapterIndex - 1 : chapterIndex + 1;
+    const targetIndex = direction === "up" ? chapterIndex - 1 : chapterIndex + 1;
 
     if (targetIndex >= 0 && targetIndex < chapters.length) {
       [chapters[chapterIndex], chapters[targetIndex]] = [
         chapters[targetIndex],
-        chapters[chapterIndex],
+        chapters[chapterIndex]
       ];
+      
       newStructure.sections[sectionIndex] = { ...section, chapters };
       onStructureChange(newStructure);
     }
@@ -2539,261 +2505,85 @@ const HierarchicalStructureReview: React.FC<{
     onStructureChange(newStructure);
   };
 
-  const addChapter = (sectionIndex: number) => {
-    const newStructure = { ...structure };
-    const section = newStructure.sections[sectionIndex];
-    const newChapter: Chapter = {
-      id: `temp-${Date.now()}`,
-      book_id: structure.id,
-      section_id: section.id,
-      chapter_number: section.chapters.length + 1,
-      title: `New Chapter ${section.chapters.length + 1}`,
-      content: "",
-      summary: "",
-      order_index: section.chapters.length,
-    };
-
-    newStructure.sections[sectionIndex] = {
-      ...section,
-      chapters: [...section.chapters, newChapter],
-    };
-    onStructureChange(newStructure);
-  };
-
-  const toggleSection = (sectionId: string) => {
-    const newExpanded = new Set(expandedSections);
-    if (newExpanded.has(sectionId)) {
-      newExpanded.delete(sectionId);
-    } else {
-      newExpanded.add(sectionId);
-    }
-    setExpandedSections(newExpanded);
-  };
-
-  const getSectionIcon = (type: string) => {
-    switch (type.toLowerCase()) {
-      case "tablet":
-        return "📜";
-      case "part":
-        return "📖";
-      case "book":
-        return "📚";
-      case "section":
-        return "📄";
-      case "chapter":
-        return "📝";
-      case "act":
-        return "🎭";
-      case "scene":
-        return "🎬";
-      case "unit":
-        return "🎯";
-      case "lesson":
-        return "🎓";
-      default:
-        return "📄";
-    }
-  };
-
-  const getSectionLabel = (type: string) => {
-    switch (type.toLowerCase()) {
-      case "tablet":
-        return "Tablet";
-      case "part":
-        return "Part";
-      case "book":
-        return "Book";
-      case "section":
-        return "Section";
-      case "chapter":
-        return "Chapter";
-      case "act":
-        return "Act";
-      case "scene":
-        return "Scene";
-      case "unit":
-        return "Unit";
-      case "lesson":
-        return "Lesson";
-      default:
-        return "Section";
-    }
-  };
-
   return (
     <div className="space-y-4">
-      {structure.sections.map((section, sectionIndex) => (
-        <div
-          key={section.id}
-          className="border border-gray-200 rounded-lg overflow-hidden"
-        >
-          {/* Section Header */}
-          <div
-            className="bg-gray-50 p-4 cursor-pointer hover:bg-gray-100 transition-colors"
+      <div className="text-sm text-gray-600 mb-4">
+        📚 This book has {structure.sections?.length || 0} sections with a total of{" "}
+        {structure.sections?.reduce((total, section) => total + (section.chapters?.length || 0), 0) || 0} chapters
+      </div>
+
+      {structure.sections?.map((section, sectionIndex) => (
+        <div key={section.id || sectionIndex} className="border rounded-xl bg-gray-50">
+          <div 
+            className="p-4 cursor-pointer flex items-center justify-between bg-blue-50 rounded-t-xl"
             onClick={() => toggleSection(section.id)}
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                <span className="text-2xl">
-                  {getSectionIcon(section.section_type)}
-                </span>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    {getSectionLabel(section.section_type)}{" "}
-                    {section.section_number}: {section.title}
-                  </h3>
-                  <p className="text-sm text-gray-600">
-                    {section.chapters.length} chapter
-                    {section.chapters.length !== 1 ? "s" : ""}
-                  </p>
-                </div>
+            <div className="flex items-center space-x-3">
+              <span className="text-2xl">📖</span>
+              <div>
+                <h3 className="font-semibold text-lg">{section.title}</h3>
+                <p className="text-sm text-gray-600">
+                  {section.section_type?.toUpperCase()} {section.section_number} • {section.chapters?.length || 0} chapters
+                </p>
               </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    // Add chapter to this section
-                  }}
-                  className="px-3 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 text-sm"
-                >
-                  + Chapter
-                </button>
-                {expandedSections.has(section.id) ? (
-                  <span className="text-gray-500">▲</span>
-                ) : (
-                  <span className="text-gray-500">▲</span>
-                )}
-                {/* {expandedSections.has(section.id) ? 
-                  <ChevronUpIcon className="h-5 w-5 text-gray-500" /> : 
-                  <ChevronDownIcon className="h-5 w-5 text-gray-500" />
-                } */}
-              </div>
+            </div>
+            <div className="text-gray-500">
+              {expandedSections.has(section.id) ? "−" : "+"}
             </div>
           </div>
 
-          {/* Section Content */}
           {expandedSections.has(section.id) && (
             <div className="p-4 space-y-4">
-              {section.chapters.map((chapter, chapterIndex) => (
-                <div
-                  key={chapter.id}
-                  className="border border-gray-200 rounded-lg p-4"
-                >
+              {section.chapters?.map((chapter, chapterIndex) => (
+                <div key={chapter.id || chapterIndex} className="border rounded-lg p-4 bg-white">
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-medium text-gray-900">
-                      Chapter {chapterIndex + 1}
-                    </h4>
-                    <div className="flex space-x-2">
+                    <span className="text-sm text-gray-600 font-medium">
+                      Chapter {chapter.chapter_number}
+                    </span>
+                    <div className="flex items-center space-x-2">
                       <button
-                        onClick={() =>
-                          moveChapter(sectionIndex, chapterIndex, "up")
-                        }
-                        className="text-blue-600 hover:text-blue-800 text-sm"
+                        onClick={() => moveChapter(sectionIndex, chapterIndex, "up")}
+                        disabled={chapterIndex === 0}
+                        className="text-xs px-2 py-1 text-blue-600 hover:bg-blue-100 rounded disabled:opacity-50"
                       >
                         ↑
                       </button>
                       <button
-                        onClick={() =>
-                          moveChapter(sectionIndex, chapterIndex, "down")
-                        }
-                        className="text-blue-600 hover:text-blue-800 text-sm"
+                        onClick={() => moveChapter(sectionIndex, chapterIndex, "down")}
+                        disabled={chapterIndex === (section.chapters?.length || 0) - 1}
+                        className="text-xs px-2 py-1 text-blue-600 hover:bg-blue-100 rounded disabled:opacity-50"
                       >
                         ↓
                       </button>
                       <button
-                        onClick={() =>
-                          removeChapter(sectionIndex, chapterIndex)
-                        }
-                        className="text-red-600 hover:text-red-800 text-sm"
+                        onClick={() => removeChapter(sectionIndex, chapterIndex)}
+                        className="text-xs px-2 py-1 text-red-600 hover:bg-red-100 rounded"
                       >
                         Remove
                       </button>
                     </div>
                   </div>
-
-                  {/* <input
-                    type="text"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-2"
-                    placeholder="Chapter Title"
-                    value={chapter.title}
-                    onChange={(e) => {
-                      // Update chapter title
-                    }}
-                  /> */}
-
-                  {/* <textarea
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    placeholder="Chapter Content"
-                    rows={4}
-                    value={chapter.content}
-                    onChange={(e) => {
-                      // Update chapter content
-                    }}
-                  /> */}
-
+                  
                   <input
-                    type="text"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-2"
-                    placeholder="Chapter Title"
                     value={chapter.title}
-                    onChange={(e) => {
-                      const newStructure = { ...structure };
-                      const sec = newStructure.sections[sectionIndex];
-                      const chs = [...sec.chapters];
-                      chs[chapterIndex] = {
-                        ...chs[chapterIndex],
-                        title: e.target.value,
-                      };
-                      newStructure.sections[sectionIndex] = {
-                        ...sec,
-                        chapters: chs,
-                      };
-                      onStructureChange(newStructure);
-                    }}
+                    onChange={(e) => updateChapterContent(sectionIndex, chapterIndex, 'title', e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 mb-3 font-medium"
+                    placeholder="Chapter title"
                   />
+                  
                   <textarea
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    placeholder="Chapter Content"
-                    rows={4}
                     value={chapter.content}
-                    onChange={(e) => {
-                      const newStructure = { ...structure };
-                      const sec = newStructure.sections[sectionIndex];
-                      const chs = [...sec.chapters];
-                      chs[chapterIndex] = {
-                        ...chs[chapterIndex],
-                        content: e.target.value,
-                      };
-                      newStructure.sections[sectionIndex] = {
-                        ...sec,
-                        chapters: chs,
-                      };
-                      onStructureChange(newStructure);
-                    }}
+                    onChange={(e) => updateChapterContent(sectionIndex, chapterIndex, 'content', e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 h-32 text-sm"
+                    rows={4}
+                    placeholder="Chapter content"
                   />
                 </div>
               ))}
-
-              {section.chapters.length === 0 && (
-                <div className="text-center py-8 text-gray-500">
-                  <p>
-                    No chapters in this{" "}
-                    {getSectionLabel(section.section_type).toLowerCase()}
-                  </p>
-                  <button className="mt-2 px-4 py-2 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">
-                    Add First Chapter
-                  </button>
-                </div>
-              )}
             </div>
           )}
         </div>
       ))}
-
-      <button className="w-full p-4 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-gray-400 hover:text-gray-800 transition-colors">
-        {/* + Add New {getSectionLabel(structure.structure_type)} */}+ Add New{" "}
-        {getSectionLabel(structure?.structure_type || "section")}
-      </button>
     </div>
   );
 };
@@ -2814,126 +2604,47 @@ const StructureTypeIndicator: React.FC<{
   );
 };
 
-// Enhanced structure review component
+
+// Update the DynamicStructureReview component
 const DynamicStructureReview: React.FC<{
   structure: BookStructure;
   onStructureChange: (structure: BookStructure) => void;
-  editableChapters: EditableChapter[]; // Add this prop
-  onChaptersChange: (chapters: EditableChapter[]) => void; // Add this prop
+  editableChapters: EditableChapter[];
+  onChaptersChange: (chapters: EditableChapter[]) => void;
 }> = ({ structure, onStructureChange, editableChapters, onChaptersChange }) => {
   if (!structure) {
     return (
-      <div className="p-8 text-center text-gray-500 bg-gray-50 rounded-lg">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
-        <p className="text-lg font-medium mb-2">Loading book structure...</p>
-        <p className="text-sm">Processing your book and extracting chapters...</p>
+      <div className="text-center py-8 text-gray-500">
+        Loading book structure...
       </div>
     );
   }
   
   const metadata = structure?.structure_metadata || {};
-  const sectionLabel = metadata.section_label || "Section";
   const chapterLabel = metadata.chapter_label || "Chapter";
 
-  
+  console.log("DynamicStructureReview - structure:", structure);
+  console.log("DynamicStructureReview - has_sections:", structure.has_sections);
+  console.log("DynamicStructureReview - sections count:", structure.sections?.length);
+  console.log("DynamicStructureReview - chapters count:", structure.chapters?.length);
+  console.log("DynamicStructureReview - editableChapters count:", editableChapters.length);
 
   return (
     <div className="space-y-6">
       <StructureTypeIndicator metadata={metadata} />
 
-      {structure.has_sections ? (
+      {/* ✅ FIX: Better condition checking for hierarchical vs flat */}
+      {structure.has_sections && structure.sections && structure.sections.length > 0 ? (
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold">
-            {sectionLabel}s and {chapterLabel}s
-          </h3>
-
-          {structure.sections?.map((section, sectionIndex) => (
-            <div key={section.id} className="border rounded-xl p-4 bg-gray-50">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-gray-900">
-                  {sectionLabel} {section.section_number}: {section.title}
-                </h4>
-                <span className="text-sm text-gray-500">
-                  {section.chapters?.length || 0} {chapterLabel.toLowerCase()}s
-                </span>
-              </div>
-
-              <input
-                type="text"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3"
-                placeholder={`${sectionLabel} Title`}
-                value={section.title}
-                onChange={(e) => {
-                  const newStructure = { ...structure };
-                  newStructure.sections[sectionIndex] = {
-                    ...section,
-                    title: e.target.value,
-                  };
-                  onStructureChange(newStructure);
-                }}
-              />
-
-              <div className="space-y-2">
-                {section.chapters?.map((chapter, chapterIndex) => (
-                  <div
-                    key={chapter.id}
-                    className="pl-4 border-l-2 border-blue-200"
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-sm text-gray-600">
-                        {chapterLabel} {chapter.chapter_number}
-                      </span>
-                      <span className="text-xs text-gray-400">
-                        {chapter.content?.length || 0} characters
-                      </span>
-                    </div>
-
-                    <input
-                      type="text"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-2"
-                      placeholder={`${chapterLabel} Title`}
-                      value={chapter.title}
-                      onChange={(e) => {
-                        const newStructure = { ...structure };
-                        const sec = newStructure.sections[sectionIndex];
-                        const chs = [...sec.chapters];
-                        chs[chapterIndex] = {
-                          ...chs[chapterIndex],
-                          title: e.target.value,
-                        };
-                        newStructure.sections[sectionIndex] = {
-                          ...sec,
-                          chapters: chs,
-                        };
-                        onStructureChange(newStructure);
-                      }}
-                    />
-
-                    <textarea
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                      placeholder={`${chapterLabel} Content`}
-                      rows={3}
-                      value={chapter.content}
-                      onChange={(e) => {
-                        const newStructure = { ...structure };
-                        const sec = newStructure.sections[sectionIndex];
-                        const chs = [...sec.chapters];
-                        chs[chapterIndex] = {
-                          ...chs[chapterIndex],
-                          content: e.target.value,
-                        };
-                        newStructure.sections[sectionIndex] = {
-                          ...sec,
-                          chapters: chs,
-                        };
-                        onStructureChange(newStructure);
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+          <h3 className="text-lg font-semibold">Review Sections and Chapters</h3>
+          <p className="text-gray-600 mb-4">
+            This book has {structure.sections.length} sections with{" "}
+            {structure.sections.reduce((total, s) => total + (s.chapters?.length || 0), 0)} total chapters.
+          </p>
+          <HierarchicalStructureReview 
+            structure={structure} 
+            onStructureChange={onStructureChange}
+          />
         </div>
       ) : (
         <div className="space-y-4">
@@ -2943,13 +2654,166 @@ const DynamicStructureReview: React.FC<{
           <p className="text-gray-600 mb-4">
             Review, edit, reorder, or add chapters. Only confirmed content will be saved.
           </p>
-        <FlatStructureReview
-          chapters={editableChapters}
-          onChaptersChange={onChaptersChange}
-          chapterLabel={chapterLabel}
-        />
+          {/* ✅ FIX: Check both editableChapters and structure.chapters for content */}
+          {(editableChapters.length === 0 && (!structure.chapters || structure.chapters.length === 0)) ? (
+            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-yellow-800">
+                No chapters loaded for editing. The book structure may still be processing.
+              </p>
+            </div>
+          ) : (
+            <FlatStructureReview 
+              chapters={editableChapters.length > 0 ? editableChapters : 
+                        (structure.chapters || []).map(ch => ({
+                          title: ch.title || "",
+                          content: ch.content || ""
+                        }))} 
+              onChaptersChange={onChaptersChange}
+              chapterLabel={chapterLabel}
+            />
+          )}
         </div>
       )}
     </div>
   );
 };
+
+// Enhanced structure review component
+// const DynamicStructureReview: React.FC<{
+//   structure: BookStructure;
+//   onStructureChange: (structure: BookStructure) => void;
+//   editableChapters: EditableChapter[]; // Add this prop
+//   onChaptersChange: (chapters: EditableChapter[]) => void; // Add this prop
+// }> = ({ structure, onStructureChange, editableChapters, onChaptersChange }) => {
+//   if (!structure) {
+//     return (
+//       <div className="p-8 text-center text-gray-500 bg-gray-50 rounded-lg">
+//         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+//         <p className="text-lg font-medium mb-2">Loading book structure...</p>
+//         <p className="text-sm">Processing your book and extracting chapters...</p>
+//       </div>
+//     );
+//   }
+  
+//   const metadata = structure?.structure_metadata || {};
+//   const sectionLabel = metadata.section_label || "Section";
+//   const chapterLabel = metadata.chapter_label || "Chapter";
+
+  
+
+//   return (
+//     <div className="space-y-6">
+//       <StructureTypeIndicator metadata={metadata} />
+
+//       {structure.has_sections ? (
+//         <div className="space-y-4">
+//           <h3 className="text-lg font-semibold">
+//             {sectionLabel}s and {chapterLabel}s
+//           </h3>
+
+//           {structure.sections?.map((section, sectionIndex) => (
+//             <div key={section.id} className="border rounded-xl p-4 bg-gray-50">
+//               <div className="flex items-center justify-between mb-3">
+//                 <h4 className="font-semibold text-gray-900">
+//                   {sectionLabel} {section.section_number}: {section.title}
+//                 </h4>
+//                 <span className="text-sm text-gray-500">
+//                   {section.chapters?.length || 0} {chapterLabel.toLowerCase()}s
+//                 </span>
+//               </div>
+
+//               <input
+//                 type="text"
+//                 className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-3"
+//                 placeholder={`${sectionLabel} Title`}
+//                 value={section.title}
+//                 onChange={(e) => {
+//                   const newStructure = { ...structure };
+//                   newStructure.sections[sectionIndex] = {
+//                     ...section,
+//                     title: e.target.value,
+//                   };
+//                   onStructureChange(newStructure);
+//                 }}
+//               />
+
+//               <div className="space-y-2">
+//                 {section.chapters?.map((chapter, chapterIndex) => (
+//                   <div
+//                     key={chapter.id}
+//                     className="pl-4 border-l-2 border-blue-200"
+//                   >
+//                     <div className="flex items-center gap-2 mb-2">
+//                       <span className="text-sm text-gray-600">
+//                         {chapterLabel} {chapter.chapter_number}
+//                       </span>
+//                       <span className="text-xs text-gray-400">
+//                         {chapter.content?.length || 0} characters
+//                       </span>
+//                     </div>
+
+//                     <input
+//                       type="text"
+//                       className="w-full border border-gray-300 rounded-lg px-3 py-2 mb-2"
+//                       placeholder={`${chapterLabel} Title`}
+//                       value={chapter.title}
+//                       onChange={(e) => {
+//                         const newStructure = { ...structure };
+//                         const sec = newStructure.sections[sectionIndex];
+//                         const chs = [...sec.chapters];
+//                         chs[chapterIndex] = {
+//                           ...chs[chapterIndex],
+//                           title: e.target.value,
+//                         };
+//                         newStructure.sections[sectionIndex] = {
+//                           ...sec,
+//                           chapters: chs,
+//                         };
+//                         onStructureChange(newStructure);
+//                       }}
+//                     />
+
+//                     <textarea
+//                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
+//                       placeholder={`${chapterLabel} Content`}
+//                       rows={3}
+//                       value={chapter.content}
+//                       onChange={(e) => {
+//                         const newStructure = { ...structure };
+//                         const sec = newStructure.sections[sectionIndex];
+//                         const chs = [...sec.chapters];
+//                         chs[chapterIndex] = {
+//                           ...chs[chapterIndex],
+//                           content: e.target.value,
+//                         };
+//                         newStructure.sections[sectionIndex] = {
+//                           ...sec,
+//                           chapters: chs,
+//                         };
+//                         onStructureChange(newStructure);
+//                       }}
+//                     />
+//                   </div>
+//                 ))}
+//               </div>
+//             </div>
+//           ))}
+//         </div>
+//       ) : (
+//         <div className="space-y-4">
+//           <h3 className="text-lg font-semibold">
+//             Review & Edit {chapterLabel}s
+//           </h3>
+//           <p className="text-gray-600 mb-4">
+//             Review, edit, reorder, or add chapters. Only confirmed content will be saved.
+//           </p>
+//         <FlatStructureReview
+//           chapters={editableChapters}
+//           onChaptersChange={onChaptersChange}
+//           chapterLabel={chapterLabel}
+//         />
+//         </div>
+//       )}
+//     </div>
+//   );
+// };
