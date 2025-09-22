@@ -2138,49 +2138,160 @@ class FileService:
         
         return []
     
-    
     def _find_toc_pages(self, doc) -> List[int]:
-        """Find pages that likely contain TOC - IMPROVED"""
+        """Find pages that likely contain TOC - IMPROVED with better validation"""
         toc_pages = []
+        confirmed_toc_start = None
         
         for page_num in range(min(30, len(doc))):
             page = doc[page_num]
             text = page.get_text()
+            text_upper = text.upper()
             
-            # ✅ FIX: Better TOC detection
-            # Look for TOC indicators - more flexible
-            toc_indicators = [
-                r'\b(contents|table\s+of\s+contents)\b',
-                r'CHAPTER\s+\d+.*?\d+\s*$',  # Chapter with page number
-                r'Chapter\s+\d+.*?\d+\s*$',   # Chapter with page number
+            # ✅ FIX: First, look for explicit TOC headers
+            explicit_toc_indicators = [
+                r'\bCONTENTS\b',
+                r'\bTABLE\s+OF\s+CONTENTS\b'
             ]
             
-            found_toc_indicator = False
-            for pattern in toc_indicators:
-                if re.search(pattern, text, re.IGNORECASE | re.MULTILINE):
-                    found_toc_indicator = True
-                    break
+            has_explicit_toc = any(re.search(pattern, text_upper) for pattern in explicit_toc_indicators)
             
-            if found_toc_indicator:
+            if has_explicit_toc:
+                print(f"[TOC PAGES] Found explicit TOC header on page {page_num + 1}")
                 toc_pages.append(page_num)
-                print(f"[TOC PAGES] Found TOC page at {page_num + 1}")
+                if confirmed_toc_start is None:
+                    confirmed_toc_start = page_num
+                continue
             
-            # Look for chapter listing patterns - more flexible
-            chapter_patterns = [
-                r'CHAPTER\s+\d+',
-                r'Chapter\s+\d+',
-                r'^\s*\d+\.\s+[A-Z]',  # "1. Title"
-            ]
-            
-            chapter_matches = 0
-            for pattern in chapter_patterns:
-                chapter_matches += len(re.findall(pattern, text, re.MULTILINE))
-            
-            if chapter_matches >= 3:  # At least 3 chapter-like entries
-                toc_pages.append(page_num)
-                print(f"[TOC PAGES] Found chapter listing page at {page_num + 1} ({chapter_matches} matches)")
+            # ✅ FIX: Only look for chapter patterns if we're near a confirmed TOC start
+            if confirmed_toc_start is not None:
+                # Check if this page continues the TOC (must be within 3 pages of TOC start)
+                if page_num <= confirmed_toc_start + 2:
+                    chapter_patterns = [
+                        r'CHAPTER\s+\d+',           # "CHAPTER 1", "CHAPTER 2"
+                        r'Chapter\s+\d+',           # "Chapter 1", "Chapter 2"
+                        r'CHAPTER\s+[IVX]+',        # "CHAPTER I", "CHAPTER II"
+                        r'Chapter\s+[IVX]+',        # "Chapter I", "Chapter II"
+                        r'BOOK\s+THE\s+(FIRST|SECOND|THIRD)',  # "BOOK THE FIRST"
+                    ]
+                    
+                    chapter_matches = 0
+                    for pattern in chapter_patterns:
+                        chapter_matches += len(re.findall(pattern, text))
+                    
+                    # ✅ FIX: Require substantial TOC-like formatting
+                    page_number_patterns = len(re.findall(r'\.{3,}\s*\d+', text))  # Dots leading to page numbers
+                    
+                    # Must have BOTH chapter patterns AND TOC formatting
+                    if chapter_matches >= 3 and page_number_patterns >= 2:
+                        print(f"[TOC PAGES] Found TOC continuation on page {page_num + 1} ({chapter_matches} chapters, {page_number_patterns} page refs)")
+                        toc_pages.append(page_num)
+                    else:
+                        print(f"[TOC PAGES] Page {page_num + 1} doesn't meet TOC continuation criteria (chapters: {chapter_matches}, page refs: {page_number_patterns})")
+                else:
+                    print(f"[TOC PAGES] Page {page_num + 1} too far from TOC start ({confirmed_toc_start + 1})")
+            else:
+                # ✅ FIX: Without confirmed TOC start, be much more strict
+                # Only accept pages that have very strong TOC indicators
+                strong_toc_score = 0
+                
+                # Count chapter-like entries with page numbers
+                chapter_with_pages = len(re.findall(r'(CHAPTER|Chapter)\s+[IVX\d]+.*?\d+\s*$', text, re.MULTILINE))
+                if chapter_with_pages >= 5:
+                    strong_toc_score += 3
+                
+                # Count dotted lines (TOC formatting)
+                dotted_lines = len(re.findall(r'\.{5,}', text))
+                if dotted_lines >= 3:
+                    strong_toc_score += 2
+                
+                # Count structural divisions
+                structural_divisions = len(re.findall(r'BOOK\s+THE\s+(FIRST|SECOND|THIRD)', text_upper))
+                if structural_divisions >= 1:
+                    strong_toc_score += 2
+                
+                # Only add if we have very strong evidence
+                if strong_toc_score >= 5:
+                    print(f"[TOC PAGES] Found strong TOC page at {page_num + 1} (score: {strong_toc_score})")
+                    toc_pages.append(page_num)
+                    if confirmed_toc_start is None:
+                        confirmed_toc_start = page_num
+                else:
+                    print(f"[TOC PAGES] Page {page_num + 1} insufficient TOC evidence (score: {strong_toc_score})")
         
-        return list(set(toc_pages))
+        # ✅ FIX: Additional validation - remove isolated pages
+        if len(toc_pages) > 1:
+            validated_pages = []
+            for page in toc_pages:
+                # Keep page if it's the first TOC page or within 2 pages of another TOC page
+                if (page == confirmed_toc_start or 
+                    any(abs(page - other_page) <= 2 for other_page in toc_pages if other_page != page)):
+                    validated_pages.append(page)
+                else:
+                    print(f"[TOC PAGES] Removing isolated TOC page {page + 1}")
+            
+            toc_pages = validated_pages
+        
+        print(f"[TOC PAGES] Final TOC pages: {[p + 1 for p in toc_pages]}")
+        return toc_pages
+    
+    
+    # def _find_toc_pages(self, doc) -> List[int]:
+    #     """Find pages that likely contain TOC - IMPROVED"""
+    #     toc_pages = []
+        
+    #     for page_num in range(min(30, len(doc))):
+    #         page = doc[page_num]
+    #         text = page.get_text()
+            
+    #         # ✅ FIX: Better TOC detection
+    #         # Look for TOC indicators - more flexible
+    #         toc_indicators = [
+    #             r'\b(contents|table\s+of\s+contents)\b',
+    #             r'CHAPTER\s+\d+.*?\d+\s*$',  # Chapter with page number
+    #             r'Chapter\s+\d+.*?\d+\s*$',   # Chapter with page number
+    #         ]
+            
+    #         found_toc_indicator = False
+    #         for pattern in toc_indicators:
+    #             if re.search(pattern, text, re.IGNORECASE | re.MULTILINE):
+    #                 found_toc_indicator = True
+    #                 break
+            
+    #         if found_toc_indicator:
+    #             toc_pages.append(page_num)
+    #             print(f"[TOC PAGES] Found TOC page at {page_num + 1}")
+            
+    #         # Look for chapter listing patterns - more flexible
+    #         chapter_patterns = [
+    #             r'CHAPTER\s+\d+',           # "CHAPTER 1", "CHAPTER 2"
+    #             r'Chapter\s+\d+',           # "Chapter 1", "Chapter 2"
+    #             r'CHAPTER\s+[IVX]+',        # "CHAPTER I", "CHAPTER II"
+    #             r'Chapter\s+[IVX]+',        # "Chapter I", "Chapter II"
+    #             r'^\s*[IVX]+\.\s+[A-Z]',    # "I. TITLE", "II. TITLE"
+    #             r'^\s*\d+\.\s+[A-Z]',       # "1. TITLE", "2. TITLE"
+    #             r'PART\s+[IVX]+',           # "PART I", "PART II"
+    #             r'BOOK\s+[IVX]+',           # "BOOK I", "BOOK II"
+    #             r'ACT\s+[IVX]+',            # "ACT I", "ACT II"
+    #             r'SECTION\s+[IVX]+',        # "SECTION I", "SECTION II"
+    #         ]
+            
+    #         chapter_matches = 0
+    #         for pattern in chapter_patterns:
+    #             chapter_matches += len(re.findall(pattern, text, re.MULTILINE))
+            
+    #         if chapter_matches >= 3:  # At least 3 chapter-like entries
+    #             toc_pages.append(page_num)
+    #             print(f"[TOC PAGES] Found chapter listing page at {page_num + 1} ({chapter_matches} matches)")
+        
+    #         # Additional heuristic: Look for page number patterns (dots leading to numbers)
+    #         page_number_patterns = len(re.findall(r'\.{3,}\s*\d+', text))
+    #         if page_number_patterns >= 3:  # Multiple page number references
+    #             toc_pages.append(page_num)
+    #             print(f"[TOC PAGES] Found TOC page at {page_num + 1} ({page_number_patterns} page references)")
+    
+    
+    #     return list(set(toc_pages))
     
     def _process_pdf_bookmarks(self, doc, toc) -> List[Dict[str, Any]]:
         """Process PDF bookmarks into chapters"""
@@ -5874,12 +5985,275 @@ Chapters:
         """Generate unique temporary filename"""
         return f"{prefix}_{uuid.uuid4().hex}{extension}"
     
+    
+    
 
-    async def _extract_complex_toc_with_ai(self, doc, toc_pages: List[int]) -> List[Dict[str, Any]]:
-        """AI extraction for complex columnar TOCs with multiple sections - FIXED"""
-        print("[COMPLEX TOC AI] Using AI for complex columnar TOC extraction...")
+    # async def _extract_complex_toc_with_ai(self, doc, toc_pages: List[int]) -> List[Dict[str, Any]]:
+    #     """AI extraction for complex columnar TOCs with multiple sections - FIXED"""
+    #     print("[COMPLEX TOC AI] Using AI for complex columnar TOC extraction...")
         
-        # Get text from detected TOC pages ONLY (don't search additional pages automatically)
+    #     # Get text from detected TOC pages ONLY (don't search additional pages automatically)
+    #     toc_text_blocks = []
+    #     for page_num in toc_pages:
+    #         page = doc[page_num]
+    #         text = page.get_text()
+    #         toc_text_blocks.append({
+    #             'page_num': page_num + 1,
+    #             'text': text,
+    #             'lines': text.split('\n')
+    #         })
+        
+    #     # ✅ FIX: Much more restrictive continuation page detection
+    #     last_toc_page = max(toc_pages) if toc_pages else 0
+    #     print(f"[COMPLEX TOC AI] Searching 3 pages after last TOC page {last_toc_page + 1}")
+        
+    #     for additional_page in range(last_toc_page + 1, min(last_toc_page + 4, len(doc))):  # Reduced from 11 to 4
+    #         page = doc[additional_page]
+    #         text = page.get_text()
+            
+    #         # ✅ FIX: Much more restrictive patterns - must have STRONG TOC indicators
+    #         strong_toc_indicators = 0
+            
+    #         # Check for actual TOC formatting (not just keywords)
+    #         if re.search(r'BOOK\s+THE\s+(FIRST|SECOND|THIRD)', text, re.IGNORECASE):
+    #             strong_toc_indicators += 2
+    #         if re.search(r'PART\s+[IVX]+', text):
+    #             strong_toc_indicators += 2
+    #         # Look for chapter number + title + page number pattern
+    #         if re.search(r'[IVX]+\.\s+[A-Z][^.]+\s+\d+', text):
+    #             strong_toc_indicators += 2
+    #         # Look for multiple chapter entries
+    #         chapter_matches = len(re.findall(r'\b[IVX]+\.\s+[A-Z]', text))
+    #         if chapter_matches >= 3:
+    #             strong_toc_indicators += 1
+            
+    #         # ✅ FIX: Only add if we have STRONG evidence this is TOC content
+    #         if strong_toc_indicators >= 3:
+    #             print(f"[COMPLEX TOC AI] ✅ Found strong TOC continuation on page {additional_page + 1} (score: {strong_toc_indicators})")
+    #             toc_text_blocks.append({
+    #                 'page_num': additional_page + 1,
+    #                 'text': text,
+    #                 'lines': text.split('\n')
+    #             })
+    #         else:
+    #             print(f"[COMPLEX TOC AI] ❌ Page {additional_page + 1} not TOC (score: {strong_toc_indicators})")
+        
+    #     combined_toc_text = "\n\n=== PAGE BREAK ===\n\n".join([
+    #         f"PAGE {block['page_num']}:\n{block['text']}" for block in toc_text_blocks
+    #     ])
+        
+    #     print(f"[COMPLEX TOC AI] Processing {len(toc_text_blocks)} TOC pages")
+    #     print(f"[COMPLEX TOC AI] Combined text length: {len(combined_toc_text)}")
+        
+    #     # Generic prompt that works for any book structure
+    #     prompt = f"""
+    #     You are analyzing a complex Table of Contents that spans multiple pages and has a hierarchical structure.
+
+    #     INSTRUCTIONS:
+    #     1. Extract ALL major sections (Books, Parts, Acts, Volumes, etc.) and their chapters
+    #     2. Look for hierarchical patterns like:
+    #     - "BOOK THE FIRST/SECOND/THIRD"
+    #     - "PART I/II/III" or "PART ONE/TWO/THREE"
+    #     - "SECTION A/B/C" or "SECTION 1/2/3"
+    #     - "ACT I/II/III" or "ACT ONE/TWO/THREE"
+    #     - "VOLUME I/II/III"
+    #     3. Each section typically contains multiple chapters with:
+    #     - Roman numerals (I, II, III, IV, V, etc.)
+    #     - Arabic numbers (1, 2, 3, 4, 5, etc.)
+    #     - Chapter titles following the numbers
+    #     4. Scan ALL pages provided - sections may continue across pages
+    #     5. Find ALL sections mentioned - don't stop early
+    #     6. IGNORE front/back matter: preface, appendix, notes, bibliography, index
+
+    #     COMMON PATTERNS TO LOOK FOR:
+    #     - Major sections: "BOOK THE FIRST: [Title]", "PART TWO: [Title]", "ACT III: [Title]"
+    #     - Chapters within sections: "I. Chapter Title", "II. Another Chapter", etc.
+    #     - Page numbers: Usually at the end of each line
+    #     - Columnar layouts: Numbers and titles may be separated by dots or spaces
+
+    #     TOC Text (Multiple Pages - ANALYZE ALL):
+    #     {combined_toc_text[:20000]}
+
+    #     Return JSON with ALL sections and their chapters:
+    #     {{
+    #         "sections": [
+    #             {{
+    #                 "section_title": "[Detected Section Title]",
+    #                 "section_type": "[book/part/act/volume/section]",
+    #                 "section_number": "[1/2/3 or I/II/III or ONE/TWO/THREE]",
+    #                 "chapters": [
+    #                     {{
+    #                         "number": "[I/II/III or 1/2/3]",
+    #                         "title": "[Chapter Title]",
+    #                         "page": [page_number]
+    #                     }}
+    #                 ]
+    #             }}
+    #         ]
+    #     }}
+
+    #     CRITICAL REQUIREMENTS:
+    #     - Extract ALL sections found in the TOC (could be 2, 3, 4, or more)
+    #     - Don't assume a specific number of sections - find what's actually there
+    #     - Include ALL chapters within each section
+    #     - Keep chapter numbers as strings (especially Roman numerals)
+    #     - Scan all provided pages thoroughly
+    #     - If no major sections are found, treat individual chapters as a single section
+
+    #     RETURN ONLY THE JSON OBJECT, NO OTHER TEXT OR EXPLANATION.
+    #     """
+        
+    #     try:
+    #         # Use the updated provider-based system
+    #         response = await self.ai_service._make_completion(
+    #             messages=[
+    #                 {"role": "system", "content": "You are an expert at analyzing complex hierarchical Table of Contents from any type of book. Extract ALL sections and chapters comprehensively. Never miss sections - scan all provided content thoroughly. Return ONLY valid JSON, no other text."},
+    #                 {"role": "user", "content": prompt}
+    #             ],
+    #             provider="auto",
+    #             max_tokens=8000,
+    #             temperature=0.1
+    #         )
+            
+    #         content = response.choices[0].message.content.strip()
+            
+    #         # Clean JSON response
+    #         print(f"[COMPLEX TOC AI] Raw AI response length: {len(content)}")
+    #         print(f"[COMPLEX TOC AI] First 500 chars: {content[:500]}")
+            
+    #         # Remove markdown formatting if present
+    #         if content.startswith('```'):
+    #             lines = content.split('\n')
+    #             start_idx = 1
+    #             end_idx = len(lines) - 1
+    #             for i, line in enumerate(lines[1:], 1):
+    #                 if line.strip().startswith('{'):
+    #                     start_idx = i
+    #                     break
+    #             for i in range(len(lines) - 1, 0, -1):
+    #                 if lines[i].strip().endswith('}'):
+    #                     end_idx = i
+    #                     break
+    #             content = '\n'.join(lines[start_idx:end_idx + 1])
+            
+    #         # Find JSON boundaries
+    #         first_brace = content.find('{')
+    #         if first_brace != -1:
+    #             brace_count = 0
+    #             last_brace = -1
+    #             for i, char in enumerate(content[first_brace:], first_brace):
+    #                 if char == '{':
+    #                     brace_count += 1
+    #                 elif char == '}':
+    #                     brace_count -= 1
+    #                     if brace_count == 0:
+    #                         last_brace = i
+    #                         break
+                
+    #             if last_brace != -1:
+    #                 content = content[first_brace:last_brace + 1]
+            
+    #         print(f"[COMPLEX TOC AI] Cleaned content length: {len(content)}")
+            
+    #         result = json.loads(content)
+    #         sections = result.get('sections', [])
+            
+    #         print(f"[COMPLEX TOC AI] AI found {len(sections)} sections")
+            
+    #         # Generic validation - warn if we found very few sections for a complex TOC
+    #         if len(sections) < 2:
+    #             print(f"[COMPLEX TOC AI] WARNING: Only found {len(sections)} sections for complex TOC")
+    #             print(f"[COMPLEX TOC AI] TOC text length: {len(combined_toc_text)} characters")
+                
+    #             # Check if text contains indicators of multiple sections
+    #             text_upper = combined_toc_text.upper()
+    #             section_indicators = ['BOOK', 'PART', 'SECTION', 'VOLUME', 'ACT']
+    #             found_indicators = [indicator for indicator in section_indicators if indicator in text_upper]
+                
+    #             if found_indicators:
+    #                 print(f"[COMPLEX TOC AI] Found section indicators {found_indicators} but AI only extracted {len(sections)} sections")
+            
+    #         # Convert to flat chapter list with section information
+    #         all_chapters = []
+    #         chapter_counter = 1
+            
+    #         for section in sections:
+    #             section_title = section.get('section_title', f'Section {len(all_chapters) + 1}')
+    #             section_type = section.get('section_type', 'section')
+    #             section_number = section.get('section_number', str(len(all_chapters) + 1))
+                
+    #             print(f"[COMPLEX TOC AI] Processing section: {section_title}")
+                
+    #             for ch in section.get('chapters', []):
+    #                 try:
+    #                     # Handle different number formats
+    #                     raw_number = ch.get('number', str(chapter_counter))
+                        
+    #                     # Convert Roman numerals to Arabic numbers
+    #                     if isinstance(raw_number, str) and raw_number.strip().upper() in [
+    #                         'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+    #                         'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
+    #                         'XXI', 'XXII', 'XXIII', 'XXIV', 'XXV', 'XXVI', 'XXVII', 'XXVIII', 'XXIX', 'XXX'
+    #                     ]:
+    #                         chapter_number = self._roman_to_int(raw_number.strip().upper())
+    #                     else:
+    #                         try:
+    #                             chapter_number = int(raw_number)
+    #                         except (ValueError, TypeError):
+    #                             chapter_number = chapter_counter
+                        
+    #                     title = str(ch.get('title', 'Unknown')).strip()
+    #                     page_hint = ch.get('page', 1)
+                        
+    #                     # Ensure page_hint is an integer
+    #                     try:
+    #                         page_hint = int(page_hint)
+    #                     except (ValueError, TypeError):
+    #                         page_hint = 1
+                        
+    #                     if not title or len(title) < 2:
+    #                         continue
+                        
+    #                     formatted_chapter = {
+    #                         'number': chapter_counter,
+    #                         'title': f"Chapter {chapter_number}: {title}",
+    #                         'raw_title': title,
+    #                         'page_hint': page_hint,
+    #                         'section_title': section_title,
+    #                         'section_type': section_type,
+    #                         'section_number': section_number,
+    #                         'is_main_chapter': True
+    #                     }
+                        
+    #                     all_chapters.append(formatted_chapter)
+    #                     print(f"[COMPLEX TOC AI] Added: {title} (Section: {section_title})")
+    #                     chapter_counter += 1
+                        
+    #                 except (ValueError, TypeError) as e:
+    #                     print(f"[COMPLEX TOC AI] Error processing chapter {ch}: {e}")
+    #                     continue
+            
+    #         print(f"[COMPLEX TOC AI] Total chapters extracted: {len(all_chapters)}")
+            
+    #         # ✅ FIX: Extract content using page-based extraction (like simple TOC does)
+    #         if len(all_chapters) >= 3:
+    #             print("[COMPLEX TOC AI] Extracting content using page-based extraction...")
+    #             return await self._parse_toc_with_ai_improved(all_chapters, doc)
+            
+    #         return all_chapters
+            
+    #     except json.JSONDecodeError as e:
+    #         print(f"[COMPLEX TOC AI] JSON decode failed: {e}")
+    #         print(f"[COMPLEX TOC AI] Failed content: {content if 'content' in locals() else 'No content'}")
+    #         return []
+    #     except Exception as e:
+    #         print(f"[COMPLEX TOC AI] Failed: {e}")
+    #         return []
+    async def _extract_complex_toc_with_ai(self, doc, toc_pages: List[int]) -> List[Dict[str, Any]]:
+        """AI extraction for complex TOCs - COMPLETELY GENERIC"""
+        print("[COMPLEX TOC AI] Using AI for complex TOC extraction...")
+        
+        # Get text from detected TOC pages
         toc_text_blocks = []
         for page_num in toc_pages:
             page = doc[page_num]
@@ -5890,40 +6264,64 @@ Chapters:
                 'lines': text.split('\n')
             })
         
-        # ✅ FIX: Much more restrictive continuation page detection
+        # Generic search for additional TOC pages (not hardcoded)
         last_toc_page = max(toc_pages) if toc_pages else 0
-        print(f"[COMPLEX TOC AI] Searching 3 pages after last TOC page {last_toc_page + 1}")
+        print(f"[COMPLEX TOC AI] Searching up to 5 pages after last TOC page {last_toc_page + 1}")
         
-        for additional_page in range(last_toc_page + 1, min(last_toc_page + 4, len(doc))):  # Reduced from 11 to 4
+        for additional_page in range(last_toc_page + 1, min(last_toc_page + 6, len(doc))):
             page = doc[additional_page]
             text = page.get_text()
+            text_upper = text.upper()
             
-            # ✅ FIX: Much more restrictive patterns - must have STRONG TOC indicators
-            strong_toc_indicators = 0
+            # Generic TOC continuation indicators
+            continuation_score = 0
             
-            # Check for actual TOC formatting (not just keywords)
-            if re.search(r'BOOK\s+THE\s+(FIRST|SECOND|THIRD)', text, re.IGNORECASE):
-                strong_toc_indicators += 2
-            if re.search(r'PART\s+[IVX]+', text):
-                strong_toc_indicators += 2
-            # Look for chapter number + title + page number pattern
-            if re.search(r'[IVX]+\.\s+[A-Z][^.]+\s+\d+', text):
-                strong_toc_indicators += 2
-            # Look for multiple chapter entries
-            chapter_matches = len(re.findall(r'\b[IVX]+\.\s+[A-Z]', text))
-            if chapter_matches >= 3:
-                strong_toc_indicators += 1
+            # Check for structural divisions (works for any book type)
+            structural_patterns = [
+                r'BOOK\s+(THE\s+)?(FIRST|SECOND|THIRD|FOURTH|FIFTH|ONE|TWO|THREE|FOUR|FIVE|[IVX]+|\d+)',
+                r'PART\s+(THE\s+)?(FIRST|SECOND|THIRD|FOURTH|FIFTH|ONE|TWO|THREE|FOUR|FIVE|[IVX]+|\d+)',
+                r'SECTION\s+(THE\s+)?(FIRST|SECOND|THIRD|FOURTH|FIFTH|ONE|TWO|THREE|FOUR|FIVE|[IVX]+|\d+)',
+                r'VOLUME\s+(THE\s+)?(FIRST|SECOND|THIRD|FOURTH|FIFTH|ONE|TWO|THREE|FOUR|FIVE|[IVX]+|\d+)',
+                r'ACT\s+(THE\s+)?(FIRST|SECOND|THIRD|FOURTH|FIFTH|ONE|TWO|THREE|FOUR|FIVE|[IVX]+|\d+)',
+            ]
             
-            # ✅ FIX: Only add if we have STRONG evidence this is TOC content
-            if strong_toc_indicators >= 3:
-                print(f"[COMPLEX TOC AI] ✅ Found strong TOC continuation on page {additional_page + 1} (score: {strong_toc_indicators})")
+            for pattern in structural_patterns:
+                if re.search(pattern, text_upper):
+                    continuation_score += 3
+                    print(f"[COMPLEX TOC AI] Found structural division on page {additional_page + 1}")
+            
+            # Check for chapter number patterns (generic)
+            chapter_patterns = [
+                r'[IVX]+\.\s+[A-Z]',        # Roman numerals with titles
+                r'\d+\.\s+[A-Z]',           # Arabic numbers with titles
+                r'CHAPTER\s+[IVX]+',        # "CHAPTER I", etc.
+                r'Chapter\s+\d+',           # "Chapter 1", etc.
+            ]
+            
+            total_chapter_entries = 0
+            for pattern in chapter_patterns:
+                matches = len(re.findall(pattern, text))
+                total_chapter_entries += matches
+            
+            if total_chapter_entries >= 3:
+                continuation_score += 2
+                print(f"[COMPLEX TOC AI] Found {total_chapter_entries} chapter entries on page {additional_page + 1}")
+            
+            # Check for page number references (common in TOCs)
+            page_refs = len(re.findall(r'\.{3,}\s*\d+|[A-Za-z]\s+\d+\s*$', text, re.MULTILINE))
+            if page_refs >= 2:
+                continuation_score += 1
+            
+            # Only include if we have strong evidence
+            if continuation_score >= 3:
+                print(f"[COMPLEX TOC AI] ✅ Including page {additional_page + 1} (score: {continuation_score})")
                 toc_text_blocks.append({
                     'page_num': additional_page + 1,
                     'text': text,
                     'lines': text.split('\n')
                 })
             else:
-                print(f"[COMPLEX TOC AI] ❌ Page {additional_page + 1} not TOC (score: {strong_toc_indicators})")
+                print(f"[COMPLEX TOC AI] ❌ Skipping page {additional_page + 1} (score: {continuation_score})")
         
         combined_toc_text = "\n\n=== PAGE BREAK ===\n\n".join([
             f"PAGE {block['page_num']}:\n{block['text']}" for block in toc_text_blocks
@@ -5932,69 +6330,68 @@ Chapters:
         print(f"[COMPLEX TOC AI] Processing {len(toc_text_blocks)} TOC pages")
         print(f"[COMPLEX TOC AI] Combined text length: {len(combined_toc_text)}")
         
-        # Generic prompt that works for any book structure
+        # COMPLETELY GENERIC PROMPT - works for any book
         prompt = f"""
-        You are analyzing a complex Table of Contents that spans multiple pages and has a hierarchical structure.
+        You are analyzing a Table of Contents that may have a hierarchical structure with multiple sections.
 
         INSTRUCTIONS:
-        1. Extract ALL major sections (Books, Parts, Acts, Volumes, etc.) and their chapters
-        2. Look for hierarchical patterns like:
-        - "BOOK THE FIRST/SECOND/THIRD"
-        - "PART I/II/III" or "PART ONE/TWO/THREE"
-        - "SECTION A/B/C" or "SECTION 1/2/3"
-        - "ACT I/II/III" or "ACT ONE/TWO/THREE"
-        - "VOLUME I/II/III"
-        3. Each section typically contains multiple chapters with:
-        - Roman numerals (I, II, III, IV, V, etc.)
-        - Arabic numbers (1, 2, 3, 4, 5, etc.)
+        1. Extract ALL major structural divisions and their chapters
+        2. Look for hierarchical patterns such as:
+        - Books: "BOOK I", "BOOK THE FIRST", "BOOK ONE"
+        - Parts: "PART I", "PART ONE", "PART A"
+        - Sections: "SECTION I", "SECTION ONE"
+        - Acts: "ACT I", "ACT ONE" (for plays)
+        - Volumes: "VOLUME I", "VOLUME ONE"
+        - Any other major divisions
+        3. Within each section, find chapters with:
+        - Roman numerals: I, II, III, IV, V, etc.
+        - Arabic numbers: 1, 2, 3, 4, 5, etc.
         - Chapter titles following the numbers
-        4. Scan ALL pages provided - sections may continue across pages
-        5. Find ALL sections mentioned - don't stop early
-        6. IGNORE front/back matter: preface, appendix, notes, bibliography, index
+        4. Scan ALL pages provided - content may continue across pages
+        5. Find ALL structural divisions - don't assume a specific number
+        6. IGNORE auxiliary content: preface, appendix, notes, bibliography, index
 
-        COMMON PATTERNS TO LOOK FOR:
-        - Major sections: "BOOK THE FIRST: [Title]", "PART TWO: [Title]", "ACT III: [Title]"
-        - Chapters within sections: "I. Chapter Title", "II. Another Chapter", etc.
-        - Page numbers: Usually at the end of each line
-        - Columnar layouts: Numbers and titles may be separated by dots or spaces
+        WHAT TO LOOK FOR:
+        - Major structural headers followed by chapter listings
+        - Numbered or titled content divisions
+        - Chapter entries with titles and page numbers
+        - Hierarchical organization patterns
 
-        TOC Text (Multiple Pages - ANALYZE ALL):
+        TOC Text (Multiple Pages):
         {combined_toc_text[:20000]}
 
-        Return JSON with ALL sections and their chapters:
+        Return JSON with the complete structure found:
         {{
             "sections": [
                 {{
-                    "section_title": "[Detected Section Title]",
-                    "section_type": "[book/part/act/volume/section]",
-                    "section_number": "[1/2/3 or I/II/III or ONE/TWO/THREE]",
+                    "section_title": "Detected Section Name",
+                    "section_type": "book|part|act|volume|section",
+                    "section_number": "I|II|III|ONE|TWO|1|2|3",
                     "chapters": [
                         {{
-                            "number": "[I/II/III or 1/2/3]",
-                            "title": "[Chapter Title]",
-                            "page": [page_number]
+                            "number": "I|II|1|2",
+                            "title": "Chapter Title",
+                            "page": page_number
                         }}
                     ]
                 }}
             ]
         }}
 
-        CRITICAL REQUIREMENTS:
-        - Extract ALL sections found in the TOC (could be 2, 3, 4, or more)
-        - Don't assume a specific number of sections - find what's actually there
-        - Include ALL chapters within each section
-        - Keep chapter numbers as strings (especially Roman numerals)
-        - Scan all provided pages thoroughly
-        - If no major sections are found, treat individual chapters as a single section
+        REQUIREMENTS:
+        - Extract ALL structural divisions found
+        - Include ALL chapters within each division
+        - If no major divisions exist, create a single section with all chapters
+        - Keep original number formats (Roman numerals as Roman, Arabic as Arabic)
+        - Return ONLY the JSON object
 
-        RETURN ONLY THE JSON OBJECT, NO OTHER TEXT OR EXPLANATION.
+        RETURN ONLY VALID JSON, NO OTHER TEXT.
         """
         
         try:
-            # Use the updated provider-based system
             response = await self.ai_service._make_completion(
                 messages=[
-                    {"role": "system", "content": "You are an expert at analyzing complex hierarchical Table of Contents from any type of book. Extract ALL sections and chapters comprehensively. Never miss sections - scan all provided content thoroughly. Return ONLY valid JSON, no other text."},
+                    {"role": "system", "content": "You are an expert at analyzing Table of Contents from any type of book. Extract the complete hierarchical structure comprehensively. Return ONLY valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
                 provider="auto",
@@ -6047,20 +6444,7 @@ Chapters:
             
             print(f"[COMPLEX TOC AI] AI found {len(sections)} sections")
             
-            # Generic validation - warn if we found very few sections for a complex TOC
-            if len(sections) < 2:
-                print(f"[COMPLEX TOC AI] WARNING: Only found {len(sections)} sections for complex TOC")
-                print(f"[COMPLEX TOC AI] TOC text length: {len(combined_toc_text)} characters")
-                
-                # Check if text contains indicators of multiple sections
-                text_upper = combined_toc_text.upper()
-                section_indicators = ['BOOK', 'PART', 'SECTION', 'VOLUME', 'ACT']
-                found_indicators = [indicator for indicator in section_indicators if indicator in text_upper]
-                
-                if found_indicators:
-                    print(f"[COMPLEX TOC AI] Found section indicators {found_indicators} but AI only extracted {len(sections)} sections")
-            
-            # Convert to flat chapter list with section information
+            # Generic conversion to flat chapter list
             all_chapters = []
             chapter_counter = 1
             
@@ -6073,24 +6457,19 @@ Chapters:
                 
                 for ch in section.get('chapters', []):
                     try:
-                        # Handle different number formats
+                        # Handle different number formats generically
                         raw_number = ch.get('number', str(chapter_counter))
+                        title = str(ch.get('title', 'Unknown')).strip()
+                        page_hint = ch.get('page', 1)
                         
-                        # Convert Roman numerals to Arabic numbers
-                        if isinstance(raw_number, str) and raw_number.strip().upper() in [
-                            'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
-                            'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
-                            'XXI', 'XXII', 'XXIII', 'XXIV', 'XXV', 'XXVI', 'XXVII', 'XXVIII', 'XXIX', 'XXX'
-                        ]:
+                        # Convert Roman numerals to integers for chapter numbering
+                        if isinstance(raw_number, str) and re.match(r'^[IVX]+$', raw_number.strip().upper()):
                             chapter_number = self._roman_to_int(raw_number.strip().upper())
                         else:
                             try:
                                 chapter_number = int(raw_number)
                             except (ValueError, TypeError):
                                 chapter_number = chapter_counter
-                        
-                        title = str(ch.get('title', 'Unknown')).strip()
-                        page_hint = ch.get('page', 1)
                         
                         # Ensure page_hint is an integer
                         try:
@@ -6122,7 +6501,7 @@ Chapters:
             
             print(f"[COMPLEX TOC AI] Total chapters extracted: {len(all_chapters)}")
             
-            # ✅ FIX: Extract content using page-based extraction (like simple TOC does)
+            # Extract content using page-based extraction
             if len(all_chapters) >= 3:
                 print("[COMPLEX TOC AI] Extracting content using page-based extraction...")
                 return await self._parse_toc_with_ai_improved(all_chapters, doc)
@@ -6135,8 +6514,7 @@ Chapters:
             return []
         except Exception as e:
             print(f"[COMPLEX TOC AI] Failed: {e}")
-            return []
-        
+            return []        
  
     async def _extract_toc_with_ai(self, toc_text_blocks: List[Dict], doc) -> List[Dict[str, Any]]:
             """Generic AI TOC parsing for any book - completely generic approach"""
