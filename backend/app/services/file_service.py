@@ -2238,10 +2238,20 @@ class FileService:
                 
                 for ch in section.get('chapters', []):
                     try:
-                        chapter_number = int(ch.get('number', chapter_counter))
+                        raw_number = ch.get('number', str(chapter_counter))
+                    
+                        # Convert Roman numerals to Arabic numbers
+                        if isinstance(raw_number, str) and raw_number.strip().upper() in ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX']:
+                            chapter_number = self._roman_to_int(raw_number.strip().upper())
+                        else:
+                            try:
+                                chapter_number = int(raw_number)
+                            except (ValueError, TypeError):
+                                chapter_number = chapter_counter
+                        
                         title = str(ch.get('title', 'Unknown')).strip()
                         page_hint = int(ch.get('page', 1))
-                        
+                    
                         if not title or len(title) < 2:
                             continue
                         
