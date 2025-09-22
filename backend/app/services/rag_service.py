@@ -140,9 +140,61 @@ class RAGService:
             }
     
     def _get_script_generation_prompt(self, context: str, video_style: str, script_style: str = "cinematic_movie") -> str:
-        """Construct a prompt based on the full RAG-enhanced context and script_style."""
-        if script_style == "cinematic_movie":
-            return f"""
+        """Construct a prompt based on the full RAG-enhanced context, video_style, and script_style."""
+        if video_style == "entertainment":
+            # Use a cinematic/story prompt for entertainment books
+            if script_style == "cinematic_movie":
+                return f"""
+Given the following book and chapter context, generate a cinematic screenplay-style script for a {video_style} video adaptation. 
+
+The script should include:
+1. Character names in CAPS
+2. Dialogue in quotes
+3. Scene descriptions
+4. Character details
+5. Dramatic and engaging storytelling
+6. Suitable for a movie or animated story
+7. A balanced, racially diverse cast of characters (not just white/Caucasian; include characters of different races and backgrounds)
+
+Use the context below:
+
+{context}
+
+Format the script as a screenplay with:
+- Scene headings (e.g., INT./EXT. LOCATION - TIME)
+- Character dialog
+- Action and scene descriptions
+- Character details
+
+Return only the screenplay script.
+"""
+            else:  # cinematic_narration
+                return f"""
+Given the following book and chapter context, generate a cinematic narration-style script for a {video_style} video adaptation.
+
+The script should include:
+1. Engaging storytelling and descriptive narration
+2. Scene descriptions and visual details
+3. Character descriptions
+4. Dramatic and immersive language
+5. Suitable for a narrated story video
+6. A balanced, racially diverse cast of characters (not just white/Caucasian; include characters of different races and backgrounds)
+
+Use the context below:
+
+{context}
+
+Format the script as a cinematic narration with:
+- Descriptive narration
+- Scene and character details
+- Visual storytelling
+
+Return only the narration script.
+"""
+        else:
+            # Default: tutorial/learning prompt (as before)
+            if script_style == "cinematic_movie":
+                return f"""
 Given the following book and chapter context, generate a detailed tutorial script for a {video_style} style video. 
 
 The script should include:
@@ -167,8 +219,8 @@ Format the script as a tutorial with:
 
 Return only the tutorial script.
 """
-        else:  # cinematic_narration
-            return f"""
+            else:
+                return f"""
 Given the following book and chapter context, generate a detailed tutorial narration script for a {video_style} style video.
 
 The script should include:

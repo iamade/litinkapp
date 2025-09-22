@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     TAVUS_API_KEY: Optional[str] = None
     PLOTDRIVE_API_KEY: Optional[str] = None
     
+    # ✅ NEW: DeepSeek Configuration
+    DEEPSEEK_API_KEY: Optional[str] = None
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    DEEPSEEK_MODEL: str = "deepseek-chat"  # Non-thinking mode
+    DEEPSEEK_REASONER_MODEL: str = "deepseek-reasoner"  # Thinking mode
+    
+    
     # Blockchain
     ALGORAND_TOKEN: Optional[str] = None
     ALGORAND_SERVER: str = "https://testnet-api.algonode.cloud"
@@ -87,6 +94,12 @@ class Settings(BaseSettings):
     # KLINGAI_API_KEY: str = os.getenv("KLINGAI_API_KEY", "")
     KLINGAI_ACCESS_KEY_ID: str = os.getenv("KLINGAI_ACCESS_KEY_ID", "")
     KLINGAI_ACCESS_KEY_SECRET: str = os.getenv("KLINGAI_ACCESS_KEY_SECRET", "")
+    
+     # ModelsLab
+    MODELSLAB_API_KEY: str = os.getenv("MODELSLAB_API_KEY", "")
+    # MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
+    MODELSLAB_BASE_URL: str = "https://modelslab.com/api/v7"  # Updated to v7
+    
     
     class Config:
         env_file = ".env"

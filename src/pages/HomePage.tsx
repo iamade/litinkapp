@@ -56,7 +56,7 @@ export default function HomePage() {
       name: "Sarah Chen",
       role: "Student",
       content:
-        "LinkAI transformed how I study. The AI-generated quizzes help me retain information better than ever before.",
+        "LitinkAI transformed how I study. The AI-generated quizzes help me retain information better than ever before.",
       rating: 5,
     },
     {
@@ -99,7 +99,7 @@ export default function HomePage() {
           <p className="text-xl sm:text-2xl text-white/90 mb-12 max-w-3xl mx-auto leading-relaxed">
             Transform any book into immersive AI-powered learning adventures or
             interactive entertainment experiences. The future of reading is here
-            at LinkAI.com.
+            at LitinkAI.com.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-6 justify-center items-center">
@@ -144,7 +144,7 @@ export default function HomePage() {
         <div className="absolute top-20 left-10 opacity-20">
           <img
             src="/litink.png"
-            alt="LinkAI Logo"
+            alt="LitinkAI Logo"
             className="h-16 w-16 object-contain animate-bounce"
           />
         </div>
@@ -176,7 +176,7 @@ export default function HomePage() {
               Powerful Features for Every Reader
             </h2>
             <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-              Whether you're learning or exploring, LinkAI.com provides
+              Whether you're learning or exploring, LitinkAI.com provides
               cutting-edge tools to enhance your reading experience.
             </p>
           </div>
@@ -354,7 +354,7 @@ export default function HomePage() {
             Ready to Transform Your Reading Experience?
           </h2>
           <p className="text-xl text-white/90 mb-12">
-            Join LinkAI.com today and discover a new way to learn, explore, and
+            Join LitinkAI.com today and discover a new way to learn, explore, and
             engage with books.
           </p>
 
