@@ -28,9 +28,10 @@ import ScriptGenerationPanel from '../components/Script/ScriptGenerationPanel';
 import ImagesPanel from '../components/Images/ImagesPanel';
 import { usePlotGeneration } from '../hooks/usePlotGeneration';
 import { useScriptGeneration } from '../hooks/useScriptGeneration';
-
-
-
+import AudioPanel from '../components/Audio/AudioPanel';
+import VideoProductionPanel from "../components/Video/VideoProductionPanel";
+import { useImageGeneration } from '../hooks/useImageGeneration';
+import { useAudioGeneration } from '../hooks/useAudioGeneration';
 
 
 interface Chapter {
@@ -176,7 +177,10 @@ export default function BookViewForEntertainment() {
   const [workflowProgress, setWorkflowProgress] = useState<
     Record<string, WorkflowProgress>
   >({});
- 
+  
+  // State for storing generated images and audio for video production
+  const [generatedImageUrls, setGeneratedImageUrls] = useState<string[]>([]);
+  const [generatedAudioFiles, setGeneratedAudioFiles] = useState<string[]>([]);
 
   // Workflow tabs configuration
   const workflowTabs = [
@@ -752,6 +756,76 @@ export default function BookViewForEntertainment() {
     }
   }, [selectedChapter, loadScripts]);
 
+  // Add image generation hook
+  const {
+    sceneImages,
+    characterImages,
+    isLoading: isLoadingImages,
+    loadImages,
+  } = useImageGeneration(selectedChapter?.id || '');
+
+  // Add audio generation hook
+  const {
+    audioAssets,
+    isLoading: isLoadingAudio,
+    loadAudioAssets,
+  } = useAudioGeneration(selectedChapter?.id || '');
+
+  // Load images and audio when chapter changes
+  useEffect(() => {
+    if (selectedChapter) {
+      loadImages();
+      loadAudioAssets();
+    }
+  }, [selectedChapter, loadImages, loadAudioAssets]);
+
+  // Update generated URLs when images/audio change
+  useEffect(() => {
+    // Extract image URLs from sceneImages
+    const imageUrls = Object.values(sceneImages)
+      .filter(img => img.imageUrl)
+      .sort((a, b) => a.sceneNumber - b.sceneNumber)
+      .map(img => img.imageUrl);
+    setGeneratedImageUrls(imageUrls);
+  }, [sceneImages]);
+
+  useEffect(() => {
+    // Extract audio file URLs from audioAssets
+    const audioUrls: string[] = [];
+    if (audioAssets) {
+      // Extract dialogue audio URLs
+      audioAssets.dialogue.forEach((dialogueItem) => {
+        if (dialogueItem.url) {
+          audioUrls.push(dialogueItem.url);
+        }
+      });
+      // Extract music URLs
+      audioAssets.music.forEach((musicItem) => {
+        if (musicItem.url) {
+          audioUrls.push(musicItem.url);
+        }
+      });
+      // Extract sound effects URLs
+      audioAssets.effects.forEach((effectItem) => {
+        if (effectItem.url) {
+          audioUrls.push(effectItem.url);
+        }
+      });
+      // Extract narration URLs
+      audioAssets.narration.forEach((narrationItem) => {
+        if (narrationItem.url) {
+          audioUrls.push(narrationItem.url);
+        }
+      });
+      // Extract ambiance URLs
+      audioAssets.ambiance.forEach((ambianceItem) => {
+        if (ambianceItem.url) {
+          audioUrls.push(ambianceItem.url);
+        }
+      });
+    }
+    setGeneratedAudioFiles(audioUrls);
+  }, [audioAssets]);
 
   // Render workflow tab content
   const renderTabContent = () => {
@@ -816,15 +890,72 @@ if (!selectedChapter) {
         />
       );
 
+      case "audio":
+  if (!selectedChapter) {
+    return (
+      <div className="text-center py-12 text-gray-500">
+        <Music className="mx-auto h-12 w-12 mb-4 opacity-50" />
+        <p>Please select a chapter to manage audio</p>
+      </div>
+    );
+  }
+
+  return (
+    <AudioPanel
+      chapterId={selectedChapter.id}
+      chapterTitle={selectedChapter.title}
+      selectedScript={selectedScript}
+      plotOverview={plotOverview}
+    />
+  );
+
+      case "video": {
+        if (!selectedChapter) {
+          return (
+            <div className="text-center py-12 text-gray-500">
+              <Video className="mx-auto h-12 w-12 mb-4 opacity-50" />
+              <p>Please select a chapter to produce videos</p>
+            </div>
+          );
+        }
+
+        // Use mock data if no real data is available yet
+        const mockImageUrls = generatedImageUrls.length > 0 ? generatedImageUrls : [
+          'https://via.placeholder.com/1920x1080/4F46E5/ffffff?text=Scene+1',
+          'https://via.placeholder.com/1920x1080/7C3AED/ffffff?text=Scene+2',
+          'https://via.placeholder.com/1920x1080/EC4899/ffffff?text=Scene+3',
+          'https://via.placeholder.com/1920x1080/F59E0B/ffffff?text=Scene+4',
+          'https://via.placeholder.com/1920x1080/10B981/ffffff?text=Scene+5',
+        ];
+
+        const mockAudioFiles = generatedAudioFiles.length > 0 ? generatedAudioFiles : [
+          'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+          'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+          'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+        ];
+
+        return (
+          <VideoProductionPanel
+            chapterId={selectedChapter.id}
+            chapterTitle={selectedChapter.title}
+            scriptId={selectedScript?.id}
+            imageUrls={mockImageUrls}
+            audioFiles={mockAudioFiles}
+            plotOverview={plotOverview}
+          />
+        );
+      }
+
+
         // return (
         //   <div className="space-y-6">
         //     <div className="flex items-center justify-between">
         //       <div>
         //         <h3 className="text-xl font-semibold text-gray-900">
-        //           Scene Images
+        //           Audio Production
         //         </h3>
         //         <p className="text-gray-600">
-        //           Generate character and scene images for{" "}
+        //           Generate music, effects, and dialogue for{" "}
         //           {selectedChapter?.title}
         //         </p>
         //       </div>
@@ -832,236 +963,206 @@ if (!selectedChapter) {
         //         disabled={true}
         //         className="flex items-center space-x-2 px-4 py-2 bg-gray-400 text-white rounded-lg cursor-not-allowed"
         //       >
-        //         <Image className="w-4 h-4" />
+        //         <Music className="w-4 h-4" />
         //         <span>Coming Soon</span>
         //       </button>
         //     </div>
 
         //     <div className="text-center py-12 text-gray-500">
-        //       <Image className="mx-auto h-12 w-12 mb-4 opacity-50" />
-        //       <p>Scene image generation will be available soon</p>
+        //       <Music className="mx-auto h-12 w-12 mb-4 opacity-50" />
+        //       <p>Audio production tools will be available soon</p>
         //       <p className="text-sm">
-        //         Generate character images and scene visualizations
+        //         Create music, sound effects, and character voices
         //       </p>
         //     </div>
         //   </div>
         // );
 
-      case "audio":
-        return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-xl font-semibold text-gray-900">
-                  Audio Production
-                </h3>
-                <p className="text-gray-600">
-                  Generate music, effects, and dialogue for{" "}
-                  {selectedChapter?.title}
-                </p>
-              </div>
-              <button
-                disabled={true}
-                className="flex items-center space-x-2 px-4 py-2 bg-gray-400 text-white rounded-lg cursor-not-allowed"
-              >
-                <Music className="w-4 h-4" />
-                <span>Coming Soon</span>
-              </button>
-            </div>
 
-            <div className="text-center py-12 text-gray-500">
-              <Music className="mx-auto h-12 w-12 mb-4 opacity-50" />
-              <p>Audio production tools will be available soon</p>
-              <p className="text-sm">
-                Create music, sound effects, and character voices
-              </p>
-            </div>
-          </div>
-        );
 
-      case "video":
-        return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-xl font-semibold text-gray-900">
-                  Video Production
-                </h3>
-                <p className="text-gray-600">
-                  Generate and edit videos for {selectedChapter?.title}
-                </p>
-              </div>
-              <div className="flex items-center space-x-4">
-                <select
-                  className="border rounded-lg px-3 py-2 text-sm"
-                  value={animationStyle}
-                  onChange={(e) =>
-                    setAnimationStyle(
-                      e.target.value as
-                        | "cartoon"
-                        | "realistic"
-                        | "cinematic"
-                        | "fantasy"
-                    )
-                  }
-                >
-                  <option value="cartoon">Cartoon Style</option>
-                  <option value="realistic">Realistic Style</option>
-                  <option value="cinematic">Cinematic Style</option>
-                  <option value="fantasy">Fantasy Style</option>
-                </select>
-                <button
-                  onClick={handleGenerateVideo}
-                  disabled={!selectedScript}
-                  className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
-                >
-                  <Video className="w-4 h-4" />
-                  <span>Generate Video</span>
-                </button>
-              </div>
-            </div>
+      // case "video":
+      //   return (
+      //     <div className="space-y-6">
+      //       <div className="flex items-center justify-between">
+      //         <div>
+      //           <h3 className="text-xl font-semibold text-gray-900">
+      //             Video Production
+      //           </h3>
+      //           <p className="text-gray-600">
+      //             Generate and edit videos for {selectedChapter?.title}
+      //           </p>
+      //         </div>
+      //         <div className="flex items-center space-x-4">
+      //           <select
+      //             className="border rounded-lg px-3 py-2 text-sm"
+      //             value={animationStyle}
+      //             onChange={(e) =>
+      //               setAnimationStyle(
+      //                 e.target.value as
+      //                   | "cartoon"
+      //                   | "realistic"
+      //                   | "cinematic"
+      //                   | "fantasy"
+      //               )
+      //             }
+      //           >
+      //             <option value="cartoon">Cartoon Style</option>
+      //             <option value="realistic">Realistic Style</option>
+      //             <option value="cinematic">Cinematic Style</option>
+      //             <option value="fantasy">Fantasy Style</option>
+      //           </select>
+      //           <button
+      //             onClick={handleGenerateVideo}
+      //             disabled={!selectedScript}
+      //             className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
+      //           >
+      //             <Video className="w-4 h-4" />
+      //             <span>Generate Video</span>
+      //           </button>
+      //         </div>
+      //       </div>
 
-            {!selectedScript && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                <p className="text-yellow-800">
-                  <strong>Note:</strong> Please generate and select a script
-                  first before creating videos.
-                </p>
-              </div>
-            )}
+      //       {!selectedScript && (
+      //         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+      //           <p className="text-yellow-800">
+      //             <strong>Note:</strong> Please generate and select a script
+      //             first before creating videos.
+      //           </p>
+      //         </div>
+      //       )}
 
-            {/* Existing Generations */}
-            {selectedChapter && showExistingGenerations && (
-              <ExistingGenerations
-                chapterId={selectedChapter.id}
-                onContinueGeneration={handleContinueGeneration}
-                onWatchVideo={handleWatchVideo}
-                className="mb-6"
-              />
-            )}
+      //       {/* Existing Generations */}
+      //       {selectedChapter && showExistingGenerations && (
+      //         <ExistingGenerations
+      //           chapterId={selectedChapter.id}
+      //           onContinueGeneration={handleContinueGeneration}
+      //           onWatchVideo={handleWatchVideo}
+      //           className="mb-6"
+      //         />
+      //       )}
 
-            {/* Video Status Display */}
-            {videoStatus !== "idle" &&
-              !videoUrls[selectedChapter?.id || ""] && (
-                <>
-                  <div className="bg-gray-50 border rounded-lg p-4">
-                    <div className="flex items-center gap-3">
-                      {videoStatus === "starting" && (
-                        <>
-                          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                          <span>Initializing video generation...</span>
-                        </>
-                      )}
-                      {videoStatus === "generating_audio" && (
-                        <>
-                          <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                          <span>Step 1/5: Generating audio and voices...</span>
-                        </>
-                      )}
-                      {videoStatus === "generating_images" && (
-                        <>
-                          <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
-                          <span>Step 2/5: Creating character images...</span>
-                        </>
-                      )}
-                      {videoStatus === "generating_video" && (
-                        <>
-                          <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-                          <span>Step 3/5: Generating video scenes...</span>
-                        </>
-                      )}
-                      {videoStatus === "merging_audio" && (
-                        <>
-                          <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
-                          <span>Step 4/5: Merging audio and video...</span>
-                        </>
-                      )}
-                      {videoStatus === "applying_lipsync" && (
-                        <>
-                          <div className="w-4 h-4 border-2 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
-                          <span>Step 5/5: Applying lip sync...</span>
-                        </>
-                      )}
-                      {videoStatus === "failed" && (
-                        <>
-                          <div className="w-4 h-4 bg-red-500 rounded-full"></div>
-                          <span className="text-red-600">
-                            Generation failed. Please try again.
-                          </span>
-                        </>
-                      )}
-                    </div>
+      //       {/* Video Status Display */}
+      //       {videoStatus !== "idle" &&
+      //         !videoUrls[selectedChapter?.id || ""] && (
+      //           <>
+      //             <div className="bg-gray-50 border rounded-lg p-4">
+      //               <div className="flex items-center gap-3">
+      //                 {videoStatus === "starting" && (
+      //                   <>
+      //                     <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      //                     <span>Initializing video generation...</span>
+      //                   </>
+      //                 )}
+      //                 {videoStatus === "generating_audio" && (
+      //                   <>
+      //                     <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      //                     <span>Step 1/5: Generating audio and voices...</span>
+      //                   </>
+      //                 )}
+      //                 {videoStatus === "generating_images" && (
+      //                   <>
+      //                     <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+      //                     <span>Step 2/5: Creating character images...</span>
+      //                   </>
+      //                 )}
+      //                 {videoStatus === "generating_video" && (
+      //                   <>
+      //                     <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+      //                     <span>Step 3/5: Generating video scenes...</span>
+      //                   </>
+      //                 )}
+      //                 {videoStatus === "merging_audio" && (
+      //                   <>
+      //                     <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
+      //                     <span>Step 4/5: Merging audio and video...</span>
+      //                   </>
+      //                 )}
+      //                 {videoStatus === "applying_lipsync" && (
+      //                   <>
+      //                     <div className="w-4 h-4 border-2 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
+      //                     <span>Step 5/5: Applying lip sync...</span>
+      //                   </>
+      //                 )}
+      //                 {videoStatus === "failed" && (
+      //                   <>
+      //                     <div className="w-4 h-4 bg-red-500 rounded-full"></div>
+      //                     <span className="text-red-600">
+      //                       Generation failed. Please try again.
+      //                     </span>
+      //                   </>
+      //                 )}
+      //               </div>
 
-                    {audioTaskId && (
-                      <div className="mt-2 text-xs text-gray-500">
-                        Tracking ID: {audioTaskId.substring(0, 8)}...
-                      </div>
-                    )}
+      //               {audioTaskId && (
+      //                 <div className="mt-2 text-xs text-gray-500">
+      //                   Tracking ID: {audioTaskId.substring(0, 8)}...
+      //                 </div>
+      //               )}
 
-                    {pipelineStatus && (
-                      <div className="mt-3 pt-3 border-t border-gray-200">
-                        <button
-                          onClick={() =>
-                            setShowPipelineStatus(!showPipelineStatus)
-                          }
-                          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          {showPipelineStatus
-                            ? "Hide Detailed Status"
-                            : "Show Detailed Status"}
-                        </button>
-                      </div>
-                    )}
-                  </div>
+      //               {pipelineStatus && (
+      //                 <div className="mt-3 pt-3 border-t border-gray-200">
+      //                   <button
+      //                     onClick={() =>
+      //                       setShowPipelineStatus(!showPipelineStatus)
+      //                     }
+      //                     className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+      //                   >
+      //                     {showPipelineStatus
+      //                       ? "Hide Detailed Status"
+      //                       : "Show Detailed Status"}
+      //                   </button>
+      //                 </div>
+      //               )}
+      //             </div>
 
-                  {pipelineStatus && showPipelineStatus && (
-                    <PipelineStatus
-                      pipelineStatus={pipelineStatus}
-                      isLoading={isLoading}
-                      onRefresh={handleRefreshStatus}
-                      onRetry={handleRetry}
-                      className="border-t-4 border-t-blue-500"
-                    />
-                  )}
-                </>
-              )}
+      //             {pipelineStatus && showPipelineStatus && (
+      //               <PipelineStatus
+      //                 pipelineStatus={pipelineStatus}
+      //                 isLoading={isLoading}
+      //                 onRefresh={handleRefreshStatus}
+      //                 onRetry={handleRetry}
+      //                 className="border-t-4 border-t-blue-500"
+      //               />
+      //             )}
+      //           </>
+      //         )}
 
-            {/* Generated Video Display */}
-            {selectedChapter && videoUrls[selectedChapter.id] && (
-              <div className="bg-white border rounded-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-lg font-semibold text-gray-900">
-                    Generated Video
-                  </h4>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() =>
-                        handleWatchVideo(videoUrls[selectedChapter.id])
-                      }
-                      className="flex items-center space-x-2 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-                    >
-                      <Play className="w-3 h-3" />
-                      <span>Watch</span>
-                    </button>
-                    <a
-                      href={videoUrls[selectedChapter.id]}
-                      download
-                      className="flex items-center space-x-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
-                    >
-                      <Download className="w-3 h-3" />
-                      <span>Download</span>
-                    </a>
-                  </div>
-                </div>
-                <video
-                  src={videoUrls[selectedChapter.id]}
-                  controls
-                  className="w-full h-64 object-cover rounded-lg"
-                />
-              </div>
-            )}
-          </div>
-        );
+      //       {/* Generated Video Display */}
+      //       {selectedChapter && videoUrls[selectedChapter.id] && (
+      //         <div className="bg-white border rounded-lg p-6">
+      //           <div className="flex items-center justify-between mb-4">
+      //             <h4 className="text-lg font-semibold text-gray-900">
+      //               Generated Video
+      //             </h4>
+      //             <div className="flex items-center space-x-2">
+      //               <button
+      //                 onClick={() =>
+      //                   handleWatchVideo(videoUrls[selectedChapter.id])
+      //                 }
+      //                 className="flex items-center space-x-2 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+      //               >
+      //                 <Play className="w-3 h-3" />
+      //                 <span>Watch</span>
+      //               </button>
+      //               <a
+      //                 href={videoUrls[selectedChapter.id]}
+      //                 download
+      //                 className="flex items-center space-x-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+      //               >
+      //                 <Download className="w-3 h-3" />
+      //                 <span>Download</span>
+      //               </a>
+      //             </div>
+      //           </div>
+      //           <video
+      //             src={videoUrls[selectedChapter.id]}
+      //             controls
+      //             className="w-full h-64 object-cover rounded-lg"
+      //           />
+      //         </div>
+      //       )}
+      //     </div>
+      //   );
 
       default:
         return <div>Tab content not implemented</div>;

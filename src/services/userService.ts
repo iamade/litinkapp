@@ -200,6 +200,154 @@ export const userService = {
   },
 
 
+// Audio generation methods
+async getChapterAudio(chapterId: string) {
+  const response = await apiClient.get<any>(`/chapters/${chapterId}/audio`);
+  return response.data;
+},
+
+async generateSceneDialogue(chapterId: string, sceneNumber: number, data: any) {
+  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/dialogue/${sceneNumber}`, data);
+  return response.data;
+},
+
+async generateSceneNarration(chapterId: string, sceneNumber: number, data: any) {
+  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/narration/${sceneNumber}`, data);
+  return response.data;
+},
+
+async generateSceneMusic(chapterId: string, sceneNumber: number, data: any) {
+  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/music/${sceneNumber}`, data);
+  return response.data;
+},
+
+async generateSceneEffects(chapterId: string, sceneNumber: number, data: any) {
+  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/effects/${sceneNumber}`, data);
+  return response.data;
+},
+
+async generateSceneAmbiance(chapterId: string, sceneNumber: number, data: any) {
+  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/ambiance/${sceneNumber}`, data);
+  return response.data;
+},
+
+async deleteAudioFile(chapterId: string, audioId: string) {
+  const response = await apiClient.delete<any>(`/chapters/${chapterId}/audio/${audioId}`);
+  return response.data;
+},
+
+async exportAudioMix(chapterId: string, audioAssets: any) {
+  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/export`, { audio_assets: audioAssets });
+  return response.data;
+},
+
+// Plot and script methods (if not already present)
+async generatePlotOverview(bookId: string) {
+  const response = await apiClient.post<any>(`/books/${bookId}/plot/generate`, {});
+  return response.data;
+},
+
+async savePlotOverview(bookId: string, plot: any) {
+  const response = await apiClient.post<any>(`/books/${bookId}/plot/save`, plot);
+  return response.data;
+},
+
+async getPlotOverview(bookId: string) {
+  const response = await apiClient.get<any>(`/books/${bookId}/plot`);
+  return response.data;
+},
+
+// Add these methods to userService.ts
+
+async getVideoProduction(chapterId: string) {
+  // Mock implementation - returns null for new productions
+  return Promise.resolve(null);
+},
+
+async saveVideoProduction(data: {
+  chapterId: string;
+  scenes: any[];
+  editorSettings: any;
+  scriptId?: string;
+}) {
+  // Mock implementation
+  return Promise.resolve({
+    id: `video-prod-${Date.now()}`,
+    chapterId: data.chapterId,
+    scenes: data.scenes || [],
+    finalVideoUrl: null,
+    renderingProgress: 0,
+    editorSettings: data.editorSettings,
+    status: 'idle' as const,
+    metadata: {
+      totalDuration: 0,
+      fileSize: 0
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+},
+
+async createOpenShotProject(data: {
+  chapterId: string;
+  scenes: any[];
+  editorSettings: any;
+  scriptId?: string;
+}) {
+  // Mock implementation
+  return Promise.resolve({
+    project_id: `openshot-${Date.now()}`,
+    status: 'created',
+    message: 'OpenShot project created successfully'
+  });
+},
+
+async getOpenShotProjectStatus(projectId: string) {
+  // Mock implementation - simulates progress
+  const progress = Math.min(100, Math.random() * 100);
+  return Promise.resolve({
+    project_id: projectId,
+    status: progress >= 100 ? 'completed' : 'rendering',
+    progress,
+    videoProduction: progress >= 100 ? {
+      id: `video-prod-${Date.now()}`,
+      chapterId: 'mock-chapter',
+      scenes: [],
+      finalVideoUrl: 'https://example.com/mock-video.mp4',
+      renderingProgress: 100,
+      editorSettings: {
+        resolution: '1080p' as const,
+        fps: 30,
+        aspectRatio: '16:9' as const,
+        outputFormat: 'mp4' as const,
+        quality: 'high' as const
+      },
+      status: 'completed' as const,
+      metadata: {
+        totalDuration: 120,
+        fileSize: 50000000
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    } : null
+  });
+},
+
+async processVideoWithFFmpeg(data: {
+  videoUrl: string;
+  quality?: string;
+  [key: string]: any;
+}) {
+  // Mock implementation
+  return Promise.resolve({
+    processedUrl: 'https://example.com/processed-video.mp4',
+    fileSize: 45000000,
+    duration: 120,
+    message: 'Video processed successfully'
+  });
+}
+
+
 };
 
 export async function deleteBook(bookId: string) {
