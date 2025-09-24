@@ -173,6 +173,33 @@ export const userService = {
     return apiClient.get<VideoStatus>(`/ai/video-generation-status/${videoGenId}`);
   },
 
+  // Image generation methods
+   async getChapterImages(chapterId: string) {
+    const response = await apiClient.get<any>(`/chapters/${chapterId}/images`);
+    return response.data;
+  },
+
+  async generateSceneImage(chapterId: string, sceneNumber: number, data: any) {
+    const response = await apiClient.post<any>(`/chapters/${chapterId}/images/scenes/${sceneNumber}`, data);
+    return response.data;
+  },
+
+  async generateCharacterImage(chapterId: string, data: any) {
+    const response = await apiClient.post<any>(`/chapters/${chapterId}/images/characters`, data);
+    return response.data;
+  },
+
+  async deleteSceneImage(chapterId: string, sceneNumber: number) {
+    const response = await apiClient.delete<any>(`/chapters/${chapterId}/images/scenes/${sceneNumber}`);
+    return response.data;
+  },
+
+  async deleteCharacterImage(chapterId: string, characterName: string) {
+    const response = await apiClient.delete<any>(`/chapters/${chapterId}/images/characters/${characterName}`);
+    return response.data;
+  },
+
+
 };
 
 export async function deleteBook(bookId: string) {
@@ -185,3 +212,5 @@ export async function deleteBook(bookId: string) {
   }
   return await response.json();
 }
+
+
