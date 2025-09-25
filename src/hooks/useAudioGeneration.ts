@@ -90,9 +90,22 @@ export const useAudioGeneration = (chapterId: string) => {
       });
 
       setAudioAssets(organized);
-    } catch (error) {
-      console.error('Error loading audio assets:', error);
-      toast.error('Failed to load audio assets');
+    } catch (error: any) {
+      // Check if it's a 404 (no data found) - treat as success
+      if (error.message?.includes('404') || error.message?.includes('Not found')) {
+        // No data exists yet - this is expected, set empty AudioAssets state
+        setAudioAssets({
+          dialogue: [],
+          narration: [],
+          music: [],
+          effects: [],
+          ambiance: []
+        });
+      } else {
+        // Real error - show toast
+        console.error('Error loading audio assets:', error);
+        toast.error('Failed to load audio assets');
+      }
     } finally {
       setIsLoading(false);
     }

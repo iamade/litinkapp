@@ -73,9 +73,17 @@ export const useImageGeneration = (chapterId: string) => {
       });
       setCharacterImages(characterImagesMap);
 
-    } catch (error) {
-      console.error('Error loading images:', error);
-      toast.error('Failed to load images');
+    } catch (error: any) {
+      // Check if it's a 404 (no data found) - treat as success
+      if (error.message?.includes('404') || error.message?.includes('Not found')) {
+        // No data exists yet - this is expected, set empty state
+        setSceneImages({});
+        setCharacterImages({});
+      } else {
+        // Real error - show toast
+        console.error('Error loading images:', error);
+        toast.error('Failed to load images');
+      }
     } finally {
       setIsLoading(false);
     }

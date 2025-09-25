@@ -48,15 +48,15 @@ class OpenRouterService:
     # Model configurations with costs (per 1K tokens)
     MODEL_CONFIGS = {
         ModelTier.FREE: {
-            "primary": "meta-llama/llama-3.2-3b-instruct",
-            "fallback": "google/gemini-flash-1.5-8b",
+            "primary": "ArliAI: QwQ 32B RpR v1" ,
+            "fallback": "meta-llama/llama-3.2-3b-instruct",
             "max_tokens": 2000,
             "temperature": 0.7,
             "cost_per_1k_input": 0.00006,
             "cost_per_1k_output": 0.00006
         },
         ModelTier.BASIC: {
-            "primary": "deepseek/deepseek-chat",
+            "primary": "deepseek-chat-v3-0324:free",
             "fallback": "mistralai/mistral-7b-instruct",
             "max_tokens": 3000,
             "temperature": 0.7,

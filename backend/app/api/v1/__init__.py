@@ -7,6 +7,7 @@ from .quizzes import router as quizzes_router
 from .badges import router as badges_router
 from .nfts import router as nfts_router
 from .payments import router as payments_router
+from .subscriptions import router as subscriptions_router
 
 api_router = APIRouter()
 
@@ -18,3 +19,4 @@ api_router.include_router(quizzes_router, prefix="/quizzes", tags=["quizzes"])
 api_router.include_router(badges_router, prefix="/badges", tags=["badges"])
 api_router.include_router(nfts_router, prefix="/nfts", tags=["nfts"])
 api_router.include_router(payments_router, prefix="/payments", tags=["payments"])
+api_router.include_router(subscriptions_router, prefix="/subscriptions", tags=["subscriptions"])

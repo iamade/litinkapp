@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
     STRIPE_PRICE_ID: Optional[str] = None
+
+    # Stripe Price IDs for subscription tiers
+    STRIPE_FREE_PRICE_ID: Optional[str] = None
+    STRIPE_BASIC_PRICE_ID: Optional[str] = None
+    STRIPE_PRO_PRICE_ID: Optional[str] = None
     
     # File Storage
     UPLOAD_DIR: str = "uploads"

@@ -65,8 +65,16 @@ export const usePlotGeneration = (bookId: string) => {
     try {
       const result = await userService.getPlotOverview(bookId);
       setPlotOverview(result);
-    } catch (error) {
-      console.error('Error loading plot:', error);
+    } catch (error: any) {
+      // Check if it's a 404 (no data found) - treat as success
+      if (error.message?.includes('404') || error.message?.includes('Not found')) {
+        // No data exists yet - this is expected, set plotOverview to null
+        setPlotOverview(null);
+      } else {
+        // Real error - show toast
+        console.error('Error loading plot:', error);
+        toast.error('Failed to load plot');
+      }
     } finally {
       setIsLoading(false);
     }

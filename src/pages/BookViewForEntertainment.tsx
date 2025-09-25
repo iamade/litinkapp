@@ -184,18 +184,20 @@ export default function BookViewForEntertainment() {
 
   // Workflow tabs configuration
   const workflowTabs = [
-    {
-      id: "plot" as WorkflowTab,
-      label: "Plot",
-      icon: BookOpen,
-      description: "Story overview & characters",
-    },
+
     {
       id: "script" as WorkflowTab,
       label: "Script",
       icon: FileText,
       description: "Chapter scripts & scenes",
     },
+    {
+      id: "plot" as WorkflowTab,
+      label: "Plot",
+      icon: BookOpen,
+      description: "Story overview & characters",
+    },
+    
     {
       id: "images" as WorkflowTab,
       label: "Images",
@@ -832,19 +834,8 @@ export default function BookViewForEntertainment() {
     const currentProgress = getCurrentProgress();
 
     switch (activeTab) {
-      case "plot":
-         return (
-          <PlotOverviewPanel
-            bookId={book!.id}
-            plotOverview={plotOverview}
-            isGenerating={isGeneratingPlot}
-            onGenerate={generatePlot}
-            onSave={savePlot}
-          />
-        );
-    
 
-      case "script":
+       case "script":
 if (!selectedChapter) {
           return (
             <div className="text-center py-12 text-gray-500">
@@ -869,6 +860,19 @@ if (!selectedChapter) {
             onDeleteScript={deleteScript}
           />
         );
+      case "plot":
+         return (
+          <PlotOverviewPanel
+            bookId={book!.id}
+            plotOverview={plotOverview}
+            isGenerating={isGeneratingPlot}
+            onGenerate={generatePlot}
+            onSave={savePlot}
+          />
+        );
+    
+
+     
 
 
       case "images":
