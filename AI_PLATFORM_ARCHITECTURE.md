@@ -32,45 +32,54 @@ After analyzing your requirements, I recommend a hybrid approach combining OpenR
 Model Configuration:
   Script Generation:
     Free Tier:
-      primary: "meta-llama/llama-3.2-3b-instruct" # $0.00006/1K tokens
-      fallback: "google/gemini-flash-1.5-8b" # $0.000038/1K tokens
+    provider: OpenRouter
+      primary: "ArliAI: QwQ 32B RpR v1" #$0/M input tokens $0/M output tokens
+      fallback: "meta-llama/llama-3.2-3b-instruct" # $0.00006/1K tokens
     
     Basic Tier:
-      primary: "deepseek/deepseek-chat" # $0.00014/1K tokens
+    provider: OpenRouter
+      primary: "deepseek/deepseek-chat or deepseek-chat-v3-0324:free'" # $0.00014/1K tokens
       fallback: "mistralai/mistral-7b-instruct" # $0.00006/1K tokens
     
     Standard Tier:
       primary: "anthropic/claude-3-haiku" # $0.00025/1K tokens
       fallback: "openai/gpt-3.5-turbo" # $0.0005/1K tokens
-    
-    Premium Tier:
-      primary: "openai/gpt-4o-mini" # $0.00015/1K tokens
+
+    Professional Tier:
+       primary: "openai/gpt-4o-mini" # $0.00015/1K tokens
       fallback: "anthropic/claude-3.5-sonnet" # $0.003/1K tokens
     
-    Professional Tier:
-      primary: "openai/gpt-4o" # $0.0025/1K tokens
+    Premium Tier:
+    primary: "openai/gpt-4o" # $0.0025/1K tokens
       fallback: "anthropic/claude-3-opus" # $0.015/1K tokens
 
   Image Generation:
     Free Tier:
-      provider: "ModelsLab"
-      model: "stable-diffusion-xl" # ~$0.002/image
+      provider: "ModelsLab v7"
+      model: "Google/Imagen 4 Ultra" # ~$0.002/image
     
-    Basic/Standard Tier:
-      provider: "ModelsLab"
-      model: "playground-v2.5" # ~$0.004/image
+    Basic:
+      provider: "ModelsLab v7"
+      model: "Google/Imagen 4 Fast" # ~$0.004/image
+
+    Standard Tier:
+
+    Professional Tier:
     
-    Premium/Professional Tier:
-      provider: "ModelsLab"
-      model: "midjourney-v6" # ~$0.02/image via API
+    Premium:
+      provider: "Direct API"
+      model: "seedream-4-high-res" # ~$0.02/image via API
       alternative: "openai/dall-e-3" # $0.04/image
 
   Video Generation:
-    All Tiers:
+  Free Tier:
       provider: "ModelsLab V7"
-      models:
-        basic: "veo2" # ~$0.05/second
-        premium: "veo2_pro" # ~$0.10/second
+      models: seeddance Image To Video
+  basic Tier: 
+      provider: "ModelsLab V7"
+      models: "veo2" # ~$0.05/second
+  
+  premium: "Veo3-audio" # ~$0.10/second
 
   Audio/Voice:
     Free Tier:
@@ -88,9 +97,9 @@ Model Configuration:
 
 | Tier | Monthly Price | Cost per User | Profit Margin | Features |
 |------|--------------|---------------|---------------|----------|
-| **Free** | $0 | ~$2-3 | N/A | 2 videos/month, watermark, basic quality |
-| **Basic** | $19 | ~$8-10 | 47-58% | 10 videos/month, 720p, no watermark |
-| **Standard** | $49 | ~$20-25 | 49-59% | 30 videos/month, 1080p, voice cloning |
+| **Free** | $0 | ~$2-3 | N/A | 2 videos/month, watermark, basic quality | no custom selection of model
+| **Basic** | $19 | ~$8-10 | 47-58% | 10 videos/month, 720p, no watermark | no custom selection of model
+| **Standard** | $49 | ~$20-25 | 49-59% | 30 videos/month, 1080p, voice cloning | custom selection of model
 | **Premium** | $99 | ~$40-50 | 49-60% | 100 videos/month, 4K, priority processing |
 | **Professional** | $299 | ~$100-150 | 50-67% | Unlimited*, API access, custom models |
 | **Enterprise** | Custom | Variable | 60-80% | White-label, dedicated infrastructure |
