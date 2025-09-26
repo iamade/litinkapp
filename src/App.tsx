@@ -12,6 +12,7 @@ import EntertainmentMode from "./pages/EntertainmentMode";
 import Profile from "./pages/Profile";
 import BookUpload from "./pages/BookUpload";
 import BookView from "./pages/BookView";
+import SubscriptionPage from "./pages/SubscriptionPage";
 import { setLoadingContextSetter } from "./lib/api";
 import { VideoGenerationProvider } from "./contexts/VideoGenerationContext";
 
@@ -59,6 +60,7 @@ function App() {
                 <Route path="/profile" element={<Profile />} />
                 <Route path="/upload" element={<BookUpload />} />
                 <Route path="/book/:id" element={<BookView />} />
+                <Route path="/subscription" element={<SubscriptionPage />} />
               </Routes>
             </div>
           </Router>

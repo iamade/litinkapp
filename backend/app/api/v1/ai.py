@@ -16,6 +16,8 @@ from app.core.database import get_supabase
 from app.core.auth import get_current_active_user
 from app.services.pipeline_manager import PipelineManager, PipelineStep
 from app.services.deepseek_script_service import DeepSeekScriptService
+from app.services.openrouter_service import OpenRouterService, ModelTier
+from app.services.subscription_manager import SubscriptionManager
 
 
 router = APIRouter()
@@ -1704,12 +1706,12 @@ async def generate_script_and_scenes(
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Generate only the AI script and scene descriptions for a chapter using DeepSeek (no video generation)"""
+    """Generate only the AI script and scene descriptions for a chapter using OpenRouter (no video generation)"""
     try:
         # Extract from request body
         chapter_id = request.get('chapter_id')
-        script_style = request.get('script_style', 'cinematic_movie')
-       
+        script_style = request.get('script_style', 'cinematic')
+
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
 
@@ -1717,88 +1719,101 @@ async def generate_script_and_scenes(
         chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
         if not chapter_response.data:
             raise HTTPException(status_code=404, detail="Chapter not found")
-        
+
         chapter_data = chapter_response.data
         book_data = chapter_data['books']
-        
+
         # Check access permissions
         if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
             raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
-        
-        # ✅ NEW: Use DeepSeek for script generation
-        print(f"[DEEPSEEK] Generating script with style: {script_style}")
-        
-        # Initialize DeepSeek service
-        deepseek_service = DeepSeekScriptService()
-        
-        # Get chapter context for DeepSeek
+
+        # ✅ NEW: Check subscription tier and limits
+        subscription_manager = SubscriptionManager(supabase_client)
+        user_tier = await subscription_manager.get_user_tier(current_user['id'])
+        tier_check = await subscription_manager.can_user_generate_video(current_user['id'])
+
+        if not tier_check['can_generate']:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Monthly limit reached. You have used {tier_check['videos_used']} out of {tier_check['videos_limit']} videos. Please upgrade your subscription."
+            )
+
+        # Map subscription tier to model tier
+        model_tier_mapping = {
+            "free": ModelTier.FREE,
+            "basic": ModelTier.BASIC,
+            "standard": ModelTier.STANDARD,
+            "premium": ModelTier.PREMIUM,
+            "professional": ModelTier.PROFESSIONAL
+        }
+        user_model_tier = model_tier_mapping.get(user_tier.value, ModelTier.FREE)
+
+        print(f"[OpenRouter] Generating {script_style} script for {user_tier.value} tier user")
+
+        # Initialize OpenRouter service
+        openrouter_service = OpenRouterService()
+
+        # Get chapter context for enhanced content
         rag_service = RAGService(supabase_client)
         chapter_context = await rag_service.get_chapter_with_context(chapter_id, include_adjacent=True)
-        
-        # Prepare content for DeepSeek based on script style
+
+        # Prepare content for OpenRouter based on script style
         content_for_script = chapter_context.get('total_context', chapter_data['content'])
-        
-        # ✅ Generate script using DeepSeek with style-specific prompts
-        if script_style == 'cinematic_movie':
-            # Use the standard screenplay system prompt for dialogue-based scripts
-            script_result = await deepseek_service.generate_screenplay(
-                content=content_for_script,
-                target_duration=3,  # 3 minutes target
-                use_reasoning=False
-            )
-        elif script_style == 'narration':
-            # Use a modified approach for narration-style scripts
-            script_result = await deepseek_service.generate_narration_script(
-                content=content_for_script,
-                target_duration=3,
-                use_reasoning=False
-            )
-        else:
-            # Default to cinematic_movie
-            script_result = await deepseek_service.generate_screenplay(
-                content=content_for_script,
-                target_duration=3,
-                use_reasoning=False
-            )
-        
+
+        # ✅ Generate script using OpenRouter with tier-appropriate model
+        script_result = await openrouter_service.generate_script(
+            content=content_for_script,
+            user_tier=user_model_tier,
+            script_type=script_style
+        )
+
         if script_result.get('status') != 'success':
             raise HTTPException(
-                status_code=500, 
-                detail=f"DeepSeek script generation failed: {script_result.get('error', 'Unknown error')}"
+                status_code=500,
+                detail=f"OpenRouter script generation failed: {script_result.get('error', 'Unknown error')}"
             )
-        
-        script = script_result.get('screenplay', '')
-        parsed_data = script_result.get('parsed_data', {})
-        
-        # Extract characters and scenes from parsed data
-        characters = parsed_data.get('characters', [])
-        scenes = parsed_data.get('scenes', [])
-        
-        # ✅ Generate scene breakdown using DeepSeek
-        scene_breakdown_result = await deepseek_service.generate_scene_breakdown(
-            screenplay=script,
-            max_scenes=10
+
+        script = script_result.get('content', '')
+        usage = script_result.get('usage', {})
+
+        # ✅ Generate scene breakdown using OpenRouter
+        scene_breakdown_result = await openrouter_service.analyze_content(
+            content=f"Please break down this script into 5-8 detailed scene descriptions for video generation:\n\n{script}",
+            user_tier=user_model_tier,
+            analysis_type="summary"  # Use summary type but with scene-specific prompt
         )
-        
+
         scene_descriptions = []
         if scene_breakdown_result.get('status') == 'success':
-            breakdown_data = scene_breakdown_result.get('scene_breakdown', {})
-            if isinstance(breakdown_data, dict) and 'scenes' in breakdown_data:
-                scene_descriptions = breakdown_data['scenes']
-            elif isinstance(breakdown_data, list):
-                scene_descriptions = breakdown_data
-        
-        # ✅ Generate character profiles using DeepSeek
-        character_profiles_result = await deepseek_service.generate_character_profiles(screenplay=script)
-        
+            # Parse scene descriptions from the analysis result
+            analysis_result = scene_breakdown_result.get('result', '')
+            # Simple parsing - split by lines that look like scene descriptions
+            lines = analysis_result.split('\n')
+            for line in lines:
+                line = line.strip()
+                if line and len(line) > 20:  # Filter out short lines
+                    scene_descriptions.append(line[:300])  # Limit length
+
+        # Limit to reasonable number of scenes
+        scene_descriptions = scene_descriptions[:10]
+
+        # ✅ Generate character analysis using OpenRouter
+        character_analysis_result = await openrouter_service.analyze_content(
+            content=f"Extract and describe all characters mentioned in this script:\n\n{script}",
+            user_tier=user_model_tier,
+            analysis_type="characters"
+        )
+
+        characters = []
         character_details = ""
-        if character_profiles_result.get('status') == 'success':
-            profiles_data = character_profiles_result.get('character_profiles', {})
-            if isinstance(profiles_data, dict) and 'characters' in profiles_data:
-                character_details = str(profiles_data['characters'])
-            else:
-                character_details = str(profiles_data)
-        
+        if character_analysis_result.get('status') == 'success':
+            character_details = character_analysis_result.get('result', '')
+            # Extract character names (simple approach)
+            import re
+            # Look for capitalized words that might be character names
+            potential_chars = re.findall(r'\b[A-Z][a-z]+\b', character_details)
+            characters = list(set(potential_chars))[:8]  # Limit to 8 characters
+
         # Enhanced script data with metadata
         script_data = {
             "script": script,
@@ -1813,22 +1828,24 @@ async def generate_script_and_scenes(
                 "estimated_duration": len(script) * 0.01,  # Rough estimate
                 "has_characters": len(characters) > 0,
                 "script_length": len(script),
-                "deepseek_model": script_result.get('model_used', 'deepseek-chat'),
-                "tokens_used": script_result.get('tokens_used', 0)
+                "model_used": script_result.get('model_used', 'unknown'),
+                "tier": user_tier.value,
+                "tokens_used": usage.get('total_tokens', 0),
+                "estimated_cost": usage.get('estimated_cost', 0)
             }
         }
-        
+
         # Store in chapters table (your existing approach)
         ai_content = chapter_data.get('ai_generated_content') or {}
         if not isinstance(ai_content, dict):
             ai_content = {}
         key = f"{current_user['id']}:{script_style}"
         ai_content[key] = script_data
-        
+
         supabase_client.table('chapters').update({
             "ai_generated_content": ai_content
         }).eq('id', chapter_id).execute()
-        
+
         # ALSO create a dedicated scripts table entry for easier access
         script_record = {
             "chapter_id": chapter_id,
@@ -1840,9 +1857,9 @@ async def generate_script_and_scenes(
             "character_details": character_details,
             "metadata": script_data["metadata"],
             "status": "ready",
-            "service_used": "deepseek"
+            "service_used": "openrouter"
         }
-        
+
         # Insert or update in scripts table
         existing_script = supabase_client.table('scripts')\
             .select('id')\
@@ -1850,7 +1867,7 @@ async def generate_script_and_scenes(
             .eq('user_id', current_user['id'])\
             .eq('script_style', script_style)\
             .execute()
-        
+
         if existing_script.data:
             # Update existing
             script_result = supabase_client.table('scripts')\
@@ -1862,9 +1879,21 @@ async def generate_script_and_scenes(
             # Insert new
             script_result = supabase_client.table('scripts').insert(script_record).execute()
             script_id = script_result.data[0]['id']
-        
-        print(f"[DEEPSEEK] Successfully generated {script_style} script with {len(characters)} characters and {len(scene_descriptions)} scenes")
-        
+
+        # ✅ Record usage for billing/limits
+        await subscription_manager.record_usage(
+            user_id=current_user['id'],
+            resource_type='script',
+            cost_usd=usage.get('estimated_cost', 0.0),
+            metadata={
+                'script_style': script_style,
+                'model_used': script_result.get('model_used'),
+                'tokens_used': usage.get('total_tokens', 0)
+            }
+        )
+
+        print(f"[OpenRouter] Successfully generated {script_style} script with {len(characters)} characters and {len(scene_descriptions)} scenes")
+
         return {
             'chapter_id': chapter_id,
             'script_id': script_id,
@@ -1874,11 +1903,19 @@ async def generate_script_and_scenes(
             'character_details': character_details,
             'script_style': script_style,
             'metadata': script_data["metadata"],
-            'service_used': 'deepseek'
+            'service_used': 'openrouter',
+            'tier': user_tier.value,
+            'usage_info': {
+                'tokens_used': usage.get('total_tokens', 0),
+                'estimated_cost': usage.get('estimated_cost', 0),
+                'model_used': script_result.get('model_used')
+            }
         }
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error generating script and scenes with DeepSeek: {e}")
+        print(f"Error generating script and scenes with OpenRouter: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
