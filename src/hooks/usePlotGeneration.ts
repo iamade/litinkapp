@@ -46,19 +46,19 @@ export const usePlotGeneration = (bookId: string) => {
     }
   };
 
-  const savePlot = async (plot: PlotOverview) => {
-    setIsLoading(true);
-    try {
-      await userService.savePlotOverview(bookId, plot);
-      setPlotOverview(plot);
-      toast.success('Plot overview saved!');
-    } catch (error) {
-      console.error('Error saving plot:', error);
-      toast.error('Failed to save plot overview');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // const savePlot = async (plot: PlotOverview) => {
+  //   setIsLoading(true);
+  //   try {
+  //     await userService.savePlotOverview(bookId, plot);
+  //     setPlotOverview(plot);
+  //     toast.success('Plot overview saved!');
+  //   } catch (error) {
+  //     console.error('Error saving plot:', error);
+  //     toast.error('Failed to save plot overview');
+  //   } finally {
+  //     setIsLoading(false);
+  //   }
+  // };
 
   const loadPlot = async () => {
     setIsLoading(true);
@@ -85,7 +85,7 @@ export const usePlotGeneration = (bookId: string) => {
     isGenerating,
     isLoading,
     generatePlot,
-    savePlot,
+    // savePlot,
     loadPlot
   };
 };

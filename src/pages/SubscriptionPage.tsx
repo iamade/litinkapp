@@ -62,7 +62,7 @@ export default function SubscriptionPage() {
     }
   };
 
-  const handleUpgrade = async (tier: SubscriptionTier) => {
+  const handleUpgrade = async (tier: SubscriptionTier, billingPeriod: 'monthly' | 'annual') => {
     if (tier.tier === currentSubscription?.tier) return;
 
     try {
@@ -71,6 +71,7 @@ export default function SubscriptionPage() {
       // Create checkout session
       const checkoutData = {
         tier: tier.tier,
+        billing_period: billingPeriod,
         success_url: `${window.location.origin}/subscription?payment=success`,
         cancel_url: `${window.location.origin}/subscription?payment=cancelled`,
       };

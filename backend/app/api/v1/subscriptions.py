@@ -4,7 +4,7 @@ from supabase import Client
 from datetime import datetime
 import json
 
-from app.schemas import (
+from app.schemas.subscription import (
     UserSubscription,
     SubscriptionTierInfo,
     CheckoutSessionCreate,
@@ -28,12 +28,12 @@ async def get_current_subscription(
 ):
     """Get the current user's subscription"""
     try:
-        response = supabase_client.table('user_subscriptions').select('*').eq('user_id', current_user['id']).single().execute()
+        response = supabase_client.table('user_subscriptions').select('*').eq('user_id', current_user['id']).execute()
 
-        if response.error or not response.data:
+        if not response.data:
             # Return free tier if no subscription exists
             free_tier = supabase_client.table('subscription_tiers').select('*').eq('tier', 'free').single().execute()
-            if free_tier.error or not free_tier.data:
+            if not free_tier.data:
                 raise HTTPException(status_code=500, detail="Free tier configuration not found")
 
             return {
@@ -49,7 +49,7 @@ async def get_current_subscription(
                 'updated_at': current_user.get('updated_at')
             }
 
-        return response.data
+        return response.data[0]
 
     except Exception as e:
         print(f"[SubscriptionsAPI] Error getting current subscription: {e}")
@@ -66,12 +66,16 @@ async def create_checkout_session(
     try:
         # Get tier information
         tier_response = supabase_client.table('subscription_tiers').select('*').eq('tier', checkout_data.tier.value).single().execute()
-        if tier_response.error or not tier_response.data:
+        if not tier_response.data:
             raise HTTPException(status_code=404, detail="Subscription tier not found")
 
         tier_info = tier_response.data
         if not tier_info.get('stripe_price_id'):
             raise HTTPException(status_code=400, detail="Tier not available for purchase")
+
+        # Disable backend integration for pro tier
+        if tier_info['tier'] == 'pro':
+            raise HTTPException(status_code=400, detail="Pro tier is coming soon")
 
         # Create or get Stripe customer
         customer_id = await stripe_service.create_or_get_customer(
@@ -145,12 +149,12 @@ async def get_usage_stats(
     """Get current usage statistics"""
     try:
         # Get user's subscription
-        sub_response = supabase_client.table('user_subscriptions').select('*').eq('user_id', current_user['id']).single().execute()
+        sub_response = supabase_client.table('user_subscriptions').select('*').eq('user_id', current_user['id']).execute()
 
-        if sub_response.error or not sub_response.data:
+        if not sub_response.data:
             # Use free tier defaults
             free_tier = supabase_client.table('subscription_tiers').select('*').eq('tier', 'free').single().execute()
-            if free_tier.error or not free_tier.data:
+            if not free_tier.data:
                 raise HTTPException(status_code=500, detail="Free tier configuration not found")
 
             return {
@@ -160,7 +164,7 @@ async def get_usage_stats(
                 'can_generate_video': True
             }
 
-        subscription = sub_response.data
+        subscription = sub_response.data[0]
         current_videos = subscription.get('videos_generated_this_period', 0)
         limit = subscription.get('monthly_video_limit', 0)
 
@@ -184,10 +188,12 @@ async def get_subscription_tiers(
 ):
     """Get available subscription tiers"""
     try:
+        print(f"[SubscriptionsAPI] Starting get_subscription_tiers, supabase_client: {supabase_client}")
         response = supabase_client.table('subscription_tiers').select('*').eq('is_active', True).order('display_order').execute()
+        print(f"[SubscriptionsAPI] Query executed, data length: {len(response.data) if response.data else 0}")
 
-        if response.error:
-            raise HTTPException(status_code=500, detail="Failed to fetch subscription tiers")
+        if not response.data:
+            print(f"[SubscriptionsAPI] No active subscription tiers found")
 
         return response.data
 
@@ -205,12 +211,12 @@ async def cancel_subscription(
     """Cancel the current user's subscription"""
     try:
         # Get user's subscription
-        sub_response = supabase_client.table('user_subscriptions').select('*').eq('user_id', current_user['id']).single().execute()
+        sub_response = supabase_client.table('user_subscriptions').select('*').eq('user_id', current_user['id']).execute()
 
-        if sub_response.error or not sub_response.data:
+        if not sub_response.data:
             raise HTTPException(status_code=404, detail="No active subscription found")
 
-        subscription = sub_response.data
+        subscription = sub_response.data[0]
         if not subscription.get('stripe_subscription_id'):
             raise HTTPException(status_code=400, detail="No Stripe subscription to cancel")
 
@@ -257,12 +263,12 @@ async def reactivate_subscription(
     """Reactivate a cancelled subscription"""
     try:
         # Get user's subscription
-        sub_response = supabase_client.table('user_subscriptions').select('*').eq('user_id', current_user['id']).single().execute()
+        sub_response = supabase_client.table('user_subscriptions').select('*').eq('user_id', current_user['id']).execute()
 
-        if sub_response.error or not sub_response.data:
+        if not sub_response.data:
             raise HTTPException(status_code=404, detail="No subscription found")
 
-        subscription = sub_response.data
+        subscription = sub_response.data[0]
         if not subscription.get('stripe_subscription_id'):
             raise HTTPException(status_code=400, detail="No Stripe subscription to reactivate")
 
@@ -299,7 +305,7 @@ async def _handle_subscription_created(event_data: dict, supabase_client: Client
     try:
         # Get tier info from price_id
         tier_response = supabase_client.table('subscription_tiers').select('*').eq('stripe_price_id', event_data['price_id']).single().execute()
-        if tier_response.error or not tier_response.data:
+        if not tier_response.data:
             print(f"[Webhook] Tier not found for price_id: {event_data['price_id']}")
             return
 

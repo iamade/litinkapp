@@ -94,6 +94,7 @@ class UserSubscription(UserSubscriptionBase):
 class CheckoutSessionCreate(BaseModel):
     """Create checkout session request"""
     tier: SubscriptionTier
+    billing_period: Optional[str] = "monthly"  # "monthly" or "annual"
     success_url: str
     cancel_url: str
 

@@ -1711,6 +1711,7 @@ async def generate_script_and_scenes(
         # Extract from request body
         chapter_id = request.get('chapter_id')
         script_style = request.get('script_style', 'cinematic')
+        plot_context = request.get('plot_context')  # Optional plot context for enhanced generation
 
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
@@ -1759,6 +1760,47 @@ async def generate_script_and_scenes(
 
         # Prepare content for OpenRouter based on script style
         content_for_script = chapter_context.get('total_context', chapter_data['content'])
+
+        # Enhance with plot context if provided
+        if plot_context:
+            try:
+                # Get plot overview and characters for enhanced script generation
+                plot_service = PlotService(supabase_client)
+                plot_overview = await plot_service.get_plot_overview(
+                    user_id=current_user['id'],
+                    book_id=chapter_data['book_id']
+                )
+
+                if plot_overview:
+                    # Get characters for this plot
+                    character_service = CharacterService(supabase_client)
+                    characters = await character_service.get_characters_by_plot(
+                        plot_overview.id, current_user['id']
+                    )
+
+                    # Build enhanced prompt with plot context
+                    plot_enhanced_content = f"""
+PLOT OVERVIEW:
+Logline: {plot_overview.logline or 'Not specified'}
+Themes: {', '.join(plot_overview.themes) if plot_overview.themes else 'Not specified'}
+Story Type: {plot_overview.story_type or 'Not specified'}
+Genre: {plot_overview.genre or 'Not specified'}
+Tone: {plot_overview.tone or 'Not specified'}
+Setting: {plot_overview.setting or 'Not specified'}
+
+CHARACTERS:
+{chr(10).join([f"- {char.name}: {char.role} - {char.personality[:100]}..." for char in characters[:5]]) if characters else "No characters defined"}
+
+CHAPTER CONTENT:
+{content_for_script}
+"""
+
+                    content_for_script = plot_enhanced_content
+                    print(f"[PlotService] Enhanced script generation with plot context for chapter {chapter_id}")
+
+            except Exception as plot_error:
+                print(f"[PlotService] Warning: Could not enhance with plot context: {str(plot_error)}")
+                # Continue with original content if plot enhancement fails
 
         # ✅ Generate script using OpenRouter with tier-appropriate model
         script_result = await openrouter_service.generate_script(
@@ -1905,6 +1947,7 @@ async def generate_script_and_scenes(
             'metadata': script_data["metadata"],
             'service_used': 'openrouter',
             'tier': user_tier.value,
+            'plot_enhanced': bool(plot_context),
             'usage_info': {
                 'tokens_used': usage.get('total_tokens', 0),
                 'estimated_cost': usage.get('estimated_cost', 0),

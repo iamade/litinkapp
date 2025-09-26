@@ -723,12 +723,11 @@ export default function BookViewForEntertainment() {
   };
 
   // Add plot generation hook
-  const { 
-    plotOverview, 
-    isGenerating: isGeneratingPlot, 
-    generatePlot, 
-    savePlot,
-    loadPlot 
+  const {
+    plotOverview,
+    isGenerating: isGeneratingPlot,
+    generatePlot,
+    loadPlot
   } = usePlotGeneration(id!);
 
   // Load plot on component mount and chapter change
@@ -843,7 +842,6 @@ export default function BookViewForEntertainment() {
             plotOverview={plotOverview}
             isGenerating={isGeneratingPlot}
             onGenerate={generatePlot}
-            onSave={savePlot}
           />
         );
 

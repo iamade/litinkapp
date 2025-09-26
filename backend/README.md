@@ -43,7 +43,7 @@ cp docker.env.local .env
 # Edit .env with your API keys
 
 # Start services
-docker-compose up -d
+make up 
 ```
 
 The API will be available at `http://localhost:8000`
@@ -68,7 +68,7 @@ The API will be available at `http://localhost:8000`
    ```
 7. Start the server:
    ```bash
-   uvicorn app.main:app --reload
+  make up 
    ```
 
 ## API Documentation

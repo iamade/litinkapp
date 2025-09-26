@@ -243,17 +243,17 @@ async exportAudioMix(chapterId: string, audioAssets: any) {
 
 // Plot and script methods (if not already present)
 async generatePlotOverview(bookId: string) {
-  const response = await apiClient.post<any>(`/books/${bookId}/plot/generate`, {});
+  const response = await apiClient.post<any>(`/plots/books/${bookId}/generate`, {});
   return response.data;
 },
 
-async savePlotOverview(bookId: string, plot: any) {
-  const response = await apiClient.post<any>(`/books/${bookId}/plot/save`, plot);
-  return response.data;
-},
+// async savePlotOverview(bookId: string, plot: any) {
+//   const response = await apiClient.post<any>(`/books/${bookId}/plot/save`, plot);
+//   return response.data;
+// },
 
 async getPlotOverview(bookId: string) {
-  const response = await apiClient.get<any>(`/books/${bookId}/plot`);
+  const response = await apiClient.get<any>(`/plots/books/${bookId}`);
   return response.data;
 },
 

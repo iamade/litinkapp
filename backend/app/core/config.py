@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List, Optional
+from typing import List, Optional, ClassVar, Dict
 import os
 
 
@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     STRIPE_PRO_PRICE_ID: Optional[str] = None  # Keep for backward compatibility
 
     # Rate Limiting per Tier (requests per minute)
-    RATE_LIMITS = {
+    RATE_LIMITS: ClassVar[Dict[str, int]] = {
         "free": 10,
         "basic": 30,
         "standard": 60,

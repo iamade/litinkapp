@@ -40,6 +40,7 @@ export interface UserSubscription {
 
 export interface CheckoutSessionCreate {
   tier: "free" | "basic" | "pro";
+  billing_period?: "monthly" | "annual";
   success_url: string;
   cancel_url: string;
 }

@@ -32,7 +32,7 @@ interface PlotOverviewPanelProps {
   plotOverview: PlotOverview | null;
   isGenerating: boolean;
   onGenerate: () => void;
-  onSave: (plotOverview: PlotOverview) => void;
+  onSave?: (plotOverview: PlotOverview) => void;
 }
 
 const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
@@ -55,7 +55,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
 
   const handleSave = () => {
     if (editedPlot) {
-      onSave(editedPlot);
+      onSave?.(editedPlot);
       setEditMode(false);
       toast.success('Plot overview saved!');
     }
