@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { userService } from '../services/userService';
 import { toast } from 'react-hot-toast';
 
 interface PlotOverview {
   logline: string;
   themes: string[];
-  storyType: string;
+  story_type: string;
   genre: string;
   tone: string;
   audience: string;
@@ -16,15 +16,15 @@ interface PlotOverview {
 interface Character {
   name: string;
   role: string;
-  characterArc: string;
-  physicalDescription: string;
+  character_arc: string;
+  physical_description: string;
   personality: string;
   archetypes: string[];
   want: string;
   need: string;
   lie: string;
   ghost: string;
-  imageUrl?: string;
+  image_url?: string;
 }
 
 export const usePlotGeneration = (bookId: string) => {
@@ -38,6 +38,8 @@ export const usePlotGeneration = (bookId: string) => {
       const result = await userService.generatePlotOverview(bookId);
       setPlotOverview(result);
       toast.success('Plot overview generated successfully!');
+      // Refetch plot overview to ensure data is up to date
+      await loadPlot();
     } catch (error) {
       console.error('Error generating plot:', error);
       toast.error('Failed to generate plot overview');
@@ -60,10 +62,12 @@ export const usePlotGeneration = (bookId: string) => {
   //   }
   // };
 
-  const loadPlot = async () => {
+  const loadPlot = useCallback(async () => {
     setIsLoading(true);
     try {
       const result = await userService.getPlotOverview(bookId);
+      console.log("[DEBUG] PlotData: ", result);
+
       setPlotOverview(result);
     } catch (error: any) {
       // Check if it's a 404 (no data found) - treat as success
@@ -78,7 +82,7 @@ export const usePlotGeneration = (bookId: string) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [bookId]);
 
   return {
     plotOverview,

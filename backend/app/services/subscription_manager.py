@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class SubscriptionTier(Enum):
     FREE = "free"
     BASIC = "basic"
-    STANDARD = "standard"
+    PRO = "pro"
     PREMIUM = "premium"
     PROFESSIONAL = "professional"
     ENTERPRISE = "enterprise"
@@ -42,7 +42,7 @@ class SubscriptionManager:
             "api_access": False,
             "price_monthly": 19
         },
-        SubscriptionTier.STANDARD: {
+        SubscriptionTier.PRO: {
             "videos_per_month": 30,
             "max_video_duration": 300,
             "max_resolution": "1080p",
@@ -102,19 +102,28 @@ class SubscriptionManager:
         Get user's current subscription tier
         """
         try:
-            # Check database for user subscription
+            logger.info(f"Getting user tier for user_id: {user_id}")
+
+            # Check if user has any subscriptions (active or not)
+            all_subs = self.supabase.table('user_subscriptions').select('*').eq('user_id', user_id).execute()
+            logger.info(f"User {user_id} has {len(all_subs.data or [])} total subscriptions")
+
+            # Check database for active user subscription - don't use .single() as it may return 0 rows
             result = self.supabase.table('user_subscriptions').select('*').eq(
                 'user_id', user_id
-            ).eq('status', 'active').single().execute()
+            ).eq('status', 'active').execute()
 
-            if result.data:
-                return SubscriptionTier(result.data['tier'])
+            if result.data and len(result.data) > 0:
+                tier = SubscriptionTier(result.data[0]['tier'])
+                logger.info(f"User {user_id} has active {tier.value} subscription")
+                return tier
             else:
                 # Default to free tier
+                logger.info(f"User {user_id} has no active subscription, defaulting to FREE tier")
                 return SubscriptionTier.FREE
 
         except Exception as e:
-            logger.error(f"Error getting user tier: {str(e)}")
+            logger.error(f"Error getting user tier for user {user_id}: {str(e)}")
             return SubscriptionTier.FREE
 
     async def check_usage_limits(
@@ -163,7 +172,7 @@ class SubscriptionManager:
             # Get price ID for tier (you need to create these in Stripe Dashboard)
             price_ids = {
                 SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID,
-                SubscriptionTier.STANDARD: settings.STRIPE_STANDARD_PRICE_ID,
+                SubscriptionTier.PRO: settings.STRIPE_PRO_PRICE_ID,
                 SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID,
                 SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID
             }

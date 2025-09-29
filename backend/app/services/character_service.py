@@ -125,6 +125,9 @@ class CharacterService:
             if not usage_check["can_generate"]:
                 raise CharacterServiceError(f"Image generation limit exceeded for {usage_check['tier']} tier")
 
+            # Get user tier for model selection
+            user_tier = usage_check["tier"]
+
             # Get character data
             character = await self.get_character_by_id(character_id, user_id)
             if not character:
@@ -133,12 +136,13 @@ class CharacterService:
             # Build image generation prompt
             prompt = self._build_character_image_prompt(character, custom_prompt)
 
-            # Generate image using ModelsLab service
+            # Generate image using ModelsLab service with tier-based model selection
             image_result = await self.image_service.generate_character_image(
                 character_name=character.name,
                 character_description=character.physical_description or character.personality or "",
                 style="realistic",  # Default style
-                aspect_ratio="3:4"  # Portrait aspect ratio
+                aspect_ratio="3:4",  # Portrait aspect ratio
+                user_tier=user_tier
             )
 
             if image_result.get("status") == "success":

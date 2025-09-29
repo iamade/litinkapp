@@ -365,25 +365,10 @@ export default function BookViewForEntertainment() {
     setCurrentVideoToWatch(videoUrl);
   };
 
-  // Add function to fetch scripts
-  const fetchGeneratedScripts = async (chapterId: string) => {
-    if (!chapterId) return;
-
-    try {
-      setLoadingScripts(true);
-      const data = await userService.getChapterScripts(chapterId);
-      setGeneratedScripts(data.scripts || []);
-    } catch (error) {
-      console.error("Error fetching scripts:", error);
-      toast.error("Failed to fetch scripts");
-    } finally {
-      setLoadingScripts(false);
-    }
-  };
 
   // Add function to select a script
   const handleSelectScript = async (script: any) => {
-    setSelectedScript(script);
+    selectScript(script);
 
     // Update the aiScriptResults to show this script is available
     setAiScriptResults((prev) => ({
@@ -426,12 +411,22 @@ export default function BookViewForEntertainment() {
   //   }
   // };
 
-  // Update your useEffect to fetch scripts when chapter changes
+  // Add plot generation hook
+  const {
+    plotOverview,
+    isGenerating: isGeneratingPlot,
+    generatePlot,
+    loadPlot
+  } = usePlotGeneration(id!);
+
+  // Load plot on component mount and chapter change
   useEffect(() => {
-    if (selectedChapter) {
-      fetchGeneratedScripts(selectedChapter.id);
+    if (book) {
+      loadPlot();
     }
-  }, [selectedChapter]);
+  }, [book]);
+
+  // Scripts are loaded by the useScriptGeneration hook
 
   // Load book data
   const loadBook = async (bookId: string) => {
@@ -478,9 +473,9 @@ export default function BookViewForEntertainment() {
 
       toast.success(`Video generation started! ${result.message}`);
       pollVideoStatus(result.video_generation_id);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating video:", error);
-      toast.error(error.message || "Failed to start video generation");
+      toast.error(error?.message || "Failed to start video generation");
       setVideoStatus("error");
       updateProgress("video", "error");
     }
@@ -488,7 +483,6 @@ export default function BookViewForEntertainment() {
 
   useEffect(() => {
     if (selectedChapter) {
-      fetchGeneratedScripts(selectedChapter.id);
       fetchExistingGenerations(); // ✅ Add this line
     }
   }, [selectedChapter]);
@@ -629,7 +623,6 @@ export default function BookViewForEntertainment() {
         [selectedChapter.id]: result,
       }));
 
-      await fetchGeneratedScripts(selectedChapter.id);
       updateProgress("script", "completed");
       toast.success("AI Script & Scene Descriptions generated!");
     } catch (error) {
@@ -683,7 +676,6 @@ export default function BookViewForEntertainment() {
 
   useEffect(() => {
     if (selectedChapter) {
-      fetchGeneratedScripts(selectedChapter.id);
       fetchExistingGenerations();
     }
   }, [selectedChapter]);
@@ -722,20 +714,6 @@ export default function BookViewForEntertainment() {
     );
   };
 
-  // Add plot generation hook
-  const {
-    plotOverview,
-    isGenerating: isGeneratingPlot,
-    generatePlot,
-    loadPlot
-  } = usePlotGeneration(id!);
-
-  // Load plot on component mount and chapter change
-  useEffect(() => {
-    if (book) {
-      loadPlot();
-    }
-  }, [book]);
 
 
   const {
@@ -752,7 +730,6 @@ export default function BookViewForEntertainment() {
 
   useEffect(() => {
     if (selectedChapter) {
-      fetchGeneratedScripts(selectedChapter.id);
       fetchExistingGenerations();
       loadScripts(); // Load enhanced scripts
     }
@@ -839,9 +816,6 @@ export default function BookViewForEntertainment() {
          return (
           <PlotOverviewPanel
             bookId={book!.id}
-            plotOverview={plotOverview}
-            isGenerating={isGeneratingPlot}
-            onGenerate={generatePlot}
           />
         );
 

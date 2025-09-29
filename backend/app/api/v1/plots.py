@@ -102,6 +102,44 @@ async def get_plot_overview(
         raise HTTPException(status_code=500, detail=f"Failed to retrieve plot overview: {str(e)}")
 
 
+@router.get("/books/{book_id}/overview", response_model=PlotOverviewResponse)
+async def get_plot_overview_overview(
+    book_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Retrieve existing plot overview for a book.
+
+    - **book_id**: ID of the book
+    """
+    try:
+        # Validate book ownership
+        book_response = supabase_client.table('books').select('user_id').eq('id', book_id).single().execute()
+        if not book_response.data:
+            raise HTTPException(status_code=404, detail="Book not found")
+
+        if book_response.data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this book")
+
+        # Get plot overview
+        plot_service = PlotService(supabase_client)
+        plot_overview = await plot_service.get_plot_overview(
+            user_id=current_user['id'],
+            book_id=book_id
+        )
+
+        if not plot_overview:
+            raise HTTPException(status_code=404, detail="No plot overview found for this book")
+
+        return plot_overview
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve plot overview: {str(e)}")
+
+
 @router.put("/{plot_id}", response_model=PlotOverviewResponse)
 async def update_plot_overview(
     plot_id: str,

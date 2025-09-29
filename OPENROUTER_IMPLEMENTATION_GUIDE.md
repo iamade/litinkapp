@@ -48,7 +48,7 @@ class OpenRouterService:
     # Model configurations with costs (per 1K tokens)
     MODEL_CONFIGS = {
         ModelTier.FREE: {
-            "primary": "ArliAI: QwQ 32B RpR v1" ,
+            "primary": "arliai/qwq-32b-arliai-rpr-v1:free",
             "fallback": "meta-llama/llama-3.2-3b-instruct",
             "max_tokens": 2000,
             "temperature": 0.7,

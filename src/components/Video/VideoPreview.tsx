@@ -4,35 +4,31 @@ import { VideoScene } from '../../types/videoProduction';
 
 interface VideoPreviewProps {
   scenes: VideoScene[];
-  currentSceneIndex: number;
+  currentSceneIndex?: number;
   isPlaying: boolean;
-  onSceneChange: (index: number) => void;
-  onPlayPause: () => void;
+  onSceneChange?: (index: number) => void;
+  onPlayPause?: () => void;
 }
 
-const VideoPreview: React.FC<VideoPreviewProps> = ({
-  scenes,
-  currentSceneIndex,
-  isPlaying,
-  onSceneChange,
-  onPlayPause,
-}) => {
+const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
+  const { scenes, currentSceneIndex = 0, isPlaying, onSceneChange, onPlayPause } = props;
   const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolume] = useState(1);
   const [showControls, setShowControls] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
 
-  const currentScene = scenes[currentSceneIndex];
-  const totalDuration = scenes.reduce((sum, scene) => sum + scene.duration, 0);
+  const currentScene = scenes && scenes[currentSceneIndex];
+  const totalDuration = scenes ? scenes.reduce((sum, scene) => sum + scene.duration, 0) : 0;
 
   useEffect(() => {
+    if (!scenes) return;
     // Calculate which scene should be showing based on current time
     let accumulatedTime = 0;
     for (let i = 0; i < scenes.length; i++) {
       if (currentTime < accumulatedTime + scenes[i].duration) {
         if (i !== currentSceneIndex) {
-          onSceneChange(i);
+          onSceneChange?.(i);
         }
         break;
       }
@@ -62,13 +58,13 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({
 
   const handlePreviousScene = () => {
     if (currentSceneIndex > 0) {
-      onSceneChange(currentSceneIndex - 1);
+      onSceneChange?.(currentSceneIndex - 1);
     }
   };
 
   const handleNextScene = () => {
     if (currentSceneIndex < scenes.length - 1) {
-      onSceneChange(currentSceneIndex + 1);
+      onSceneChange?.(currentSceneIndex + 1);
     }
   };
 
@@ -162,7 +158,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({
             <div className="flex items-center space-x-4">
               {/* Play/Pause */}
               <button
-                onClick={onPlayPause}
+                onClick={onPlayPause || (() => {})}
                 className="text-white hover:text-blue-400 transition-colors"
               >
                 {isPlaying ? (

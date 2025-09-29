@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { userService } from '../services/userService';
 import { toast } from 'react-hot-toast';
 
@@ -17,6 +17,7 @@ interface ChapterScript {
   id: string;
   chapter_id: string;
   script_style: string;
+  script_name: string;
   script: string;
   scene_descriptions: SceneDescription[];
   characters: string[];
@@ -62,7 +63,7 @@ interface Scene {
 
 interface ScriptGenerationOptions {
   includeCharacterProfiles: boolean;
-  targetDuration?: number;
+  targetDuration?: number | "auto";
   sceneCount?: number;
   focusAreas: string[];
 }
@@ -72,6 +73,11 @@ export const useScriptGeneration = (chapterId: string) => {
   const [selectedScript, setSelectedScript] = useState<ChapterScript | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+
+  // Reset selectedScript when chapterId changes
+  useEffect(() => {
+    setSelectedScript(null);
+  }, [chapterId]);
 
   const loadScripts = useCallback(async () => {
     if (!chapterId) return;
@@ -86,8 +92,9 @@ export const useScriptGeneration = (chapterId: string) => {
         id: script.id,
         chapter_id: script.chapter_id,
         script_style: script.script_style,
+        script_name: script.script_name || 'Unnamed Script',
         script: script.script,
-        scene_descriptions: script.scene_descriptions || [],
+        scene_descriptions: (script.scene_descriptions || []) as unknown as SceneDescription[],
         characters: script.characters || [],
         character_details: script.character_details || '',
         acts: script.acts || [],
@@ -109,18 +116,23 @@ export const useScriptGeneration = (chapterId: string) => {
     } finally {
       setIsLoading(false);
     }
-  }, [chapterId, selectedScript]);
+  }, [chapterId]);
 
   const generateScript = async (
-    scriptStyle: string, 
+    scriptStyle: string,
     options: ScriptGenerationOptions
   ) => {
     setIsGeneratingScript(true);
     try {
       const result = await userService.generateScriptAndScenes(
-        chapterId, 
+        chapterId,
         scriptStyle,
-        options
+        {
+          targetDuration: options.targetDuration,
+          includeCharacterProfiles: options.includeCharacterProfiles,
+          sceneCount: options.sceneCount,
+          focusAreas: options.focusAreas
+        }
       );
       
       // Create new script object
@@ -128,8 +140,9 @@ export const useScriptGeneration = (chapterId: string) => {
         id: result.script_id || Date.now().toString(),
         chapter_id: chapterId,
         script_style: scriptStyle,
+        script_name: result.script_name || 'Unnamed Script',
         script: result.script,
-        scene_descriptions: result.scene_descriptions || [],
+        scene_descriptions: (result.scene_descriptions || []) as unknown as SceneDescription[],
         characters: result.characters || [],
         character_details: result.character_details || '',
         acts: [],
@@ -196,9 +209,7 @@ export const useScriptGeneration = (chapterId: string) => {
         setSelectedScript(remaining.length > 0 ? remaining[0] : null);
       }
 
-      // TODO: Send delete to backend
-      // await userService.deleteScript(scriptId);
-      
+      await userService.deleteScript(scriptId);
       toast.success('Script deleted successfully!');
     } catch (error) {
       console.error('Error deleting script:', error);

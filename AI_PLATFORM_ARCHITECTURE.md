@@ -33,7 +33,7 @@ Model Configuration:
   Script Generation:
     Free Tier:
     provider: OpenRouter
-      primary: "ArliAI: QwQ 32B RpR v1" #$0/M input tokens $0/M output tokens
+      primary: "arliai/qwq-32b-arliai-rpr-v1:free" #$0/M input tokens $0/M output tokens
       fallback: "meta-llama/llama-3.2-3b-instruct" # $0.00006/1K tokens
     
     Basic Tier:

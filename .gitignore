@@ -27,3 +27,4 @@ venv
 uploads
 backend/mycoderead.md
 backend/CODEDISCUSS.md
+*.pyc

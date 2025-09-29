@@ -82,10 +82,11 @@ class PlotService:
             characters_data = await self._generate_characters_with_archetypes(
                 plot_data, book_context, model_tier
             )
+            logger.info(f"[PlotService] Characters generated: {len(characters_data)} characters")
 
             # 6. Store plot overview and characters in database
             stored_data = await self._store_plot_overview(
-                plot_data, characters_data, user_id, book_id
+                plot_data, characters_data, user_id, book_id, book_context
             )
 
             # 7. Record usage for billing
@@ -256,9 +257,12 @@ Return ONLY a valid JSON object with these exact keys:
         """
         Parse the AI response and extract plot data.
         """
+        logger.info(f"[PlotService] Raw AI response: {ai_response[:500]}...")  # Log first 500 chars
+
         try:
             # Try to parse as JSON first
             plot_data = json.loads(ai_response.strip())
+            logger.info(f"[PlotService] Parsed JSON successfully. Themes type: {type(plot_data.get('themes'))}, value: {plot_data.get('themes')}")
 
             # Validate required fields
             required_fields = ["logline", "themes", "story_type", "genre", "tone", "audience", "setting"]
@@ -282,6 +286,7 @@ Return ONLY a valid JSON object with these exact keys:
                 "setting": self._extract_field_from_text(ai_response, "setting")
             }
 
+            logger.info(f"[PlotService] Text parsing completed. Themes type: {type(plot_data.get('themes'))}, value: {plot_data.get('themes')}")
             return plot_data
 
     def _extract_field_from_text(self, text: str, field_name: str) -> Optional[str]:
@@ -310,21 +315,30 @@ Return ONLY a valid JSON object with these exact keys:
         """
         import re
 
+        logger.debug(f"[PlotService] Extracting themes from text: {text[:200]}...")
+
         # Look for themes section
         themes_match = re.search(r"themes?:?\s*\[([^\]]+)\]", text, re.IGNORECASE | re.DOTALL)
         if themes_match:
             themes_str = themes_match.group(1)
+            logger.debug(f"[PlotService] Found bracketed themes: {themes_str}")
             # Split by comma and clean up
             themes = [t.strip().strip('"\'') for t in themes_str.split(',')]
-            return [t for t in themes if t]
+            result = [t for t in themes if t]
+            logger.info(f"[PlotService] Extracted themes from brackets: {result}")
+            return result
 
         # Fallback: look for themes in a list format
         themes_match = re.search(r"themes?:?\s*(.+?)(?=\n\n|\n[A-Z]|$)", text, re.IGNORECASE | re.DOTALL)
         if themes_match:
             themes_text = themes_match.group(1)
+            logger.debug(f"[PlotService] Found themes text: {themes_text}")
             themes = re.split(r'[,;]\s*', themes_text)
-            return [t.strip() for t in themes if t.strip()]
+            result = [t.strip() for t in themes if t.strip()]
+            logger.info(f"[PlotService] Extracted themes from text: {result}")
+            return result
 
+        logger.warning("[PlotService] No themes found in text response")
         return []
 
     async def _generate_characters_with_archetypes(
@@ -454,8 +468,74 @@ Return ONLY a valid JSON array of character objects:
             return validated_characters[:5]  # Limit to 5 characters
 
         except json.JSONDecodeError:
-            logger.warning("[PlotService] Character response not valid JSON")
-            return []
+            # Fallback: extract information from text response
+            logger.warning("[PlotService] Character response not valid JSON, attempting text parsing")
+            return self._parse_character_generation_text_response(ai_response)
+
+    def _parse_character_generation_text_response(self, ai_response: str) -> List[Dict[str, Any]]:
+        """
+        Parse character generation response from text when JSON parsing fails.
+        """
+        import re
+
+        logger.info(f"[PlotService] Parsing character text response: {ai_response[:500]}...")
+
+        characters = []
+
+        # Split response into character sections
+        # Look for patterns like "Character 1:", "1.", or just numbered sections
+        character_sections = re.split(r'(?:^|\n)(?:Character\s*\d+:?|^\d+\.|\n\d+\.)\s*', ai_response.strip(), flags=re.MULTILINE | re.IGNORECASE)
+
+        # Remove empty sections
+        character_sections = [section.strip() for section in character_sections if section.strip()]
+
+        for section in character_sections[:5]:  # Limit to 5 characters
+            character_data = {
+                "name": self._extract_character_field_from_text(section, "name"),
+                "role": self._extract_character_field_from_text(section, "role"),
+                "character_arc": self._extract_character_field_from_text(section, "character_arc"),
+                "physical_description": self._extract_character_field_from_text(section, "physical_description"),
+                "personality": self._extract_character_field_from_text(section, "personality"),
+                "want": self._extract_character_field_from_text(section, "want"),
+                "need": self._extract_character_field_from_text(section, "need"),
+                "lie": self._extract_character_field_from_text(section, "lie"),
+                "ghost": self._extract_character_field_from_text(section, "ghost"),
+                "archetypes": [],
+                "generation_method": "openrouter_text_fallback"
+            }
+
+            # Only include characters that have at least a name
+            if character_data["name"]:
+                characters.append(character_data)
+
+        logger.info(f"[PlotService] Extracted {len(characters)} characters from text")
+        return characters
+
+    def _extract_character_field_from_text(self, text: str, field_name: str) -> Optional[str]:
+        """
+        Extract a specific character field value from text.
+        """
+        import re
+
+        # Look for patterns like "Field Name: value"
+        patterns = [
+            rf"{field_name}:\s*([^\n\r]+)",
+            rf"{field_name.capitalize()}:\s*([^\n\r]+)",
+            rf"{field_name.upper()}:\s*([^\n\r]+)",
+            rf"{field_name.replace('_', ' ')}:\s*([^\n\r]+)",
+            rf"{field_name.replace('_', ' ').capitalize()}:\s*([^\n\r]+)"
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                value = match.group(1).strip()
+                # Clean up common artifacts
+                value = re.sub(r'^[-•*]\s*', '', value)  # Remove bullets
+                value = re.sub(r'\s*$', '', value)  # Remove trailing whitespace
+                return value if value else None
+
+        return None
 
     async def _analyze_character_archetypes(
         self,
@@ -529,7 +609,8 @@ Return a JSON object with:
         plot_data: Dict[str, Any],
         characters: List[Dict[str, Any]],
         user_id: str,
-        book_id: str
+        book_id: str,
+        book_context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Store plot overview and characters in database.
@@ -538,23 +619,37 @@ Return a JSON object with:
             # Generate plot overview ID
             plot_id = str(uuid.uuid4())
 
-            # Prepare plot overview data
+            # Query current maximum version for this book and user
+            max_version_response = self.db.table('plot_overviews').select('version').eq('book_id', book_id).eq('user_id', user_id).order('version', desc=True).limit(1).execute()
+            if max_version_response.data:
+                max_version = max_version_response.data[0]['version']
+                version = max_version + 1
+            else:
+                version = 1
+
+            # Prepare plot overview data with defaults for missing fields
+            themes_value = plot_data.get("themes", [])
+            if not themes_value:
+                themes_value = ["adventure", "growth"]  # Default themes
+
+            logger.info(f"[PlotService] Storing themes - type: {type(themes_value)}, value: {themes_value}")
+
             plot_overview_data = {
                 "id": plot_id,
                 "book_id": book_id,
                 "user_id": user_id,
-                "logline": plot_data.get("logline"),
-                "themes": plot_data.get("themes", []),
-                "story_type": plot_data.get("story_type"),
-                "genre": plot_data.get("genre"),
-                "tone": plot_data.get("tone"),
-                "audience": plot_data.get("audience"),
-                "setting": plot_data.get("setting"),
+                "logline": plot_data.get("logline") or f"A compelling {plot_data.get('genre', 'fiction')} story about personal growth and discovery.",
+                "themes": themes_value,
+                "story_type": plot_data.get("story_type") or "hero's journey",
+                "genre": plot_data.get("genre") or book_context.get("book", {}).get("genre", "fiction"),
+                "tone": plot_data.get("tone") or "hopeful",
+                "audience": plot_data.get("audience") or "adult",
+                "setting": plot_data.get("setting") or "Contemporary world",
                 "generation_method": plot_data.get("generation_method", "openrouter"),
                 "model_used": plot_data.get("model_used"),
                 "generation_cost": plot_data.get("generation_cost", 0.0),
                 "status": plot_data.get("status", "completed"),
-                "version": 1
+                "version": version
             }
 
             # Insert plot overview
@@ -611,26 +706,34 @@ Return a JSON object with:
 
                 stored_characters.append(stored_char)
 
-            # Create plot overview response
+            # Debug: Log characters data before creating response
+            logger.info(f"[PlotService] Creating PlotOverviewResponse - stored_characters count: {len(stored_characters)}")
+            if stored_characters:
+                logger.info(f"[PlotService] First character: {stored_characters[0].name if stored_characters[0] else 'None'}")
+
+            # Create plot overview response with defaults
             plot_response = PlotOverviewResponse(
                 id=plot_id,
                 book_id=book_id,
                 user_id=user_id,
-                logline=plot_data.get("logline"),
-                themes=plot_data.get("themes", []),
-                story_type=plot_data.get("story_type"),
-                genre=plot_data.get("genre"),
-                tone=plot_data.get("tone"),
-                audience=plot_data.get("audience"),
-                setting=plot_data.get("setting"),
-                generation_method=plot_data.get("generation_method", "openrouter"),
-                model_used=plot_data.get("model_used"),
-                generation_cost=plot_data.get("generation_cost", 0.0),
-                status=plot_data.get("status", "completed"),
-                version=1,
+                logline=plot_overview_data["logline"],
+                themes=plot_overview_data["themes"],
+                story_type=plot_overview_data["story_type"],
+                genre=plot_overview_data["genre"],
+                tone=plot_overview_data["tone"],
+                audience=plot_overview_data["audience"],
+                setting=plot_overview_data["setting"],
+                generation_method=plot_overview_data["generation_method"],
+                model_used=plot_overview_data["model_used"],
+                generation_cost=plot_overview_data["generation_cost"],
+                status=plot_overview_data["status"],
+                version=version,
+                characters=stored_characters,  # Add missing characters field
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
+
+            logger.info(f"[PlotService] PlotOverviewResponse created with characters field: {len(plot_response.characters) if hasattr(plot_response, 'characters') else 'MISSING'}")
 
             return {
                 "plot_overview": plot_response,
@@ -840,6 +943,7 @@ Return the enhanced script.
                 generation_cost=plot_data['generation_cost'],
                 status=plot_data['status'],
                 version=plot_data['version'],
+                characters=characters,
                 created_at=plot_data['created_at'],
                 updated_at=plot_data['updated_at']
             )

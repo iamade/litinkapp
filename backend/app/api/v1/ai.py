@@ -1,7 +1,10 @@
 from datetime import datetime
 from typing import Optional
+import re
 from fastapi import APIRouter, Depends, HTTPException, Body
 from app.schemas.video import VideoGenerationRequest, VideoGenerationResponse
+from app.services.character_service import CharacterService
+from app.services.plot_service import PlotService
 from supabase import Client
 import time
 
@@ -18,6 +21,211 @@ from app.services.pipeline_manager import PipelineManager, PipelineStep
 from app.services.deepseek_script_service import DeepSeekScriptService
 from app.services.openrouter_service import OpenRouterService, ModelTier
 from app.services.subscription_manager import SubscriptionManager
+
+
+def parse_scene_descriptions(analysis_result: str) -> list:
+    """Parse scene descriptions from AI analysis result with improved logic"""
+    scene_descriptions = []
+
+    # Split by common scene delimiters
+    lines = analysis_result.split('\n')
+
+    current_scene = ""
+    for line in lines:
+        line = line.strip()
+
+        # Look for scene markers (Scene 1:, Scene One:, SCENE 1:, etc.)
+        scene_match = re.match(r'^(?:Scene\s+|SCENE\s+|scene\s+)(\d+|[A-Za-z]+)\s*:\s*(.+)$', line, re.IGNORECASE)
+
+        if scene_match:
+            # Save previous scene if it exists
+            if current_scene and len(current_scene) > 20:
+                scene_descriptions.append(current_scene[:300])  # Limit length
+            # Start new scene
+            current_scene = scene_match.group(2) + ": " + scene_match.group(3)
+        elif line and len(line) > 10:
+            # Continue building current scene
+            if current_scene:
+                current_scene += " " + line
+            else:
+                current_scene = line
+
+    # Add the last scene
+    if current_scene and len(current_scene) > 20:
+        scene_descriptions.append(current_scene[:300])
+
+    # If no structured scenes found, fall back to line-based parsing
+    if not scene_descriptions:
+        for line in lines:
+            line = line.strip()
+            if line and len(line) > 20:
+                scene_descriptions.append(line[:300])
+
+    return scene_descriptions
+
+
+def extract_characters(character_details: str, script_style: str = "cinematic_movie") -> list:
+    """Extract character names from character analysis with improved logic and script style filtering"""
+    characters = []
+
+    # Look for patterns like "Character Name: description" or "Name - role"
+    character_patterns = [
+        r'^([A-Z][a-zA-Z\s]+?)\s*:\s*.+$',  # Name: description
+        r'^([A-Z][a-zA-Z\s]+?)\s*-\s*.+$',   # Name - role
+        r'^([A-Z][a-zA-Z\s]+?)\s*\([^)]+\)', # Name (role)
+    ]
+
+    lines = character_details.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        for pattern in character_patterns:
+            match = re.match(pattern, line, re.MULTILINE)
+            if match:
+                char_name = match.group(1).strip()
+                # Clean up the name (remove extra spaces, titles, etc.)
+                char_name = re.sub(r'\s+', ' ', char_name)
+                if len(char_name) > 1 and char_name not in characters:
+                    characters.append(char_name)
+                break
+
+    # Fallback: extract capitalized words if no structured characters found
+    if not characters:
+        potential_chars = re.findall(r'\b[A-Z][a-zA-Z]+\b', character_details)
+        # Filter out common non-character words
+        exclude_words = {'The', 'And', 'But', 'For', 'Are', 'With', 'This', 'That', 'From', 'They', 'Will', 'Have', 'Been', 'One', 'Two', 'Three'}
+        characters = [char for char in potential_chars if char not in exclude_words]
+
+    # Filter characters based on script style for frontend selection
+    if script_style == "cinematic_narration":
+        # For narration scripts, exclude narrator-like entities that aren't speaking characters
+        narrator_indicators = ['narrator', 'voice', 'speaker', 'announcer']
+        filtered_characters = []
+        for char in characters:
+            char_lower = char.lower()
+            # Exclude if it contains narrator indicators
+            if not any(indicator in char_lower for indicator in narrator_indicators):
+                filtered_characters.append(char)
+        characters = filtered_characters
+
+    # Remove duplicates and limit
+    characters = list(set(characters))[:10]  # Increased limit to 10
+
+    return characters
+
+
+def validate_script_style(script_style: str) -> str:
+    """Validate and normalize script style"""
+    valid_styles = ["cinematic", "narration", "educational", "marketing"]
+    if script_style not in valid_styles:
+        # Default to cinematic if invalid
+        return "cinematic"
+    return script_style
+
+
+def get_available_script_styles() -> dict:
+    """Get available script styles with descriptions"""
+    return {
+        "cinematic": {
+            "name": "Cinematic",
+            "description": "Professional screenplay format with scene headings, character names, and visual descriptions",
+            "best_for": "Video production, storytelling, dramatic content"
+        },
+        "narration": {
+            "name": "Narration",
+            "description": "Rich voice-over script with descriptive language and atmospheric elements",
+            "best_for": "Audiobooks, documentaries, explanatory videos"
+        },
+        "educational": {
+            "name": "Educational",
+            "description": "Clear, structured learning content with step-by-step explanations",
+            "best_for": "Tutorials, courses, training materials"
+        },
+        "marketing": {
+            "name": "Marketing",
+            "description": "Compelling promotional content with hooks and calls-to-action",
+            "best_for": "Advertisements, product demos, promotional videos"
+        }
+    }
+
+
+async def enhance_with_plot_context(supabase_client: Client, user_id: str, book_id: str, chapter_content: str) -> dict:
+    """Enhanced plot context integration for script generation"""
+    try:
+        plot_service = PlotService(supabase_client)
+        plot_overview = await plot_service.get_plot_overview(
+            user_id=user_id,
+            book_id=book_id
+        )
+
+        if not plot_overview:
+            return {"enhanced_content": None, "plot_info": None}
+
+        # Get characters for this plot
+        character_service = CharacterService(supabase_client)
+        characters = await character_service.get_characters_by_plot(
+            plot_overview.id, user_id
+        )
+
+        # Build comprehensive plot context
+        plot_context_parts = []
+
+        # Plot overview section
+        plot_context_parts.append("PLOT OVERVIEW:")
+        if plot_overview.logline:
+            plot_context_parts.append(f"Logline: {plot_overview.logline}")
+        if plot_overview.themes:
+            plot_context_parts.append(f"Themes: {', '.join(plot_overview.themes)}")
+        if plot_overview.story_type:
+            plot_context_parts.append(f"Story Type: {plot_overview.story_type}")
+        if plot_overview.genre:
+            plot_context_parts.append(f"Genre: {plot_overview.genre}")
+        if plot_overview.tone:
+            plot_context_parts.append(f"Tone: {plot_overview.tone}")
+        if plot_overview.setting:
+            plot_context_parts.append(f"Setting: {plot_overview.setting}")
+        if plot_overview.target_audience:
+            plot_context_parts.append(f"Target Audience: {plot_overview.target_audience}")
+
+        # Characters section
+        if characters:
+            plot_context_parts.append("\nCHARACTERS:")
+            for char in characters[:8]:  # Limit to 8 characters for brevity
+                char_info = f"- {char.name}"
+                if char.role:
+                    char_info += f" ({char.role})"
+                if char.personality:
+                    char_info += f": {char.personality[:150]}..."
+                plot_context_parts.append(char_info)
+
+        # Conflict and stakes
+        if plot_overview.conflict_type or plot_overview.stakes:
+            plot_context_parts.append("\nSTORY ELEMENTS:")
+            if plot_overview.conflict_type:
+                plot_context_parts.append(f"Conflict Type: {plot_overview.conflict_type}")
+            if plot_overview.stakes:
+                plot_context_parts.append(f"Stakes: {plot_overview.stakes}")
+
+        # Combine plot context with chapter content
+        plot_context_text = "\n".join(plot_context_parts)
+        enhanced_content = f"{plot_context_text}\n\nCHAPTER CONTENT:\n{chapter_content}"
+
+        return {
+            "enhanced_content": enhanced_content,
+            "plot_info": {
+                "plot_id": plot_overview.id,
+                "logline": plot_overview.logline,
+                "genre": plot_overview.genre,
+                "tone": plot_overview.tone,
+                "character_count": len(characters) if characters else 0
+            }
+        }
+
+    except Exception as e:
+        print(f"Error in enhance_with_plot_context: {str(e)}")
+        return {"enhanced_content": None, "plot_info": None}
 
 
 router = APIRouter()
@@ -747,6 +955,14 @@ async def trigger_lip_sync_manually(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
+@router.get("/script-styles")
+async def get_script_styles():
+    """Get available script styles with descriptions"""
+    return {
+        "styles": get_available_script_styles(),
+        "default": "cinematic"
+    }
+
 @router.get("/scripts/{chapter_id}")
 async def list_chapter_scripts(
     chapter_id: str,
@@ -761,12 +977,12 @@ async def list_chapter_scripts(
             .eq('user_id', current_user['id'])\
             .order('created_at', desc=True)\
             .execute()
-        
+
         return {
             'chapter_id': chapter_id,
             'scripts': scripts.data or []
         }
-        
+
     except Exception as e:
         print(f"Error listing scripts: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1710,7 +1926,8 @@ async def generate_script_and_scenes(
     try:
         # Extract from request body
         chapter_id = request.get('chapter_id')
-        script_style = request.get('script_style', 'cinematic')
+        script_style = validate_script_style(request.get('script_style', 'cinematic'))
+        script_name = request.get('script_name')  # Optional custom name for the script
         plot_context = request.get('plot_context')  # Optional plot context for enhanced generation
 
         if not chapter_id:
@@ -1762,51 +1979,41 @@ async def generate_script_and_scenes(
         content_for_script = chapter_context.get('total_context', chapter_data['content'])
 
         # Enhance with plot context if provided
+        plot_enhanced = False
+        plot_info = None
         if plot_context:
             try:
-                # Get plot overview and characters for enhanced script generation
-                plot_service = PlotService(supabase_client)
-                plot_overview = await plot_service.get_plot_overview(
+                plot_info = await enhance_with_plot_context(
+                    supabase_client=supabase_client,
                     user_id=current_user['id'],
-                    book_id=chapter_data['book_id']
+                    book_id=chapter_data['book_id'],
+                    chapter_content=content_for_script
                 )
-
-                if plot_overview:
-                    # Get characters for this plot
-                    character_service = CharacterService(supabase_client)
-                    characters = await character_service.get_characters_by_plot(
-                        plot_overview.id, current_user['id']
-                    )
-
-                    # Build enhanced prompt with plot context
-                    plot_enhanced_content = f"""
-PLOT OVERVIEW:
-Logline: {plot_overview.logline or 'Not specified'}
-Themes: {', '.join(plot_overview.themes) if plot_overview.themes else 'Not specified'}
-Story Type: {plot_overview.story_type or 'Not specified'}
-Genre: {plot_overview.genre or 'Not specified'}
-Tone: {plot_overview.tone or 'Not specified'}
-Setting: {plot_overview.setting or 'Not specified'}
-
-CHARACTERS:
-{chr(10).join([f"- {char.name}: {char.role} - {char.personality[:100]}..." for char in characters[:5]]) if characters else "No characters defined"}
-
-CHAPTER CONTENT:
-{content_for_script}
-"""
-
-                    content_for_script = plot_enhanced_content
+                if plot_info and plot_info['enhanced_content']:
+                    content_for_script = plot_info['enhanced_content']
+                    plot_enhanced = True
                     print(f"[PlotService] Enhanced script generation with plot context for chapter {chapter_id}")
 
             except Exception as plot_error:
                 print(f"[PlotService] Warning: Could not enhance with plot context: {str(plot_error)}")
                 # Continue with original content if plot enhancement fails
 
+        # Extract target duration from request
+        target_duration = request.get('target_duration', 'auto')
+        if target_duration == 'auto':
+            target_duration = 'auto'
+        elif isinstance(target_duration, str) and target_duration.isdigit():
+            target_duration = int(target_duration)
+        else:
+            target_duration = None
+
         # ✅ Generate script using OpenRouter with tier-appropriate model
         script_result = await openrouter_service.generate_script(
-            content=content_for_script,
+            content=chapter_data['content'],  # Use original content, plot context is handled separately
             user_tier=user_model_tier,
-            script_type=script_style
+            script_type=script_style,
+            target_duration=target_duration,
+            plot_context=plot_info if plot_info and plot_info.get('enhanced_content') else None
         )
 
         if script_result.get('status') != 'success':
@@ -1820,28 +2027,23 @@ CHAPTER CONTENT:
 
         # ✅ Generate scene breakdown using OpenRouter
         scene_breakdown_result = await openrouter_service.analyze_content(
-            content=f"Please break down this script into 5-8 detailed scene descriptions for video generation:\n\n{script}",
+            content=f"Please break down this script into 5-8 detailed scene descriptions for video generation. Format each scene as 'Scene X: [Detailed description]' where X is the scene number:\n\n{script}",
             user_tier=user_model_tier,
             analysis_type="summary"  # Use summary type but with scene-specific prompt
         )
 
         scene_descriptions = []
         if scene_breakdown_result.get('status') == 'success':
-            # Parse scene descriptions from the analysis result
+            # Parse scene descriptions from the analysis result with improved logic
             analysis_result = scene_breakdown_result.get('result', '')
-            # Simple parsing - split by lines that look like scene descriptions
-            lines = analysis_result.split('\n')
-            for line in lines:
-                line = line.strip()
-                if line and len(line) > 20:  # Filter out short lines
-                    scene_descriptions.append(line[:300])  # Limit length
+            scene_descriptions = parse_scene_descriptions(analysis_result)
 
         # Limit to reasonable number of scenes
         scene_descriptions = scene_descriptions[:10]
 
         # ✅ Generate character analysis using OpenRouter
         character_analysis_result = await openrouter_service.analyze_content(
-            content=f"Extract and describe all characters mentioned in this script:\n\n{script}",
+            content=f"Extract and describe all characters mentioned in this script. Format as 'Character Name: [brief description/role]':\n\n{script}",
             user_tier=user_model_tier,
             analysis_type="characters"
         )
@@ -1850,11 +2052,12 @@ CHAPTER CONTENT:
         character_details = ""
         if character_analysis_result.get('status') == 'success':
             character_details = character_analysis_result.get('result', '')
-            # Extract character names (simple approach)
-            import re
-            # Look for capitalized words that might be character names
-            potential_chars = re.findall(r'\b[A-Z][a-z]+\b', character_details)
-            characters = list(set(potential_chars))[:8]  # Limit to 8 characters
+            # Extract character names with improved logic, filtered by script style
+            characters = extract_characters(character_details, script_style)
+
+        # Generate default script name if not provided
+        if not script_name:
+            script_name = f"{script_style.title()} Script - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
 
         # Enhanced script data with metadata
         script_data = {
@@ -1863,6 +2066,7 @@ CHAPTER CONTENT:
             "characters": characters,
             "character_details": character_details,
             "script_style": script_style,
+            "script_name": script_name,
             "user_id": current_user['id'],
             "created_at": datetime.now().isoformat(),
             "metadata": {
@@ -1888,11 +2092,13 @@ CHAPTER CONTENT:
             "ai_generated_content": ai_content
         }).eq('id', chapter_id).execute()
 
-        # ALSO create a dedicated scripts table entry for easier access
+        # Create a dedicated scripts table entry for easier access
+        # Allow multiple scripts per chapter by not checking for existing ones
         script_record = {
             "chapter_id": chapter_id,
             "user_id": current_user['id'],
             "script_style": script_style,
+            "script_name": script_name,
             "script": script,
             "scene_descriptions": scene_descriptions,
             "characters": characters,
@@ -1902,25 +2108,9 @@ CHAPTER CONTENT:
             "service_used": "openrouter"
         }
 
-        # Insert or update in scripts table
-        existing_script = supabase_client.table('scripts')\
-            .select('id')\
-            .eq('chapter_id', chapter_id)\
-            .eq('user_id', current_user['id'])\
-            .eq('script_style', script_style)\
-            .execute()
-
-        if existing_script.data:
-            # Update existing
-            script_result = supabase_client.table('scripts')\
-                .update(script_record)\
-                .eq('id', existing_script.data[0]['id'])\
-                .execute()
-            script_id = existing_script.data[0]['id']
-        else:
-            # Insert new
-            script_result = supabase_client.table('scripts').insert(script_record).execute()
-            script_id = script_result.data[0]['id']
+        # Always insert new script (allow multiple scripts per chapter)
+        script_result = supabase_client.table('scripts').insert(script_record).execute()
+        script_id = script_result.data[0]['id']
 
         # ✅ Record usage for billing/limits
         await subscription_manager.record_usage(
@@ -1939,6 +2129,7 @@ CHAPTER CONTENT:
         return {
             'chapter_id': chapter_id,
             'script_id': script_id,
+            'script_name': script_name,
             'script': script,
             'scene_descriptions': scene_descriptions,
             'characters': characters,
@@ -1947,7 +2138,8 @@ CHAPTER CONTENT:
             'metadata': script_data["metadata"],
             'service_used': 'openrouter',
             'tier': user_tier.value,
-            'plot_enhanced': bool(plot_context),
+            'plot_enhanced': plot_enhanced,
+            'plot_info': plot_info['plot_info'] if plot_info else None,
             'usage_info': {
                 'tokens_used': usage.get('total_tokens', 0),
                 'estimated_cost': usage.get('estimated_cost', 0),
@@ -2083,10 +2275,11 @@ async def save_script_and_scenes(
     characters: list = Body(...),
     character_details: str = Body(...),
     script_style: str = Body(...),
+    script_name: str = Body(None),
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Save or update the AI-generated script and scene descriptions for a chapter (per user)."""
+    """Save a new AI-generated script and scene descriptions for a chapter."""
     try:
         # Verify chapter access
         chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
@@ -2096,23 +2289,44 @@ async def save_script_and_scenes(
         book_data = chapter_data['books']
         if book_data['user_id'] != current_user['id']:
             raise HTTPException(status_code=403, detail="Not authorized to modify this chapter")
-        # Prepare new content
-        new_content = {
+
+        # Generate default script name if not provided
+        if not script_name:
+            script_name = f"{script_style.title()} Script - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        # Validate script style
+        script_style = validate_script_style(script_style)
+
+        # Create new script record (allow multiple scripts)
+        script_record = {
+            "chapter_id": chapter_id,
+            "user_id": current_user['id'],
+            "script_style": script_style,
+            "script_name": script_name,
             "script": script,
             "scene_descriptions": scene_descriptions,
             "characters": characters,
             "character_details": character_details,
-            "script_style": script_style,
-            "user_id": current_user['id']
+            "metadata": {
+                "total_scenes": len(scene_descriptions),
+                "estimated_duration": len(script) * 0.01,
+                "has_characters": len(characters) > 0,
+                "script_length": len(script)
+            },
+            "status": "ready",
+            "service_used": "manual"
         }
-        # Update ai_generated_content (per user, per script_style)
-        ai_content = chapter_data.get('ai_generated_content') or {}
-        if not isinstance(ai_content, dict):
-            ai_content = {}
-        key = f"{current_user['id']}:{script_style}"
-        ai_content[key] = new_content
-        supabase_client.table('chapters').update({"ai_generated_content": ai_content}).eq('id', chapter_id).execute()
-        return {"message": "Saved", "chapter_id": chapter_id, "script_style": script_style}
+
+        script_result = supabase_client.table('scripts').insert(script_record).execute()
+        script_id = script_result.data[0]['id']
+
+        return {
+            "message": "Saved",
+            "chapter_id": chapter_id,
+            "script_id": script_id,
+            "script_name": script_name,
+            "script_style": script_style
+        }
     except Exception as e:
         print(f"Error saving script and scenes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2141,28 +2355,35 @@ async def get_script_and_scenes(
         print(f"Error fetching script and scenes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/delete-script-and-scenes")
-async def delete_script_and_scenes(
-    chapter_id: str,
-    script_style: str = "cinematic_movie",
+@router.delete("/delete-script/{script_id}")
+async def delete_script(
+    script_id: str,
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Delete the saved AI-generated script and scene descriptions for a chapter (per user)."""
+    """Delete a specific script by ID."""
     try:
-        chapter_response = supabase_client.table('chapters').select('ai_generated_content').eq('id', chapter_id).single().execute()
-        if not chapter_response.data:
-            raise HTTPException(status_code=404, detail="Chapter not found")
-        ai_content = chapter_response.data.get('ai_generated_content') or {}
-        if not isinstance(ai_content, dict):
-            ai_content = {}
-        key = f"{current_user['id']}:{script_style}"
-        if key in ai_content:
-            del ai_content[key]
-            supabase_client.table('chapters').update({"ai_generated_content": ai_content}).eq('id', chapter_id).execute()
-        return {"message": "Deleted", "chapter_id": chapter_id, "script_style": script_style}
+        # Verify script ownership
+        script_response = supabase_client.table('scripts').select('*').eq('id', script_id).single().execute()
+        if not script_response.data:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        script_data = script_response.data
+        if script_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this script")
+
+        # Delete the script
+        supabase_client.table('scripts').delete().eq('id', script_id).execute()
+
+        return {
+            "message": "Script deleted successfully",
+            "script_id": script_id,
+            "script_name": script_data.get('script_name', 'Unnamed Script')
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error deleting script and scenes: {e}")
+        print(f"Error deleting script: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
 # Add the missing pipeline status endpoint (around line 450)

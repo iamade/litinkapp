@@ -64,10 +64,12 @@ interface ScriptResult {
   character_details: string;
   script_style: string;
   script_id: string;
+  script_name: string;
 }
 
 interface GeneratedScript {
   id: string;
+  script_name: string;
   script: string;
   scene_descriptions: string[];
   characters: string[];
@@ -78,7 +80,79 @@ interface GeneratedScript {
   chapter_id: string;
 }
 
+// Image generation interfaces
+interface ChapterImagesResponse {
+  chapter_id: string;
+  images: ImageRecord[];
+  total_count: number;
+}
 
+interface ImageRecord {
+  id: string;
+  user_id: string;
+  image_type: string;
+  scene_description?: string;
+  character_name?: string;
+  image_url?: string;
+  thumbnail_url?: string;
+  image_prompt?: string;
+  status: string;
+  generation_time_seconds?: number;
+  width?: number;
+  height?: number;
+  file_size_bytes?: number;
+  metadata: Record<string, any>;
+  created_at: string;
+  updated_at?: string;
+}
+
+interface ImageGenerationResponse {
+  record_id: string;
+  image_url: string;
+  prompt_used: string;
+  metadata: Record<string, any>;
+  generation_time?: number;
+  message: string;
+}
+
+interface SceneImageRequest {
+  scene_description: string;
+  style?: string;
+  aspect_ratio?: string;
+  custom_prompt?: string;
+}
+
+interface CharacterImageRequest {
+  character_name: string;
+  character_description: string;
+  style?: string;
+  aspect_ratio?: string;
+  custom_prompt?: string;
+}
+
+interface DeleteImageResponse {
+  success: boolean;
+  message: string;
+  record_id: string;
+}
+
+interface ImageStatusResponse {
+  record_id: string;
+  status: string; // 'pending', 'processing', 'completed', 'failed'
+  image_url?: string;
+  error_message?: string;
+  generation_time_seconds?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+interface ImageGenerationQueuedResponse {
+  task_id: string;
+  status: string;
+  message: string;
+  estimated_time_seconds?: number;
+  record_id?: string;
+}
 
 export const userService = {
   getProfile: async (): Promise<UserProfile> => {
@@ -135,23 +209,41 @@ export const userService = {
     return apiClient.get("/books/superadmin-entertainment-books");
   },
 
-// Script Generation Functions
+  // Script Generation Functions
   generateScriptAndScenes: async (
     chapterId: string,
-    scriptStyle: string = "cinematic_movie"
+    scriptStyle: string = "cinematic_movie",
+    options?: {
+      includeCharacterProfiles?: boolean;
+      targetDuration?: number | "auto";
+      sceneCount?: number;
+      focusAreas?: string[];
+    }
   ): Promise<ScriptResult> => {
     return apiClient.post<ScriptResult>(`/ai/generate-script-and-scenes`, {
       chapter_id: chapterId,
       script_style: scriptStyle,
+      target_duration: options?.targetDuration,
+      include_character_profiles: options?.includeCharacterProfiles,
+      scene_count: options?.sceneCount,
+      focus_areas: options?.focusAreas,
     });
   },
 
-  getChapterScripts: async (chapterId: string): Promise<{chapter_id: string, scripts: GeneratedScript[]}> => {
-    return apiClient.get<{chapter_id: string, scripts: GeneratedScript[]}>(`/ai/scripts/${chapterId}`);
+  getChapterScripts: async (
+    chapterId: string
+  ): Promise<{ chapter_id: string; scripts: GeneratedScript[] }> => {
+    return apiClient.get<{ chapter_id: string; scripts: GeneratedScript[] }>(
+      `/ai/scripts/${chapterId}`
+    );
   },
 
   getScriptDetails: async (scriptId: string): Promise<GeneratedScript> => {
     return apiClient.get<GeneratedScript>(`/ai/script/${scriptId}`);
+  },
+
+  deleteScript: async (scriptId: string) => {
+    return apiClient.delete(`/ai/delete-script/${scriptId}`);
   },
 
   // Video Generation Functions
@@ -161,193 +253,271 @@ export const userService = {
     videoStyle: string = "realistic",
     scriptId?: string
   ): Promise<VideoGenerationResponse> => {
-    return apiClient.post<VideoGenerationResponse>(`/ai/generate-entertainment-video`, {
-      chapter_id: chapterId,
-      quality_tier: qualityTier,
-      video_style: videoStyle,
-      script_id: scriptId,
-    });
+    return apiClient.post<VideoGenerationResponse>(
+      `/ai/generate-entertainment-video`,
+      {
+        chapter_id: chapterId,
+        quality_tier: qualityTier,
+        video_style: videoStyle,
+        script_id: scriptId,
+      }
+    );
   },
 
-  getVideoGenerationStatus: async (videoGenId: string): Promise<VideoStatus> => {
-    return apiClient.get<VideoStatus>(`/ai/video-generation-status/${videoGenId}`);
+  getVideoGenerationStatus: async (
+    videoGenId: string
+  ): Promise<VideoStatus> => {
+    return apiClient.get<VideoStatus>(
+      `/ai/video-generation-status/${videoGenId}`
+    );
   },
 
   // Image generation methods
-   async getChapterImages(chapterId: string) {
-    const response = await apiClient.get<any>(`/chapters/${chapterId}/images`);
+  async getChapterImages(chapterId: string): Promise<ChapterImagesResponse> {
+    return apiClient.get<ChapterImagesResponse>(
+      `/chapters/${chapterId}/images`
+    );
+  },
+
+  async generateSceneImage(
+    chapterId: string,
+    sceneNumber: number,
+    request: SceneImageRequest
+  ): Promise<ImageGenerationResponse> {
+    return apiClient.post<ImageGenerationResponse>(
+      `/chapters/${chapterId}/images/scenes/${sceneNumber}`,
+      request
+    );
+  },
+
+  async generateCharacterImage(
+    chapterId: string,
+    request: CharacterImageRequest
+  ): Promise<ImageGenerationQueuedResponse> {
+    return apiClient.post<ImageGenerationQueuedResponse>(
+      `/chapters/${chapterId}/images/characters`,
+      request
+    );
+  },
+
+  async deleteSceneImage(
+    chapterId: string,
+    sceneNumber: number
+  ): Promise<DeleteImageResponse> {
+    return apiClient.delete<DeleteImageResponse>(
+      `/chapters/${chapterId}/images/scenes/${sceneNumber}`
+    );
+  },
+
+  async deleteCharacterImage(
+    chapterId: string,
+    characterName: string
+  ): Promise<DeleteImageResponse> {
+    return apiClient.delete<DeleteImageResponse>(
+      `/chapters/${chapterId}/images/characters/${characterName}`
+    );
+  },
+
+  async getImageGenerationStatus(
+    chapterId: string,
+    recordId: string
+  ): Promise<ImageStatusResponse> {
+    return apiClient.get<ImageStatusResponse>(
+      `/chapters/${chapterId}/images/status/${recordId}`
+    );
+  },
+
+  // Audio generation methods
+  async getChapterAudio(chapterId: string) {
+    const response = await apiClient.get<any>(`/chapters/${chapterId}/audio`);
     return response.data;
   },
 
-  async generateSceneImage(chapterId: string, sceneNumber: number, data: any) {
-    const response = await apiClient.post<any>(`/chapters/${chapterId}/images/scenes/${sceneNumber}`, data);
+  async generateSceneDialogue(
+    chapterId: string,
+    sceneNumber: number,
+    data: any
+  ) {
+    const response = await apiClient.post<any>(
+      `/chapters/${chapterId}/audio/dialogue/${sceneNumber}`,
+      data
+    );
     return response.data;
   },
 
-  async generateCharacterImage(chapterId: string, data: any) {
-    const response = await apiClient.post<any>(`/chapters/${chapterId}/images/characters`, data);
+  async generateSceneNarration(
+    chapterId: string,
+    sceneNumber: number,
+    data: any
+  ) {
+    const response = await apiClient.post<any>(
+      `/chapters/${chapterId}/audio/narration/${sceneNumber}`,
+      data
+    );
     return response.data;
   },
 
-  async deleteSceneImage(chapterId: string, sceneNumber: number) {
-    const response = await apiClient.delete<any>(`/chapters/${chapterId}/images/scenes/${sceneNumber}`);
+  async generateSceneMusic(chapterId: string, sceneNumber: number, data: any) {
+    const response = await apiClient.post<any>(
+      `/chapters/${chapterId}/audio/music/${sceneNumber}`,
+      data
+    );
     return response.data;
   },
 
-  async deleteCharacterImage(chapterId: string, characterName: string) {
-    const response = await apiClient.delete<any>(`/chapters/${chapterId}/images/characters/${characterName}`);
+  async generateSceneEffects(
+    chapterId: string,
+    sceneNumber: number,
+    data: any
+  ) {
+    const response = await apiClient.post<any>(
+      `/chapters/${chapterId}/audio/effects/${sceneNumber}`,
+      data
+    );
     return response.data;
   },
 
+  async generateSceneAmbiance(
+    chapterId: string,
+    sceneNumber: number,
+    data: any
+  ) {
+    const response = await apiClient.post<any>(
+      `/chapters/${chapterId}/audio/ambiance/${sceneNumber}`,
+      data
+    );
+    return response.data;
+  },
 
-// Audio generation methods
-async getChapterAudio(chapterId: string) {
-  const response = await apiClient.get<any>(`/chapters/${chapterId}/audio`);
-  return response.data;
-},
+  async deleteAudioFile(chapterId: string, audioId: string) {
+    const response = await apiClient.delete<any>(
+      `/chapters/${chapterId}/audio/${audioId}`
+    );
+    return response.data;
+  },
 
-async generateSceneDialogue(chapterId: string, sceneNumber: number, data: any) {
-  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/dialogue/${sceneNumber}`, data);
-  return response.data;
-},
+  async exportAudioMix(chapterId: string, audioAssets: any) {
+    const response = await apiClient.post<any>(
+      `/chapters/${chapterId}/audio/export`,
+      { audio_assets: audioAssets }
+    );
+    return response.data;
+  },
 
-async generateSceneNarration(chapterId: string, sceneNumber: number, data: any) {
-  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/narration/${sceneNumber}`, data);
-  return response.data;
-},
+  // Plot and script methods (if not already present)
+  async generatePlotOverview(bookId: string) {
+    const response = await apiClient.post<any>(
+      `/plots/books/${bookId}/generate`,
+      {}
+    );
+    return response.data;
+  },
 
-async generateSceneMusic(chapterId: string, sceneNumber: number, data: any) {
-  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/music/${sceneNumber}`, data);
-  return response.data;
-},
+  // async savePlotOverview(bookId: string, plot: any) {
+  //   const response = await apiClient.post<any>(`/books/${bookId}/plot/save`, plot);
+  //   return response.data;
+  // },
 
-async generateSceneEffects(chapterId: string, sceneNumber: number, data: any) {
-  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/effects/${sceneNumber}`, data);
-  return response.data;
-},
+  async getPlotOverview(bookId: string) {
+    const response = await apiClient.get<any>(
+      `/plots/books/${bookId}/overview`
+    );
+    console.log("[DEBUG] getPlotOverview: ", response);
+    return response;
+  },
 
-async generateSceneAmbiance(chapterId: string, sceneNumber: number, data: any) {
-  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/ambiance/${sceneNumber}`, data);
-  return response.data;
-},
+  // Add these methods to userService.ts
 
-async deleteAudioFile(chapterId: string, audioId: string) {
-  const response = await apiClient.delete<any>(`/chapters/${chapterId}/audio/${audioId}`);
-  return response.data;
-},
+  async getVideoProduction(chapterId: string) {
+    // Mock implementation - returns null for new productions
+    return Promise.resolve(null);
+  },
 
-async exportAudioMix(chapterId: string, audioAssets: any) {
-  const response = await apiClient.post<any>(`/chapters/${chapterId}/audio/export`, { audio_assets: audioAssets });
-  return response.data;
-},
-
-// Plot and script methods (if not already present)
-async generatePlotOverview(bookId: string) {
-  const response = await apiClient.post<any>(`/plots/books/${bookId}/generate`, {});
-  return response.data;
-},
-
-// async savePlotOverview(bookId: string, plot: any) {
-//   const response = await apiClient.post<any>(`/books/${bookId}/plot/save`, plot);
-//   return response.data;
-// },
-
-async getPlotOverview(bookId: string) {
-  const response = await apiClient.get<any>(`/plots/books/${bookId}`);
-  return response.data;
-},
-
-// Add these methods to userService.ts
-
-async getVideoProduction(chapterId: string) {
-  // Mock implementation - returns null for new productions
-  return Promise.resolve(null);
-},
-
-async saveVideoProduction(data: {
-  chapterId: string;
-  scenes: any[];
-  editorSettings: any;
-  scriptId?: string;
-}) {
-  // Mock implementation
-  return Promise.resolve({
-    id: `video-prod-${Date.now()}`,
-    chapterId: data.chapterId,
-    scenes: data.scenes || [],
-    finalVideoUrl: null,
-    renderingProgress: 0,
-    editorSettings: data.editorSettings,
-    status: 'idle' as const,
-    metadata: {
-      totalDuration: 0,
-      fileSize: 0
-    },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  });
-},
-
-async createOpenShotProject(data: {
-  chapterId: string;
-  scenes: any[];
-  editorSettings: any;
-  scriptId?: string;
-}) {
-  // Mock implementation
-  return Promise.resolve({
-    project_id: `openshot-${Date.now()}`,
-    status: 'created',
-    message: 'OpenShot project created successfully'
-  });
-},
-
-async getOpenShotProjectStatus(projectId: string) {
-  // Mock implementation - simulates progress
-  const progress = Math.min(100, Math.random() * 100);
-  return Promise.resolve({
-    project_id: projectId,
-    status: progress >= 100 ? 'completed' : 'rendering',
-    progress,
-    videoProduction: progress >= 100 ? {
+  async saveVideoProduction(data: {
+    chapterId: string;
+    scenes: any[];
+    editorSettings: any;
+    scriptId?: string;
+  }) {
+    // Mock implementation
+    return Promise.resolve({
       id: `video-prod-${Date.now()}`,
-      chapterId: 'mock-chapter',
-      scenes: [],
-      finalVideoUrl: 'https://example.com/mock-video.mp4',
-      renderingProgress: 100,
-      editorSettings: {
-        resolution: '1080p' as const,
-        fps: 30,
-        aspectRatio: '16:9' as const,
-        outputFormat: 'mp4' as const,
-        quality: 'high' as const
-      },
-      status: 'completed' as const,
+      chapterId: data.chapterId,
+      scenes: data.scenes || [],
+      finalVideoUrl: null,
+      renderingProgress: 0,
+      editorSettings: data.editorSettings,
+      status: "idle" as const,
       metadata: {
-        totalDuration: 120,
-        fileSize: 50000000
+        totalDuration: 0,
+        fileSize: 0,
       },
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    } : null
-  });
-},
+      updatedAt: new Date().toISOString(),
+    });
+  },
 
-async processVideoWithFFmpeg(data: {
-  videoUrl: string;
-  quality?: string;
-  [key: string]: any;
-}) {
-  // Mock implementation
-  return Promise.resolve({
-    processedUrl: 'https://example.com/processed-video.mp4',
-    fileSize: 45000000,
-    duration: 120,
-    message: 'Video processed successfully'
-  });
-}
+  async createOpenShotProject(data: {
+    chapterId: string;
+    scenes: any[];
+    editorSettings: any;
+    scriptId?: string;
+  }) {
+    // Mock implementation
+    return Promise.resolve({
+      project_id: `openshot-${Date.now()}`,
+      status: "created",
+      message: "OpenShot project created successfully",
+    });
+  },
 
+  async getOpenShotProjectStatus(projectId: string) {
+    // Mock implementation - simulates progress
+    const progress = Math.min(100, Math.random() * 100);
+    return Promise.resolve({
+      project_id: projectId,
+      status: progress >= 100 ? "completed" : "rendering",
+      progress,
+      videoProduction:
+        progress >= 100
+          ? {
+              id: `video-prod-${Date.now()}`,
+              chapterId: "mock-chapter",
+              scenes: [],
+              finalVideoUrl: "https://example.com/mock-video.mp4",
+              renderingProgress: 100,
+              editorSettings: {
+                resolution: "1080p" as const,
+                fps: 30,
+                aspectRatio: "16:9" as const,
+                outputFormat: "mp4" as const,
+                quality: "high" as const,
+              },
+              status: "completed" as const,
+              metadata: {
+                totalDuration: 120,
+                fileSize: 50000000,
+              },
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }
+          : null,
+    });
+  },
 
+  async processVideoWithFFmpeg(data: {
+    videoUrl: string;
+    quality?: string;
+    [key: string]: any;
+  }) {
+    // Mock implementation
+    return Promise.resolve({
+      processedUrl: "https://example.com/processed-video.mp4",
+      fileSize: 45000000,
+      duration: 120,
+      message: "Video processed successfully",
+    });
+  },
 };
 
 export async function deleteBook(bookId: string) {
@@ -360,5 +530,3 @@ export async function deleteBook(bookId: string) {
   }
   return await response.json();
 }
-
-

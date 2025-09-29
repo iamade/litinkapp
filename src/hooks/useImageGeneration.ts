@@ -43,34 +43,36 @@ export const useImageGeneration = (chapterId: string) => {
     setIsLoading(true);
     try {
       const response = await userService.getChapterImages(chapterId);
-      
-      // Organize scene images by scene number
-      const sceneImagesMap: Record<number, SceneImage> = {};
-      response.scene_images?.forEach((img: any) => {
-        sceneImagesMap[img.scene_number] = {
-          sceneNumber: img.scene_number,
-          imageUrl: img.image_url,
-          prompt: img.prompt,
-          characters: img.characters || [],
-          generationStatus: img.status || 'completed',
-          generatedAt: img.created_at,
-          id: img.id
-        };
-      });
-      setSceneImages(sceneImagesMap);
 
-      // Organize character images by character name
+      // Organize images by type from the unified images array
+      const sceneImagesMap: Record<number, SceneImage> = {};
       const characterImagesMap: Record<string, CharacterImage> = {};
-      response.character_images?.forEach((img: any) => {
-        characterImagesMap[img.character_name] = {
-          name: img.character_name,
-          imageUrl: img.image_url,
-          prompt: img.prompt,
-          generationStatus: img.status || 'completed',
-          generatedAt: img.created_at,
-          id: img.id
-        };
+
+      response.images.forEach((img: any) => {
+        const metadata = img.metadata || {};
+        if (metadata.image_type === 'scene') {
+          sceneImagesMap[metadata.scene_number] = {
+            sceneNumber: metadata.scene_number,
+            imageUrl: img.image_url || '',
+            prompt: img.image_prompt || '',
+            characters: [], // Could be extracted from metadata if available
+            generationStatus: img.status === 'completed' ? 'completed' : 'failed',
+            generatedAt: img.created_at,
+            id: img.id
+          };
+        } else if (metadata.image_type === 'character') {
+          characterImagesMap[metadata.character_name] = {
+            name: metadata.character_name,
+            imageUrl: img.image_url || '',
+            prompt: img.image_prompt || '',
+            generationStatus: img.status === 'completed' ? 'completed' : 'failed',
+            generatedAt: img.created_at,
+            id: img.id
+          };
+        }
       });
+
+      setSceneImages(sceneImagesMap);
       setCharacterImages(characterImagesMap);
 
     } catch (error: any) {
@@ -91,31 +93,31 @@ export const useImageGeneration = (chapterId: string) => {
 
   const generateSceneImage = async (
     sceneNumber: number,
-    sceneDescription: any,
+    sceneDescription: string,
     options: ImageGenerationOptions
   ) => {
     setGeneratingScenes(prev => new Set(prev).add(sceneNumber));
-    
+
     try {
       // Create initial scene image entry
       const tempImage: SceneImage = {
         sceneNumber,
         imageUrl: '',
-        prompt: sceneDescription.visual_description || '',
-        characters: sceneDescription.characters || [],
+        prompt: sceneDescription,
+        characters: [],
         generationStatus: 'generating'
       };
-      
+
       setSceneImages(prev => ({ ...prev, [sceneNumber]: tempImage }));
 
-      const result = await userService.generateSceneImage(
-        chapterId,
-        sceneNumber,
-        {
-          scene_description: sceneDescription,
-          options
-        }
-      );
+      const request = {
+        scene_description: sceneDescription,
+        style: options.style,
+        aspect_ratio: options.aspectRatio,
+        custom_prompt: options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined
+      };
+
+      const result = await userService.generateSceneImage(chapterId, sceneNumber, request);
 
       // Update with generated image
       setSceneImages(prev => ({
@@ -125,15 +127,15 @@ export const useImageGeneration = (chapterId: string) => {
           imageUrl: result.image_url,
           generationStatus: 'completed',
           generatedAt: new Date().toISOString(),
-          id: result.image_id
+          id: result.record_id
         }
       }));
 
       toast.success(`Generated image for Scene ${sceneNumber}`);
-      
+
     } catch (error: any) {
       console.error('Error generating scene image:', error);
-      
+
       setSceneImages(prev => ({
         ...prev,
         [sceneNumber]: {
@@ -141,7 +143,7 @@ export const useImageGeneration = (chapterId: string) => {
           generationStatus: 'failed'
         }
       }));
-      
+
       toast.error(`Failed to generate image for Scene ${sceneNumber}`);
     } finally {
       setGeneratingScenes(prev => {
@@ -158,7 +160,7 @@ export const useImageGeneration = (chapterId: string) => {
     options: ImageGenerationOptions
   ) => {
     setGeneratingCharacters(prev => new Set(prev).add(characterName));
-    
+
     try {
       const tempImage: CharacterImage = {
         name: characterName,
@@ -166,34 +168,39 @@ export const useImageGeneration = (chapterId: string) => {
         prompt: characterDescription,
         generationStatus: 'generating'
       };
-      
+
       setCharacterImages(prev => ({ ...prev, [characterName]: tempImage }));
 
-      const result = await userService.generateCharacterImage(
-        chapterId,
-        {
-          character_name: characterName,
-          description: characterDescription,
-          options
-        }
-      );
+      const request = {
+        character_name: characterName,
+        character_description: characterDescription,
+        style: options.style,
+        aspect_ratio: options.aspectRatio,
+        custom_prompt: options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined
+      };
 
-      setCharacterImages(prev => ({
-        ...prev,
-        [characterName]: {
-          ...tempImage,
-          imageUrl: result.image_url,
-          generationStatus: 'completed',
-          generatedAt: new Date().toISOString(),
-          id: result.image_id
-        }
-      }));
+      const result = await userService.generateCharacterImage(chapterId, request);
 
-      toast.success(`Generated image for ${characterName}`);
-      
+      // Start polling for status if we have a record_id
+      if (result.record_id) {
+        pollCharacterImageStatus(characterName, result.record_id);
+      } else {
+        // Fallback: mark as completed immediately (shouldn't happen with new implementation)
+        setCharacterImages(prev => ({
+          ...prev,
+          [characterName]: {
+            ...tempImage,
+            generationStatus: 'completed',
+            generatedAt: new Date().toISOString(),
+            id: result.record_id
+          }
+        }));
+        toast.success(`Generated image for ${characterName}`);
+      }
+
     } catch (error: any) {
       console.error('Error generating character image:', error);
-      
+
       setCharacterImages(prev => ({
         ...prev,
         [characterName]: {
@@ -201,7 +208,7 @@ export const useImageGeneration = (chapterId: string) => {
           generationStatus: 'failed'
         }
       }));
-      
+
       toast.error(`Failed to generate image for ${characterName}`);
     } finally {
       setGeneratingCharacters(prev => {
@@ -220,11 +227,7 @@ export const useImageGeneration = (chapterId: string) => {
     if (type === 'scene') {
       const sceneImage = sceneImages[identifier as number];
       if (sceneImage) {
-        // Find scene description from script (you'll need to pass this data)
-        await generateSceneImage(identifier as number, {
-          visual_description: sceneImage.prompt,
-          characters: sceneImage.characters
-        }, options);
+        await generateSceneImage(identifier as number, sceneImage.prompt, options);
       }
     } else {
       const characterImage = characterImages[identifier as string];
@@ -268,14 +271,70 @@ export const useImageGeneration = (chapterId: string) => {
     options: ImageGenerationOptions
   ) => {
     toast.success(`Starting generation of ${scenes.length} scene images`);
-    
+
     for (const scene of scenes) {
       if (typeof scene === 'object' && scene.scene_number) {
-        await generateSceneImage(scene.scene_number, scene, options);
+        const sceneDescription = scene.visual_description || scene.description || '';
+        await generateSceneImage(scene.scene_number, sceneDescription, options);
         // Add small delay between generations to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
+  };
+
+  const pollCharacterImageStatus = async (characterName: string, recordId: string) => {
+    const pollInterval = 2000; // Poll every 2 seconds
+    const maxPolls = 30; // Maximum 30 polls (60 seconds)
+
+    for (let i = 0; i < maxPolls; i++) {
+      try {
+        const statusResponse = await userService.getImageGenerationStatus(chapterId, recordId);
+
+        if (statusResponse.status === 'completed') {
+          // Update with completed image
+          setCharacterImages(prev => ({
+            ...prev,
+            [characterName]: {
+              ...prev[characterName],
+              imageUrl: statusResponse.image_url || '',
+              generationStatus: 'completed',
+              generatedAt: new Date().toISOString(),
+              id: recordId
+            }
+          }));
+          toast.success(`Generated image for ${characterName}`);
+          return;
+        } else if (statusResponse.status === 'failed') {
+          // Update with failed status
+          setCharacterImages(prev => ({
+            ...prev,
+            [characterName]: {
+              ...prev[characterName],
+              generationStatus: 'failed'
+            }
+          }));
+          toast.error(`Failed to generate image for ${characterName}`);
+          return;
+        }
+
+        // Still processing, wait and poll again
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      } catch (error) {
+        console.error('Error polling character image status:', error);
+        // Continue polling on error
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
+    }
+
+    // Timeout reached
+    setCharacterImages(prev => ({
+      ...prev,
+      [characterName]: {
+        ...prev[characterName],
+        generationStatus: 'failed'
+      }
+    }));
+    toast.error(`Image generation for ${characterName} timed out`);
   };
 
   const generateAllCharacterImages = async (
@@ -284,7 +343,7 @@ export const useImageGeneration = (chapterId: string) => {
     options: ImageGenerationOptions
   ) => {
     toast.success(`Starting generation of ${characters.length} character images`);
-    
+
     for (const character of characters) {
       const description = characterDetails[character] || `Portrait of ${character}`;
       await generateCharacterImage(character, description, options);

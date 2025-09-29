@@ -7,7 +7,7 @@ from decimal import Decimal
 # PlotOverview Schemas
 class PlotOverviewBase(BaseModel):
     logline: Optional[str] = Field(None, max_length=1000, description="One-sentence summary of the plot")
-    themes: Optional[Dict[str, Any]] = Field(None, description="Key themes in the story")
+    themes: Optional[List[str]] = Field(None, description="Key themes in the story")
     story_type: Optional[str] = Field(None, max_length=100, description="Type of story (e.g., adventure, mystery)")
     genre: Optional[str] = Field(None, max_length=100, description="Primary genre")
     tone: Optional[str] = Field(None, max_length=100, description="Overall tone of the story")
@@ -27,7 +27,7 @@ class PlotOverviewCreate(PlotOverviewBase):
 
 class PlotOverviewUpdate(BaseModel):
     logline: Optional[str] = Field(None, max_length=1000)
-    themes: Optional[Dict[str, Any]] = None
+    themes: Optional[List[str]] = None
     story_type: Optional[str] = Field(None, max_length=100)
     genre: Optional[str] = Field(None, max_length=100)
     tone: Optional[str] = Field(None, max_length=100)
@@ -38,19 +38,7 @@ class PlotOverviewUpdate(BaseModel):
     generation_cost: Optional[Decimal] = None
     status: Optional[str] = Field(None, max_length=50)
     version: Optional[int] = None
-
-
-class PlotOverviewResponse(PlotOverviewBase):
-    id: str = Field(..., description="Unique identifier")
-    book_id: str
-    user_id: str
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
+    
 # Character Schemas
 class CharacterBase(BaseModel):
     name: str = Field(..., max_length=255, description="Character name")
@@ -58,7 +46,7 @@ class CharacterBase(BaseModel):
     character_arc: Optional[str] = Field(None, max_length=1000, description="Character's development arc")
     physical_description: Optional[str] = Field(None, max_length=1000, description="Physical appearance")
     personality: Optional[str] = Field(None, max_length=1000, description="Personality traits")
-    archetypes: Optional[Dict[str, Any]] = Field(None, description="Character archetypes")
+    archetypes: Optional[List[str]] = Field(None, description="Character archetypes")
     want: Optional[str] = Field(None, max_length=500, description="What the character wants")
     need: Optional[str] = Field(None, max_length=500, description="What the character needs")
     lie: Optional[str] = Field(None, max_length=500, description="The lie the character believes")
@@ -68,6 +56,32 @@ class CharacterBase(BaseModel):
     image_metadata: Optional[Dict[str, Any]] = Field(None, description="Metadata for generated image")
     generation_method: Optional[str] = Field(None, max_length=100, description="Method used for generation")
     model_used: Optional[str] = Field(None, max_length=100, description="AI model used")
+
+
+
+class CharacterResponse(CharacterBase):
+    id: str = Field(..., description="Unique identifier")
+    plot_overview_id: str
+    book_id: str
+    user_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PlotOverviewResponse(PlotOverviewBase):
+    id: str = Field(..., description="Unique identifier")
+    book_id: str
+    user_id: str
+    characters: List[CharacterResponse] = Field(..., description="Generated characters")
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
 
 
 class CharacterCreate(CharacterBase):
@@ -82,7 +96,7 @@ class CharacterUpdate(BaseModel):
     character_arc: Optional[str] = Field(None, max_length=1000)
     physical_description: Optional[str] = Field(None, max_length=1000)
     personality: Optional[str] = Field(None, max_length=1000)
-    archetypes: Optional[Dict[str, Any]] = None
+    archetypes: Optional[List[str]] = None
     want: Optional[str] = Field(None, max_length=500)
     need: Optional[str] = Field(None, max_length=500)
     lie: Optional[str] = Field(None, max_length=500)
@@ -94,16 +108,6 @@ class CharacterUpdate(BaseModel):
     model_used: Optional[str] = Field(None, max_length=100)
 
 
-class CharacterResponse(CharacterBase):
-    id: str = Field(..., description="Unique identifier")
-    plot_overview_id: str
-    book_id: str
-    user_id: str
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class CharacterArchetypeMatch(BaseModel):

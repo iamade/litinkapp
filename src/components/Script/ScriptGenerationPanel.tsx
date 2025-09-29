@@ -26,6 +26,7 @@ interface ChapterScript {
   id: string;
   chapter_id: string;
   script_style: string;
+  script_name: string;
   script: string;
   scene_descriptions: SceneDescription[];
   characters: string[];
@@ -85,7 +86,7 @@ interface ScriptGenerationPanelProps {
 
 interface ScriptGenerationOptions {
   includeCharacterProfiles: boolean;
-  targetDuration?: number;
+  targetDuration?: number | "auto";
   sceneCount?: number;
   focusAreas: string[];
 }
@@ -107,13 +108,14 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [generationOptions, setGenerationOptions] = useState<ScriptGenerationOptions>({
     includeCharacterProfiles: true,
-    targetDuration: 5,
+    targetDuration: "auto",
     sceneCount: 5,
     focusAreas: []
   });
   const [activeView, setActiveView] = useState<'overview' | 'acts' | 'scenes' | 'dialogue'>('overview');
   const [expandedScenes, setExpandedScenes] = useState<Set<number>>(new Set());
   const [editMode, setEditMode] = useState(false);
+  const [showFullScript, setShowFullScript] = useState(false);
 
   const handleGenerateScript = () => {
     onGenerateScript(scriptStyle, generationOptions);
@@ -187,18 +189,28 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Target Duration (minutes)</label>
-          <input
-            type="number"
-            min="1"
-            max="30"
-            value={generationOptions.targetDuration || 5}
-            onChange={(e) => setGenerationOptions(prev => ({ 
-              ...prev, 
-              targetDuration: parseInt(e.target.value) || 5 
+          <label className="block text-sm font-medium text-gray-700 mb-2">Target Duration</label>
+          <select
+            value={generationOptions.targetDuration || "auto"}
+            onChange={(e) => setGenerationOptions(prev => ({
+              ...prev,
+              targetDuration: e.target.value === "auto" ? "auto" : parseInt(e.target.value) || "auto"
             }))}
             className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          />
+          >
+            <option value="auto">Auto (Full Story)</option>
+            <option value="3">3 minutes</option>
+            <option value="5">5 minutes</option>
+            <option value="10">10 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="20">20 minutes</option>
+            <option value="30">30 minutes</option>
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            {generationOptions.targetDuration === "auto"
+              ? "Automatically determine duration based on content length"
+              : `${generationOptions.targetDuration} minute target duration`}
+          </p>
         </div>
       </div>
 
@@ -335,10 +347,10 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-xl font-semibold text-gray-900">
-                {selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script'}
+                {selectedScript.script_name || (selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script')}
               </h3>
               <p className="text-gray-600">
-                {chapterTitle} • {selectedScript.scenes?.length || 0} scenes • 
+                {selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script'} • {chapterTitle} • {selectedScript.scenes?.length || 0} scenes •
                 {selectedScript.characters?.length || 0} characters
               </p>
             </div>
@@ -426,12 +438,27 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       {/* Script Preview */}
       <div>
         <h4 className="text-lg font-semibold text-gray-900 mb-3">Script Preview</h4>
-        <div className="bg-gray-50 border rounded-lg p-4 max-h-96 overflow-y-auto">
-          <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">
-            {script.script?.substring(0, 1000)}
-            {script.script && script.script.length > 1000 && '...'}
-          </pre>
+        <div className={`bg-gray-50 border rounded-lg p-4 overflow-y-auto ${showFullScript ? '' : 'max-h-96'}`}>
+          {script.script && script.script.trim() ? (
+            <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">
+              {showFullScript ? script.script : script.script.substring(0, 1000) + (script.script.length > 1000 ? '...' : '')}
+            </pre>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
+              <p className="text-sm">No script content available</p>
+              <p className="text-xs mt-1">The script may still be generating or encountered an error.</p>
+            </div>
+          )}
         </div>
+        {script.script && script.script.length > 1000 && (
+          <button
+            onClick={() => setShowFullScript(!showFullScript)}
+            className="text-blue-600 hover:text-blue-800 text-sm mt-2 font-medium"
+          >
+            {showFullScript ? "Show Less" : "Show More"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -516,12 +543,20 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const renderDialogueView = (script: ChapterScript) => (
     <div className="space-y-4">
       <h4 className="text-lg font-semibold text-gray-900">Full Script</h4>
-      
+
       <div className="bg-white border rounded-lg p-6">
         <div className="bg-gray-50 p-4 rounded-lg max-h-96 overflow-y-auto">
-          <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono leading-relaxed">
-            {script.script || 'No script content available.'}
-          </pre>
+          {script.script && script.script.trim() ? (
+            <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono leading-relaxed">
+              {script.script}
+            </pre>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
+              <p className="text-sm">No script content available</p>
+              <p className="text-xs mt-1">The script may still be generating or encountered an error.</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -581,10 +616,10 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, onSelect, o
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1">
           <h4 className="font-semibold text-gray-900">
-            {script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'}
+            {script.script_name || (script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration')}
           </h4>
           <p className="text-sm text-gray-500">
-            Created: {new Date(script.created_at).toLocaleDateString()}
+            {script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Created: {new Date(script.created_at).toLocaleDateString()}
           </p>
         </div>
         <div className="flex items-center space-x-2">
@@ -630,11 +665,15 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, onSelect, o
         </div>
       </div>
 
-      {script.script && (
+      {script.script && script.script.trim() ? (
         <div className="bg-gray-50 p-3 rounded text-sm">
           <p className="text-gray-700 line-clamp-3">
             {script.script.substring(0, 200)}...
           </p>
+        </div>
+      ) : (
+        <div className="bg-gray-50 p-3 rounded text-sm text-center text-gray-500">
+          <p className="text-xs">No preview available</p>
         </div>
       )}
 

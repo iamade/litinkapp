@@ -59,7 +59,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   selectedScript,
   plotOverview
 }) => {
-  const [activeTab, setActiveTab] = useState<'scenes' | 'characters'>('scenes');
+  const [activeTab, setActiveTab] = useState<'scenes' | 'characters'>('characters');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showSettings, setShowSettings] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -270,21 +270,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const renderTabNavigation = () => (
     <div className="flex space-x-1 bg-gray-100 rounded-lg p-1 mb-6">
       <button
-        onClick={() => setActiveTab('scenes')}
-        className={`flex items-center space-x-2 px-4 py-2 rounded-md font-medium text-sm transition-colors ${
-          activeTab === 'scenes'
-            ? 'bg-white text-blue-600 shadow-sm'
-            : 'text-gray-600 hover:text-gray-800'
-        }`}
-      >
-        <Camera className="w-4 h-4" />
-        <span>Scenes</span>
-        <span className="px-2 py-1 bg-gray-200 text-gray-600 rounded-full text-xs">
-          {scenes.length}
-        </span>
-      </button>
-      
-      <button
         onClick={() => setActiveTab('characters')}
         className={`flex items-center space-x-2 px-4 py-2 rounded-md font-medium text-sm transition-colors ${
           activeTab === 'characters'
@@ -296,6 +281,21 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         <span>Characters</span>
         <span className="px-2 py-1 bg-gray-200 text-gray-600 rounded-full text-xs">
           {characters.length}
+        </span>
+      </button>
+
+      <button
+        onClick={() => setActiveTab('scenes')}
+        className={`flex items-center space-x-2 px-4 py-2 rounded-md font-medium text-sm transition-colors ${
+          activeTab === 'scenes'
+            ? 'bg-white text-blue-600 shadow-sm'
+            : 'text-gray-600 hover:text-gray-800'
+        }`}
+      >
+        <Camera className="w-4 h-4" />
+        <span>Scenes</span>
+        <span className="px-2 py-1 bg-gray-200 text-gray-600 rounded-full text-xs">
+          {scenes.length}
         </span>
       </button>
     </div>
@@ -336,7 +336,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
               viewMode={viewMode}
               onGenerate={() => generateSceneImage(
                 scene.scene_number || idx + 1,
-                scene,
+                scene.visual_description || scene.description || '',
                 generationOptions
               )}
               onRegenerate={() => regenerateImage(
@@ -410,8 +410,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       {renderGenerationSettings()}
       {renderTabNavigation()}
       
-      {activeTab === 'scenes' && renderScenesTab()}
       {activeTab === 'characters' && renderCharactersTab()}
+      {activeTab === 'scenes' && renderScenesTab()}
 
       {/* Image Viewer Modal */}
       {selectedImage && (
