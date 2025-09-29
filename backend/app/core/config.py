@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List, Optional
+from typing import List, Optional, ClassVar, Dict
 import os
 
 
@@ -56,12 +56,16 @@ class Settings(BaseSettings):
     ELEVENLABS_API_KEY: Optional[str] = None
     TAVUS_API_KEY: Optional[str] = None
     PLOTDRIVE_API_KEY: Optional[str] = None
-    
+
     # ✅ NEW: DeepSeek Configuration
     DEEPSEEK_API_KEY: Optional[str] = None
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_MODEL: str = "deepseek-chat"  # Non-thinking mode
     DEEPSEEK_REASONER_MODEL: str = "deepseek-reasoner"  # Thinking mode
+
+    # ✅ NEW: OpenRouter Configuration
+    OPENROUTER_API_KEY: Optional[str] = None
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     
     
     # Blockchain
@@ -74,6 +78,24 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
     STRIPE_PRICE_ID: Optional[str] = None
+
+    # Stripe Price IDs for subscription tiers
+    STRIPE_FREE_PRICE_ID: Optional[str] = None
+    STRIPE_BASIC_PRICE_ID: Optional[str] = None
+    STRIPE_STANDARD_PRICE_ID: Optional[str] = None
+    STRIPE_PREMIUM_PRICE_ID: Optional[str] = None
+    STRIPE_PROFESSIONAL_PRICE_ID: Optional[str] = None
+    STRIPE_PRO_PRICE_ID: Optional[str] = None  # Keep for backward compatibility
+
+    # Rate Limiting per Tier (requests per minute)
+    RATE_LIMITS: ClassVar[Dict[str, int]] = {
+        "free": 10,
+        "basic": 30,
+        "standard": 60,
+        "premium": 120,
+        "professional": 300,
+        "enterprise": 1000
+    }
     
     # File Storage
     UPLOAD_DIR: str = "uploads"

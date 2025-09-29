@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { userService } from "../services/userService";
+import { subscriptionService, SubscriptionUsageStats } from "../services/subscriptionService";
+import UsageIndicator from "../components/Subscription/UsageIndicator";
 import {
   Brain,
   Sparkles,
@@ -104,6 +106,7 @@ export default function Dashboard() {
     title: string;
   } | null>(null);
   const [retryingBookId, setRetryingBookId] = useState<string | null>(null);
+  const [usage, setUsage] = useState<SubscriptionUsageStats | null>(null);
 
   // Function to fetch all books
   const fetchBooks = async () => {
@@ -117,6 +120,7 @@ export default function Dashboard() {
     userService.getProfile().then((data: UserProfile) => setProfile(data));
     userService.getStats().then((data: UserStats) => setStats(data));
     fetchBooks();
+    subscriptionService.getUsageStats().then(setUsage).catch(() => setUsage(null));
   }, [user]);
 
   // Auto-refresh books every 7 seconds if there are processing or generating books
@@ -443,6 +447,11 @@ export default function Dashboard() {
 
           {/* Achievements */}
           <div className="space-y-6">
+            {/* Usage Indicator */}
+            {usage && (
+              <UsageIndicator usage={usage} />
+            )}
+
             {/* Stats */}
             <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
               <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">

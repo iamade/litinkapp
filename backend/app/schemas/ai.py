@@ -36,6 +36,7 @@ class ScriptMetadata(BaseModel):
 class ScriptResponse(BaseModel):
     chapter_id: str
     script_id: str
+    script_name: str
     script: str
     scene_descriptions: List[str]
     characters: List[str]
@@ -49,6 +50,7 @@ class ScriptRetrievalResponse(BaseModel):
     chapter_id: str
     user_id: str
     script_style: str
+    script_name: str
     script: str
     scene_descriptions: List[str]
     characters: List[str]

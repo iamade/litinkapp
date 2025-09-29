@@ -1,8 +1,9 @@
 from app.tasks.celery_app import celery_app
 import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from app.core.database import get_supabase
 import json
+import logging
 
 from app.tasks.celery_app import celery_app
 import asyncio
@@ -11,6 +12,10 @@ from app.services.modelslab_image_service import ModelsLabImageService
 from app.core.database import get_supabase
 from app.services.pipeline_manager import PipelineManager, PipelineStep
 from app.services.modelslab_v7_image_service import ModelsLabV7ImageService
+from app.services.standalone_image_service import StandaloneImageService
+from app.services.subscription_manager import SubscriptionManager
+
+logger = logging.getLogger(__name__)
 
 @celery_app.task(bind=True)
 def generate_all_images_for_video(self, video_generation_id: str):
@@ -32,7 +37,18 @@ def generate_all_images_for_video(self, video_generation_id: str):
             raise Exception(f"Video generation {video_generation_id} not found")
         
         video_gen = video_response.data
-        
+        user_id = video_gen.get('user_id')
+
+        if not user_id:
+            raise Exception(f"Video generation {video_generation_id} has no user_id")
+
+        # Get user tier for model selection
+        subscription_manager = SubscriptionManager(supabase)
+        usage_check = asyncio.run(subscription_manager.check_usage_limits(user_id, "image"))
+        user_tier = usage_check["tier"]
+
+        print(f"[IMAGE GENERATION] User {user_id} has {user_tier} tier - will use tier-based model selection")
+
         # ✅ FIXED: Proper validation of existing images
         existing_image_data = video_gen.get('image_data') or {}
         existing_character_images = existing_image_data.get('character_images') or []
@@ -125,16 +141,16 @@ def generate_all_images_for_video(self, video_generation_id: str):
         if characters:
             print(f"[IMAGE GENERATION] Generating {len(characters)} character images...")
             character_images = asyncio.run(generate_character_images_optimized(
-                image_service, video_generation_id, characters, video_style
+                image_service, video_generation_id, characters, video_style, user_tier
             ))
         
-        # 2. Generate scene images  
+        # 2. Generate scene images
         scene_images = []
         if scene_descriptions:
             print(f"[IMAGE GENERATION] Generating {len(scene_descriptions)} scene images...")
             scene_images = asyncio.run(generate_scene_images_optimized(
             # scene_images = asyncio.run(generate_scene_images(
-                image_service, video_generation_id, scene_descriptions, video_style
+                image_service, video_generation_id, scene_descriptions, video_style, user_tier
             ))
         
         # Compile results
@@ -244,7 +260,8 @@ async def generate_character_images_optimized(
     image_service: ModelsLabV7ImageService,
     video_gen_id: str,
     characters: List[str],
-    style: str = "realistic"
+    style: str = "realistic",
+    user_tier: str = "free"
 ) -> List[Dict[str, Any]]:
     """Generate character images with optimizations"""
     
@@ -262,7 +279,8 @@ async def generate_character_images_optimized(
                 character_name=character,
                 character_description=character_description,
                 style=style,
-                aspect_ratio="3:4"
+                aspect_ratio="3:4",
+                user_tier=user_tier
             )
             
             if result.get('status') == 'success':
@@ -345,7 +363,8 @@ async def generate_scene_images_optimized(
     image_service: ModelsLabV7ImageService,
     video_gen_id: str,
     scene_descriptions: List[Dict[str, Any]],
-    style: str = "cinematic"
+    style: str = "cinematic",
+    user_tier: str = "free"
 ) -> List[Dict[str, Any]]:
     """Generate scene images sequentially with optimizations"""
     
@@ -369,7 +388,8 @@ async def generate_scene_images_optimized(
             result = await image_service.generate_scene_image(
                 scene_description=scene_text,
                 style=style,
-                aspect_ratio="16:9"
+                aspect_ratio="16:9",
+                user_tier=user_tier
             )
             
             if result.get('status') == 'success':
@@ -666,6 +686,83 @@ def create_character_image_prompt(character: str, style: str) -> str:
     technical_prompt = ", 16:9 aspect ratio, high quality, detailed, professional"
     
     return base_prompt + style_prompt + technical_prompt
+
+
+@celery_app.task(bind=True)
+def generate_character_image_task(self, character_name: str, character_description: str, user_id: str, chapter_id: str, style: str = "realistic", aspect_ratio: str = "3:4", custom_prompt: Optional[str] = None, record_id: Optional[str] = None):
+    """
+    Asynchronous Celery task for generating character images.
+
+    Args:
+        character_name: Name of the character
+        character_description: Description of the character
+        user_id: User ID for database association
+        chapter_id: Chapter ID for metadata association
+        style: Visual style (realistic, cinematic, animated, fantasy)
+        aspect_ratio: Image aspect ratio
+        custom_prompt: Optional custom prompt additions
+
+    Returns:
+        Dict containing task result with record_id and status
+    """
+    try:
+        logger.info(f"[CharacterImageTask] Starting generation for {character_name} (user: {user_id}, chapter: {chapter_id}, record: {record_id})")
+
+        # Get database connection
+        supabase = get_supabase()
+
+        # Create standalone image service instance
+        image_service = StandaloneImageService(supabase)
+
+        # Generate the character image using the existing service
+        result = asyncio.run(image_service.generate_character_image(
+            character_name=character_name,
+            character_description=character_description,
+            user_id=user_id,
+            style=style,
+            aspect_ratio=aspect_ratio,
+            custom_prompt=custom_prompt
+        ))
+
+        # Update the existing record with the result
+        update_data = {
+            'status': 'completed',
+            'image_url': result.get('image_url'),
+            'generation_time_seconds': result.get('generation_time', 0),
+            'updated_at': 'now()'
+        }
+
+        # Update metadata in database
+        supabase.table('image_generations').update(update_data).eq('id', record_id).execute()
+
+        logger.info(f"[CharacterImageTask] Successfully generated character image: {record_id}")
+
+        return {
+            'status': 'success',
+            'record_id': record_id,
+            'character_name': character_name,
+            'image_url': result.get('image_url'),
+            'message': 'Character image generated successfully',
+            'generation_time': result.get('generation_time')
+        }
+
+    except Exception as e:
+        error_message = f"Character image generation failed: {str(e)}"
+        logger.error(f"[CharacterImageTask] {error_message}")
+
+        # Try to update the record with error
+        try:
+            if record_id:
+                supabase = get_supabase()
+                supabase.table('image_generations').update({
+                    'status': 'failed',
+                    'error_message': error_message,
+                    'updated_at': 'now()'
+                }).eq('id', record_id).execute()
+        except Exception as db_error:
+            logger.error(f"[CharacterImageTask] Failed to update record with error: {db_error}")
+
+        raise Exception(error_message)
 
 def create_scene_image_prompt(scene_description: str, style: str) -> str:
     """Create detailed prompt for scene image generation"""

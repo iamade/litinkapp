@@ -16,6 +16,9 @@ import {
 } from "lucide-react";
 import { apiClient } from "../lib/api";
 import { stripeService } from "../services/stripeService";
+import SubscriptionModal from "../components/Subscription/SubscriptionModal";
+import UpgradePrompt from "../components/Subscription/UpgradePrompt";
+import { subscriptionService } from "../services/subscriptionService";
 // import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 // Add interface for chapter structure
@@ -185,6 +188,8 @@ export default function BookUpload() {
   const [isUploading, setIsUploading] = useState(false);
 
   const [structureLoadingTimeout, setStructureLoadingTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [currentSubscriptionTier, setCurrentSubscriptionTier] = useState<string | undefined>();
 
 
   // Add timeout effect when reaching step 4
@@ -352,6 +357,15 @@ export default function BookUpload() {
     try {
       const bookCountData = await stripeService.getUserBookCount();
       setUserBookCount(bookCountData.book_count);
+
+      // Check subscription status
+      const subscription = await subscriptionService.getCurrentSubscription().catch(() => null);
+      setCurrentSubscriptionTier(subscription?.tier);
+
+      // Show subscription prompt if user has uploaded 2 books (approaching free limit)
+      if (bookCountData.book_count >= 2 && subscription?.tier === 'free') {
+        setShowSubscriptionModal(true);
+      }
     } catch (error) {
       console.error("Error loading user book count:", error);
     }
@@ -2263,6 +2277,13 @@ export default function BookUpload() {
           )}
         </div>
       </div>
+
+      {/* Subscription Modal */}
+      <SubscriptionModal
+        isOpen={showSubscriptionModal}
+        onClose={() => setShowSubscriptionModal(false)}
+        currentTier={currentSubscriptionTier}
+      />
     </div>
   );
 }

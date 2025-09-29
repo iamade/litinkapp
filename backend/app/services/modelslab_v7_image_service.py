@@ -31,6 +31,20 @@ class ModelsLabV7ImageService:
             'realistic': 'gen4_image',
             'artistic': 'gen4_image'
         }
+
+        # ✅ Tier-based model mapping (based on architecture)
+        self.tier_model_mapping = {
+            'free': 'imagen-4.0-ultra',        # ModelsLab Imagen 4.0 Ultra for free tier
+            'basic': 'imagen-4.0-fast-generate',       # ModelsLab Imagen 4.0 Fast Generate for basic tier
+            'pro': 'runway_image',       # Better quality for Pro tier
+            'premium': 'runway_image',   # Premium models
+            'professional': 'runway_image',  # Professional tier
+            'enterprise': 'runway_image' # Enterprise tier
+        }
+
+        logger.info(f"[MODELSLAB V7 IMAGE] Initialized with image models: {self.image_models}")
+        logger.info(f"[MODELSLAB V7 IMAGE] Tier model mapping: {self.tier_model_mapping}")
+        logger.info(f"[MODELSLAB V7 IMAGE] Default model_id: gen4_image")
         
         # ✅ Aspect ratio presets
         self.aspect_ratios = {
@@ -50,23 +64,33 @@ class ModelsLabV7ImageService:
         self,
         prompt: str,
         aspect_ratio: str = "16:9",
-        model_id: str = "gen4_image",
+        model_id: Optional[str] = None,
+        user_tier: Optional[str] = None,
         wait_for_completion: bool = True,
         max_wait_time: int = 60
     ) -> Dict[str, Any]:
         """Generate image using ModelsLab V7 API with async handling"""
-        
+
         try:
+            # Determine model_id based on user_tier if not explicitly provided
+            if model_id is None and user_tier is not None:
+                model_id = self._get_model_for_tier(user_tier)
+            elif model_id is None:
+                model_id = "gen4_image"  # Fallback to default
+
             payload = {
                 "prompt": prompt,
                 "aspect_ratio": aspect_ratio,
                 "model_id": model_id,
                 "key": self.api_key
             }
-            
+
             logger.info(f"[MODELSLAB V7 IMAGE] Generating image with model: {model_id}")
+            logger.info(f"[MODELSLAB V7 IMAGE] User tier: {user_tier}")
             logger.info(f"[MODELSLAB V7 IMAGE] Aspect ratio: {aspect_ratio}")
             logger.info(f"[MODELSLAB V7 IMAGE] Prompt: {prompt[:100]}...")
+            logger.info(f"[MODELSLAB V7 IMAGE] Model selection: {'tier-based' if user_tier else 'hardcoded/default'}")
+            logger.info(f"[DEBUG] API payload model_id: {payload.get('model_id')}")
             
             async with aiohttp.ClientSession() as session:
                 # Submit generation request
@@ -179,7 +203,8 @@ class ModelsLabV7ImageService:
         character_name: str,
         character_description: str,
         style: str = "realistic",
-        aspect_ratio: str = "3:4"  # Portrait for characters
+        aspect_ratio: str = "3:4",  # Portrait for characters
+        user_tier: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate character image using V7 API"""
         
@@ -200,15 +225,21 @@ class ModelsLabV7ImageService:
             Clear background, centered composition, detailed character design, 
             expressive eyes, well-defined features, professional character art"""
             
-            # Get appropriate model for style
-            model_id = self._get_model_for_style(style)
-            
+            # Get appropriate model for style (fallback if no tier provided)
+            if user_tier:
+                model_id = self._get_model_for_tier(user_tier)
+            else:
+                model_id = self._get_model_for_style(style)
+
             logger.info(f"[CHARACTER IMAGE] Generating {style} portrait for: {character_name}")
-            
+            logger.info(f"[CHARACTER IMAGE] User tier: {user_tier}")
+            logger.info(f"[CHARACTER IMAGE] Selected model: {model_id} ({'tier-based' if user_tier else 'style-based'})")
+
             result = await self.generate_image(
                 prompt=full_prompt,
                 aspect_ratio=aspect_ratio,
                 model_id=model_id,
+                user_tier=user_tier,
                 wait_for_completion=True,  # Wait for character images
                 max_wait_time=120  # 2 minutes for characters
             
@@ -230,7 +261,8 @@ class ModelsLabV7ImageService:
         self,
         scene_description: str,
         style: str = "cinematic",
-        aspect_ratio: str = "16:9"
+        aspect_ratio: str = "16:9",
+        user_tier: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate scene image using V7 API"""
         
@@ -250,15 +282,22 @@ class ModelsLabV7ImageService:
             Wide establishing shot, detailed environment, atmospheric perspective, 
             rich visual storytelling, immersive background, professional scene composition"""
             
-            model_id = self._get_model_for_style(style)
-            
+            # Get appropriate model for style (fallback if no tier provided)
+            if user_tier:
+                model_id = self._get_model_for_tier(user_tier)
+            else:
+                model_id = self._get_model_for_style(style)
+
             logger.info(f"[SCENE IMAGE] Generating {style} scene: {scene_description[:50]}...")
-            
+            logger.info(f"[SCENE IMAGE] User tier: {user_tier}")
+            logger.info(f"[SCENE IMAGE] Selected model: {model_id} ({'tier-based' if user_tier else 'style-based'})")
+
             result = await self.generate_image(
                 prompt=full_prompt,
                 aspect_ratio=aspect_ratio,
                 model_id=model_id,
-                wait_for_completion=True,  # Wait for scene images  
+                user_tier=user_tier,
+                wait_for_completion=True,  # Wait for scene images
                 max_wait_time=120  # 2 minutes for scenes
             )
             
@@ -280,7 +319,8 @@ class ModelsLabV7ImageService:
         environment_description: str,
         mood: str = "neutral",
         time_of_day: str = "day",
-        aspect_ratio: str = "16:9"
+        aspect_ratio: str = "16:9",
+        user_tier: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate environment/background image with specific mood and timing"""
         
@@ -311,12 +351,21 @@ class ModelsLabV7ImageService:
             Detailed environment design, atmospheric perspective, immersive background, 
             professional landscape composition, rich visual detail, cinematic quality"""
             
+            # Get appropriate model for tier
+            if user_tier:
+                model_id = self._get_model_for_tier(user_tier)
+            else:
+                model_id = "gen4_image"  # Fallback
+
             logger.info(f"[ENVIRONMENT IMAGE] {mood} {time_of_day} environment: {environment_description[:50]}...")
-            
+            logger.info(f"[ENVIRONMENT IMAGE] User tier: {user_tier}")
+            logger.info(f"[ENVIRONMENT IMAGE] Selected model: {model_id} ({'tier-based' if user_tier else 'hardcoded'})")
+
             result = await self.generate_image(
                 prompt=full_prompt,
                 aspect_ratio=aspect_ratio,
-                model_id="gen4_image"
+                model_id=model_id,
+                user_tier=user_tier
             )
             
             # Add environment metadata
@@ -335,7 +384,8 @@ class ModelsLabV7ImageService:
     async def batch_generate_images(
         self,
         image_requests: List[Dict[str, Any]],
-        max_concurrent: int = 3
+        max_concurrent: int = 3,
+        user_tier: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Generate multiple images with controlled concurrency"""
         
@@ -371,10 +421,18 @@ class ModelsLabV7ImageService:
                         )
                     else:
                         # General image generation
+                        model_id = request.get('model_id')
+                        if model_id is None and user_tier:
+                            model_id = self._get_model_for_tier(user_tier)
+                        elif model_id is None:
+                            model_id = 'gen4_image'  # Fallback
+
+                        logger.info(f"[BATCH GENERATION] Using model: {model_id} for request {index} ({'tier-based' if user_tier else 'hardcoded'})")
                         result = await self.generate_image(
                             prompt=request.get('prompt', request.get('description', '')),
                             aspect_ratio=request.get('aspect_ratio', '16:9'),
-                            model_id=request.get('model_id', 'gen4_image')
+                            model_id=model_id,
+                            user_tier=user_tier
                         )
                     
                     result['batch_index'] = index
@@ -422,7 +480,17 @@ class ModelsLabV7ImageService:
     
     def _get_model_for_style(self, style: str) -> str:
         """Get appropriate model ID for the given style"""
-        return self.image_models.get(style, 'gen4_image')
+        model_id = self.image_models.get(style, 'gen4_image')
+        logger.info(f"[MODELSLAB V7 IMAGE] Style '{style}' mapped to model '{model_id}' (hardcoded mapping)")
+        return model_id
+
+    def _get_model_for_tier(self, user_tier: str) -> str:
+        """Get appropriate model ID for the given user subscription tier"""
+        model_id = self.tier_model_mapping.get(user_tier, 'gen4_image')
+        logger.info(f"[MODELSLAB V7 IMAGE] Tier '{user_tier}' mapped to model '{model_id}' (tier-based selection)")
+        logger.info(f"[DEBUG] Available tier mappings: {self.tier_model_mapping}")
+        logger.info(f"[DEBUG] Requested tier: '{user_tier}', resolved model: '{model_id}'")
+        return model_id
     
     def _get_aspect_ratio(self, ratio_name: str) -> str:
         """Get aspect ratio string from preset name"""
