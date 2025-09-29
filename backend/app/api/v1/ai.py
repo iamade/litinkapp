@@ -1,4 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+from typing import Optional
+import re
+from fastapi import APIRouter, Depends, HTTPException, Body
+from app.schemas.video import VideoGenerationRequest, VideoGenerationResponse
+from app.services.character_service import CharacterService
+from app.services.plot_service import PlotService
 from supabase import Client
 import time
 
@@ -11,6 +17,216 @@ from app.services.elevenlabs_service import ElevenLabsService
 from app.services.embeddings_service import EmbeddingsService
 from app.core.database import get_supabase
 from app.core.auth import get_current_active_user
+from app.services.pipeline_manager import PipelineManager, PipelineStep
+from app.services.deepseek_script_service import DeepSeekScriptService
+from app.services.openrouter_service import OpenRouterService, ModelTier
+from app.services.subscription_manager import SubscriptionManager
+
+
+def parse_scene_descriptions(analysis_result: str) -> list:
+    """Parse scene descriptions from AI analysis result with improved logic"""
+    scene_descriptions = []
+
+    # Split by common scene delimiters
+    lines = analysis_result.split('\n')
+
+    current_scene = ""
+    for line in lines:
+        line = line.strip()
+
+        # Look for scene markers (Scene 1:, Scene One:, SCENE 1:, etc.)
+        scene_match = re.match(r'^(?:Scene\s+|SCENE\s+|scene\s+)(\d+|[A-Za-z]+)\s*:\s*(.+)$', line, re.IGNORECASE)
+
+        if scene_match:
+            # Save previous scene if it exists
+            if current_scene and len(current_scene) > 20:
+                scene_descriptions.append(current_scene[:300])  # Limit length
+            # Start new scene
+            current_scene = scene_match.group(2) + ": " + scene_match.group(3)
+        elif line and len(line) > 10:
+            # Continue building current scene
+            if current_scene:
+                current_scene += " " + line
+            else:
+                current_scene = line
+
+    # Add the last scene
+    if current_scene and len(current_scene) > 20:
+        scene_descriptions.append(current_scene[:300])
+
+    # If no structured scenes found, fall back to line-based parsing
+    if not scene_descriptions:
+        for line in lines:
+            line = line.strip()
+            if line and len(line) > 20:
+                scene_descriptions.append(line[:300])
+
+    return scene_descriptions
+
+
+def extract_characters(character_details: str, script_style: str = "cinematic_movie") -> list:
+    """Extract character names from character analysis with improved logic and script style filtering"""
+    characters = []
+
+    # Look for patterns like "Character Name: description" or "Name - role"
+    character_patterns = [
+        r'^([A-Z][a-zA-Z\s]+?)\s*:\s*.+$',  # Name: description
+        r'^([A-Z][a-zA-Z\s]+?)\s*-\s*.+$',   # Name - role
+        r'^([A-Z][a-zA-Z\s]+?)\s*\([^)]+\)', # Name (role)
+    ]
+
+    lines = character_details.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        for pattern in character_patterns:
+            match = re.match(pattern, line, re.MULTILINE)
+            if match:
+                char_name = match.group(1).strip()
+                # Clean up the name (remove extra spaces, titles, etc.)
+                char_name = re.sub(r'\s+', ' ', char_name)
+                if len(char_name) > 1 and char_name not in characters:
+                    characters.append(char_name)
+                break
+
+    # Fallback: extract capitalized words if no structured characters found
+    if not characters:
+        potential_chars = re.findall(r'\b[A-Z][a-zA-Z]+\b', character_details)
+        # Filter out common non-character words
+        exclude_words = {'The', 'And', 'But', 'For', 'Are', 'With', 'This', 'That', 'From', 'They', 'Will', 'Have', 'Been', 'One', 'Two', 'Three'}
+        characters = [char for char in potential_chars if char not in exclude_words]
+
+    # Filter characters based on script style for frontend selection
+    if script_style == "cinematic_narration":
+        # For narration scripts, exclude narrator-like entities that aren't speaking characters
+        narrator_indicators = ['narrator', 'voice', 'speaker', 'announcer']
+        filtered_characters = []
+        for char in characters:
+            char_lower = char.lower()
+            # Exclude if it contains narrator indicators
+            if not any(indicator in char_lower for indicator in narrator_indicators):
+                filtered_characters.append(char)
+        characters = filtered_characters
+
+    # Remove duplicates and limit
+    characters = list(set(characters))[:10]  # Increased limit to 10
+
+    return characters
+
+
+def validate_script_style(script_style: str) -> str:
+    """Validate and normalize script style"""
+    valid_styles = ["cinematic", "narration", "educational", "marketing"]
+    if script_style not in valid_styles:
+        # Default to cinematic if invalid
+        return "cinematic"
+    return script_style
+
+
+def get_available_script_styles() -> dict:
+    """Get available script styles with descriptions"""
+    return {
+        "cinematic": {
+            "name": "Cinematic",
+            "description": "Professional screenplay format with scene headings, character names, and visual descriptions",
+            "best_for": "Video production, storytelling, dramatic content"
+        },
+        "narration": {
+            "name": "Narration",
+            "description": "Rich voice-over script with descriptive language and atmospheric elements",
+            "best_for": "Audiobooks, documentaries, explanatory videos"
+        },
+        "educational": {
+            "name": "Educational",
+            "description": "Clear, structured learning content with step-by-step explanations",
+            "best_for": "Tutorials, courses, training materials"
+        },
+        "marketing": {
+            "name": "Marketing",
+            "description": "Compelling promotional content with hooks and calls-to-action",
+            "best_for": "Advertisements, product demos, promotional videos"
+        }
+    }
+
+
+async def enhance_with_plot_context(supabase_client: Client, user_id: str, book_id: str, chapter_content: str) -> dict:
+    """Enhanced plot context integration for script generation"""
+    try:
+        plot_service = PlotService(supabase_client)
+        plot_overview = await plot_service.get_plot_overview(
+            user_id=user_id,
+            book_id=book_id
+        )
+
+        if not plot_overview:
+            return {"enhanced_content": None, "plot_info": None}
+
+        # Get characters for this plot
+        character_service = CharacterService(supabase_client)
+        characters = await character_service.get_characters_by_plot(
+            plot_overview.id, user_id
+        )
+
+        # Build comprehensive plot context
+        plot_context_parts = []
+
+        # Plot overview section
+        plot_context_parts.append("PLOT OVERVIEW:")
+        if plot_overview.logline:
+            plot_context_parts.append(f"Logline: {plot_overview.logline}")
+        if plot_overview.themes:
+            plot_context_parts.append(f"Themes: {', '.join(plot_overview.themes)}")
+        if plot_overview.story_type:
+            plot_context_parts.append(f"Story Type: {plot_overview.story_type}")
+        if plot_overview.genre:
+            plot_context_parts.append(f"Genre: {plot_overview.genre}")
+        if plot_overview.tone:
+            plot_context_parts.append(f"Tone: {plot_overview.tone}")
+        if plot_overview.setting:
+            plot_context_parts.append(f"Setting: {plot_overview.setting}")
+        if plot_overview.target_audience:
+            plot_context_parts.append(f"Target Audience: {plot_overview.target_audience}")
+
+        # Characters section
+        if characters:
+            plot_context_parts.append("\nCHARACTERS:")
+            for char in characters[:8]:  # Limit to 8 characters for brevity
+                char_info = f"- {char.name}"
+                if char.role:
+                    char_info += f" ({char.role})"
+                if char.personality:
+                    char_info += f": {char.personality[:150]}..."
+                plot_context_parts.append(char_info)
+
+        # Conflict and stakes
+        if plot_overview.conflict_type or plot_overview.stakes:
+            plot_context_parts.append("\nSTORY ELEMENTS:")
+            if plot_overview.conflict_type:
+                plot_context_parts.append(f"Conflict Type: {plot_overview.conflict_type}")
+            if plot_overview.stakes:
+                plot_context_parts.append(f"Stakes: {plot_overview.stakes}")
+
+        # Combine plot context with chapter content
+        plot_context_text = "\n".join(plot_context_parts)
+        enhanced_content = f"{plot_context_text}\n\nCHAPTER CONTENT:\n{chapter_content}"
+
+        return {
+            "enhanced_content": enhanced_content,
+            "plot_info": {
+                "plot_id": plot_overview.id,
+                "logline": plot_overview.logline,
+                "genre": plot_overview.genre,
+                "tone": plot_overview.tone,
+                "character_count": len(characters) if characters else 0
+            }
+        }
+
+    except Exception as e:
+        print(f"Error in enhance_with_plot_context: {str(e)}")
+        return {"enhanced_content": None, "plot_info": None}
+
 
 router = APIRouter()
 
@@ -132,43 +348,710 @@ async def generate_tutorial_video(
     except Exception as e:
         print(f"Error generating tutorial video: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/generate-entertainment-video")
+ 
+@router.post("/generate-entertainment-video", response_model=VideoGenerationResponse)
 async def generate_entertainment_video(
-    chapter_id: str,
-    animation_style: str = "cinematic",
+    request: VideoGenerationRequest, 
+    # request: dict = Body(...),
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_active_user)
 ):
-    """Generate entertainment video from chapter using RAG system with OpenAI enhancement"""
+    """Generate entertainment video using already saved script"""
     try:
-        # Verify chapter access
-        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
-        if not chapter_response.data:
-            raise HTTPException(status_code=404, detail="Chapter not found")
+        chapter_id = request.chapter_id
+        quality_tier = request.quality_tier
+        video_style = request.video_style
+        # Extract parameters from request body
+        # chapter_id = request.get('chapter_id')
+        # quality_tier = request.get('quality_tier', 'basic')
+        # video_style = request.get('video_style', 'realistic')  # This is for visual styling
         
-        chapter_data = chapter_response.data
-        book_data = chapter_data['books']
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required")
+
+        # Step 1: Get the most recent script for this chapter (regardless of style)
+        script_response = supabase_client.table('scripts')\
+            .select('*')\
+            .eq('chapter_id', chapter_id)\
+            .eq('user_id', current_user['id'])\
+            .order('created_at', desc=True)\
+            .limit(1)\
+            .execute()
         
-        # Check access permissions
-        if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
-            raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
+        if not script_response.data:
+            raise HTTPException(
+                status_code=400, 
+                detail="No script found for this chapter. Please generate script first using 'Generate Script & Scene'."
+            )
         
-        # Generate entertainment video
-        video_service = VideoService(supabase_client)
-        video_result = await video_service.generate_entertainment_video(
-            chapter_id=chapter_id,
-            animation_style=animation_style,
-            supabase_client=supabase_client
+        script_data = script_response.data[0]
+
+        # Step 2: Create video generation record
+        video_generation = supabase_client.table('video_generations').insert({
+            'chapter_id': chapter_id,
+            'script_id': script_data['id'],
+            'user_id': current_user['id'],
+            'generation_status': 'pending',
+            'quality_tier': quality_tier,
+            'can_resume': True,  # ✅ Add this field
+            'retry_count': 0,    # ✅ Add this field
+            'script_data': {
+                'script': script_data['script'],
+                'scene_descriptions': script_data['scene_descriptions'],
+                'characters': script_data['characters'],
+                'script_style': script_data['script_style'],  # Preserve original style
+                'video_style': video_style  # New: visual styling for video generation
+            }
+        }).execute()
+
+        video_gen_id = video_generation.data[0]['id']
+        
+        try:
+            # Step 3: Start audio generation (first step in pipeline)
+            from app.tasks.audio_tasks import generate_all_audio_for_video
+            print(f"✅ Starting audio generation for video: {video_gen_id}")
+    
+            task = generate_all_audio_for_video.delay(video_gen_id)
+            print(f"✅ Audio task queued successfully: {task.id}")
+            
+            # Store task ID and update status in database
+            supabase_client.table('video_generations').update({
+                'audio_task_id': task.id,
+                'generation_status': 'generating_audio',
+                'task_metadata': {
+                    'audio_task_id': task.id,
+                    'audio_task_state': task.state,
+                    'started_at': datetime.now().isoformat()
+                }
+            }).eq('id', video_gen_id).execute()
+
+        
+        except Exception as e:
+            print(f"❌ Failed to queue audio task: {e}")
+            
+            supabase_client.table('video_generations').update({
+                'generation_status': 'failed',
+                'error_message': f"Failed to start audio generation: {str(e)}"
+            }).eq('id', video_gen_id).execute()
+            
+            raise e
+        
+        return VideoGenerationResponse(
+            video_generation_id=video_gen_id,
+            script_id=script_data['id'],
+            status="queued",
+            audio_task_id=task.id,
+            task_status=task.state,
+            message="Video generation started using saved script",
+            script_info={
+                "script_style": script_data['script_style'],
+                "video_style": video_style,  # ✅ Now this works
+                "scenes": len(script_data.get('scene_descriptions', [])),
+                "characters": len(script_data.get('characters', [])),
+                "created_at": script_data['created_at']
+            }
         )
+            
+        # return VideoGenerationResponse(
+        #     video_generation_id=video_gen_id,
+        #     script_id=script_data['id'],
+        #     status="queued",
+        #     audio_task_id=task.id,
+        #     task_status=task.state,
+        #     message="Video generation started using saved script",
+        #     script_info={
+        #         "script_style": script_data['script_style'],
+        #         "video_style": request.get('video_style', 'realistic'), 
+        #         "scenes": len(script_data.get('scene_descriptions', [])),
+        #         "characters": len(script_data.get('characters', [])),
+        #         "created_at": script_data['created_at']
+        #     }
+        # )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))   
+    
+@router.get("/video-generation-status/{video_gen_id}")
+async def get_video_generation_status(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get video generation status with detailed progress"""
+    try:
+        response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
         
-        if not video_result:
-            raise HTTPException(status_code=500, detail="Failed to generate entertainment video")
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
         
-        return video_result
+        data = response.data
+        status = data['generation_status']
+        
+        task_metadata = data.get('task_metadata', {})
+        audio_task_id = task_metadata.get('audio_task_id') or data.get('audio_task_id')
+        
+        if audio_task_id and status in ['generating_audio', 'pending']:
+            try:
+                from app.tasks.celery_app import celery_app
+                task_result = celery_app.AsyncResult(audio_task_id)
+                
+                if task_result.state == 'SUCCESS':
+                    # Task completed but DB not updated yet
+                    status = 'audio_completed'
+                elif task_result.state == 'FAILURE':
+                    status = 'failed'
+                    data['error_message'] = str(task_result.result)
+                elif task_result.state == 'PENDING':
+                    status = 'generating_audio'
+                
+                # Add task info to response
+                data['task_info'] = {
+                    'task_id': audio_task_id,
+                    'task_state': task_result.state,
+                    'task_result': str(task_result.result) if task_result.result else None
+                }
+            except Exception as e:
+                print(f"Error checking task status: {e}")
+        
+        # Base response
+        result = {
+            'status': status,
+            'generation_status': status, 
+            'quality_tier': data['quality_tier'],
+            'video_url': data.get('video_url'),
+            'created_at': data['created_at'],
+            'script_id': data.get('script_id'),
+            'error_message': data.get('error_message')
+        }
+        
+        # Add audio information if available
+        if data.get('audio_files'):
+            audio_data = data['audio_files']
+            result['audio_progress'] = {
+                'narrator_files': len(audio_data.get('narrator', [])),
+                'character_files': len(audio_data.get('characters', [])),
+                'sound_effects': len(audio_data.get('sound_effects', [])),
+                'background_music': len(audio_data.get('background_music', []))
+            }
+            
+        # Add task info if available
+        if 'task_info' in data:
+            result['task_info'] = data['task_info']
+        
+        # Add image information if available
+        if data.get('image_data'):
+            image_data = data['image_data']
+            result['image_progress'] = image_data.get('statistics', {})
+            
+            # Include character images for frontend display
+            if status in ['images_completed', 'generating_video', 'completed']:
+                character_images = image_data.get('character_images', [])
+                result['character_images'] = [
+                    img for img in character_images if img is not None
+                ]
+        
+        #  Add video information if available
+        if data.get('video_data'):
+            video_data = data['video_data']
+            result['video_progress'] = video_data.get('statistics', {})
+            
+            # Include scene videos for frontend display
+            if status in ['video_completed', 'merging_audio', 'completed']:
+                scene_videos = video_data.get('scene_videos', [])
+                result['scene_videos'] = [
+                    video for video in scene_videos if video is not None
+                ]
+        
+        # Add merge information if available
+        if data.get('merge_data'):
+            merge_data = data['merge_data']
+            result['merge_progress'] = merge_data.get('merge_statistics', {})
+            
+            # Include final video information if completed
+            if status == 'completed':
+                result['final_video_ready'] = True
+                result['merge_details'] = {
+                    'processing_time': merge_data.get('merge_statistics', {}).get('processing_time', 0),
+                    'file_size_mb': merge_data.get('merge_statistics', {}).get('file_size_mb', 0),
+                    'scenes_merged': merge_data.get('merge_statistics', {}).get('total_scenes_merged', 0),
+                    'audio_tracks_mixed': merge_data.get('merge_statistics', {}).get('audio_tracks_mixed', 0)
+                }
+        
+         # ✅ NEW: Add lip sync information if available
+        if data.get('lipsync_data'):
+            lipsync_data = data['lipsync_data']
+            result['lipsync_progress'] = lipsync_data.get('statistics', {})
+            
+            # Include lip sync details if completed
+            if status in ['lipsync_completed', 'completed']:
+                result['lipsync_completed'] = True
+                result['lipsync_details'] = {
+                    'characters_lip_synced': lipsync_data.get('statistics', {}).get('characters_lip_synced', 0),
+                    'scenes_processed': lipsync_data.get('statistics', {}).get('total_scenes_processed', 0),
+                    'processing_method': lipsync_data.get('statistics', {}).get('processing_method', 'unknown')
+                }
+                
+                # Include lip synced scenes
+                lip_synced_scenes = lipsync_data.get('lip_synced_scenes', [])
+                result['lip_synced_scenes'] = [
+                    scene for scene in lip_synced_scenes if scene is not None
+                ]
+        
+        return result
         
     except Exception as e:
-        print(f"Error generating entertainment video: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chapter-video-generations/{chapter_id}")
+async def get_chapter_video_generations(
+    chapter_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get all video generations for a chapter"""
+    try:
+        print(f"🔍 DEBUG: Getting video generations for chapter: {chapter_id}")
+        print(f"🔍 DEBUG: User ID: {current_user.get('id', 'Unknown')}")
+        
+        # First check if chapter exists
+        chapter_check = supabase_client.table('chapters')\
+            .select('id, title')\
+            .eq('id', chapter_id)\
+            .execute()
+        
+        print(f"🔍 DEBUG: Chapter found: {len(chapter_check.data or [])}")
+        
+        
+        response = supabase_client.table('video_generations')\
+            .select('*')\
+            .eq('chapter_id', chapter_id)\
+            .eq('user_id', current_user['id'])\
+            .order('created_at', desc=True)\
+            .execute()
+            
+        print(f"🔍 DEBUG: Video generations found: {len(response.data or [])}")
+        
+        
+        generations = []
+        for gen in response.data or []:
+            # Add pipeline status for each generation
+            try:
+                pipeline_manager = PipelineManager()
+                pipeline_status = pipeline_manager.get_pipeline_status(gen['id'])
+                gen['pipeline_status'] = pipeline_status
+                
+                # Add retry capability flag
+                gen['can_resume'] = (
+                    gen.get('generation_status') in ['failed', 'audio_completed', 'images_completed', 'video_completed'] or
+                    (pipeline_status and pipeline_status.get('can_resume', False))
+                )
+                
+            except Exception as e:
+                print(f"Error getting pipeline status for {gen['id']}: {e}")
+                gen['pipeline_status'] = None
+                gen['can_resume'] = gen.get('generation_status') == 'failed'
+            
+            generations.append(gen)
+        
+        result = {
+            'chapter_id': chapter_id,
+            'generations': generations,
+            'total': len(generations)
+        }
+        
+        print(f"🔍 DEBUG: Returning result with {len(generations)} generations")
+        return result
+        
+    except Exception as e:
+        print(f"❌ ERROR in get_chapter_video_generations: {e}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+# Add this new endpoint after get_character_images function (around line 310):
+
+@router.get("/scene-videos/{video_gen_id}")
+async def get_scene_videos(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get scene videos for a video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        # Get scene videos
+        videos_response = supabase_client.table('video_segments')\
+            .select('*')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('status', 'completed')\
+            .order('scene_id')\
+            .execute()
+        
+        scene_videos = []
+        total_duration = 0.0
+        
+        for video in videos_response.data or []:
+            # Calculate resolution from width and height
+            width = video.get('width', 512)
+            height = video.get('height', 288)
+            resolution = f"{width}x{height}"
+            
+            scene_videos.append({
+                'id': video['id'],
+                'scene_id': video['scene_id'],
+                'scene_description': video['scene_description'],
+                'video_url': video['video_url'],
+                'duration': video['duration_seconds'],
+                'resolution': video['resolution'],
+                'width': width,  # ✅ Include individual dimensions too
+                'height': height,  # ✅ Include individual dimensions too
+                'fps': video['fps'],
+                'generation_method': video['generation_method'],
+                'created_at': video['created_at']
+            })
+            total_duration += video['duration_seconds']
+        
+        return {
+            'video_generation_id': video_gen_id,
+            'scene_videos': scene_videos,
+            'total_scenes': len(scene_videos),
+            'total_duration': total_duration
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# Add this new endpoint after get_scene_videos function (around line 380):
+
+@router.get("/final-video/{video_gen_id}")
+async def get_final_video(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get final merged video for a video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        data = video_response.data
+        
+        if data['generation_status'] != 'completed':
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Video generation not completed. Current status: {data['generation_status']}"
+            )
+        
+        final_video_url = data.get('video_url')
+        merge_data = data.get('merge_data', {})
+        
+        if not final_video_url:
+            raise HTTPException(status_code=404, detail="Final video not found")
+        
+        return {
+            'video_generation_id': video_gen_id,
+            'final_video_url': final_video_url,
+            'status': 'completed',
+            'merge_statistics': merge_data.get('merge_statistics', {}),
+            'quality_versions': merge_data.get('quality_versions', []),
+            'processing_details': merge_data.get('processing_details', {})
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/merge-status/{video_gen_id}")
+async def get_merge_status(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get detailed merge status and progress"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        data = video_response.data
+        status = data['generation_status']
+        merge_data = data.get('merge_data', {})
+        
+        result = {
+            'video_generation_id': video_gen_id,
+            'merge_status': status,
+            'is_merging': status == 'merging_audio',
+            'is_completed': status == 'completed',
+            'final_video_url': data.get('video_url'),
+            'error_message': data.get('error_message')
+        }
+        
+        # Add merge statistics if available
+        if merge_data:
+            result['merge_statistics'] = merge_data.get('merge_statistics', {})
+            result['processing_details'] = merge_data.get('processing_details', {})
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# Add these new endpoints after get_merge_status function (around line 450):
+
+@router.get("/lip-sync-status/{video_gen_id}")
+async def get_lip_sync_status(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get detailed lip sync status and progress"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        data = video_response.data
+        status = data['generation_status']
+        lipsync_data = data.get('lipsync_data', {})
+        
+        result = {
+            'video_generation_id': video_gen_id,
+            'lipsync_status': status,
+            'is_applying_lipsync': status == 'applying_lipsync',
+            'is_lipsync_completed': status in ['lipsync_completed', 'completed'],
+            'error_message': data.get('error_message')
+        }
+        
+        # Add lip sync statistics if available
+        if lipsync_data:
+            result['lipsync_statistics'] = lipsync_data.get('statistics', {})
+            result['lip_synced_scenes'] = lipsync_data.get('lip_synced_scenes', [])
+        
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/lip-synced-videos/{video_gen_id}")
+async def get_lip_synced_videos(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get lip synced scene videos for a video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        # Get lip synced video segments
+        lipsync_response = supabase_client.table('video_segments')\
+            .select('*')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('generation_method', 'lip_sync')\
+            .eq('status', 'completed')\
+            .order('scene_id')\
+            .execute()
+        
+        lip_synced_videos = []
+        total_duration = 0.0
+        
+        for video in lipsync_response.data or []:
+            metadata = video.get('metadata', {})
+            lip_synced_videos.append({
+                'id': video['id'],
+                'scene_id': video['scene_id'],
+                'original_video_url': metadata.get('original_video_url'),
+                'lipsync_video_url': video['video_url'],
+                'duration': video['duration_seconds'],
+                'characters_processed': metadata.get('characters_processed', []),
+                'faces_detected': metadata.get('faces_detected', 0),
+                'processing_model': video['processing_model'],
+                'created_at': video['created_at']
+            })
+            total_duration += video['duration_seconds']
+        
+        return {
+            'video_generation_id': video_gen_id,
+            'lip_synced_videos': lip_synced_videos,
+            'total_scenes': len(lip_synced_videos),
+            'total_duration': total_duration,
+            'characters_with_lipsync': len(set([
+                char for video in lip_synced_videos 
+                for char in video.get('characters_processed', [])
+            ]))
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/trigger-lip-sync/{video_gen_id}")
+async def trigger_lip_sync_manually(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Manually trigger lip sync processing for a video generation"""
+    try:
+        # Verify access and status
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        data = video_response.data
+        status = data['generation_status']
+        
+        # Check if lip sync can be applied
+        if status not in ['video_completed', 'completed', 'lipsync_failed']:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot apply lip sync. Current status: {status}. Video generation must be completed first."
+            )
+        
+        # Check if character dialogue exists
+        audio_files = data.get('audio_files', {})
+        character_audio = audio_files.get('characters', [])
+        
+        if not character_audio:
+            raise HTTPException(
+                status_code=400,
+                detail="No character dialogue found. Lip sync requires character audio."
+            )
+        
+        # Trigger lip sync task
+        from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
+        task = apply_lip_sync_to_generation.delay(video_gen_id)
+        
+        return {
+            'message': 'Lip sync processing started',
+            'task_id': task.id,
+            'video_generation_id': video_gen_id,
+            'character_dialogues': len(character_audio)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/script-styles")
+async def get_script_styles():
+    """Get available script styles with descriptions"""
+    return {
+        "styles": get_available_script_styles(),
+        "default": "cinematic"
+    }
+
+@router.get("/scripts/{chapter_id}")
+async def list_chapter_scripts(
+    chapter_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """List all scripts for a chapter by current user"""
+    try:
+        scripts = supabase_client.table('scripts')\
+            .select('*')\
+            .eq('chapter_id', chapter_id)\
+            .eq('user_id', current_user['id'])\
+            .order('created_at', desc=True)\
+            .execute()
+
+        return {
+            'chapter_id': chapter_id,
+            'scripts': scripts.data or []
+        }
+
+    except Exception as e:
+        print(f"Error listing scripts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/script/{script_id}")
+async def get_script_details(
+    script_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get detailed script information"""
+    try:
+        script = supabase_client.table('scripts')\
+            .select('*')\
+            .eq('id', script_id)\
+            .eq('user_id', current_user['id'])\
+            .single().execute()
+        
+        if not script.data:
+            raise HTTPException(status_code=404, detail="Script not found")
+        
+        return script.data
+        
+    except Exception as e:
+        print(f"Error getting script details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# get_character_images endpoint:
+
+@router.get("/character-images/{video_gen_id}")
+async def get_character_images(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get character images for a video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        # Get character images
+        images_response = supabase_client.table('image_generations')\
+            .select('*')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('image_type', 'character')\
+            .eq('status', 'completed')\
+            .execute()
+        
+        character_images = []
+        for img in images_response.data or []:
+            character_images.append({
+                'id': img['id'],
+                'character_name': img['character_name'],
+                'image_url': img['image_url'],
+                'prompt': img['image_prompt'],
+                'created_at': img['created_at']
+            })
+        
+        return {
+            'video_generation_id': video_gen_id,
+            'character_images': character_images,
+            'total_characters': len(character_images)
+        }
+        
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/generate-video-avatar")
@@ -1030,3 +1913,950 @@ async def combine_tavus_videos(
         import traceback
         print(f"🔍 Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# Update the generate_script_and_scenes endpoint
+@router.post("/generate-script-and-scenes")
+async def generate_script_and_scenes(
+    request: dict = Body(...),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Generate only the AI script and scene descriptions for a chapter using OpenRouter (no video generation)"""
+    try:
+        # Extract from request body
+        chapter_id = request.get('chapter_id')
+        script_style = validate_script_style(request.get('script_style', 'cinematic'))
+        script_name = request.get('script_name')  # Optional custom name for the script
+        plot_context = request.get('plot_context')  # Optional plot context for enhanced generation
+
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required")
+
+        # Verify chapter access
+        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+
+        chapter_data = chapter_response.data
+        book_data = chapter_data['books']
+
+        # Check access permissions
+        if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
+
+        # ✅ NEW: Check subscription tier and limits
+        subscription_manager = SubscriptionManager(supabase_client)
+        user_tier = await subscription_manager.get_user_tier(current_user['id'])
+        tier_check = await subscription_manager.can_user_generate_video(current_user['id'])
+
+        if not tier_check['can_generate']:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Monthly limit reached. You have used {tier_check['videos_used']} out of {tier_check['videos_limit']} videos. Please upgrade your subscription."
+            )
+
+        # Map subscription tier to model tier
+        model_tier_mapping = {
+            "free": ModelTier.FREE,
+            "basic": ModelTier.BASIC,
+            "standard": ModelTier.STANDARD,
+            "premium": ModelTier.PREMIUM,
+            "professional": ModelTier.PROFESSIONAL
+        }
+        user_model_tier = model_tier_mapping.get(user_tier.value, ModelTier.FREE)
+
+        print(f"[OpenRouter] Generating {script_style} script for {user_tier.value} tier user")
+
+        # Initialize OpenRouter service
+        openrouter_service = OpenRouterService()
+
+        # Get chapter context for enhanced content
+        rag_service = RAGService(supabase_client)
+        chapter_context = await rag_service.get_chapter_with_context(chapter_id, include_adjacent=True)
+
+        # Prepare content for OpenRouter based on script style
+        content_for_script = chapter_context.get('total_context', chapter_data['content'])
+
+        # Enhance with plot context if provided
+        plot_enhanced = False
+        plot_info = None
+        if plot_context:
+            try:
+                plot_info = await enhance_with_plot_context(
+                    supabase_client=supabase_client,
+                    user_id=current_user['id'],
+                    book_id=chapter_data['book_id'],
+                    chapter_content=content_for_script
+                )
+                if plot_info and plot_info['enhanced_content']:
+                    content_for_script = plot_info['enhanced_content']
+                    plot_enhanced = True
+                    print(f"[PlotService] Enhanced script generation with plot context for chapter {chapter_id}")
+
+            except Exception as plot_error:
+                print(f"[PlotService] Warning: Could not enhance with plot context: {str(plot_error)}")
+                # Continue with original content if plot enhancement fails
+
+        # Extract target duration from request
+        target_duration = request.get('target_duration', 'auto')
+        if target_duration == 'auto':
+            target_duration = 'auto'
+        elif isinstance(target_duration, str) and target_duration.isdigit():
+            target_duration = int(target_duration)
+        else:
+            target_duration = None
+
+        # ✅ Generate script using OpenRouter with tier-appropriate model
+        script_result = await openrouter_service.generate_script(
+            content=chapter_data['content'],  # Use original content, plot context is handled separately
+            user_tier=user_model_tier,
+            script_type=script_style,
+            target_duration=target_duration,
+            plot_context=plot_info if plot_info and plot_info.get('enhanced_content') else None
+        )
+
+        if script_result.get('status') != 'success':
+            raise HTTPException(
+                status_code=500,
+                detail=f"OpenRouter script generation failed: {script_result.get('error', 'Unknown error')}"
+            )
+
+        script = script_result.get('content', '')
+        usage = script_result.get('usage', {})
+
+        # ✅ Generate scene breakdown using OpenRouter
+        scene_breakdown_result = await openrouter_service.analyze_content(
+            content=f"Please break down this script into 5-8 detailed scene descriptions for video generation. Format each scene as 'Scene X: [Detailed description]' where X is the scene number:\n\n{script}",
+            user_tier=user_model_tier,
+            analysis_type="summary"  # Use summary type but with scene-specific prompt
+        )
+
+        scene_descriptions = []
+        if scene_breakdown_result.get('status') == 'success':
+            # Parse scene descriptions from the analysis result with improved logic
+            analysis_result = scene_breakdown_result.get('result', '')
+            scene_descriptions = parse_scene_descriptions(analysis_result)
+
+        # Limit to reasonable number of scenes
+        scene_descriptions = scene_descriptions[:10]
+
+        # ✅ Generate character analysis using OpenRouter
+        character_analysis_result = await openrouter_service.analyze_content(
+            content=f"Extract and describe all characters mentioned in this script. Format as 'Character Name: [brief description/role]':\n\n{script}",
+            user_tier=user_model_tier,
+            analysis_type="characters"
+        )
+
+        characters = []
+        character_details = ""
+        if character_analysis_result.get('status') == 'success':
+            character_details = character_analysis_result.get('result', '')
+            # Extract character names with improved logic, filtered by script style
+            characters = extract_characters(character_details, script_style)
+
+        # Generate default script name if not provided
+        if not script_name:
+            script_name = f"{script_style.title()} Script - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        # Enhanced script data with metadata
+        script_data = {
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "script_style": script_style,
+            "script_name": script_name,
+            "user_id": current_user['id'],
+            "created_at": datetime.now().isoformat(),
+            "metadata": {
+                "total_scenes": len(scene_descriptions),
+                "estimated_duration": len(script) * 0.01,  # Rough estimate
+                "has_characters": len(characters) > 0,
+                "script_length": len(script),
+                "model_used": script_result.get('model_used', 'unknown'),
+                "tier": user_tier.value,
+                "tokens_used": usage.get('total_tokens', 0),
+                "estimated_cost": usage.get('estimated_cost', 0)
+            }
+        }
+
+        # Store in chapters table (your existing approach)
+        ai_content = chapter_data.get('ai_generated_content') or {}
+        if not isinstance(ai_content, dict):
+            ai_content = {}
+        key = f"{current_user['id']}:{script_style}"
+        ai_content[key] = script_data
+
+        supabase_client.table('chapters').update({
+            "ai_generated_content": ai_content
+        }).eq('id', chapter_id).execute()
+
+        # Create a dedicated scripts table entry for easier access
+        # Allow multiple scripts per chapter by not checking for existing ones
+        script_record = {
+            "chapter_id": chapter_id,
+            "user_id": current_user['id'],
+            "script_style": script_style,
+            "script_name": script_name,
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "metadata": script_data["metadata"],
+            "status": "ready",
+            "service_used": "openrouter"
+        }
+
+        # Always insert new script (allow multiple scripts per chapter)
+        script_result = supabase_client.table('scripts').insert(script_record).execute()
+        script_id = script_result.data[0]['id']
+
+        # ✅ Record usage for billing/limits
+        await subscription_manager.record_usage(
+            user_id=current_user['id'],
+            resource_type='script',
+            cost_usd=usage.get('estimated_cost', 0.0),
+            metadata={
+                'script_style': script_style,
+                'model_used': script_result.get('model_used'),
+                'tokens_used': usage.get('total_tokens', 0)
+            }
+        )
+
+        print(f"[OpenRouter] Successfully generated {script_style} script with {len(characters)} characters and {len(scene_descriptions)} scenes")
+
+        return {
+            'chapter_id': chapter_id,
+            'script_id': script_id,
+            'script_name': script_name,
+            'script': script,
+            'scene_descriptions': scene_descriptions,
+            'characters': characters,
+            'character_details': character_details,
+            'script_style': script_style,
+            'metadata': script_data["metadata"],
+            'service_used': 'openrouter',
+            'tier': user_tier.value,
+            'plot_enhanced': plot_enhanced,
+            'plot_info': plot_info['plot_info'] if plot_info else None,
+            'usage_info': {
+                'tokens_used': usage.get('total_tokens', 0),
+                'estimated_cost': usage.get('estimated_cost', 0),
+                'model_used': script_result.get('model_used')
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error generating script and scenes with OpenRouter: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-script-and-scenes")
+async def generate_script_and_scenes_with_gpt(
+    request: dict = Body(...),  # Accept body instead of query params
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Generate only the AI script and scene descriptions for a chapter (no video generation)"""
+    try:
+          # Extract from request body
+        chapter_id = request.get('chapter_id')
+        script_style = request.get('script_style', 'cinematic_movie')
+       
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required")
+
+        # Verify chapter access
+        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        chapter_data = chapter_response.data
+        book_data = chapter_data['books']
+        # Check access permissions
+        if book_data['status'] != 'published' and book_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this chapter")
+        # Generate script using RAGService
+        rag_service = RAGService(supabase_client)
+        chapter_context = await rag_service.get_chapter_with_context(chapter_id, include_adjacent=True)
+        script_result = await rag_service.generate_video_script(chapter_context, video_style=book_data.get('book_type', 'realistic'), script_style=script_style)
+        script = script_result.get('script', '')
+        characters = script_result.get('characters', [])
+        character_details = script_result.get('character_details', '')
+        # Parse script for scene descriptions
+        video_service = VideoService()
+        parsed = video_service._parse_script_for_services(script, script_style)
+        scene_descriptions = parsed.get('scene_descriptions') or parsed.get('parsed_sections', {}).get('scene_descriptions', [])
+        
+        # Enhanced script data with metadata
+        script_data = {
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "script_style": script_style,
+            "user_id": current_user['id'],
+            "created_at": datetime.now().isoformat(),
+            "metadata": {
+                "total_scenes": len(scene_descriptions),
+                "estimated_duration": len(script) * 0.01,  # Rough estimate
+                "has_characters": len(characters) > 0,
+                "script_length": len(script)
+            }
+        }
+        
+        
+        # Store in chapters table (your existing approach)
+        ai_content = chapter_data.get('ai_generated_content') or {}
+        if not isinstance(ai_content, dict):
+            ai_content = {}
+        key = f"{current_user['id']}:{script_style}"
+        ai_content[key] = script_data
+        
+        supabase_client.table('chapters').update({
+            "ai_generated_content": ai_content
+        }).eq('id', chapter_id).execute()
+        
+        # ALSO create a dedicated scripts table entry for easier access
+        script_record = {
+            "chapter_id": chapter_id,
+            "user_id": current_user['id'],
+            "script_style": script_style,
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "metadata": script_data["metadata"],
+            "status": "ready"
+        }
+        
+        # Insert or update in scripts table
+        existing_script = supabase_client.table('scripts')\
+            .select('id')\
+            .eq('chapter_id', chapter_id)\
+            .eq('user_id', current_user['id'])\
+            .eq('script_style', script_style)\
+            .execute()
+        
+        if existing_script.data:
+            # Update existing
+            script_result = supabase_client.table('scripts')\
+                .update(script_record)\
+                .eq('id', existing_script.data[0]['id'])\
+                .execute()
+            script_id = existing_script.data[0]['id']
+        else:
+            # Insert new
+            script_result = supabase_client.table('scripts').insert(script_record).execute()
+            script_id = script_result.data[0]['id']
+        
+        
+        return {
+            'chapter_id': chapter_id,
+            'script_id':script_id,
+            'script': script,
+            'scene_descriptions': scene_descriptions,
+            'characters': characters,
+            'character_details': character_details,
+            'script_style': script_style,
+            'metadata': script_data["metadata"],
+        }
+    except Exception as e:
+        print(f"Error generating script and scenes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/save-script-and-scenes")
+async def save_script_and_scenes(
+    chapter_id: str = Body(...),
+    script: str = Body(...),
+    scene_descriptions: list = Body(...),
+    characters: list = Body(...),
+    character_details: str = Body(...),
+    script_style: str = Body(...),
+    script_name: str = Body(None),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Save a new AI-generated script and scene descriptions for a chapter."""
+    try:
+        # Verify chapter access
+        chapter_response = supabase_client.table('chapters').select('*, books(*)').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        chapter_data = chapter_response.data
+        book_data = chapter_data['books']
+        if book_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to modify this chapter")
+
+        # Generate default script name if not provided
+        if not script_name:
+            script_name = f"{script_style.title()} Script - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        # Validate script style
+        script_style = validate_script_style(script_style)
+
+        # Create new script record (allow multiple scripts)
+        script_record = {
+            "chapter_id": chapter_id,
+            "user_id": current_user['id'],
+            "script_style": script_style,
+            "script_name": script_name,
+            "script": script,
+            "scene_descriptions": scene_descriptions,
+            "characters": characters,
+            "character_details": character_details,
+            "metadata": {
+                "total_scenes": len(scene_descriptions),
+                "estimated_duration": len(script) * 0.01,
+                "has_characters": len(characters) > 0,
+                "script_length": len(script)
+            },
+            "status": "ready",
+            "service_used": "manual"
+        }
+
+        script_result = supabase_client.table('scripts').insert(script_record).execute()
+        script_id = script_result.data[0]['id']
+
+        return {
+            "message": "Saved",
+            "chapter_id": chapter_id,
+            "script_id": script_id,
+            "script_name": script_name,
+            "script_style": script_style
+        }
+    except Exception as e:
+        print(f"Error saving script and scenes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/get-script-and-scenes")
+async def get_script_and_scenes(
+    chapter_id: str,
+    script_style: str = "cinematic_movie",
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Fetch the saved AI-generated script and scene descriptions for a chapter (per user)."""
+    try:
+        chapter_response = supabase_client.table('chapters').select('ai_generated_content').eq('id', chapter_id).single().execute()
+        if not chapter_response.data:
+            raise HTTPException(status_code=404, detail="Chapter not found")
+        ai_content = chapter_response.data.get('ai_generated_content') or {}
+        if not isinstance(ai_content, dict):
+            ai_content = {}
+        key = f"{current_user['id']}:{script_style}"
+        result = ai_content.get(key)
+        if not result:
+            return {"chapter_id": chapter_id, "script_style": script_style, "content": None}
+        return {"chapter_id": chapter_id, "script_style": script_style, "content": result}
+    except Exception as e:
+        print(f"Error fetching script and scenes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/delete-script/{script_id}")
+async def delete_script(
+    script_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Delete a specific script by ID."""
+    try:
+        # Verify script ownership
+        script_response = supabase_client.table('scripts').select('*').eq('id', script_id).single().execute()
+        if not script_response.data:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        script_data = script_response.data
+        if script_data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this script")
+
+        # Delete the script
+        supabase_client.table('scripts').delete().eq('id', script_id).execute()
+
+        return {
+            "message": "Script deleted successfully",
+            "script_id": script_id,
+            "script_name": script_data.get('script_name', 'Unnamed Script')
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error deleting script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# Add the missing pipeline status endpoint (around line 450)
+@router.get("/pipeline-status/{video_gen_id}")
+async def get_pipeline_status(
+    video_gen_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get detailed pipeline status for video generation"""
+    try:
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        video_data = video_response.data
+        
+        # Get pipeline steps
+        steps_response = supabase_client.table('pipeline_steps')\
+            .select('*').eq('video_generation_id', video_gen_id)\
+            .order('step_order').execute()
+        
+        pipeline_steps = steps_response.data or []
+        
+        # Calculate progress
+        total_steps = len(pipeline_steps) or 5  # Default to 5 steps
+        completed_steps = len([s for s in pipeline_steps if s.get('status') == 'completed'])
+        failed_steps = len([s for s in pipeline_steps if s.get('status') == 'failed'])
+        
+        # Determine current step
+        current_step = None
+        next_step = None
+        
+        processing_steps = [s for s in pipeline_steps if s.get('status') == 'processing']
+        if processing_steps:
+            current_step = processing_steps[0].get('step_name')
+        else:
+            # Find next pending step
+            pending_steps = [s for s in pipeline_steps if s.get('status') == 'pending']
+            if pending_steps:
+                next_step = pending_steps[0].get('step_name')
+        
+        # Calculate percentage
+        percentage = (completed_steps / total_steps * 100) if total_steps > 0 else 0
+        
+        # Determine overall status
+        overall_status = video_data.get('generation_status', 'pending')
+        
+        # Build response
+        pipeline_status = {
+            'overall_status': overall_status,
+            'failed_at_step': video_data.get('failed_at_step'),
+            'can_resume': video_data.get('can_resume', False),
+            'retry_count': video_data.get('retry_count', 0),
+            'progress': {
+                'completed_steps': completed_steps,
+                'failed_steps': failed_steps,
+                'total_steps': total_steps,
+                'percentage': percentage,
+                'current_step': current_step,
+                'next_step': next_step
+            },
+            'steps': [
+                {
+                    'step_name': step.get('step_name'),
+                    'status': step.get('status', 'pending'),
+                    'started_at': step.get('started_at'),
+                    'completed_at': step.get('completed_at'),
+                    'error_message': step.get('error_message'),
+                    'retry_count': step.get('retry_count', 0)
+                }
+                for step in pipeline_steps
+            ]
+        }
+        
+        return pipeline_status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting pipeline status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@router.post("/retry-generation/{video_gen_id}")
+async def retry_video_generation(
+    video_gen_id: str,
+    request: dict = Body(default={}),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Retry video generation from failed step or specific step - with smart resume logic"""
+    try:
+        print(f"🔄 Starting retry for video generation: {video_gen_id}")
+        print(f"🔄 Request body: {request}")
+        
+        # Extract retry_from_step from request body
+        retry_from_step = request.get('retry_from_step') if request else None
+        
+        # Verify access
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        video_data = video_response.data
+        current_status = video_data.get('generation_status')
+        
+        print(f"🔄 Current status: {current_status}")
+        
+        # ✅ NEW: Smart step determination based on existing data
+        next_step = await determine_next_step_from_database(video_gen_id, video_data, supabase_client)
+        
+        if retry_from_step:
+            try:
+                requested_step = PipelineStep(retry_from_step)
+                # Warn if they're trying to redo a completed step
+                if next_step.value > requested_step.value:
+                    print(f"⚠️  WARNING: User requested step {requested_step.value} but {next_step.value} is the next logical step")
+                step_to_retry = requested_step
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid step: {retry_from_step}")
+        else:
+            step_to_retry = next_step
+            
+        print(f"🔄 Determined retry step: {step_to_retry.value}")
+        
+        # Update retry count
+        retry_count = video_data.get('retry_count', 0) + 1
+        
+        # Update video generation status based on step
+        new_status = get_status_for_step(step_to_retry)
+        
+        supabase_client.table('video_generations').update({
+            'generation_status': new_status,
+            'failed_at_step': None,
+            'error_message': None,
+            'retry_count': retry_count,
+            'can_resume': False,
+            'updated_at': datetime.now().isoformat()
+        }).eq('id', video_gen_id).execute()
+        
+        # Trigger the appropriate task
+        task_id = await trigger_task_for_step(step_to_retry, video_gen_id, supabase_client)
+        
+        return {
+            'message': f'Retrying from step: {step_to_retry.value}',
+            'video_generation_id': video_gen_id,
+            'retry_step': step_to_retry.value,
+            'task_id': task_id,
+            'retry_count': retry_count,
+            'new_status': new_status,
+            'existing_progress': await get_existing_progress_summary(video_gen_id, supabase_client)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error in retry: {e}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def determine_next_step_from_database(video_gen_id: str, video_data: dict, supabase_client: Client) -> PipelineStep:
+    """Determine the next step based on existing SUCCESSFUL data in the database"""
+    
+    print(f"🔍 Analyzing existing data for video generation: {video_gen_id}")
+    
+    # ✅ FIXED: Check for actual successful completions, not just existence
+    audio_files = video_data.get('audio_files') or {}
+    
+    # Count actual successful audio files
+    narrator_count = len(audio_files.get('narrator', []))
+    characters_count = len(audio_files.get('characters', []))
+    sound_effects_count = len(audio_files.get('sound_effects', []))
+    background_music_count = len(audio_files.get('background_music', []))
+    total_audio_count = narrator_count + characters_count + sound_effects_count + background_music_count
+    
+    has_audio = total_audio_count > 0
+    
+    # ✅ FIXED: Check image statistics for successful generations
+    image_data = video_data.get('image_data') or {}
+    image_stats = image_data.get('statistics', {})
+    successful_images = image_stats.get('total_images_generated', 0)
+    character_images_generated = image_stats.get('character_images_generated', 0)
+    scene_images_generated = image_stats.get('scene_images_generated', 0)
+    
+    has_images = successful_images > 0 or (character_images_generated > 0 or scene_images_generated > 0)
+    
+    # ✅ FIXED: Check video statistics for successful generations  
+    video_data_obj = video_data.get('video_data') or {}
+    video_stats = video_data_obj.get('statistics', {})
+    successful_videos = video_stats.get('videos_generated', 0)
+    
+    has_videos = successful_videos > 0
+    
+    # ✅ FIXED: Check for actual final video URL
+    has_merged_video = bool(video_data.get('video_url'))
+    
+    # ✅ FIXED: Check lipsync statistics
+    lipsync_data = video_data.get('lipsync_data') or {}
+    lipsync_stats = lipsync_data.get('statistics', {})
+    lipsync_scenes = lipsync_stats.get('scenes_processed', 0)
+    
+    has_lipsync = lipsync_scenes > 0
+    
+    # Also check database tables for more accuracy - but check for COMPLETED status
+    try:
+        # Check audio_generations table - only count completed
+        audio_check = supabase_client.table('audio_generations')\
+            .select('id')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('status', 'completed')\
+            .execute()
+        
+        db_audio_count = len(audio_check.data or [])
+        
+        # Check image_generations table - only count completed
+        image_check = supabase_client.table('image_generations')\
+            .select('id')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('status', 'completed')\
+            .execute()
+            
+        db_image_count = len(image_check.data or [])
+        
+        # Check video_segments table - only count completed
+        video_check = supabase_client.table('video_segments')\
+            .select('id')\
+            .eq('video_generation_id', video_gen_id)\
+            .eq('status', 'completed')\
+            .execute()
+            
+        db_video_count = len(video_check.data or [])
+        
+        # Use database data as the source of truth with counts
+        has_audio = has_audio or (db_audio_count > 0)
+        has_images = has_images or (db_image_count > 0)  
+        has_videos = has_videos or (db_video_count > 0)
+        
+        print(f"📊 Database verification:")
+        print(f"   - DB Audio files: {db_audio_count}")
+        print(f"   - DB Image files: {db_image_count}")
+        print(f"   - DB Video files: {db_video_count}")
+        
+    except Exception as db_error:
+        print(f"⚠️  Database check error: {db_error}")
+        # Continue with original data if DB check fails
+    
+    print(f"📊 Existing progress (CORRECTED):")
+    print(f"   - Audio: {'✅' if has_audio else '❌'} ({total_audio_count} files)")
+    print(f"   - Images: {'✅' if has_images else '❌'} ({successful_images} generated)")  
+    print(f"   - Videos: {'✅' if has_videos else '❌'} ({successful_videos} generated)")
+    print(f"   - Merged: {'✅' if has_merged_video else '❌'}")
+    print(f"   - Lipsync: {'✅' if has_lipsync else '❌'} ({lipsync_scenes} scenes)")
+    
+    # Determine next step based on what's actually missing
+    if not has_audio:
+        print(f"🎯 Next step: AUDIO_GENERATION (missing audio)")
+        return PipelineStep.AUDIO_GENERATION
+        
+    if not has_images:
+        print(f"🎯 Next step: IMAGE_GENERATION (missing images)")
+        return PipelineStep.IMAGE_GENERATION
+        
+    if not has_videos:
+        print(f"🎯 Next step: VIDEO_GENERATION (missing videos)")
+        return PipelineStep.VIDEO_GENERATION
+        
+    if not has_merged_video:
+        print(f"🎯 Next step: AUDIO_VIDEO_MERGE (missing final video)")
+        return PipelineStep.AUDIO_VIDEO_MERGE
+        
+    # Check if lipsync is needed (only if there are character dialogues)
+    script_data = video_data.get('script_data') or {}
+    characters = script_data.get('characters', [])
+    character_audio = audio_files.get('characters', [])
+    
+    needs_lipsync = bool(characters and character_audio)
+    
+    if needs_lipsync and not has_lipsync:
+        print(f"🎯 Next step: LIP_SYNC (missing lipsync for {len(characters)} characters)")
+        return PipelineStep.LIP_SYNC
+    
+    # If everything exists, just return the status-based step
+    current_status = video_data.get('generation_status', 'failed')
+    if current_status == 'completed':
+        print(f"🎯 All steps completed, but retrying LIP_SYNC as final step")
+        return PipelineStep.LIP_SYNC
+    else:
+        print(f"🎯 Defaulting to AUDIO_GENERATION as fallback")
+        return PipelineStep.AUDIO_GENERATION
+
+async def get_existing_progress_summary(video_gen_id: str, supabase_client: Client) -> dict:
+    """Get a summary of existing progress for the frontend - CORRECTED VERSION"""
+    try:
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_gen_id).single().execute()
+            
+        if not video_response.data:
+            return {}
+            
+        video_data = video_response.data
+        
+        # ✅ FIXED: Count actual successful items, not just existence
+        audio_files = video_data.get('audio_files') or {}
+        image_data = video_data.get('image_data') or {}
+        video_data_obj = video_data.get('video_data') or {}
+        
+        # Count actual audio files
+        audio_count = (
+            len(audio_files.get('narrator', [])) + 
+            len(audio_files.get('characters', [])) + 
+            len(audio_files.get('sound_effects', [])) + 
+            len(audio_files.get('background_music', []))
+        )
+        
+        # Get actual successful counts from statistics
+        image_stats = image_data.get('statistics', {})
+        image_count = image_stats.get('total_images_generated', 0)
+        
+        video_stats = video_data_obj.get('statistics', {})
+        video_count = video_stats.get('videos_generated', 0)
+        
+        return {
+            'audio_files_count': audio_count,
+            'images_count': image_count, 
+            'videos_count': video_count,
+            'has_final_video': bool(video_data.get('video_url')),
+            'last_completed_step': get_last_completed_step_corrected(video_data),
+            'progress_percentage': calculate_progress_percentage_corrected(video_data)
+        }
+        
+    except Exception as e:
+        print(f"Error getting progress summary: {e}")
+        return {}
+
+def get_last_completed_step_corrected(video_data: dict) -> str:
+    """Determine the last completed step - CORRECTED VERSION"""
+    
+    # Check actual successful counts
+    audio_files = video_data.get('audio_files') or {}
+    total_audio = (
+        len(audio_files.get('narrator', [])) + 
+        len(audio_files.get('characters', [])) + 
+        len(audio_files.get('sound_effects', [])) + 
+        len(audio_files.get('background_music', []))
+    )
+    
+    image_data = video_data.get('image_data') or {}
+    image_stats = image_data.get('statistics', {})
+    total_images = image_stats.get('total_images_generated', 0)
+    
+    video_data_obj = video_data.get('video_data') or {}
+    video_stats = video_data_obj.get('statistics', {})
+    total_videos = video_stats.get('videos_generated', 0)
+    
+    lipsync_data = video_data.get('lipsync_data') or {}
+    lipsync_stats = lipsync_data.get('statistics', {})
+    lipsync_scenes = lipsync_stats.get('scenes_processed', 0)
+    
+    has_final_video = bool(video_data.get('video_url'))
+    
+    # Return the last successfully completed step
+    if lipsync_scenes > 0:
+        return 'lipsync_completed'
+    elif has_final_video:
+        return 'merge_completed'  
+    elif total_videos > 0:
+        return 'video_completed'
+    elif total_images > 0:
+        return 'images_completed'
+    elif total_audio > 0:
+        return 'audio_completed'
+    else:
+        return 'none'
+
+def calculate_progress_percentage_corrected(video_data: dict) -> float:
+    """Calculate overall progress percentage - CORRECTED VERSION"""
+    steps_completed = 0
+    total_steps = 5  # audio, image, video, merge, lipsync
+    
+    # Check actual successful completions
+    audio_files = video_data.get('audio_files') or {}
+    total_audio = (
+        len(audio_files.get('narrator', [])) + 
+        len(audio_files.get('characters', [])) + 
+        len(audio_files.get('sound_effects', [])) + 
+        len(audio_files.get('background_music', []))
+    )
+    
+    if total_audio > 0:
+        steps_completed += 1
+        
+    image_data = video_data.get('image_data') or {}
+    if image_data.get('statistics', {}).get('total_images_generated', 0) > 0:
+        steps_completed += 1
+        
+    video_data_obj = video_data.get('video_data') or {}
+    if video_data_obj.get('statistics', {}).get('videos_generated', 0) > 0:
+        steps_completed += 1
+        
+    if video_data.get('video_url'):
+        steps_completed += 1
+        
+    lipsync_data = video_data.get('lipsync_data') or {}
+    if lipsync_data.get('statistics', {}).get('scenes_processed', 0) > 0:
+        steps_completed += 1
+        
+    return (steps_completed / total_steps) * 100
+
+
+def get_status_for_step(step: PipelineStep) -> str:
+    """Get the appropriate status for a pipeline step"""
+    status_mapping = {
+        PipelineStep.AUDIO_GENERATION: 'generating_audio',
+        PipelineStep.IMAGE_GENERATION: 'generating_images', 
+        PipelineStep.VIDEO_GENERATION: 'generating_video',
+        PipelineStep.AUDIO_VIDEO_MERGE: 'merging_audio',
+        PipelineStep.LIP_SYNC: 'applying_lipsync'
+    }
+    return status_mapping.get(step, 'retrying')
+
+async def trigger_task_for_step(step: PipelineStep, video_gen_id: str, supabase_client: Client) -> str:
+    """Trigger the appropriate task for a pipeline step"""
+    try:
+        task_id = None
+        
+        if step == PipelineStep.AUDIO_GENERATION:
+            from app.tasks.audio_tasks import generate_all_audio_for_video
+            task = generate_all_audio_for_video.delay(video_gen_id)
+            task_id = task.id
+            print(f"🎵 Started audio generation task: {task_id}")
+            
+        elif step == PipelineStep.IMAGE_GENERATION:
+            from app.tasks.image_tasks import generate_all_images_for_video
+            task = generate_all_images_for_video.delay(video_gen_id)
+            task_id = task.id
+            print(f"🖼️  Started image generation task: {task_id}")
+            
+        elif step == PipelineStep.VIDEO_GENERATION:
+            from app.tasks.video_tasks import generate_all_videos_for_generation
+            task = generate_all_videos_for_generation.delay(video_gen_id)
+            task_id = task.id
+            print(f"🎬 Started video generation task: {task_id}")
+            
+        elif step == PipelineStep.AUDIO_VIDEO_MERGE:
+            from app.tasks.merge_tasks import merge_audio_video_for_generation
+            task = merge_audio_video_for_generation.delay(video_gen_id)
+            task_id = task.id
+            print(f"🔗 Started merge task: {task_id}")
+            
+        elif step == PipelineStep.LIP_SYNC:
+            from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
+            task = apply_lip_sync_to_generation.delay(video_gen_id)
+            task_id = task.id
+            print(f"💋 Started lipsync task: {task_id}")
+            
+        return task_id
+        
+    except Exception as task_error:
+        print(f"❌ Failed to start task for step {step.value}: {task_error}")
+        
+        # Revert status back to failed
+        supabase_client.table('video_generations').update({
+            'generation_status': 'failed',
+            'error_message': f"Failed to start retry task: {str(task_error)}",
+            'can_resume': True
+        }).eq('id', video_gen_id).execute()
+        
+        raise HTTPException(status_code=500, detail=f"Failed to start retry task: {str(task_error)}")
+

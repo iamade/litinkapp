@@ -43,7 +43,7 @@ cp docker.env.local .env
 # Edit .env with your API keys
 
 # Start services
-docker-compose up -d
+make up 
 ```
 
 The API will be available at `http://localhost:8000`
@@ -68,7 +68,7 @@ The API will be available at `http://localhost:8000`
    ```
 7. Start the server:
    ```bash
-   uvicorn app.main:app --reload
+  make up 
    ```
 
 ## API Documentation
@@ -207,3 +207,21 @@ Access at `http://localhost:5555`
 ## License
 
 MIT License - see LICENSE file for details
+
+make dev     # Should show: 🔄 Starting in DEVELOPMENT mode WITHOUT debugger...
+make debug   # Should show: 🐛 Starting in DEVELOPMENT mode WITH debugger...
+make up      # Should show: 🚀 Starting in PRODUCTION mode...
+make rebuild-dev
+
+
+<!-- Step 4: Start VS Code Debugger
+Go to Run and Debug panel (Ctrl+Shift+D)
+Select "Docker: Attach to FastAPI"
+Click the green play button
+Wait for "Attached to Python" message
+Step 5: Trigger the Code
+Go to your frontend
+Upload a book to trigger the breakpoints
+VS Code should stop at your breakpoints
+4. Debug the 'id' Error Specifically
+Set breakpoints at these critical points: -->

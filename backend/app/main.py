@@ -81,6 +81,13 @@ async def health_check():
 
 
 if __name__ == "__main__":
+    if os.getenv("ENVIRONMENT") == "development":
+        import debugpy
+        debugpy.listen(("0.0.0.0", 5678))
+        print("🐛 Debug server listening on port 5678...")
+        print("Waiting for debugger to attach...")
+        # debugpy.wait_for_client()  # Uncomment to wait for debugger
+    
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

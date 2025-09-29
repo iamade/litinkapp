@@ -6,7 +6,10 @@ celery_app = Celery(
     "litink_tasks",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.ai_tasks", "app.tasks.blockchain_tasks"]
+    include=["app.tasks.ai_tasks", "app.tasks.blockchain_tasks", "app.tasks.audio_tasks","app.tasks.image_tasks",      # ✅ ADD: Missing image tasks
+        "app.tasks.video_tasks",      # ✅ ADD: Missing video tasks
+        "app.tasks.merge_tasks",      # ✅ ADD: Missing merge tasks
+        "app.tasks.lipsync_tasks" ]
 )
 
 # Configure Celery
@@ -21,4 +24,5 @@ celery_app.conf.update(
     task_soft_time_limit=25 * 60,  # 25 minutes
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
+    broker_connection_retry_on_startup=True, 
 )

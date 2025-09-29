@@ -4,6 +4,7 @@ import asyncio
 from app.core.config import settings
 from app.services.rag_service import RAGService
 from app.services.elevenlabs_service import ElevenLabsService
+from app.services.text_utils import TextSanitizer
 import time
 import os
 import subprocess
@@ -2149,8 +2150,11 @@ Return as JSON with: script, character_details, scene_prompt
         if not content:
             return "A peaceful and educational scene with gentle camera movements."
         
+        # First apply general text sanitization
+        sanitized_content = TextSanitizer.sanitize_for_openai(content)
+        
         # Convert to lowercase for easier filtering
-        content_lower = content.lower()
+        content_lower = sanitized_content.lower()
         
         # List of potentially problematic keywords that might trigger risk control
         problematic_keywords = [
@@ -2170,15 +2174,15 @@ Return as JSON with: script, character_details, scene_prompt
         
         if found_keywords:
             print(f"[CONTENT SANITIZATION] Found potentially problematic keywords: {found_keywords}")
-            print(f"[CONTENT SANITIZATION] Original content: {content[:200]}...")
+            print(f"[CONTENT SANITIZATION] Original content: {sanitized_content[:200]}...")
             
             # Create a sanitized version by removing or replacing problematic content
-            sanitized_content = self._create_safe_content(content, found_keywords)
+            final_sanitized_content = self._create_safe_content(sanitized_content, found_keywords)
             
-            print(f"[CONTENT SANITIZATION] Sanitized content: {sanitized_content[:200]}...")
-            return sanitized_content
+            print(f"[CONTENT SANITIZATION] Sanitized content: {final_sanitized_content[:200]}...")
+            return final_sanitized_content
         
-        return content
+        return sanitized_content
     
     def _create_safe_content(self, original_content: str, problematic_keywords: list) -> str:
         """Create safe content by replacing problematic elements with educational alternatives"""

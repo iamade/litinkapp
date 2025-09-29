@@ -25,3 +25,7 @@ dist-ssr
 .env
 venv
 uploads
+backend/mycoderead.md
+backend/CODEDISCUSS.md
+*.pyc
+architecture

@@ -43,6 +43,7 @@ export default function Navbar() {
     ...(user?.role === "author"
       ? [{ path: "/author", label: "Create", showWhenLoggedIn: true }]
       : []),
+    { path: "/subscription", label: "Subscription", showWhenLoggedIn: true },
   ];
 
   // Filter nav items based on authentication status
@@ -189,6 +190,13 @@ export default function Navbar() {
                     className="text-base font-medium text-gray-700 hover:text-purple-600 transition-colors px-2 py-1"
                   >
                     Profile
+                  </Link>
+                  <Link
+                    to="/subscription"
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-base font-medium text-gray-700 hover:text-purple-600 transition-colors px-2 py-1"
+                  >
+                    Subscription
                   </Link>
                   <button
                     onClick={() => {

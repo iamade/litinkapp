@@ -1,6 +1,6 @@
 from .auth import Token, UserLogin, UserRegister
 from .user import User, UserCreate, UserUpdate
-from .book import Book, BookCreate, BookUpdate
+from .book import Book, BookCreate, BookUpdate, BookStructureInput, ChapterInput, SectionInput, BookWithSections
 from .quiz import Quiz, QuizCreate, QuizAttempt, QuizAttemptCreate
 from .badge import Badge, BadgeCreate
 from .nft import NFT, NFTCreate
