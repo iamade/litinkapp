@@ -81,6 +81,46 @@ Model Configuration:
   
   premium: "Veo3-audio" # ~$0.10/second
 
+  Cost & Tiering Strategy for Litinkai
+
+Free & Basic tiers → stick with FFmpeg directly (cheaper, runs in your Render + Docker + Celery stack). Limit video length/resolution (e.g., 720p, 2–3 mins).
+
+Pro & Premium tiers → still use FFmpeg, but allow longer, higher-quality renders (1080p/4K, 10–20 mins).
+
+Enterprise tiers → consider offering hybrid OpenShot + FFmpeg, deployed on dedicated infra (AWS/GCP/Azure or even Hetzner/OVH bare metal for cost savings). This lets you provide timeline-based editing for bigger clients who might want fine control.
+
+🔹 Recommended Setup for You (Cost-Effective + Scalable)
+
+Since you’re on Render and using Dockerized Celery workers, here’s the optimal approach:
+
+Start with FFmpeg-only implementation
+
+Encapsulate each render as a Celery task.
+
+Use Docker volume/mounted storage for temporary assets.
+
+Store finished videos in a cheap object storage (e.g., Backblaze B2 or Wasabi, much cheaper than AWS S3).
+
+Abstract your pipeline so you can later swap FFmpeg commands with OpenShot API if needed.
+
+Example: have a “Renderer Service Layer” → can call FFmpeg directly now, and later OpenShot for Enterprise.
+
+Use quotas per tier:
+
+Free → short clips only (limit duration).
+
+Basic → 720p max.
+
+Pro → 1080p.
+
+Premium → 4K, longer videos, faster rendering priority.
+
+Enterprise → custom infra with OpenShot Cloud API for timeline editing.
+
+✅ Conclusion:
+For Litinkai right now (Render + Docker + Celery), go with FFmpeg only. It’s the most cost-effective, flexible, and production-ready option.
+Later, for Enterprise tiers, you can layer OpenShot Cloud API on top for premium features (timeline, transitions, collaborative editing).
+
   Audio/Voice:
     Free Tier:
       provider: "ModelsLab"
