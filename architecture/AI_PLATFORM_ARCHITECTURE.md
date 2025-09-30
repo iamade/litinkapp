@@ -85,9 +85,9 @@ Model Configuration:
 
 Free & Basic tiers → stick with FFmpeg directly (cheaper, runs in your Render + Docker + Celery stack). Limit video length/resolution (e.g., 720p, 2–3 mins).
 
-Pro & Premium tiers → still use FFmpeg, but allow longer, higher-quality renders (1080p/4K, 10–20 mins).
+Pro → still use FFmpeg, but allow longer, higher-quality renders (1080p/4K, 10–20 mins).
 
-Enterprise tiers → consider offering hybrid OpenShot + FFmpeg, deployed on dedicated infra (AWS/GCP/Azure or even Hetzner/OVH bare metal for cost savings). This lets you provide timeline-based editing for bigger clients who might want fine control.
+Premium tiers & Enterprise tiers → consider offering hybrid OpenShot + FFmpeg, deployed on dedicated infra (AWS/GCP/Azure or even Hetzner/OVH bare metal for cost savings). This lets you provide timeline-based editing for bigger clients who might want fine control.
 
 🔹 Recommended Setup for You (Cost-Effective + Scalable)
 

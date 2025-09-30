@@ -1,5 +1,24 @@
 import { apiClient } from "../lib/api";
 
+interface Book {
+  id: string;
+  title: string;
+  author_name?: string;
+  description?: string;
+  cover_image_url?: string;
+  book_type: string;
+  difficulty?: string;
+  tags?: any;
+  language?: string;
+  user_id: string;
+  status: string;
+  total_chapters?: number;
+  estimated_duration?: any;
+  created_at: string;
+  updated_at: string;
+  chapters?: any[];
+}
+
 interface VideoGenerationResponse {
   video_generation_id: string;
   script_id: string;
@@ -146,6 +165,16 @@ interface ImageStatusResponse {
   updated_at?: string;
 }
 
+interface AudioStatusResponse {
+  record_id: string;
+  status: string; // 'pending', 'processing', 'completed', 'failed'
+  audio_url?: string;
+  error_message?: string;
+  duration?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
 interface ImageGenerationQueuedResponse {
   task_id: string;
   status: string;
@@ -173,8 +202,8 @@ export const userService = {
   deleteBook: async (bookId: string) => {
     return apiClient.delete(`/books/${bookId}`);
   },
-  getBook: async (bookId: string) => {
-    return apiClient.get(`/books/${bookId}`);
+  getBook: async (bookId: string): Promise<Book> => {
+    return apiClient.get<Book>(`/books/${bookId}`);
   },
   getChapters: async (bookId: string) => {
     return apiClient.get(`/books/${bookId}/chapters`);
@@ -329,8 +358,7 @@ export const userService = {
 
   // Audio generation methods
   async getChapterAudio(chapterId: string) {
-    const response = await apiClient.get<any>(`/chapters/${chapterId}/audio`);
-    return response.data;
+    return apiClient.get<any>(`/chapters/${chapterId}/audio`);
   },
 
   async generateSceneDialogue(
@@ -338,11 +366,18 @@ export const userService = {
     sceneNumber: number,
     data: any
   ) {
-    const response = await apiClient.post<any>(
-      `/chapters/${chapterId}/audio/dialogue/${sceneNumber}`,
-      data
-    );
-    return response.data;
+    console.log("[DEBUG] generateSceneDialogue called:", { chapterId, sceneNumber, data });
+    try {
+      const response = await apiClient.post<any>(
+        `/chapters/${chapterId}/audio/dialogue/${sceneNumber}`,
+        data
+      );
+      console.log("[DEBUG] generateSceneDialogue response:", response);
+      return response;
+    } catch (error) {
+      console.error("[DEBUG] generateSceneDialogue error:", error);
+      throw error;
+    }
   },
 
   async generateSceneNarration(
@@ -350,19 +385,33 @@ export const userService = {
     sceneNumber: number,
     data: any
   ) {
-    const response = await apiClient.post<any>(
-      `/chapters/${chapterId}/audio/narration/${sceneNumber}`,
-      data
-    );
-    return response.data;
+    console.log("[DEBUG] generateSceneNarration called:", { chapterId, sceneNumber, data });
+    try {
+      const response = await apiClient.post<any>(
+        `/chapters/${chapterId}/audio/narrator/${sceneNumber}`,
+        data
+      );
+      console.log("[DEBUG] generateSceneNarration response:", response);
+      return response;
+    } catch (error) {
+      console.error("[DEBUG] generateSceneNarration error:", error);
+      throw error;
+    }
   },
 
   async generateSceneMusic(chapterId: string, sceneNumber: number, data: any) {
-    const response = await apiClient.post<any>(
-      `/chapters/${chapterId}/audio/music/${sceneNumber}`,
-      data
-    );
-    return response.data;
+    console.log("[DEBUG] generateSceneMusic called:", { chapterId, sceneNumber, data });
+    try {
+      const response = await apiClient.post<any>(
+        `/chapters/${chapterId}/audio/music/${sceneNumber}`,
+        data
+      );
+      console.log("[DEBUG] generateSceneMusic response:", response);
+      return response;
+    } catch (error) {
+      console.error("[DEBUG] generateSceneMusic error:", error);
+      throw error;
+    }
   },
 
   async generateSceneEffects(
@@ -370,11 +419,18 @@ export const userService = {
     sceneNumber: number,
     data: any
   ) {
-    const response = await apiClient.post<any>(
-      `/chapters/${chapterId}/audio/effects/${sceneNumber}`,
-      data
-    );
-    return response.data;
+    console.log("[DEBUG] generateSceneEffects called:", { chapterId, sceneNumber, data });
+    try {
+      const response = await apiClient.post<any>(
+        `/chapters/${chapterId}/audio/sound_effect/${sceneNumber}`,
+        data
+      );
+      console.log("[DEBUG] generateSceneEffects response:", response);
+      return response;
+    } catch (error) {
+      console.error("[DEBUG] generateSceneEffects error:", error);
+      throw error;
+    }
   },
 
   async generateSceneAmbiance(
@@ -382,35 +438,48 @@ export const userService = {
     sceneNumber: number,
     data: any
   ) {
-    const response = await apiClient.post<any>(
-      `/chapters/${chapterId}/audio/ambiance/${sceneNumber}`,
-      data
-    );
-    return response.data;
+    console.log("[DEBUG] generateSceneAmbiance called:", { chapterId, sceneNumber, data });
+    try {
+      const response = await apiClient.post<any>(
+        `/chapters/${chapterId}/audio/background_music/${sceneNumber}`,
+        data
+      );
+      console.log("[DEBUG] generateSceneAmbiance response:", response);
+      return response;
+    } catch (error) {
+      console.error("[DEBUG] generateSceneAmbiance error:", error);
+      throw error;
+    }
   },
 
   async deleteAudioFile(chapterId: string, audioId: string) {
-    const response = await apiClient.delete<any>(
+    return apiClient.delete<any>(
       `/chapters/${chapterId}/audio/${audioId}`
     );
-    return response.data;
   },
 
   async exportAudioMix(chapterId: string, audioAssets: any) {
-    const response = await apiClient.post<any>(
+    return apiClient.post<any>(
       `/chapters/${chapterId}/audio/export`,
       { audio_assets: audioAssets }
     );
-    return response.data;
+  },
+
+  async getAudioGenerationStatus(
+    chapterId: string,
+    recordId: string
+  ): Promise<AudioStatusResponse> {
+    return apiClient.get<AudioStatusResponse>(
+      `/chapters/${chapterId}/audio/status/${recordId}`
+    );
   },
 
   // Plot and script methods (if not already present)
   async generatePlotOverview(bookId: string) {
-    const response = await apiClient.post<any>(
+    return apiClient.post<any>(
       `/plots/books/${bookId}/generate`,
       {}
     );
-    return response.data;
   },
 
   // async savePlotOverview(bookId: string, plot: any) {
@@ -457,67 +526,6 @@ export const userService = {
     });
   },
 
-  async createOpenShotProject(data: {
-    chapterId: string;
-    scenes: any[];
-    editorSettings: any;
-    scriptId?: string;
-  }) {
-    // Mock implementation
-    return Promise.resolve({
-      project_id: `openshot-${Date.now()}`,
-      status: "created",
-      message: "OpenShot project created successfully",
-    });
-  },
-
-  async getOpenShotProjectStatus(projectId: string) {
-    // Mock implementation - simulates progress
-    const progress = Math.min(100, Math.random() * 100);
-    return Promise.resolve({
-      project_id: projectId,
-      status: progress >= 100 ? "completed" : "rendering",
-      progress,
-      videoProduction:
-        progress >= 100
-          ? {
-              id: `video-prod-${Date.now()}`,
-              chapterId: "mock-chapter",
-              scenes: [],
-              finalVideoUrl: "https://example.com/mock-video.mp4",
-              renderingProgress: 100,
-              editorSettings: {
-                resolution: "1080p" as const,
-                fps: 30,
-                aspectRatio: "16:9" as const,
-                outputFormat: "mp4" as const,
-                quality: "high" as const,
-              },
-              status: "completed" as const,
-              metadata: {
-                totalDuration: 120,
-                fileSize: 50000000,
-              },
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            }
-          : null,
-    });
-  },
-
-  async processVideoWithFFmpeg(data: {
-    videoUrl: string;
-    quality?: string;
-    [key: string]: any;
-  }) {
-    // Mock implementation
-    return Promise.resolve({
-      processedUrl: "https://example.com/processed-video.mp4",
-      fileSize: 45000000,
-      duration: 120,
-      message: "Video processed successfully",
-    });
-  },
 };
 
 export async function deleteBook(bookId: string) {

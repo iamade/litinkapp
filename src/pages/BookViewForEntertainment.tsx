@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { userService } from "../services/userService";
 import { toast } from "react-hot-toast";
@@ -33,7 +33,7 @@ import VideoProductionPanel from "../components/Video/VideoProductionPanel";
 import { useImageGeneration } from '../hooks/useImageGeneration';
 import { useAudioGeneration } from '../hooks/useAudioGeneration';
 
-
+ console.log("BookViewForEntertainment starting")
 interface Chapter {
   id: string;
   title: string;
@@ -127,7 +127,7 @@ interface WorkflowProgress {
 type WorkflowTab = "plot" | "script" | "images" | "audio" | "video";
 
 export default function BookViewForEntertainment() {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams();
 
   // State declarations - all hooks at the top level
   const [book, setBook] = useState<Book | null>(null);
@@ -181,6 +181,16 @@ export default function BookViewForEntertainment() {
   // State for storing generated images and audio for video production
   const [generatedImageUrls, setGeneratedImageUrls] = useState<string[]>([]);
   const [generatedAudioFiles, setGeneratedAudioFiles] = useState<string[]>([]);
+
+  // Ref to track if component is mounted
+  const mountedRef = useRef(true);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Workflow tabs configuration
   const workflowTabs = [
@@ -388,28 +398,7 @@ export default function BookViewForEntertainment() {
     );
   };
 
-  // Generate plot overview using RAG
-  // const handleGeneratePlot = async () => {
-  //   if (!book) return;
 
-  //   setIsGeneratingPlot(true);
-  //   updateProgress("plot", "generating");
-
-  //   try {
-  //     // This would be a new API call to generate plot overview using book embeddings
-  //     const plotResult = await userService.generatePlotOverview(book.id);
-
-  //     setPlotOverview(plotResult);
-  //     updateProgress("plot", "completed");
-  //     toast.success("Plot overview generated successfully!");
-  //   } catch (error) {
-  //     console.error("Error generating plot:", error);
-  //     toast.error("Failed to generate plot overview");
-  //     updateProgress("plot", "error");
-  //   } finally {
-  //     setIsGeneratingPlot(false);
-  //   }
-  // };
 
   // Add plot generation hook
   const {
@@ -417,7 +406,7 @@ export default function BookViewForEntertainment() {
     isGenerating: isGeneratingPlot,
     generatePlot,
     loadPlot
-  } = usePlotGeneration(id!);
+  } = usePlotGeneration(id || '');
 
   // Load plot on component mount and chapter change
   useEffect(() => {
@@ -504,16 +493,20 @@ export default function BookViewForEntertainment() {
       const generations = response.generations || [];
       console.log("[FETCH] Found generations:", generations.length);
 
-      setExistingGenerations(generations); // ✅ Now using the array
+      if (mountedRef.current) {
+        setExistingGenerations(generations); // ✅ Now using the array
 
-      // If we have generations, show them
-      if (generations.length > 0) {
-        setShowExistingGenerations(true);
+        // If we have generations, show them
+        if (generations.length > 0) {
+          setShowExistingGenerations(true);
+        }
       }
     } catch (error) {
       console.error("Error fetching existing generations:", error);
       // Even on error, show the generation interface
-      setShowExistingGenerations(true);
+      if (mountedRef.current) {
+        setShowExistingGenerations(true);
+      }
     }
   }, [selectedChapter]);
 
@@ -538,40 +531,47 @@ export default function BookViewForEntertainment() {
         const data = await userService.getVideoGenerationStatus(videoGenId);
         console.log("[POLLING] Status update:", data.generation_status);
 
+        if (!mountedRef.current) {
+          console.log("[POLLING] Component unmounted, skipping setState");
+          return;
+        }
+
         setVideoStatus(data.generation_status);
 
-        try {
-          const pipelineData = await aiService.getPipelineStatus(videoGenId);
-          setPipelineStatus(pipelineData);
-          setLastUpdated(Date.now());
-        } catch (pipelineError) {
-          console.warn("Pipeline status not available:", pipelineError);
-        }
+        if (mountedRef.current) {
+          try {
+            const pipelineData = await aiService.getPipelineStatus(videoGenId);
+            setPipelineStatus(pipelineData);
+            setLastUpdated(Date.now());
+          } catch (pipelineError) {
+            console.warn("Pipeline status not available:", pipelineError);
+          }
 
-        if (data.task_metadata?.audio_task_state) {
-          setTaskStatus(data.task_metadata.audio_task_state);
-        }
+          if (data.task_metadata?.audio_task_state) {
+            setTaskStatus(data.task_metadata.audio_task_state);
+          }
 
-        if (data.generation_status === "completed" && data.video_url) {
-          setVideoUrls((prev) => ({
-            ...prev,
-            [selectedChapter!.id]: data.video_url!,
-          }));
-          updateProgress("video", "completed");
-          toast.success("Video generation completed!");
-          setShowPipelineStatus(false);
-          setShowExistingGenerations(true);
-          return;
-        }
+          if (data.generation_status === "completed" && data.video_url) {
+            setVideoUrls((prev) => ({
+              ...prev,
+              [selectedChapter!.id]: data.video_url!,
+            }));
+            updateProgress("video", "completed");
+            toast.success("Video generation completed!");
+            setShowPipelineStatus(false);
+            setShowExistingGenerations(true);
+            return;
+          }
 
-        if (data.generation_status === "failed") {
-          toast.error(data.error_message || "Video generation failed");
-          updateProgress("video", "error");
-          setShowExistingGenerations(true);
-          setTimeout(() => {
-            fetchExistingGenerations();
-          }, 1000);
-          return;
+          if (data.generation_status === "failed") {
+            toast.error(data.error_message || "Video generation failed");
+            updateProgress("video", "error");
+            setShowExistingGenerations(true);
+            setTimeout(() => {
+              fetchExistingGenerations();
+            }, 1000);
+            return;
+          }
         }
 
         if (
@@ -594,8 +594,10 @@ export default function BookViewForEntertainment() {
         }
       } catch (error) {
         console.error("Error checking status:", error);
-        toast.error("Error checking video status");
-        setShowExistingGenerations(true);
+        if (mountedRef.current) {
+          toast.error("Error checking video status");
+          setShowExistingGenerations(true);
+        }
       }
     };
 
@@ -772,32 +774,26 @@ export default function BookViewForEntertainment() {
     // Extract audio file URLs from audioAssets
     const audioUrls: string[] = [];
     if (audioAssets) {
-      // Extract dialogue audio URLs
-      audioAssets.dialogue.forEach((dialogueItem) => {
-        if (dialogueItem.url) {
-          audioUrls.push(dialogueItem.url);
+      // Extract narration URLs
+      (audioAssets.narration || []).forEach((narrationItem) => {
+        if (narrationItem.url) {
+          audioUrls.push(narrationItem.url);
         }
       });
       // Extract music URLs
-      audioAssets.music.forEach((musicItem) => {
+      (audioAssets.music || []).forEach((musicItem) => {
         if (musicItem.url) {
           audioUrls.push(musicItem.url);
         }
       });
       // Extract sound effects URLs
-      audioAssets.effects.forEach((effectItem) => {
+      (audioAssets.effects || []).forEach((effectItem) => {
         if (effectItem.url) {
           audioUrls.push(effectItem.url);
         }
       });
-      // Extract narration URLs
-      audioAssets.narration.forEach((narrationItem) => {
-        if (narrationItem.url) {
-          audioUrls.push(narrationItem.url);
-        }
-      });
       // Extract ambiance URLs
-      audioAssets.ambiance.forEach((ambianceItem) => {
+      (audioAssets.ambiance || []).forEach((ambianceItem) => {
         if (ambianceItem.url) {
           audioUrls.push(ambianceItem.url);
         }
@@ -1148,6 +1144,11 @@ if (!selectedChapter) {
     }
   };
 
+  // Check for valid id
+  if (!id) {
+    return <div className="p-8 text-center text-red-500">Invalid book id</div>;
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -1164,7 +1165,7 @@ if (!selectedChapter) {
       </div>
     );
   }
-
+console.log("After hooks")
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}

@@ -41,63 +41,50 @@ class ScriptParser:
         
       
     def _generate_sound_effects(self, scene_descriptions: List) -> List[Dict[str, Any]]:
-        """Generate sound effects based on scene descriptions"""
-        
+        """Generate sound effects based on scene descriptions, prioritizing audio_requirements from DeepSeek"""
+
         sound_effects = []
-        
+
         for i, scene in enumerate(scene_descriptions):
             try:
                 # ✅ Handle both object and string formats
                 if isinstance(scene, dict):
-                    scene_text = scene.get('visual_description', '') or scene.get('key_actions', '') or str(scene)
                     scene_number = scene.get('scene_number', i + 1)
+                    audio_requirements = scene.get('audio_requirements', '').strip()
+
+                    if audio_requirements:
+                        # 🎯 Use DeepSeek-provided audio requirements
+                        print(f"[SFX PARSER] Scene {scene_number}: Using DeepSeek audio_requirements: '{audio_requirements}'")
+
+                        # Parse the audio_requirements string for sound effects
+                        effects_found = self._parse_audio_requirements_for_sfx(audio_requirements, scene_number)
+                        if effects_found:
+                            sound_effects.extend(effects_found)
+                        else:
+                            # Fallback if parsing fails
+                            sound_effects.append({
+                                "scene": scene_number,
+                                "description": audio_requirements,
+                                "duration": 10.0
+                            })
+                    else:
+                        # Fallback to keyword-based generation from visual content
+                        scene_text = scene.get('visual_description', '') or scene.get('key_actions', '') or str(scene)
+                        effects_found = self._generate_sfx_from_keywords(scene_text, scene_number)
+                        sound_effects.extend(effects_found)
+
                 elif isinstance(scene, str):
-                    scene_text = scene
+                    # Legacy string format - use keyword analysis
                     scene_number = i + 1
+                    effects_found = self._generate_sfx_from_keywords(scene, scene_number)
+                    sound_effects.extend(effects_found)
                 else:
+                    # Fallback for unexpected types
                     scene_text = str(scene)
                     scene_number = i + 1
-                
-                scene_lower = scene_text.lower()
-                effects_found = []
-                
-                # Map keywords to sound effects
-                effect_mapping = {
-                    "door": "door opening/closing",
-                    "footsteps": "footsteps",
-                    "wind": "wind blowing", 
-                    "rain": "rain falling",
-                    "fire": "crackling fire",
-                    "water": "water flowing",
-                    "crowd": "crowd murmur",
-                    "explosion": "explosion",
-                    "thunder": "thunder",
-                    "car": "car engine",
-                    "phone": "phone ringing",
-                    "clock": "clock ticking",
-                    "owl": "owl hooting",
-                    "magic": "magical sound effects",
-                    "wand": "magic wand sounds"
-                }
-                
-                for keyword, effect in effect_mapping.items():
-                    if keyword in scene_lower:
-                        effects_found.append({
-                            "scene": scene_number,
-                            "description": effect,
-                            "duration": 5.0
-                        })
-                
-                # Add at least one ambient effect per scene if none found
-                if not effects_found:
-                    effects_found.append({
-                        "scene": scene_number,
-                        "description": "ambient room tone",
-                        "duration": 10.0
-                    })
-                
-                sound_effects.extend(effects_found)
-                
+                    effects_found = self._generate_sfx_from_keywords(scene_text, scene_number)
+                    sound_effects.extend(effects_found)
+
             except Exception as e:
                 print(f"[SFX PARSER] Error processing scene {i}: {e}")
                 sound_effects.append({
@@ -105,8 +92,82 @@ class ScriptParser:
                     "description": "ambient room tone",
                     "duration": 10.0
                 })
-        
+
         return sound_effects
+
+    def _parse_audio_requirements_for_sfx(self, audio_requirements: str, scene_number: int) -> List[Dict[str, Any]]:
+        """Parse DeepSeek audio_requirements string for sound effects"""
+        effects = []
+
+        # Split by common delimiters
+        requirements = audio_requirements.replace(';', ',').replace(' and ', ',').replace(' or ', ',')
+        items = [item.strip() for item in requirements.split(',') if item.strip()]
+
+        for item in items:
+            item_lower = item.lower()
+
+            # Skip dialogue and music mentions
+            if any(skip_word in item_lower for skip_word in ['dialogue', 'music', 'narration', 'voice']):
+                continue
+
+            # Extract duration if mentioned
+            duration = 10.0  # default
+            if 'second' in item_lower:
+                # Try to extract number before 'second'
+                import re
+                duration_match = re.search(r'(\d+)\s*second', item_lower)
+                if duration_match:
+                    duration = float(duration_match.group(1))
+
+            effects.append({
+                "scene": scene_number,
+                "description": item.strip(),
+                "duration": duration
+            })
+
+        return effects
+
+    def _generate_sfx_from_keywords(self, scene_text: str, scene_number: int) -> List[Dict[str, Any]]:
+        """Fallback: Generate sound effects from keyword analysis of scene text"""
+        scene_lower = scene_text.lower()
+        effects_found = []
+
+        # Map keywords to sound effects
+        effect_mapping = {
+            "door": "door opening/closing",
+            "footsteps": "footsteps",
+            "wind": "wind blowing",
+            "rain": "rain falling",
+            "fire": "crackling fire",
+            "water": "water flowing",
+            "crowd": "crowd murmur",
+            "explosion": "explosion",
+            "thunder": "thunder",
+            "car": "car engine",
+            "phone": "phone ringing",
+            "clock": "clock ticking",
+            "owl": "owl hooting",
+            "magic": "magical sound effects",
+            "wand": "magic wand sounds"
+        }
+
+        for keyword, effect in effect_mapping.items():
+            if keyword in scene_lower:
+                effects_found.append({
+                    "scene": scene_number,
+                    "description": effect,
+                    "duration": 5.0
+                })
+
+        # Add at least one ambient effect per scene if none found
+        if not effects_found:
+            effects_found.append({
+                "scene": scene_number,
+                "description": "ambient room tone",
+                "duration": 10.0
+            })
+
+        return effects_found
     
     # Update your existing _parse_cinematic_movie_script method:
     def _parse_cinematic_movie_script(self, script: str, characters: List[str], scene_descriptions: List) -> Dict[str, Any]:
@@ -528,54 +589,54 @@ class ScriptParser:
     
       
     def _generate_background_music_cues(self, scene_descriptions: List) -> List[Dict[str, Any]]:
-        """Generate background music cues based on scene descriptions"""
-        
+        """Generate background music cues based on scene descriptions, prioritizing audio_requirements from DeepSeek"""
+
         music_cues = []
-        
+
         for i, scene in enumerate(scene_descriptions):
             try:
-                # ✅ FIX: Handle both object and string formats
+                # ✅ Handle both object and string formats
                 if isinstance(scene, dict):
-                    # New format from DeepSeek - extract description text
-                    scene_text = scene.get('visual_description', '') or scene.get('key_actions', '') or str(scene)
-                    scene_location = scene.get('location', f'Scene {i+1}')
                     scene_number = scene.get('scene_number', i + 1)
+                    scene_location = scene.get('location', f'Scene {scene_number}')
+                    audio_requirements = scene.get('audio_requirements', '').strip()
+
+                    if audio_requirements:
+                        # 🎯 Use DeepSeek-provided audio requirements
+                        print(f"[MUSIC PARSER] Scene {scene_number}: Using DeepSeek audio_requirements for music: '{audio_requirements}'")
+
+                        # Parse the audio_requirements string for music cues
+                        music_cue = self._parse_audio_requirements_for_music(audio_requirements, scene_number, scene_location)
+                        if music_cue:
+                            music_cues.append(music_cue)
+                        else:
+                            # Fallback if parsing fails
+                            music_cues.append({
+                                "scene": scene_number,
+                                "description": f"Background music: {audio_requirements}",
+                                "type": "ambient",
+                                "duration": 30.0
+                            })
+                    else:
+                        # Fallback to keyword-based generation from visual content
+                        scene_text = scene.get('visual_description', '') or scene.get('key_actions', '') or str(scene)
+                        music_cue = self._generate_music_from_keywords(scene_text, scene_number, scene_location)
+                        music_cues.append(music_cue)
+
                 elif isinstance(scene, str):
-                    # Legacy string format
-                    scene_text = scene
-                    scene_location = f'Scene {i+1}'
+                    # Legacy string format - use keyword analysis
                     scene_number = i + 1
+                    scene_location = f'Scene {scene_number}'
+                    music_cue = self._generate_music_from_keywords(scene, scene_number, scene_location)
+                    music_cues.append(music_cue)
                 else:
                     # Fallback for unexpected types
                     scene_text = str(scene)
-                    scene_location = f'Scene {i+1}'
                     scene_number = i + 1
-                
-                scene_lower = scene_text.lower()  # Now we can safely call .lower()
-                
-                # Determine music type based on scene content
-                music_type = "ambient"
-                if any(word in scene_lower for word in ["battle", "fight", "action", "chase", "war"]):
-                    music_type = "intense"
-                elif any(word in scene_lower for word in ["romantic", "love", "tender", "gentle"]):
-                    music_type = "romantic"
-                elif any(word in scene_lower for word in ["sad", "death", "cry", "mourn", "tragic"]):
-                    music_type = "melancholic"
-                elif any(word in scene_lower for word in ["celebration", "party", "joy", "happy", "victory"]):
-                    music_type = "uplifting"
-                elif any(word in scene_lower for word in ["mystery", "dark", "horror", "scary", "suspense"]):
-                    music_type = "mysterious"
-                
-                # Create music description
-                music_description = f"{music_type.capitalize()} background music for {scene_location}"
-                
-                music_cues.append({
-                    "scene": scene_number,
-                    "description": music_description,
-                    "type": music_type,
-                    "duration": 30.0  # Default duration
-                })
-                
+                    scene_location = f'Scene {scene_number}'
+                    music_cue = self._generate_music_from_keywords(scene_text, scene_number, scene_location)
+                    music_cues.append(music_cue)
+
             except Exception as e:
                 print(f"[MUSIC PARSER] Error processing scene {i}: {e}")
                 # Fallback music cue
@@ -585,8 +646,68 @@ class ScriptParser:
                     "type": "ambient",
                     "duration": 30.0
                 })
-        
+
         return music_cues
+
+    def _parse_audio_requirements_for_music(self, audio_requirements: str, scene_number: int, scene_location: str) -> Dict[str, Any] | None:
+        """Parse DeepSeek audio_requirements string for music cues"""
+        requirements_lower = audio_requirements.lower()
+
+        # Look for music-related keywords
+        if any(music_word in requirements_lower for music_word in ['music', 'score', 'theme', 'melody', 'orchestral']):
+            # Extract the music description
+            music_description = audio_requirements.strip()
+            if music_description.startswith('music:'):
+                music_description = music_description[6:].strip()
+
+            # Determine music type from description
+            music_type = "ambient"
+            if any(word in requirements_lower for word in ["battle", "fight", "action", "chase", "war", "intense", "epic"]):
+                music_type = "intense"
+            elif any(word in requirements_lower for word in ["romantic", "love", "tender", "gentle"]):
+                music_type = "romantic"
+            elif any(word in requirements_lower for word in ["sad", "death", "cry", "mourn", "tragic", "melancholic"]):
+                music_type = "melancholic"
+            elif any(word in requirements_lower for word in ["celebration", "party", "joy", "happy", "victory", "uplifting"]):
+                music_type = "uplifting"
+            elif any(word in requirements_lower for word in ["mystery", "dark", "horror", "scary", "suspense", "mysterious"]):
+                music_type = "mysterious"
+
+            return {
+                "scene": scene_number,
+                "description": music_description,
+                "type": music_type,
+                "duration": 30.0
+            }
+
+        return None
+
+    def _generate_music_from_keywords(self, scene_text: str, scene_number: int, scene_location: str) -> Dict[str, Any]:
+        """Fallback: Generate music cues from keyword analysis of scene text"""
+        scene_lower = scene_text.lower()
+
+        # Determine music type based on scene content
+        music_type = "ambient"
+        if any(word in scene_lower for word in ["battle", "fight", "action", "chase", "war"]):
+            music_type = "intense"
+        elif any(word in scene_lower for word in ["romantic", "love", "tender", "gentle"]):
+            music_type = "romantic"
+        elif any(word in scene_lower for word in ["sad", "death", "cry", "mourn", "tragic"]):
+            music_type = "melancholic"
+        elif any(word in scene_lower for word in ["celebration", "party", "joy", "happy", "victory"]):
+            music_type = "uplifting"
+        elif any(word in scene_lower for word in ["mystery", "dark", "horror", "scary", "suspense"]):
+            music_type = "mysterious"
+
+        # Create music description
+        music_description = f"{music_type.capitalize()} background music for {scene_location}"
+
+        return {
+            "scene": scene_number,
+            "description": music_description,
+            "type": music_type,
+            "duration": 30.0
+        }
 
     # def _generate_background_music_cues(self, scene_descriptions: List[str]) -> List[Dict[str, Any]]:
     #     """Generate background music cues based on scene descriptions"""

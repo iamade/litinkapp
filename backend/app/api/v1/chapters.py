@@ -5,6 +5,8 @@ from supabase import Client
 from app.core.auth import get_current_active_user
 from app.core.database import get_supabase
 from app.services.standalone_image_service import StandaloneImageService
+from app.services.elevenlabs_service import ElevenLabsService
+from app.services.modelslab_v7_audio_service import ModelsLabV7AudioService
 from app.tasks.image_tasks import generate_character_image_task
 from app.schemas.image import (
     SceneImageRequest,
@@ -18,6 +20,17 @@ from app.schemas.image import (
     DeleteImageResponse,
     ImageRecord,
     ImageStatusResponse
+)
+from app.schemas.audio import (
+    AudioGenerationRequest,
+    AudioGenerationResponse,
+    AudioGenerationQueuedResponse,
+    AudioRecord,
+    ChapterAudioResponse,
+    AudioExportRequest,
+    AudioExportResponse,
+    DeleteAudioResponse,
+    AudioStatusResponse
 )
 
 router = APIRouter()
@@ -521,3 +534,333 @@ async def get_image_generation_status(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting image generation status: {str(e)}")
+
+
+@router.get("/{chapter_id}/audio", response_model=ChapterAudioResponse)
+async def list_chapter_audio(
+    chapter_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """List all audio files associated with a chapter"""
+    try:
+        # Verify chapter access
+        chapter_data = await verify_chapter_access(chapter_id, current_user['id'], supabase_client)
+
+        # Get user's audio files for this chapter
+        print(f"[DEBUG] Querying audio_generations for user_id: {current_user['id']}, chapter_id: {chapter_id}")
+        audio_response = supabase_client.table('audio_generations').select('*').eq('user_id', current_user['id']).eq('chapter_id', chapter_id).execute()
+        chapter_audio = [AudioRecord(**audio) for audio in (audio_response.data or [])]
+        print(f"[DEBUG] Retrieved {len(chapter_audio)} audio records for chapter {chapter_id}")
+        return ChapterAudioResponse(
+            chapter_id=chapter_id,
+            audio_files=chapter_audio,
+            total_count=len(chapter_audio)
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Error listing chapter audio: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error listing chapter audio: {str(e)}")
+
+
+@router.post("/{chapter_id}/audio/{audio_type}/{scene_number}", response_model=AudioGenerationQueuedResponse)
+async def generate_chapter_audio(
+    chapter_id: str,
+    audio_type: str,
+    scene_number: int,
+    request: AudioGenerationRequest,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Generate audio for a specific type and scene in the chapter (asynchronous)"""
+    try:
+        # Verify chapter access
+        chapter_data = await verify_chapter_access(chapter_id, current_user['id'], supabase_client)
+
+        # Validate audio type against old frontend enum values (for error message)
+        old_valid_types = ['narration', 'music', 'effects', 'ambiance', 'dialogue', 'sound_effects', 'background_music', 'sound_effect']
+        if audio_type not in old_valid_types:
+            raise HTTPException(status_code=400, detail=f"Invalid audio type. Must be one of: {', '.join(old_valid_types)}")
+
+        # Map old frontend enum values to new database enum values
+        audio_type_mapping = {
+            'narration': 'narrator',
+            'music': 'music',
+            'effects': 'sound_effect',
+            'ambiance': 'background_music',
+            'dialogue': 'character',
+            'sound_effects': 'sound_effect',
+            'background_music': 'background_music',
+            'sound_effect': 'sound_effect'
+        }
+
+        # Apply mapping if needed
+        if audio_type in audio_type_mapping:
+            audio_type = audio_type_mapping[audio_type]
+
+        # Check script style validation for narrator audio
+        if audio_type == 'narrator':
+            # Get the most recent script for this chapter
+            script_response = supabase_client.table('scripts').select('script_style').eq('chapter_id', chapter_id).order('created_at', desc=True).limit(1).execute()
+
+            if script_response.data:
+                script_style = script_response.data[0].get('script_style')
+                # Reject narrator audio generation for cinematic scripts (character dialogue)
+                if script_style == 'cinematic':
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Narration audio cannot be generated for cinematic scripts. This script style contains character dialogue and is not suitable for narrator voice-over."
+                    )
+
+        # Get content based on audio type
+        text_content = None
+        if audio_type == 'narrator':
+            # Get scene description for narration
+            scene_description = get_scene_description_from_chapter(chapter_data, scene_number)
+            text_content = request.text or scene_description or f"Narration for scene {scene_number}"
+        elif audio_type == 'character':
+            # For character dialogue, text should be provided
+            text_content = request.text
+            if not text_content:
+                raise HTTPException(status_code=400, detail="Text content required for character audio")
+        else:
+            # For music, sound_effect, background_music, sfx - use description or generate based on scene
+            scene_description = get_scene_description_from_chapter(chapter_data, scene_number)
+            text_content = request.text or f"{audio_type} for scene {scene_number}: {scene_description}"
+
+        # Create initial record in database
+        print(f"[DEBUG] Creating audio record with audio_type: {audio_type}, user_id: {current_user['id']}, chapter_id: {chapter_id}")
+        audio_record_data = {
+            'user_id': current_user['id'],
+            'chapter_id': chapter_id,
+            'audio_type': audio_type,
+            'text_content': text_content,
+            'generation_status': 'pending',
+            'metadata': {
+                'scene_number': scene_number,
+                'audio_type': audio_type,
+                'voice_id': request.voice_id,
+                'emotion': request.emotion,
+                'speed': request.speed,
+                'duration': request.duration
+            }
+        }
+
+        record_result = supabase_client.table('audio_generations').insert(audio_record_data).execute()
+        record_id = record_result.data[0]['id'] if record_result.data else None
+
+        if not record_id:
+            raise HTTPException(status_code=500, detail="Failed to create audio generation record")
+
+        print(f"[DEBUG] Created audio record {record_id} for user {current_user['id']}")
+
+        # Queue the audio generation task
+        from app.tasks.audio_tasks import generate_chapter_audio_task
+        task = generate_chapter_audio_task.delay(
+            audio_type=audio_type,
+            text_content=text_content,
+            user_id=current_user['id'],
+            chapter_id=chapter_id,
+            scene_number=scene_number,
+            voice_id=request.voice_id,
+            emotion=request.emotion,
+            speed=request.speed,
+            duration=request.duration,
+            record_id=record_id
+        )
+
+        return AudioGenerationQueuedResponse(
+            task_id=task.id,
+            status="queued",
+            message=f"{audio_type.title()} audio generation has been queued and will be processed in the background",
+            estimated_time_seconds=30,  # Estimated time for audio generation
+            record_id=record_id
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error queuing audio generation: {str(e)}")
+
+
+@router.delete("/{chapter_id}/audio/{audio_id}", response_model=DeleteAudioResponse)
+async def delete_chapter_audio(
+    chapter_id: str,
+    audio_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Delete an audio file for the chapter"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user['id'], supabase_client)
+
+        # Find the audio record
+        audio_response = supabase_client.table('audio_generations').select('*').eq('id', audio_id).single().execute()
+
+        if not audio_response.data:
+            raise HTTPException(status_code=404, detail="Audio file not found")
+
+        audio_record = audio_response.data
+
+        # Verify the record belongs to the current user
+        if audio_record.get('user_id') != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this audio file")
+
+        # Verify the record is associated with the chapter
+        metadata = audio_record.get('metadata', {})
+        if metadata.get('chapter_id') != chapter_id:
+            raise HTTPException(status_code=403, detail="Audio file is not associated with this chapter")
+
+        # Delete the audio record
+        supabase_client.table('audio_generations').delete().eq('id', audio_id).execute()
+
+        return DeleteAudioResponse(
+            success=True,
+            message="Audio file deleted successfully",
+            record_id=audio_id
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting audio file: {str(e)}")
+
+
+@router.post("/{chapter_id}/audio/export", response_model=AudioExportResponse)
+async def export_chapter_audio_mix(
+    chapter_id: str,
+    request: AudioExportRequest,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Export a mixed audio file for the chapter (asynchronous)"""
+    try:
+        # Verify chapter access
+        chapter_data = await verify_chapter_access(chapter_id, current_user['id'], supabase_client)
+
+        # Get all audio files for this chapter
+        audio_response = supabase_client.table('audio_generations').select('*').eq('user_id', current_user['id']).eq('chapter_id', chapter_id).execute()
+        chapter_audio = audio_response.data or []
+
+        if not chapter_audio:
+            raise HTTPException(status_code=404, detail="No audio files found for this chapter")
+
+        # Filter audio by types based on request
+        filtered_audio = []
+        for audio in chapter_audio:
+            audio_type = audio.get('audio_type')
+            if ((audio_type == 'narrator' and request.include_narration) or
+                ((audio_type in ['music', 'background_music']) and request.include_music) or
+                ((audio_type in ['sound_effect', 'sfx']) and request.include_effects) or
+                (audio_type == 'background_music' and request.include_ambiance) or
+                (audio_type == 'character' and request.include_dialogue)):
+                filtered_audio.append(audio)
+
+        if not filtered_audio:
+            raise HTTPException(status_code=400, detail="No audio files match the export criteria")
+
+        # Create export record
+        export_record_data = {
+            'user_id': current_user['id'],
+            'chapter_id': chapter_id,
+            'export_format': request.format,
+            'status': 'pending',
+            'audio_files': [audio['id'] for audio in filtered_audio],
+            'mix_settings': request.mix_settings or {},
+            'metadata': {
+                'chapter_id': chapter_id,
+                'include_narration': request.include_narration,
+                'include_music': request.include_music,
+                'include_effects': request.include_effects,
+                'include_ambiance': request.include_ambiance,
+                'include_dialogue': request.include_dialogue
+            }
+        }
+
+        export_result = supabase_client.table('audio_exports').insert(export_record_data).execute()
+        export_id = export_result.data[0]['id'] if export_result.data else None
+
+        if not export_id:
+            raise HTTPException(status_code=500, detail="Failed to create audio export record")
+
+        # Queue the audio export task
+        from app.tasks.audio_tasks import export_chapter_audio_mix_task
+        task = export_chapter_audio_mix_task.delay(
+            export_id=export_id,
+            chapter_id=chapter_id,
+            user_id=current_user['id'],
+            audio_files=filtered_audio,
+            export_format=request.format,
+            mix_settings=request.mix_settings
+        )
+
+        return AudioExportResponse(
+            export_id=export_id,
+            status="queued",
+            message="Audio export has been queued and will be processed in the background",
+            estimated_time_seconds=60  # Estimated time for audio mixing
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error queuing audio export: {str(e)}")
+
+
+@router.get("/{chapter_id}/audio/status/{record_id}", response_model=AudioStatusResponse)
+async def get_audio_generation_status(
+    chapter_id: str,
+    record_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Get the status of an audio generation by record ID"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user['id'], supabase_client)
+
+        # Get the audio record
+        audio_response = supabase_client.table('audio_generations').select('*').eq('id', record_id).single().execute()
+
+        if not audio_response.data:
+            raise HTTPException(status_code=404, detail="Audio generation record not found")
+
+        audio_record = audio_response.data
+
+        # Verify the record belongs to the current user
+        if audio_record.get('user_id') != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to access this audio generation")
+
+        # Verify the record is associated with the chapter
+        metadata = audio_record.get('metadata', {})
+        if metadata.get('chapter_id') != chapter_id:
+            raise HTTPException(status_code=403, detail="Audio generation is not associated with this chapter")
+
+        # Map status values
+        status = audio_record.get('generation_status', 'pending')
+        if status == 'completed':
+            status = 'completed'
+        elif status == 'failed':
+            status = 'failed'
+        elif status in ['processing', 'generating']:
+            status = 'processing'
+        else:
+            status = 'pending'
+
+        return AudioStatusResponse(
+            record_id=record_id,
+            status=status,
+            audio_url=audio_record.get('audio_url'),
+            error_message=audio_record.get('error_message'),
+            duration=audio_record.get('duration'),
+            created_at=audio_record.get('created_at'),
+            updated_at=audio_record.get('updated_at')
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting audio generation status: {str(e)}")

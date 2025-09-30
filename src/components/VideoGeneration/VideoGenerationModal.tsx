@@ -1,34 +1,43 @@
-import React, { useState, useEffect } from 'react';
-import { X, AlertCircle, CheckCircle } from 'lucide-react';
-import { useVideoGeneration, useGenerationStatus, useGenerationProgress } from '../../contexts/VideoGenerationContext';
-import { QualityTierSelector } from './QualityTierSelector';
-import { ProgressIndicators } from './ProgressIndicators';
-import { AudioGenerationStep } from './steps/AudioGenerationStep';
-import { ImageGenerationStep } from './steps/ImageGenerationStep';
-import { VideoGenerationStep } from './steps/VideoGenerationStep';
-import { MergeStep } from './steps/MergeStep';
-import { LipSyncStep } from './steps/LipSyncStep';
-import { CompletedStep } from './steps/CompletedStep';
-import { GenerationStatus } from '../../lib/videoGenerationApi';
+import React, { useState, useEffect } from "react";
+import { X, AlertCircle, CheckCircle } from "lucide-react";
+import {
+  useVideoGeneration,
+  useGenerationStatus,
+  useGenerationProgress,
+} from "../../contexts/VideoGenerationContext";
+import { QualityTierSelector } from "./QualityTierSelector";
+import { ProgressIndicators } from "./ProgressIndicators";
+import { AudioGenerationStep } from "./steps/AudioGenerationStep";
+import { ImageGenerationStep } from "./steps/ImageGenerationStep";
+import { VideoGenerationStep } from "./steps/VideoGenerationStep";
+import { MergeStep } from "./steps/MergeStep";
+import { LipSyncStep } from "./steps/LipSyncStep";
+import { CompletedStep } from "./steps/CompletedStep";
+import { GenerationStatus } from "../../lib/videoGenerationApi";
 
 interface VideoGenerationModalProps {
   isOpen: boolean;
   onClose: () => void;
   scriptId: string;
-  initialQualityTier?: 'free' | 'premium' | 'professional';
+  chapterId: string;
+  initialQualityTier?: "free" | "premium" | "professional";
 }
 
 export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
   isOpen,
   onClose,
   scriptId,
-  initialQualityTier = 'free'
+  chapterId,
+  initialQualityTier = "free",
 }) => {
-  const { state, startGeneration, resetGeneration, clearError } = useVideoGeneration();
+  const { state, startGeneration, resetGeneration, clearError } =
+    useVideoGeneration();
   const status = useGenerationStatus();
   const progress = useGenerationProgress();
-  
-  const [selectedQualityTier, setSelectedQualityTier] = useState<'free' | 'premium' | 'professional'>(initialQualityTier);
+
+  const [selectedQualityTier, setSelectedQualityTier] = useState<
+    "free" | "premium" | "professional"
+  >(initialQualityTier);
   const [hasStarted, setHasStarted] = useState(false);
 
   // Reset when modal opens/closes
@@ -44,16 +53,18 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
 
   const handleStartGeneration = async () => {
     try {
-      await startGeneration(scriptId, selectedQualityTier);
+      await startGeneration(scriptId, chapterId, selectedQualityTier);
       setHasStarted(true);
     } catch (error) {
-      console.error('Failed to start generation:', error);
+      console.error("Failed to start generation:", error);
     }
   };
 
   const handleClose = () => {
     if (state.isGenerating) {
-      const confirmClose = window.confirm('Video generation is in progress. Are you sure you want to close?');
+      const confirmClose = window.confirm(
+        "Video generation is in progress. Are you sure you want to close?"
+      );
       if (!confirmClose) return;
     }
     onClose();
@@ -62,24 +73,24 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
   const getCurrentStepNumber = (status: GenerationStatus | null): number => {
     if (!status) return 0;
     switch (status) {
-      case 'generating_audio':
-      case 'audio_completed':
+      case "generating_audio":
+      case "audio_completed":
         return 1;
-      case 'generating_images':
-      case 'images_completed':
+      case "generating_images":
+      case "images_completed":
         return 2;
-      case 'generating_video':
-      case 'video_completed':
+      case "generating_video":
+      case "video_completed":
         return 3;
-      case 'merging_audio':
+      case "merging_audio":
         return 4;
-      case 'applying_lipsync':
-      case 'lipsync_completed':
+      case "applying_lipsync":
+      case "lipsync_completed":
         return 5;
-      case 'completed':
+      case "completed":
         return 6;
-      case 'failed':
-      case 'lipsync_failed':
+      case "failed":
+      case "lipsync_failed":
         return -1;
       default:
         return 0;
@@ -99,29 +110,33 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
     }
 
     switch (status) {
-      case 'generating_audio':
-      case 'audio_completed':
+      case "generating_audio":
+      case "audio_completed":
         return <AudioGenerationStep />;
-      case 'generating_images':
-      case 'images_completed':
+      case "generating_images":
+      case "images_completed":
         return <ImageGenerationStep />;
-      case 'generating_video':
-      case 'video_completed':
+      case "generating_video":
+      case "video_completed":
         return <VideoGenerationStep />;
-      case 'merging_audio':
+      case "merging_audio":
         return <MergeStep />;
-      case 'applying_lipsync':
-      case 'lipsync_completed':
+      case "applying_lipsync":
+      case "lipsync_completed":
         return <LipSyncStep />;
-      case 'completed':
+      case "completed":
         return <CompletedStep />;
-      case 'failed':
-      case 'lipsync_failed':
+      case "failed":
+      case "lipsync_failed":
         return (
           <div className="text-center py-8">
             <AlertCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-red-600 mb-2">Generation Failed</h3>
-            <p className="text-gray-600 mb-4">{state.error || 'An error occurred during video generation'}</p>
+            <h3 className="text-xl font-semibold text-red-600 mb-2">
+              Generation Failed
+            </h3>
+            <p className="text-gray-600 mb-4">
+              {state.error || "An error occurred during video generation"}
+            </p>
             <button
               onClick={() => {
                 resetGeneration();
@@ -147,10 +162,12 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
           <div>
             <h2 className="text-2xl font-bold text-gray-900">
-              {hasStarted ? 'Generating Video' : 'Generate Video'}
+              {hasStarted ? "Generating Video" : "Generate Video"}
             </h2>
             <p className="text-gray-600 mt-1">
-              {hasStarted ? 'Please wait while we create your video...' : 'Choose your quality tier and start generation'}
+              {hasStarted
+                ? "Please wait while we create your video..."
+                : "Choose your quality tier and start generation"}
             </p>
           </div>
           <button
@@ -190,24 +207,25 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
         )}
 
         {/* Main Content */}
-        <div className="p-6 min-h-[400px]">
-          {renderCurrentStep()}
-        </div>
+        <div className="p-6 min-h-[400px]">{renderCurrentStep()}</div>
 
         {/* Footer */}
-        {hasStarted && status && !['completed', 'failed', 'lipsync_failed'].includes(status) && (
-          <div className="p-6 border-t border-gray-200 bg-gray-50 rounded-b-xl">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-gray-600">
-                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                Processing... This may take several minutes.
-              </div>
-              <div className="text-sm text-gray-500">
-                Last updated: {state.lastUpdated?.toLocaleTimeString() || 'Never'}
+        {hasStarted &&
+          status &&
+          !["completed", "failed", "lipsync_failed"].includes(status) && (
+            <div className="p-6 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm text-gray-600">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                  Processing... This may take several minutes.
+                </div>
+                <div className="text-sm text-gray-500">
+                  Last updated:{" "}
+                  {state.lastUpdated?.toLocaleTimeString() || "Never"}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
       </div>
     </div>
   );

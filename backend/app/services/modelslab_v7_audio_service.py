@@ -25,15 +25,21 @@ class ModelsLabV7AudioService:
         self.sound_effects_endpoint = f"{self.base_url}/voice/sound-generation"
         self.music_endpoint = f"{self.base_url}/voice/music-gen"
         
-        # ✅ Voice mapping for characters (ElevenLabs voices)
+        # ✅ Voice mapping for narrators (ElevenLabs voices)
+        self.narrator_voices = {
+            'professional': 'ErXwobaYiN019PkySvjV',     # Professional narrator
+            'storyteller': 'M7baJQBjzMsrxxZ796H6',      # Male storyteller
+            'friendly': 'pNInz6obpgDQGcFmaJgB',        # Female friendly narrator
+        }
+
+        # ✅ Voice mapping for characters (ElevenLabs voices for dialogue)
         self.character_voices = {
-            'male_adult': 'M7baJQBjzMsrxxZ796H6',      # Male voice
-            'female_adult': 'pNInz6obpgDQGcFmaJgB',    # Female voice
-            'male_young': 'yoZ06aMxZJJ28mfd3POQ',      # Young male
-            'female_young': '21m00Tcm4TlvDq8ikWAM',    # Young female
-            'narrator': 'ErXwobaYiN019PkySvjV',        # Professional narrator
-            'elderly_male': 'VR6AewLTigWG4xSOukaG',    # Elderly male
-            'elderly_female': 'EXAVITQu4vr4xnSDxMaL'   # Elderly female
+            'conversational_male': '29vD33N1CtxCmqQRPOHJ',    # Conversational male
+            'conversational_female': '21m00Tcm4TlvDq8ikWAM',  # Conversational female
+            'expressive_male': 'IKne3meq5aSn9XLyUdCD',       # Expressive male
+            'expressive_female': 'AZnzlk1XvdvUeBnXmlld',     # Expressive female
+            'warm_male': 'pNInz6obpgDQGcFmaJgB',            # Warm male
+            'warm_female': 'EXAVITQu4vr4xnSDxMaL',          # Warm female
         }
         
         # ✅ Available TTS models
@@ -187,30 +193,6 @@ class ModelsLabV7AudioService:
             logger.error(f"[MODELSLAB V7 MUSIC ERROR]: {str(e)}")
             raise e
     
-    def assign_character_voice(self, character_name: str) -> str:
-        """Assign appropriate voice based on character name and traits"""
-        
-        character_lower = character_name.lower()
-        
-        # ✅ Smart voice assignment based on character name patterns
-        if any(name in character_lower for name in ['john', 'david', 'michael', 'james', 'robert', 'dad', 'father', 'man', 'king', 'prince']):
-            return self.character_voices['male_adult']
-        elif any(name in character_lower for name in ['mary', 'sarah', 'elizabeth', 'emma', 'mom', 'mother', 'woman', 'queen', 'princess']):
-            return self.character_voices['female_adult']
-        elif any(name in character_lower for name in ['boy', 'young', 'teen', 'kid', 'son', 'brother']):
-            return self.character_voices['male_young']
-        elif any(name in character_lower for name in ['girl', 'teen', 'daughter', 'sister']):
-            return self.character_voices['female_young']
-        elif any(name in character_lower for name in ['grandfather', 'grandpa', 'elder', 'old man']):
-            return self.character_voices['elderly_male']
-        elif any(name in character_lower for name in ['grandmother', 'grandma', 'elder', 'old woman']):
-            return self.character_voices['elderly_female']
-        elif 'narrator' in character_lower:
-            return self.character_voices['narrator']
-        else:
-            # ✅ Random assignment for unknown characters
-            voices = list(self.character_voices.values())
-            return random.choice(voices)
     
     def _process_tts_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
         """Process TTS API response and extract relevant information"""
@@ -307,16 +289,24 @@ class ModelsLabV7AudioService:
         }
     
     def get_available_voices(self) -> Dict[str, str]:
-        """Get available voice IDs and their descriptions"""
-        
+        """Get available narrator voice IDs and their descriptions"""
+
         return {
-            'M7baJQBjzMsrxxZ796H6': 'Male Adult Voice',
-            'pNInz6obpgDQGcFmaJgB': 'Female Adult Voice', 
-            'yoZ06aMxZJJ28mfd3POQ': 'Young Male Voice',
-            '21m00Tcm4TlvDq8ikWAM': 'Young Female Voice',
             'ErXwobaYiN019PkySvjV': 'Professional Narrator',
-            'VR6AewLTigWG4xSOukaG': 'Elderly Male Voice',
-            'EXAVITQu4vr4xnSDxMaL': 'Elderly Female Voice'
+            'M7baJQBjzMsrxxZ796H6': 'Male Storyteller',
+            'pNInz6obpgDQGcFmaJgB': 'Friendly Female Narrator'
+        }
+
+    def get_available_character_voices(self) -> Dict[str, str]:
+        """Get available character voice IDs and their descriptions"""
+
+        return {
+            '29vD33N1CtxCmqQRPOHJ': 'Conversational Male',
+            '21m00Tcm4TlvDq8ikWAM': 'Conversational Female',
+            'IKne3meq5aSn9XLyUdCD': 'Expressive Male',
+            'AZnzlk1XvdvUeBnXmlld': 'Expressive Female',
+            'pNInz6obpgDQGcFmaJgB': 'Warm Male',
+            'EXAVITQu4vr4xnSDxMaL': 'Warm Female'
         }
     
     def get_available_models(self) -> Dict[str, Dict[str, str]]:
@@ -339,32 +329,38 @@ class ModelsLabV7AudioService:
     async def batch_generate_tts(
         self,
         texts: List[Dict[str, str]],
-        default_voice: str = "M7baJQBjzMsrxxZ796H6"
+        default_voice: str = "29vD33N1CtxCmqQRPOHJ",  # Default to conversational male for character dialogue
+        use_character_voices: bool = True
     ) -> List[Dict[str, Any]]:
         """Generate multiple TTS audio files in batch"""
         
         results = []
         
+        # Cycle through character voices for variety if using character voices
+        character_voice_list = list(self.character_voices.values()) if use_character_voices else [default_voice]
+
         for i, text_item in enumerate(texts):
             try:
                 text = text_item.get('text', '')
-                voice_id = text_item.get('voice_id', default_voice)
+                # Use different voices for different characters to add variety
+                voice_id = text_item.get('voice_id', character_voice_list[i % len(character_voice_list)])
                 character = text_item.get('character', f'Speaker_{i+1}')
-                
-                logger.info(f"[BATCH TTS] Processing {i+1}/{len(texts)}: {character}")
-                
+
+                logger.info(f"[BATCH TTS] Processing {i+1}/{len(texts)}: {character} (voice: {voice_id})")
+
                 result = await self.generate_tts_audio(
                     text=text,
                     voice_id=voice_id
                 )
-                
+
                 result['character'] = character
                 result['sequence'] = i + 1
+                result['voice_used'] = voice_id
                 results.append(result)
-                
+
                 # ✅ Small delay to prevent rate limiting
                 await asyncio.sleep(0.5)
-                
+
             except Exception as e:
                 logger.error(f"[BATCH TTS] Failed for item {i+1}: {e}")
                 results.append({

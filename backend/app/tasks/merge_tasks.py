@@ -38,11 +38,27 @@ def merge_audio_video_for_generation(self, video_generation_id: str):
         audio_files = video_gen.get('audio_files', {})
         video_data_obj = video_gen.get('video_data', {})
         scene_videos = video_data_obj.get('scene_videos', [])
-        
+
+        # Fetch key scene shots for transitions
+        key_scene_shots = {}
+        try:
+            segments_data = supabase.table('video_segments').select('scene_id, key_scene_shot_url').eq('video_generation_id', video_generation_id).execute()
+            for segment in segments_data.data or []:
+                key_scene_shots[segment['scene_id']] = segment['key_scene_shot_url']
+        except Exception as e:
+            print(f"[KEY SHOTS] Could not fetch key scene shots: {str(e)}")
+
+        # Add key scene shots to scene videos
+        for scene in scene_videos:
+            scene_id = scene.get('scene_id')
+            if scene_id in key_scene_shots:
+                scene['key_scene_shot_url'] = key_scene_shots[scene_id]
+
         print(f"[AUDIO VIDEO MERGE] Processing:")
         print(f"- Scene videos: {len(scene_videos)}")
         print(f"- Audio files: {len(audio_files.get('narrator', [])) + len(audio_files.get('characters', []))}")
-        
+        print(f"- Key scene shots available: {len([s for s in scene_videos if s.get('key_scene_shot_url')])}")
+
         # Merge audio and video
         merge_result = asyncio.run(merge_audio_video_scenes(
             video_generation_id, scene_videos, audio_files
@@ -54,7 +70,13 @@ def merge_audio_video_for_generation(self, video_generation_id: str):
         # Update video generation with final result
         final_video_url = merge_result.get('final_video_url')
         merge_statistics = merge_result.get('statistics', {})
-        
+        quality_versions = merge_result.get('quality_versions', [])
+
+        # Prepare download metadata
+        download_metadata = prepare_download_metadata(
+            final_video_url, quality_versions, merge_statistics, video_generation_id
+        )
+
         supabase.table('video_generations').update({
             'video_url': final_video_url,
             'generation_status': 'completed',
@@ -62,7 +84,14 @@ def merge_audio_video_for_generation(self, video_generation_id: str):
                 'final_video_url': final_video_url,
                 'merge_statistics': merge_statistics,
                 'processing_details': merge_result.get('processing_details', {}),
-                'quality_versions': merge_result.get('quality_versions', [])
+                'quality_versions': quality_versions,
+                'download_metadata': download_metadata,
+                'advanced_features': {
+                    'transitions_added': merge_result.get('transitions_added', 0),
+                    'filters_applied': merge_result.get('filters_applied', False),
+                    'quality_optimization': True,
+                    'web_optimized': True
+                }
             }
         }).eq('id', video_generation_id).execute()
         
@@ -436,12 +465,182 @@ async def merge_audio_with_video_ffmpeg(video_path: str, audio_path: str, output
     if result.returncode != 0:
         raise Exception(f"FFmpeg video/audio merge failed: {result.stderr}")
 
+async def generate_scene_transition(
+    scene_a: Dict[str, Any],
+    scene_b: Dict[str, Any],
+    temp_dir: str,
+    transition_duration: float = 1.0
+) -> Optional[str]:
+    """Generate animated transition between two scenes using key scene shots"""
+
+    try:
+        # Get key scene shot from scene_a (last frame)
+        key_shot_url = scene_a.get('key_scene_shot_url')
+        if not key_shot_url:
+            print(f"[TRANSITION] No key scene shot for scene {scene_a.get('scene_id')}, skipping transition")
+            return None
+
+        # Download key scene shot
+        key_shot_path = os.path.join(temp_dir, f"key_shot_{scene_a.get('scene_id')}.jpg")
+        await download_file(key_shot_url, key_shot_path)
+
+        # Download first frame of scene_b for transition
+        scene_b_video_url = scene_b.get('video_url')
+        if not scene_b_video_url:
+            return None
+
+        scene_b_path = os.path.join(temp_dir, f"scene_b_{scene_b.get('scene_id')}.mp4")
+        await download_file(scene_b_video_url, scene_b_path)
+
+        # Extract first frame of scene_b
+        first_frame_path = os.path.join(temp_dir, f"first_frame_{scene_b.get('scene_id')}.jpg")
+        cmd_extract = [
+            'ffmpeg', '-y', '-i', scene_b_path,
+            '-vframes', '1', '-q:v', '2', first_frame_path
+        ]
+        result = subprocess.run(cmd_extract, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"[TRANSITION] Failed to extract first frame: {result.stderr}")
+            return None
+
+        # Create fade transition using FFmpeg
+        transition_output = os.path.join(temp_dir, f"transition_{scene_a.get('scene_id')}_to_{scene_b.get('scene_id')}.mp4")
+
+        # Create transition: fade from key_shot to first_frame over transition_duration seconds
+        cmd_transition = [
+            'ffmpeg', '-y',
+            '-loop', '1', '-i', key_shot_path,  # Loop key shot
+            '-loop', '1', '-i', first_frame_path,  # Loop first frame
+            '-filter_complex',
+            f'[0:v]fade=t=out:st=0:d={transition_duration}:alpha=1[va];' +
+            f'[1:v]fade=t=in:st=0:d={transition_duration}:alpha=1[vb];' +
+            '[va][vb]overlay=format=auto[outv]',
+            '-map', '[outv]',
+            '-t', str(transition_duration),
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+            transition_output
+        ]
+
+        result = subprocess.run(cmd_transition, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"[TRANSITION] Failed to create transition: {result.stderr}")
+            return None
+
+        print(f"[TRANSITION] ✅ Created {transition_duration}s transition between scenes")
+        return transition_output
+
+    except Exception as e:
+        print(f"[TRANSITION ERROR] {str(e)}")
+        return None
+
+async def apply_video_filters(
+    input_video: str,
+    output_video: str,
+    filters: List[str] = None
+) -> bool:
+    """Apply advanced video filters using FFmpeg"""
+
+    if not filters:
+        filters = ['colorlevels=rimin=0.058:gimin=0.058:bimin=0.058:rimax=0.898:gimax=0.898:bimax=0.898']  # Basic color correction
+
+    try:
+        filter_string = ','.join(filters)
+
+        cmd = [
+            'ffmpeg', '-y', '-i', input_video,
+            '-vf', filter_string,
+            '-c:v', 'libx264', '-preset', 'slow', '-crf', '20',  # High quality
+            '-c:a', 'copy',  # Copy audio if present
+            output_video
+        ]
+
+        print(f"[FILTERS] Applying filters: {filter_string}")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            print(f"[FILTERS] Failed to apply filters: {result.stderr}")
+            return False
+
+        return True
+
+    except Exception as e:
+        print(f"[FILTERS ERROR] {str(e)}")
+        return False
+
+async def reencode_video(
+    input_video: str,
+    output_video: str,
+    quality_preset: str = 'high',
+    format_type: str = 'mp4'
+) -> Dict[str, Any]:
+    """Re-encode video with optimized settings for quality and file size"""
+
+    quality_settings = {
+        'high': {'crf': '18', 'preset': 'slow', 'maxrate': '10M', 'bufsize': '20M'},
+        'medium': {'crf': '23', 'preset': 'medium', 'maxrate': '5M', 'bufsize': '10M'},
+        'low': {'crf': '28', 'preset': 'fast', 'maxrate': '2M', 'bufsize': '4M'},
+        'web': {'crf': '24', 'preset': 'fast', 'maxrate': '3M', 'bufsize': '6M'}  # Optimized for web playback
+    }
+
+    settings = quality_settings.get(quality_preset, quality_settings['high'])
+
+    try:
+        cmd = [
+            'ffmpeg', '-y', '-i', input_video,
+            '-c:v', 'libx264',
+            '-preset', settings['preset'],
+            '-crf', settings['crf'],
+            '-maxrate', settings['maxrate'],
+            '-bufsize', settings['bufsize'],
+            '-c:a', 'aac', '-b:a', '128k',  # Audio settings
+            '-movflags', '+faststart',  # Optimize for web playback
+            '-f', format_type,
+            output_video
+        ]
+
+        if format_type == 'webm':
+            cmd = [
+                'ffmpeg', '-y', '-i', input_video,
+                '-c:v', 'libvpx-vp9',
+                '-b:v', settings['maxrate'],
+                '-c:a', 'libopus', '-b:a', '128k',
+                '-f', 'webm',
+                output_video
+            ]
+
+        print(f"[REENCODE] Re-encoding with {quality_preset} quality to {format_type}")
+        import time
+        start_time = time.time()
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        processing_time = time.time() - start_time
+
+        if result.returncode != 0:
+            raise Exception(f"FFmpeg re-encoding failed: {result.stderr}")
+
+        # Get file size
+        file_size_bytes = os.path.getsize(output_video)
+        file_size_mb = file_size_bytes / (1024 * 1024)
+
+        return {
+            'success': True,
+            'file_size_mb': file_size_mb,
+            'processing_time': processing_time,
+            'quality': quality_preset,
+            'format': format_type
+        }
+
+    except Exception as e:
+        print(f"[REENCODE ERROR] {str(e)}")
+        return {'success': False, 'error': str(e)}
+
 async def concatenate_final_video(
     merged_scenes: List[Dict[str, Any]],
     video_generation_id: str
 ) -> Dict[str, Any]:
-    """Concatenate all merged scenes into final video"""
-    
+    """Concatenate all merged scenes into final video with advanced editing features"""
+
     if len(merged_scenes) == 1:
         # Single scene, just return it
         scene = merged_scenes[0]
@@ -451,84 +650,169 @@ async def concatenate_final_video(
             'processing_time': 0,
             'quality_versions': []
         }
-    
+
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
-            # Download all scene videos
+            # Download all scene videos and prepare for concatenation with transitions
             scene_files = []
+            transition_files = []
+
             for i, scene in enumerate(merged_scenes):
                 video_url = scene.get('video_url')
                 if video_url:
                     video_path = os.path.join(temp_dir, f"scene_{i:03d}.mp4")
                     await download_file(video_url, video_path)
                     scene_files.append(video_path)
-            
+
+                    # Generate transition to next scene if not the last
+                    if i < len(merged_scenes) - 1:
+                        next_scene = merged_scenes[i + 1]
+                        transition_path = await generate_scene_transition(scene, next_scene, temp_dir)
+                        if transition_path:
+                            transition_files.append(transition_path)
+
             if not scene_files:
                 raise Exception("No scene videos to concatenate")
-            
+
+            # Create sequence with transitions
+            sequence_files = []
+            for i, scene_file in enumerate(scene_files):
+                sequence_files.append(scene_file)
+                if i < len(transition_files):
+                    sequence_files.append(transition_files[i])
+
             # Create FFmpeg concat file
-            concat_file = os.path.join(temp_dir, "scenes.txt")
+            concat_file = os.path.join(temp_dir, "scenes_with_transitions.txt")
             with open(concat_file, 'w') as f:
-                for scene_file in scene_files:
-                    f.write(f"file '{scene_file}'\n")
-            
-            # Concatenate using FFmpeg
-            final_output = os.path.join(temp_dir, "final_video.mp4")
-            cmd = [
+                for seq_file in sequence_files:
+                    f.write(f"file '{seq_file}'\n")
+
+            # Concatenate with transitions
+            raw_concat_output = os.path.join(temp_dir, "raw_concat.mp4")
+            cmd_concat = [
                 'ffmpeg', '-y',
                 '-f', 'concat',
                 '-safe', '0',
                 '-i', concat_file,
-                '-c', 'copy',  # Copy without re-encoding
-                final_output
+                '-c', 'copy',  # Copy without re-encoding first
+                raw_concat_output
             ]
-            
-            print(f"[FINAL CONCAT] Concatenating {len(scene_files)} scene videos")
+
+            print(f"[FINAL CONCAT] Concatenating {len(sequence_files)} segments (scenes + transitions)")
             import time
             start_time = time.time()
-            
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
+
+            result = subprocess.run(cmd_concat, capture_output=True, text=True)
+
             if result.returncode != 0:
                 raise Exception(f"FFmpeg concatenation failed: {result.stderr}")
-            
+
+            # Apply video filters
+            filtered_output = os.path.join(temp_dir, "filtered_video.mp4")
+            filters_applied = await apply_video_filters(raw_concat_output, filtered_output)
+            processing_input = filtered_output if filters_applied else raw_concat_output
+
+            # Generate multiple quality versions
+            quality_versions = []
+            quality_presets = ['web', 'high', 'medium']
+
+            for preset in quality_presets:
+                quality_output = os.path.join(temp_dir, f"final_video_{preset}.mp4")
+                reencode_result = await reencode_video(processing_input, quality_output, preset, 'mp4')
+                if reencode_result['success']:
+                    quality_versions.append({
+                        'quality': preset,
+                        'file_size_mb': reencode_result['file_size_mb'],
+                        'url': None  # Will be set after upload
+                    })
+
+            # Use web quality as main final video
+            final_output = os.path.join(temp_dir, "final_video_web.mp4")
+
             processing_time = time.time() - start_time
-            
+
             # Get file size
             file_size_bytes = os.path.getsize(final_output)
-            file_size_mb = file_size_bytes / (512 * 512)
-            
-            # Upload final video
+            file_size_mb = file_size_bytes / (1024 * 1024)
+
+            # Upload final video and quality versions
             file_service = FileService()
             final_video_url = await file_service.upload_file(
-                final_output, 
+                final_output,
                 f"final_videos/{video_generation_id}/final_video.mp4"
             )
-            
+
             if not final_video_url:
                 raise Exception("Failed to upload final video")
-            
-            print(f"[FINAL CONCAT] ✅ Final video created: {file_size_mb:.1f}MB in {processing_time:.1f}s")
-            
+
+            # Upload quality versions
+            for version in quality_versions:
+                quality_file = os.path.join(temp_dir, f"final_video_{version['quality']}.mp4")
+                if os.path.exists(quality_file):
+                    version_url = await file_service.upload_file(
+                        quality_file,
+                        f"final_videos/{video_generation_id}/final_video_{version['quality']}.mp4"
+                    )
+                    version['url'] = version_url
+
+            print(f"[FINAL CONCAT] ✅ Final video created: {file_size_mb:.1f}MB in {processing_time:.1f}s with {len(quality_versions)} quality versions")
+
             return {
                 'final_video_url': final_video_url,
                 'file_size_mb': file_size_mb,
                 'processing_time': processing_time,
-                'quality_versions': []  # Could generate multiple qualities here
+                'quality_versions': quality_versions,
+                'transitions_added': len(transition_files),
+                'filters_applied': filters_applied
             }
-            
+
     except Exception as e:
         print(f"[FINAL CONCAT ERROR] {str(e)}")
         raise e
 
+def prepare_download_metadata(
+    final_video_url: str,
+    quality_versions: List[Dict[str, Any]],
+    statistics: Dict[str, Any],
+    video_generation_id: str
+) -> Dict[str, Any]:
+    """Prepare metadata for download optimization and user information"""
+
+    return {
+        'video_id': video_generation_id,
+        'primary_download_url': final_video_url,
+        'quality_options': [
+            {
+                'quality': v.get('quality', 'unknown'),
+                'file_size_mb': v.get('file_size_mb', 0),
+                'download_url': v.get('url'),
+                'recommended_for': 'web' if v.get('quality') == 'web' else ('high_quality' if v.get('quality') == 'high' else 'standard')
+            } for v in quality_versions if v.get('url')
+        ],
+        'technical_specs': {
+            'duration_seconds': statistics.get('total_duration', 0),
+            'file_size_mb': statistics.get('file_size_mb', 0),
+            'format': 'MP4 (H.264/AAC)',
+            'optimized_for': ['web_playback', 'download', 'sharing'],
+            'advanced_features': ['scene_transitions', 'color_correction', 'quality_optimization']
+        },
+        'download_instructions': {
+            'direct_download': True,
+            'streaming_optimized': True,
+            'compatible_players': ['VLC', 'QuickTime', 'Web browsers', 'Mobile devices']
+        },
+        'created_at': None,  # Will be set by database
+        'expires_at': None   # For temporary URLs if needed
+    }
+
 async def download_file(url: str, local_path: str):
     """Download file from URL to local path"""
-    
+
     response = requests.get(url, stream=True)
     response.raise_for_status()
-    
+
     with open(local_path, 'wb') as f:
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
-    
+
     print(f"[DOWNLOAD] Downloaded {url} to {local_path}")

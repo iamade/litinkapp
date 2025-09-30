@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+architecture
 
 # Editor directories and files
 .vscode/*
@@ -28,4 +29,3 @@ uploads
 backend/mycoderead.md
 backend/CODEDISCUSS.md
 *.pyc
-architecture

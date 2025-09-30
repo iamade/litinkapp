@@ -119,6 +119,7 @@ export interface LipSyncData {
 
 export interface StartVideoGenerationRequest {
   script_id: string;
+  chapter_id: string;
   quality_tier: 'free' | 'premium' | 'professional';
 }
 
@@ -131,17 +132,19 @@ export interface StartVideoGenerationResponse {
 // Video Generation API class using existing apiClient
 class VideoGenerationAPI {
   /**
-   * Start video generation for a script
-   */
-  async startVideoGeneration(
-    scriptId: string, 
-    qualityTier: 'free' | 'premium' | 'professional'
-  ): Promise<StartVideoGenerationResponse> {
-    return apiClient.post<StartVideoGenerationResponse>('/ai/generate-video', {
-      script_id: scriptId,
-      quality_tier: qualityTier
-    });
-  }
+    * Start video generation for a script
+    */
+   async startVideoGeneration(
+     scriptId: string,
+     chapterId: string,
+     qualityTier: 'free' | 'premium' | 'professional'
+   ): Promise<StartVideoGenerationResponse> {
+     return apiClient.post<StartVideoGenerationResponse>('/ai/generate-entertainment-video', {
+       script_id: scriptId,
+       chapter_id: chapterId,
+       quality_tier: qualityTier
+     });
+   }
 
   /**
    * Get overall generation status and progress

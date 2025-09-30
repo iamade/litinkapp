@@ -247,7 +247,7 @@ class VideoService:
         """Extract character dialogues from screenplay script"""
         dialogues = []
         lines = script.split('\n')
-        
+
         for i, line in enumerate(lines):
             line = line.strip()
             # Look for character names in caps (screenplay format)
@@ -260,14 +260,91 @@ class VideoService:
                     if lines[j].strip():
                         dialogue_text += lines[j].strip() + " "
                     j += 1
-                
+
                 if dialogue_text.strip():
                     dialogues.append({
                         'character': character,
                         'text': dialogue_text.strip()
                     })
-        
+
         return dialogues
+
+    async def extract_dialogue_per_scene(self, script: str, scene_descriptions: List[Dict[str, Any]], user_id: str = None) -> Dict[str, Any]:
+        """Extract character dialogue for each scene and generate audio"""
+        try:
+            from app.services.script_parser import ScriptParser
+
+            # Parse script to extract dialogue components
+            script_parser = ScriptParser()
+            parsed_audio = script_parser.parse_script_for_audio(
+                script=script,
+                characters=[],  # Will be extracted from script
+                scene_descriptions=scene_descriptions,
+                script_style="cinematic_movie"
+            )
+
+            # Extract character dialogues with scene information
+            scene_dialogues = {}
+            character_profiles = {}
+
+            # Group dialogues by scene
+            for dialogue in parsed_audio.get("character_dialogues", []):
+                scene_num = dialogue.get("scene", 1)
+                if scene_num not in scene_dialogues:
+                    scene_dialogues[scene_num] = []
+
+                scene_dialogues[scene_num].append({
+                    'character': dialogue['character'],
+                    'text': dialogue['text'],
+                    'line_number': dialogue.get('line_number', 0)
+                })
+
+                # Create character profile if not exists
+                if dialogue['character'] not in character_profiles:
+                    character_profiles[dialogue['character']] = self._create_character_profile(dialogue['character'])
+
+            # Generate audio for each scene's dialogues
+            scene_audio_files = {}
+            for scene_num, dialogues in scene_dialogues.items():
+                scene_audio = []
+                for dialogue in dialogues:
+                    # Generate character voice audio
+                    character_profile = character_profiles[dialogue['character']]
+                    audio_url = await self.elevenlabs_service.generate_character_voice(
+                        text=dialogue['text'],
+                        character_name=dialogue['character'],
+                        character_traits=character_profile.get('personality', ''),
+                        user_id=user_id
+                    )
+
+                    if audio_url:
+                        scene_audio.append({
+                            'character': dialogue['character'],
+                            'text': dialogue['text'],
+                            'audio_url': audio_url,
+                            'scene': scene_num,
+                            'character_profile': character_profile
+                        })
+
+                if scene_audio:
+                    scene_audio_files[scene_num] = scene_audio
+
+            return {
+                'scene_dialogues': scene_dialogues,
+                'scene_audio_files': scene_audio_files,
+                'character_profiles': character_profiles,
+                'total_scenes_with_dialogue': len(scene_dialogues),
+                'total_audio_files': sum(len(audio) for audio in scene_audio_files.values())
+            }
+
+        except Exception as e:
+            print(f"Error extracting dialogue per scene: {e}")
+            return {
+                'scene_dialogues': {},
+                'scene_audio_files': {},
+                'character_profiles': {},
+                'error': str(e)
+            }
     
     def _create_character_profile(self, character_name: str) -> Dict[str, Any]:
         """Create character profile based on character name"""
@@ -394,6 +471,7 @@ class VideoService:
         supabase_client = None,
         user_id: str = None
     ) -> Optional[Dict[str, Any]]:
+        """Generate entertainment-style video with integrated dialogue audio generation"""
         """Generate entertainment-style video for story content using RAG, OpenAI, ElevenLabs, KlingAI, and FFmpeg. User can choose script_style ('cinematic_movie' or 'cinematic_narration')."""
         logs = []
         try:
@@ -594,6 +672,9 @@ class VideoService:
             logs.append(f"[FFMPEG CMD] {' '.join(ffmpeg_cmd)}")
             proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
             logs.append(f"[FFMPEG OUT] {proc.stdout}")
+            if proc.stderr:
+                logs.append(f"[FFMPEG ERR] {proc.stderr}")
+            logs.append(f"[FFMPEG EXIT] {proc.returncode}")
             logs.append(f"[FFMPEG ERR] {proc.stderr}")
             if not os.path.exists(merged_path):
                 logs.append(f"[ERROR] Merged video not found at {merged_path}")
@@ -987,6 +1068,86 @@ class VideoService:
             print(f"Error merging video and audio: {e}")
             return False
 
+    async def extract_last_frame_from_video(self, video_url: str, output_filename: str, user_id: str = None) -> Optional[str]:
+        """Extract the last frame from a video using FFmpeg and upload to Supabase Storage"""
+        try:
+            print(f"[FRAME EXTRACTION] Extracting last frame from video: {video_url}")
+
+            # Check if FFmpeg is available
+            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
+            if result.returncode != 0:
+                print("[FRAME EXTRACTION] FFmpeg not found, cannot extract frame")
+                return None
+
+            # Download video to temporary file
+            import tempfile
+            import httpx
+
+            fd, video_temp_path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+
+            try:
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    response = await client.get(video_url)
+                    response.raise_for_status()
+                    with open(video_temp_path, 'wb') as f:
+                        f.write(response.content)
+
+                print(f"[FRAME EXTRACTION] Video downloaded to: {video_temp_path}")
+
+                # Create temporary output path for the frame
+                fd, frame_temp_path = tempfile.mkstemp(suffix=".jpg")
+                os.close(fd)
+
+                # Use FFmpeg to extract the last frame
+                # -sseof -1 means seek to 1 second before end, then extract frame
+                ffmpeg_cmd = [
+                    'ffmpeg',
+                    '-i', video_temp_path,  # Input video
+                    '-vf', 'select=eq(n\\,0)',  # Select only the last frame
+                    '-q:v', '2',  # High quality JPEG
+                    '-f', 'image2',  # Output format
+                    '-update', '1',  # Only output one frame
+                    '-y',  # Overwrite output
+                    frame_temp_path
+                ]
+
+                print(f"[FRAME EXTRACTION] Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+                result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=60)
+
+                if result.returncode != 0:
+                    print(f"[FRAME EXTRACTION] FFmpeg failed: {result.stderr}")
+                    return None
+
+                if not os.path.exists(frame_temp_path):
+                    print("[FRAME EXTRACTION] Frame extraction failed - no output file")
+                    return None
+
+                print(f"[FRAME EXTRACTION] Frame extracted to: {frame_temp_path}")
+
+                # Upload frame to Supabase Storage
+                frame_url = await self._serve_video_from_supabase(frame_temp_path, output_filename, user_id)
+
+                if frame_url:
+                    print(f"[FRAME EXTRACTION] Frame uploaded to: {frame_url}")
+                else:
+                    print("[FRAME EXTRACTION] Failed to upload frame to Supabase")
+
+                return frame_url
+
+            finally:
+                # Clean up temporary files
+                try:
+                    if os.path.exists(video_temp_path):
+                        os.unlink(video_temp_path)
+                    if os.path.exists(frame_temp_path):
+                        os.unlink(frame_temp_path)
+                except:
+                    pass
+
+        except Exception as e:
+            print(f"[FRAME EXTRACTION] Error extracting last frame: {e}")
+            return None
     async def _create_mock_video(self, duration: int = 180) -> str:
         """Create a mock video using FFmpeg for development"""
         try:

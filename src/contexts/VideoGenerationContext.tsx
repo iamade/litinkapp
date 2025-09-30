@@ -1,10 +1,17 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 import {
   VideoGeneration,
   GenerationStatus,
   videoGenerationAPI,
 } from "../lib/videoGenerationApi";
-import { pollingService } from '../services/videoGenerationPolling';
+import { pollingService } from "../services/videoGenerationPolling";
 
 // Simplified state interface
 export interface VideoGenerationState {
@@ -17,17 +24,25 @@ export interface VideoGenerationState {
 // Context interface
 interface VideoGenerationContextType {
   state: VideoGenerationState;
-  startGeneration: (scriptId: string, qualityTier: "free" | "premium" | "professional") => Promise<string>;
+  startGeneration: (
+    scriptId: string,
+    chapterId: string,
+    qualityTier: "free" | "premium" | "professional"
+  ) => Promise<string>;
   stopPolling: () => void;
   resetGeneration: () => void;
   clearError: () => void;
 }
 
 // Create context
-const VideoGenerationContext = createContext<VideoGenerationContextType | undefined>(undefined);
+const VideoGenerationContext = createContext<
+  VideoGenerationContextType | undefined
+>(undefined);
 
 // Provider component
-export const VideoGenerationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const VideoGenerationProvider: React.FC<{
+  children: React.ReactNode;
+}> = ({ children }) => {
   const [state, setState] = useState<VideoGenerationState>({
     currentGeneration: null,
     isGenerating: false,
@@ -40,32 +55,34 @@ export const VideoGenerationProvider: React.FC<{ children: React.ReactNode }> = 
   // Start polling for status updates
   const startPolling = useCallback((videoGenId: string) => {
     currentVideoGenId.current = videoGenId;
-    
+
     pollingService.startPolling(videoGenId, {
       onUpdate: (generation) => {
-        setState(prev => ({
+        setState((prev) => ({
           ...prev,
           currentGeneration: generation,
-          isGenerating: !['completed', 'failed', 'lipsync_failed'].includes(generation.generation_status),
+          isGenerating: !["completed", "failed", "lipsync_failed"].includes(
+            generation.generation_status
+          ),
           lastUpdated: new Date(),
           error: generation.error_message || null,
         }));
       },
       onError: (error) => {
-        setState(prev => ({
+        setState((prev) => ({
           ...prev,
           error: error.message,
           lastUpdated: new Date(),
         }));
       },
       onComplete: (generation) => {
-        setState(prev => ({
+        setState((prev) => ({
           ...prev,
           currentGeneration: generation,
           isGenerating: false,
           lastUpdated: new Date(),
         }));
-      }
+      },
     });
   }, []);
 
@@ -78,37 +95,48 @@ export const VideoGenerationProvider: React.FC<{ children: React.ReactNode }> = 
   }, []);
 
   // Start video generation
-  const startGeneration = useCallback(async (
-    scriptId: string,
-    qualityTier: "free" | "premium" | "professional"
-  ): Promise<string> => {
-    try {
-      setState(prev => ({ ...prev, error: null }));
+  const startGeneration = useCallback(
+    async (
+      scriptId: string,
+      chapterId: string,
+      qualityTier: "free" | "premium" | "professional"
+    ): Promise<string> => {
+      try {
+        setState((prev) => ({ ...prev, error: null }));
 
-      const response = await videoGenerationAPI.startVideoGeneration(scriptId, qualityTier);
-      
-      setState(prev => ({
-        ...prev,
-        isGenerating: true,
-        error: null,
-        lastUpdated: new Date(),
-      }));
+        const response = await videoGenerationAPI.startVideoGeneration(
+          scriptId,
+          chapterId,
+          qualityTier
+        );
 
-      // Start polling for updates
-      startPolling(response.video_generation_id);
+        setState((prev) => ({
+          ...prev,
+          isGenerating: true,
+          error: null,
+          lastUpdated: new Date(),
+        }));
 
-      return response.video_generation_id;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to start video generation';
-      setState(prev => ({
-        ...prev,
-        error: errorMessage,
-        isGenerating: false,
-        lastUpdated: new Date(),
-      }));
-      throw error;
-    }
-  }, [startPolling]);
+        // Start polling for updates
+        startPolling(response.video_generation_id);
+
+        return response.video_generation_id;
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : "Failed to start video generation";
+        setState((prev) => ({
+          ...prev,
+          error: errorMessage,
+          isGenerating: false,
+          lastUpdated: new Date(),
+        }));
+        throw error;
+      }
+    },
+    [startPolling]
+  );
 
   // Reset generation
   const resetGeneration = useCallback(() => {
@@ -123,7 +151,7 @@ export const VideoGenerationProvider: React.FC<{ children: React.ReactNode }> = 
 
   // Clear error
   const clearError = useCallback(() => {
-    setState(prev => ({ ...prev, error: null }));
+    setState((prev) => ({ ...prev, error: null }));
   }, []);
 
   // Cleanup on unmount
@@ -153,7 +181,9 @@ export const VideoGenerationProvider: React.FC<{ children: React.ReactNode }> = 
 export const useVideoGeneration = (): VideoGenerationContextType => {
   const context = useContext(VideoGenerationContext);
   if (!context) {
-    throw new Error("useVideoGeneration must be used within a VideoGenerationProvider");
+    throw new Error(
+      "useVideoGeneration must be used within a VideoGenerationProvider"
+    );
   }
   return context;
 };
@@ -167,25 +197,36 @@ export const useGenerationStatus = (): GenerationStatus | null => {
 export const useGenerationProgress = () => {
   const { state } = useVideoGeneration();
   const generation = state.currentGeneration;
-  
+
   if (!generation) return null;
 
   // Calculate overall progress based on status
   const calculateProgress = (status: GenerationStatus): number => {
     switch (status) {
-      case 'generating_audio': return 15;
-      case 'audio_completed': return 25;
-      case 'generating_images': return 25 + (generation.image_progress?.success_rate || 0) * 0.25;
-      case 'images_completed': return 50;
-      case 'generating_video': return 50 + (generation.video_progress?.success_rate || 0) * 0.25;
-      case 'video_completed': return 75;
-      case 'merging_audio': return 85;
-      case 'applying_lipsync': return 95;
-      case 'lipsync_completed':
-      case 'completed': return 100;
-      case 'failed':
-      case 'lipsync_failed': return 0;
-      default: return 0;
+      case "generating_audio":
+        return 15;
+      case "audio_completed":
+        return 25;
+      case "generating_images":
+        return 25 + (generation.image_progress?.success_rate || 0) * 0.25;
+      case "images_completed":
+        return 50;
+      case "generating_video":
+        return 50 + (generation.video_progress?.success_rate || 0) * 0.25;
+      case "video_completed":
+        return 75;
+      case "merging_audio":
+        return 85;
+      case "applying_lipsync":
+        return 95;
+      case "lipsync_completed":
+      case "completed":
+        return 100;
+      case "failed":
+      case "lipsync_failed":
+        return 0;
+      default:
+        return 0;
     }
   };
 

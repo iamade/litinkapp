@@ -8,7 +8,20 @@ import BookViewForEntertainment from "./BookViewForEntertainment";
 interface Book {
   id: string;
   title: string;
+  author_name?: string;
+  description?: string;
+  cover_image_url?: string;
   book_type: string;
+  difficulty?: string;
+  tags?: any;
+  language?: string;
+  user_id: string;
+  status: string;
+  total_chapters?: number;
+  estimated_duration?: any;
+  created_at: string;
+  updated_at: string;
+  chapters?: any[];
 }
 
 export default function BookView() {

@@ -69,32 +69,6 @@ class ElevenLabsService:
             print(f"Error in generate_enhanced_speech: {e}")
             return {"audio_url": None, "error": str(e)}
     
-    async def generate_character_voice(
-        self, 
-        text: str, 
-        character_name: str, 
-        character_traits: str = "",
-        user_id: str = None
-    ) -> Optional[str]:
-        """Generate character-specific voice with personality"""
-        try:
-            # Create character-specific prompt
-            character_prompt = f"{character_name}: {text}"
-            if character_traits:
-                character_prompt += f" (Character traits: {character_traits})"
-            
-            # Generate speech with character voice
-            result = await self.generate_enhanced_speech(character_prompt, "21m00Tcm4TlvDq8ikWAM", user_id)
-            
-            if result and result.get("audio_url"):
-                return result["audio_url"]
-            else:
-                print(f"Failed to generate character voice for {character_name}")
-                return None
-                
-        except Exception as e:
-            print(f"Error generating character voice: {e}")
-            return None
 
     async def generate_audio_narration(
         self, 
@@ -315,38 +289,7 @@ class ElevenLabsService:
         }
         return emotion_styles.get(emotion, 0.5)
     
-    def _get_character_voice_settings(self, character_profile: Dict[str, Any]) -> Dict[str, Any]:
-        """Get voice settings based on character profile"""
-        personality = character_profile.get("personality", "neutral")
-        age = character_profile.get("age", "adult")
-        gender = character_profile.get("gender", "neutral")
-        
-        # Map character traits to voice settings
-        voice_mapping = {
-            "brave": {"emotion": "confident", "speed": 1.1, "stability": 0.8},
-            "wise": {"emotion": "wise", "speed": 0.9, "stability": 0.9},
-            "young": {"emotion": "excited", "speed": 1.2, "stability": 0.7},
-            "mysterious": {"emotion": "mysterious", "speed": 0.8, "stability": 0.8},
-            "friendly": {"emotion": "friendly", "speed": 1.0, "stability": 0.75}
-        }
-        
-        settings = voice_mapping.get(personality, {
-            "emotion": "neutral",
-            "speed": 1.0,
-            "stability": 0.75
-        })
-        
-        # Add voice ID based on character profile
-        settings["voice_id"] = self._get_voice_id_for_character(character_profile)
-        settings["similarity_boost"] = 0.75
-        
-        return settings
     
-    def _get_voice_id_for_character(self, character_profile: Dict[str, Any]) -> str:
-        """Get appropriate voice ID for character"""
-        # Use a real ElevenLabs voice ID
-        # For now, use a common default voice ID
-        return "21m00Tcm4TlvDq8ikWAM"  # Rachel voice
     
     def _get_narrator_voice_settings(self, narrator_style: str) -> Dict[str, Any]:
         """Get voice settings for narrator"""
@@ -364,16 +307,6 @@ class ElevenLabsService:
         
         return style_mapping.get(narrator_style, style_mapping["professional"])
     
-    async def _enhance_text_for_character(
-        self, 
-        text: str, 
-        character_profile: Dict[str, Any], 
-        scene_context: str
-    ) -> str:
-        """Enhance text to match character personality"""
-        # In a real implementation, you might use AI to enhance the text
-        # For now, return the original text
-        return text
     
     def _extract_personality(self, labels: Dict[str, str]) -> str:
         """Extract personality from voice labels"""
@@ -389,12 +322,6 @@ class ElevenLabsService:
         audio_filename = f"mock_speech_{hash(text)}.mp3"
         return f"/uploads/audio/{audio_filename}"
     
-    async def _mock_generate_character_voice(self, text: str, character_profile: Dict[str, Any]) -> str:
-        """Mock character voice generation for development"""
-        await asyncio.sleep(1)
-        character_name = character_profile.get("name", "character")
-        audio_filename = f"mock_{character_name}_{hash(text)}.mp3"
-        return f"/uploads/audio/{audio_filename}"
     
     def _get_mock_voices(self) -> List[Dict[str, Any]]:
         """Return mock voice data"""
@@ -407,27 +334,20 @@ class ElevenLabsService:
                 "personality": "professional"
             },
             {
-                "voice_id": "character_young",
-                "name": "Young Character",
-                "description": "Energetic and friendly voice for young characters",
-                "category": "character",
-                "personality": "friendly"
-            },
-            {
-                "voice_id": "character_wise",
-                "name": "Wise Character",
-                "description": "Deep and thoughtful voice for wise characters",
-                "category": "character",
-                "personality": "wise"
-            },
-            {
-                "voice_id": "character_mysterious",
-                "name": "Mysterious Character",
-                "description": "Enigmatic and intriguing voice for mysterious characters",
-                "category": "character",
+                "voice_id": "narrator_storyteller",
+                "name": "Storyteller Narrator",
+                "description": "Warm and engaging voice for storytelling",
+                "category": "narrator",
                 "personality": "mysterious"
+            },
+            {
+                "voice_id": "narrator_friendly",
+                "name": "Friendly Narrator",
+                "description": "Approachable and conversational voice",
+                "category": "narrator",
+                "personality": "friendly"
             }
-        ] 
+        ]
 
     async def _generate_speech_with_settings(
         self, 

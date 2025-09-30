@@ -143,6 +143,7 @@ class ModelsLabV7VideoService:
         scene_description: str,
         image_url: str,
         audio_url: Optional[str] = None,
+        dialogue_audio: Optional[List[Dict[str, Any]]] = None,
         style: str = "cinematic",
         include_lipsync: bool = True
     ) -> Dict[str, Any]:
@@ -150,57 +151,97 @@ class ModelsLabV7VideoService:
         
         try:
             logger.info(f"[SCENE VIDEO] Enhancing scene: {scene_description[:50]}...")
-            
-            # Step 1: Generate video from image
-            video_prompt = self._create_scene_video_prompt(scene_description, style)
-            
+
+            # Step 1: Generate video from image with character information
+            video_prompt = self._create_scene_video_prompt_with_characters(scene_description, style, dialogue_audio)
+
             video_result = await self.generate_image_to_video(
                 image_url=image_url,
                 prompt=video_prompt,
                 model_id="veo2",
                 negative_prompt=self._get_negative_prompt_for_style(style)
             )
-            
+
             if video_result.get('status') != 'success':
                 raise Exception(f"Video generation failed: {video_result.get('error', 'Unknown error')}")
-            
+
             video_url = video_result.get('video_url')
             if not video_url:
                 raise Exception("No video URL in response")
-            
+
             enhanced_result = {
                 'original_video': video_result,
                 'video_url': video_url,
-                'has_lipsync': False
+                'has_lipsync': False,
+                'dialogue_audio': dialogue_audio or []
             }
-            
-            # Step 2: Apply lip sync if audio is provided
-            if include_lipsync and audio_url:
-                logger.info(f"[SCENE VIDEO] Applying lip sync...")
-                
+
+            # Step 2: Apply lip sync for dialogue audio if provided
+            if include_lipsync and dialogue_audio:
+                logger.info(f"[SCENE VIDEO] Applying lip sync for {len(dialogue_audio)} dialogue segments...")
+
+                # For multiple dialogue segments, we need to handle them sequentially
+                current_video_url = video_url
+                lipsync_results = []
+
+                for i, dialogue in enumerate(dialogue_audio):
+                    dialogue_audio_url = dialogue.get('audio_url')
+                    if dialogue_audio_url:
+                        logger.info(f"[SCENE VIDEO] Processing dialogue {i+1}: {dialogue.get('character', 'Unknown')}")
+
+                        lipsync_result = await self.generate_lip_sync(
+                            video_url=current_video_url,
+                            audio_url=dialogue_audio_url,
+                            model_id="lipsync-2"
+                        )
+
+                        if lipsync_result.get('status') == 'success':
+                            new_video_url = lipsync_result.get('video_url')
+                            if new_video_url:
+                                current_video_url = new_video_url
+                                lipsync_results.append(lipsync_result)
+                                logger.info(f"[SCENE VIDEO] ✅ Dialogue {i+1} lip sync applied")
+                            else:
+                                logger.warning(f"[SCENE VIDEO] ⚠️ Dialogue {i+1} lip sync completed but no video URL")
+                        else:
+                            logger.warning(f"[SCENE VIDEO] ⚠️ Dialogue {i+1} lip sync failed: {lipsync_result.get('error', 'Unknown error')}")
+
+                if lipsync_results:
+                    enhanced_result['lipsync_videos'] = lipsync_results
+                    enhanced_result['video_url'] = current_video_url  # Use final lip-synced version
+                    enhanced_result['has_lipsync'] = True
+                    logger.info(f"[SCENE VIDEO] ✅ All dialogue lip sync applied successfully")
+                else:
+                    logger.warning(f"[SCENE VIDEO] ⚠️ No dialogue lip sync succeeded")
+
+            # Step 3: Apply lip sync for background audio if provided (separate from dialogue)
+            elif include_lipsync and audio_url and not dialogue_audio:
+                logger.info(f"[SCENE VIDEO] Applying lip sync for background audio...")
+
                 lipsync_result = await self.generate_lip_sync(
                     video_url=video_url,
                     audio_url=audio_url,
                     model_id="lipsync-2"
                 )
-                
+
                 if lipsync_result.get('status') == 'success':
                     lipsync_video_url = lipsync_result.get('video_url')
                     if lipsync_video_url:
                         enhanced_result['lipsync_video'] = lipsync_result
                         enhanced_result['video_url'] = lipsync_video_url  # Use lip-synced version
                         enhanced_result['has_lipsync'] = True
-                        logger.info(f"[SCENE VIDEO] ✅ Lip sync applied successfully")
+                        logger.info(f"[SCENE VIDEO] ✅ Background audio lip sync applied successfully")
                     else:
-                        logger.warning(f"[SCENE VIDEO] ⚠️ Lip sync completed but no video URL")
+                        logger.warning(f"[SCENE VIDEO] ⚠️ Background audio lip sync completed but no video URL")
                 else:
-                    logger.warning(f"[SCENE VIDEO] ⚠️ Lip sync failed: {lipsync_result.get('error', 'Unknown error')}")
-            
+                    logger.warning(f"[SCENE VIDEO] ⚠️ Background audio lip sync failed: {lipsync_result.get('error', 'Unknown error')}")
+
             return {
                 'status': 'success',
                 'scene_description': scene_description,
                 'enhanced_video': enhanced_result,
-                'processing_steps': ['image_to_video'] + (['lip_sync'] if enhanced_result['has_lipsync'] else [])
+                'processing_steps': ['image_to_video'] + (['lip_sync'] if enhanced_result['has_lipsync'] else []),
+                'character_dialogue_count': len(dialogue_audio) if dialogue_audio else 0
             }
             
         except Exception as e:
@@ -324,7 +365,7 @@ class ModelsLabV7VideoService:
     
     def _create_scene_video_prompt(self, scene_description: str, style: str) -> str:
         """Create optimized prompt for Veo 2 video generation"""
-        
+
         style_modifiers = {
             "realistic": "cinematic realism, natural movement, photorealistic details, smooth camera motion",
             "cinematic": "epic cinematic style, dramatic lighting, professional cinematography, dynamic camera angles",
@@ -333,19 +374,51 @@ class ModelsLabV7VideoService:
             "comic": "comic book style, dynamic action, bold movements, superhero cinematography",
             "artistic": "artistic cinematography, creative movement, unique visual style, artistic flair"
         }
-        
+
         style_prompt = style_modifiers.get(style.lower(), style_modifiers["cinematic"])
-        
+
         # Enhanced prompt for Veo 2
         full_prompt = f"""
 {scene_description}
 
-{style_prompt}. 
-High quality video production, smooth motion, professional videography, 
+{style_prompt}.
+High quality video production, smooth motion, professional videography,
 engaging visual storytelling, seamless transitions, cinematic composition.
 """.strip()
-        
+
         return full_prompt
+
+    def _create_scene_video_prompt_with_characters(self, scene_description: str, style: str, dialogue_audio: Optional[List[Dict[str, Any]]] = None) -> str:
+        """Create optimized prompt for Veo 2 video generation with character information"""
+
+        base_prompt = self._create_scene_video_prompt(scene_description, style)
+
+        # Add character information if dialogue audio is provided
+        if dialogue_audio:
+            character_info = []
+            for dialogue in dialogue_audio:
+                character_name = dialogue.get('character', 'Character')
+                character_profile = dialogue.get('character_profile', {})
+
+                # Build character description
+                char_desc = f"{character_name}"
+                if character_profile.get('age'):
+                    char_desc += f" ({character_profile['age']})"
+                if character_profile.get('gender') and character_profile['gender'] != 'neutral':
+                    char_desc += f" {character_profile['gender']}"
+                if character_profile.get('personality'):
+                    char_desc += f", {character_profile['personality']}"
+
+                character_info.append(char_desc)
+
+            if character_info:
+                characters_text = "Characters present: " + ", ".join(character_info)
+                base_prompt = f"{characters_text}\n\n{base_prompt}"
+
+                # Add instruction for character visibility in video
+                base_prompt += "\n\nEnsure characters are clearly visible and appropriately positioned for dialogue delivery."
+
+        return base_prompt
     
     def _get_negative_prompt_for_style(self, style: str) -> str:
         """Get negative prompt to avoid unwanted elements"""

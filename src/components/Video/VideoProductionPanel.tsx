@@ -1,5 +1,6 @@
 // src/components/Video/VideoProductionPanel.tsx
 import React, { useState, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
 import {
   Video,
   Download,
@@ -77,8 +78,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   };
 
   const handleRender = async () => {
-    await saveProduction();
-    await renderWithOpenShot();
+    toast.error('Video rendering is handled through the AI generation pipeline. Use the "Generate Video" feature instead.');
   };
 
   const handleDownload = (quality?: 'low' | 'medium' | 'high' | 'ultra') => {

@@ -22,11 +22,11 @@ class PipelineManager:
     def __init__(self):
         self.supabase = get_supabase()
         self.step_order = {
-            PipelineStep.AUDIO_GENERATION: 1,
-            PipelineStep.IMAGE_GENERATION: 2,
+            PipelineStep.IMAGE_GENERATION: 1,
+            PipelineStep.AUDIO_GENERATION: 2,
             PipelineStep.VIDEO_GENERATION: 3,
             PipelineStep.AUDIO_VIDEO_MERGE: 4,
-            PipelineStep.LIP_SYNC: 5
+            PipelineStep.LIP_SYNC: 5  # Keep for compatibility, though lip sync is in video generation
         }
 
     def initialize_pipeline(self, video_generation_id: str) -> bool:
@@ -49,7 +49,7 @@ class PipelineManager:
             self.supabase.table('video_generations').update({
                 'pipeline_state': {
                     'initialized': True,
-                    'current_step': PipelineStep.AUDIO_GENERATION.value,
+                    'current_step': PipelineStep.IMAGE_GENERATION.value,
                     'steps_completed': 0,
                     'total_steps': len(self.step_order)
                 },
@@ -125,6 +125,7 @@ class PipelineManager:
     def mark_step_started(self, video_generation_id: str, step: PipelineStep) -> bool:
         """Mark a step as started"""
         try:
+            print(f"[PIPELINE DEBUG] Marking step {step.value} as started for video {video_generation_id}")
             self.supabase.table('pipeline_steps').update({
                 'status': PipelineStatus.PROCESSING.value,
                 'started_at': datetime.now().isoformat()

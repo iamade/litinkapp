@@ -119,89 +119,17 @@ export const useVideoProduction = ({
     setEditorSettings(prev => ({ ...prev, ...settings }));
   }, []);
 
-  // Render video with OpenShot
+  // Render video - disabled per architecture (should use AI generation pipeline)
   const renderWithOpenShot = useCallback(async () => {
-    if (!scenes.length) {
-      toast.error('No scenes to render');
-      return;
-    }
+    toast.error('Video rendering is handled through the AI generation pipeline. Use the "Generate Video" feature instead.');
+    return;
+  }, []);
 
-    setIsRendering(true);
-    setRenderingProgress(0);
-
-    try {
-      // Create OpenShot project
-      const projectData = {
-        chapterId,
-        scenes,
-        editorSettings,
-        scriptId
-      };
-
-      const response = await userService.createOpenShotProject(projectData);
-      const projectId = response.project_id;
-
-      // Poll for rendering progress
-      const pollInterval = setInterval(async () => {
-        try {
-          const status = await userService.getOpenShotProjectStatus(projectId);
-          setRenderingProgress(status.progress);
-
-          if (status.status === 'completed') {
-            clearInterval(pollInterval);
-            setVideoProduction(status.videoProduction);
-            toast.success('Video rendering completed!');
-            setIsRendering(false);
-          } else if (status.status === 'error') {
-            clearInterval(pollInterval);
-            toast.error('Video rendering failed');
-            setIsRendering(false);
-          }
-        } catch (error) {
-          console.error('Error polling status:', error);
-        }
-      }, 2000);
-
-    } catch (error) {
-      console.error('Error rendering video:', error);
-      toast.error('Failed to start video rendering');
-      setIsRendering(false);
-    }
-  }, [scenes, chapterId, editorSettings, scriptId]);
-
-  // Process with FFmpeg
+  // Process with FFmpeg - disabled per architecture (should use backend processing)
   const processWithFFmpeg = useCallback(async (options?: Partial<FFmpegOptions>) => {
-    if (!videoProduction?.finalVideoUrl) {
-      toast.error('No video to process');
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const result = await userService.processVideoWithFFmpeg({
-        videoUrl: videoProduction.finalVideoUrl,
-        ...options
-      });
-
-      setVideoProduction(prev => prev ? {
-        ...prev,
-        finalVideoUrl: result.processedUrl,
-        metadata: {
-          ...prev.metadata,
-          fileSize: result.fileSize,
-          totalDuration: prev.metadata?.totalDuration || 0
-        }
-      } : null);
-
-      toast.success('Video processing completed');
-      return result.processedUrl;
-    } catch (error) {
-      console.error('Error processing video:', error);
-      toast.error('Failed to process video');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [videoProduction]);
+    toast.error('Video processing is handled in the backend. Use the AI generation pipeline for video processing.');
+    return;
+  }, []);
 
   // Download video
   const downloadVideo = useCallback(async (quality?: 'low' | 'medium' | 'high' | 'ultra') => {
@@ -211,9 +139,9 @@ export const useVideoProduction = ({
     }
 
     try {
-      const downloadUrl = quality && quality !== editorSettings.quality
-        ? await processWithFFmpeg({ quality })
-        : videoProduction.finalVideoUrl;
+      // For now, just download the existing video
+      // Video processing should be done through the AI generation pipeline
+      const downloadUrl = videoProduction.finalVideoUrl;
 
       // Create download link
       const link = document.createElement('a');
@@ -228,7 +156,7 @@ export const useVideoProduction = ({
       console.error('Error downloading video:', error);
       toast.error('Failed to download video');
     }
-  }, [videoProduction, chapterId, editorSettings, processWithFFmpeg]);
+  }, [videoProduction, chapterId, editorSettings]);
 
   // Save production
   const saveProduction = useCallback(async () => {
