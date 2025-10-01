@@ -11,6 +11,7 @@ from .subscriptions import router as subscriptions_router
 from .plots import router as plots_router
 from .characters import router as characters_router
 from .chapters import router as chapters_router
+from .merge import router as merge_router
 
 api_router = APIRouter()
 
@@ -26,3 +27,4 @@ api_router.include_router(badges_router, prefix="/badges", tags=["badges"])
 api_router.include_router(nfts_router, prefix="/nfts", tags=["nfts"])
 api_router.include_router(payments_router, prefix="/payments", tags=["payments"])
 api_router.include_router(subscriptions_router, prefix="/subscriptions", tags=["subscriptions"])
+api_router.include_router(merge_router, prefix="/merge", tags=["merge"])

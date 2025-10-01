@@ -20,6 +20,7 @@ import SceneTimeline from './SceneTimeline';
 import EditorSettingsPanel from './EditorSettingsPanel';
 import VideoPreview from './VideoPreview';
 import RenderingProgress from './RenderingProgress';
+import MergePanel from './MergePanel';
 import type { VideoScene, EditorSettings } from '../../types/videoProduction';
 
 interface VideoProductionPanelProps {
@@ -29,6 +30,9 @@ interface VideoProductionPanelProps {
   imageUrls?: string[];
   audioFiles?: string[];
   plotOverview?: any;
+  onGenerateVideo?: () => void;
+  videoStatus?: string | null;
+  canGenerateVideo?: boolean;
 }
 
 const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
@@ -37,7 +41,10 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   scriptId,
   imageUrls = [],
   audioFiles = [],
-  plotOverview
+  plotOverview,
+  onGenerateVideo,
+  videoStatus,
+  canGenerateVideo
 }) => {
   const {
     videoProduction,
@@ -62,7 +69,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     audioFiles
   });
 
-  const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'settings'>('timeline');
+  const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'settings' | 'merge'>('timeline');
   const [selectedScene, setSelectedScene] = useState<VideoScene | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
@@ -110,19 +117,31 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             <Save className="w-4 h-4" />
             <span>Save</span>
           </button>
+          {/* Repurposed Render Video button (disabled for now) */}
           <button
-            onClick={handleRender}
-            disabled={isLoading || isRendering || !scenes.length}
+            onClick={() => toast('This button will be repurposed for a new function.')}
+            disabled
             className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
           >
-            {isRendering ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Video className="w-4 h-4" />
-            )}
-            <span>{isRendering ? 'Rendering...' : 'Render Video'}</span>
+            <Video className="w-4 h-4" />
+            <span>Render Video</span>
           </button>
         </div>
+      </div>
+      {/* Generate Video Button */}
+      <div className="flex justify-end">
+        <button
+          onClick={onGenerateVideo}
+          disabled={!canGenerateVideo}
+          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+        >
+          <Video className="w-4 h-4" />
+          <span>
+            {videoStatus === "processing" || videoStatus === "starting"
+              ? "Generating Video..."
+              : "Generate Video"}
+          </span>
+        </button>
       </div>
 
       {/* View Tabs */}
@@ -168,6 +187,19 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
                 <span>Settings</span>
               </div>
             </button>
+            <button
+              onClick={() => setActiveView('merge')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeView === 'merge'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <Layers className="w-4 h-4" />
+                <span>Merge</span>
+              </div>
+            </button>
           </nav>
         </div>
 
@@ -205,6 +237,10 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               settings={editorSettings}
               onUpdateSettings={updateEditorSettings}
             />
+          )}
+
+          {activeView === 'merge' && (
+            <MergePanel />
           )}
         </div>
       </div>

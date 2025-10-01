@@ -78,6 +78,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     stopAllAudio,
     setAudioVolume,
     deleteAudio,
+    deleteAllAudio,
     exportAudioMix,
     setSelectedAudioFiles
   } = useAudioGeneration(chapterId);
@@ -130,6 +131,13 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     console.log('[DEBUG] scenes:', scenes);
     console.log('[DEBUG] generationOptions:', generationOptions);
     await generateAllAudio(scenes, generationOptions);
+  };
+
+  const handleDeleteAll = async (type: keyof AudioAssets) => {
+    const confirmed = window.confirm(`Are you sure you want to delete all ${type} audio files? This action cannot be undone.`);
+    if (confirmed) {
+      await deleteAllAudio(type);
+    }
   };
 
   const handlePlayPause = () => {
@@ -377,6 +385,17 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
 
     return (
       <div className="space-y-4">
+        {files.length > 0 && (
+          <div className="flex justify-end">
+            <button
+              onClick={() => handleDeleteAll(audioType)}
+              className="flex items-center space-x-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Delete All</span>
+            </button>
+          </div>
+        )}
         {files.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
             <Music className="mx-auto h-12 w-12 mb-4 opacity-50" />

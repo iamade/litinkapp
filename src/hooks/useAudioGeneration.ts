@@ -329,16 +329,41 @@ export const useAudioGeneration = (chapterId: string) => {
   const deleteAudio = async (audioId: string, type: keyof AudioAssets) => {
     try {
       await userService.deleteAudioFile(chapterId, audioId);
-      
+
       setAudioAssets(prev => ({
         ...prev,
         [type]: prev[type].filter(file => file.id !== audioId)
       }));
-      
+
       toast.success('Audio file deleted');
     } catch (error) {
       console.error('Error deleting audio:', error);
       toast.error('Failed to delete audio file');
+    }
+  };
+
+  const deleteAllAudio = async (type: keyof AudioAssets) => {
+    const filesToDelete = audioAssets[type];
+    if (filesToDelete.length === 0) {
+      toast.error('No audio files to delete');
+      return;
+    }
+
+    try {
+      // Delete all files of this type
+      const deletePromises = filesToDelete.map(file => userService.deleteAudioFile(chapterId, file.id));
+      await Promise.all(deletePromises);
+
+      // Update state to remove all files of this type
+      setAudioAssets(prev => ({
+        ...prev,
+        [type]: []
+      }));
+
+      toast.success(`All ${type} audio files deleted`);
+    } catch (error) {
+      console.error('Error deleting all audio files:', error);
+      toast.error(`Failed to delete all ${type} audio files`);
     }
   };
 
@@ -449,6 +474,7 @@ export const useAudioGeneration = (chapterId: string) => {
     stopAllAudio,
     setAudioVolume,
     deleteAudio,
+    deleteAllAudio,
     exportAudioMix,
     setSelectedAudioFiles
   };

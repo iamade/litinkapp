@@ -12,6 +12,7 @@ import {
   videoGenerationAPI,
 } from "../lib/videoGenerationApi";
 import { pollingService } from "../services/videoGenerationPolling";
+import { handleVideoGenerationStatusError, showVideoGenerationSuccess } from "../utils/videoGenerationErrors";
 
 // Simplified state interface
 export interface VideoGenerationState {
@@ -58,6 +59,9 @@ export const VideoGenerationProvider: React.FC<{
 
     pollingService.startPolling(videoGenId, {
       onUpdate: (generation) => {
+        // Check for errors and show notifications
+        handleVideoGenerationStatusError(generation, videoGenId);
+        
         setState((prev) => ({
           ...prev,
           currentGeneration: generation,
@@ -76,6 +80,11 @@ export const VideoGenerationProvider: React.FC<{
         }));
       },
       onComplete: (generation) => {
+        // Show success notification for completed generation
+        if (generation.generation_status === 'completed') {
+          showVideoGenerationSuccess(videoGenId);
+        }
+        
         setState((prev) => ({
           ...prev,
           currentGeneration: generation,

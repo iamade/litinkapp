@@ -1,4 +1,5 @@
 import { videoGenerationAPI, VideoGeneration, GenerationStatus } from '../lib/videoGenerationApi';
+import { handleVideoGenerationStatusError, showVideoGenerationSuccess } from '../utils/videoGenerationErrors';
 
 export interface PollingConfig {
   interval: number;
@@ -68,11 +69,19 @@ class VideoGenerationPolling {
         // Reset retry attempts on successful poll
         this.retryAttempts.set(videoGenId, 0);
         
+        // Check for errors and show notifications
+        handleVideoGenerationStatusError(generation, videoGenId);
+
         // Call update callback
         callbacks.onUpdate(generation);
 
         // Check if generation is complete
         if (this.isCompleteStatus(generation.generation_status)) {
+          // Show success notification for completed generation
+          if (generation.generation_status === 'completed') {
+            showVideoGenerationSuccess(videoGenId);
+          }
+          
           callbacks.onComplete(generation);
           
           if (finalConfig.stopOnComplete) {

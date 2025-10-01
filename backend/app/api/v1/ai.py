@@ -411,12 +411,26 @@ async def generate_entertainment_video(
             # Step 3: Check for pre-generated audio first
             print(f"🔍 Checking for pre-generated audio for chapter: {chapter_id}")
 
-            # Check if audio files exist in chapter's ai_generated_content
-            chapter_response = supabase_client.table('chapters')\
-                .select('ai_generated_content')\
-                .eq('id', chapter_id)\
-                .single()\
+            # Check for existing audio in audio_generations table
+            print(f"[AUDIO QUERY DEBUG] Querying audio_generations with:")
+            print(f"  chapter_id: {chapter_id}")
+            print(f"  user_id: {current_user['id']}")
+            print(f"  generation_status: completed (using 'generation_status' column)")
+
+            audio_response = supabase_client.table('audio_generations')\
+                .select('*')\
+                .eq('chapter_id', chapter_id)\
+                .eq('user_id', current_user['id'])\
+                .eq('generation_status', 'completed')\
                 .execute()
+
+            print(f"[AUDIO QUERY DEBUG] Raw response: {audio_response.data}")
+            if audio_response.data:
+                for idx, record in enumerate(audio_response.data):
+                    print(f"[AUDIO QUERY DEBUG] Record {idx}: keys={list(record.keys())}")
+                    print(f"[AUDIO QUERY DEBUG] Record {idx}: status={record.get('status')}, generation_status={record.get('generation_status')}")
+            else:
+                print("[AUDIO QUERY DEBUG] No records found.")
 
             existing_audio = []
             audio_by_type = {
@@ -426,33 +440,32 @@ async def generate_entertainment_video(
                 'background_music': []
             }
 
-            if chapter_response.data and chapter_response.data.get('ai_generated_content'):
-                ai_content = chapter_response.data['ai_generated_content']
-                if isinstance(ai_content, dict):
-                    # Look for audio data in ai_generated_content
-                    for key, content in ai_content.items():
-                        if isinstance(content, dict) and 'audioAssets' in content:
-                            audio_assets = content['audioAssets']
-                            if isinstance(audio_assets, dict):
-                                # Extract audio by type
-                                narration = audio_assets.get('narration', [])
-                                music = audio_assets.get('music', [])
-                                effects = audio_assets.get('effects', [])
-                                ambiance = audio_assets.get('ambiance', [])
+            if audio_response.data:
+                for audio_record in audio_response.data:
+                    audio_type = audio_record.get('audio_type', 'narrator')
+                    # Map database fields to expected format
+                    audio_data = {
+                        'id': audio_record['id'],
+                        'url': audio_record['audio_url'],
+                        'audio_url': audio_record['audio_url'],
+                        'duration': audio_record.get('duration', 0),
+                        'file_name': audio_record.get('text_content', ''),
+                        'scene_number': audio_record.get('sequence_order', 0),
+                        'character_name': audio_record.get('metadata', {}).get('character_name'),
+                        'volume': 1.0
+                    }
 
-                                # Map to video generation format and fix field names
-                                audio_by_type['narrator'] = [
-                                    {**audio, 'audio_url': audio['url']} for audio in narration
-                                ]
-                                audio_by_type['background_music'] = [
-                                    {**audio, 'audio_url': audio['url']} for audio in music
-                                ]
-                                audio_by_type['sound_effects'] = [
-                                    {**audio, 'audio_url': audio['url']} for audio in effects + ambiance
-                                ]
+                    # Categorize by type
+                    if audio_type == 'narrator':
+                        audio_by_type['narrator'].append(audio_data)
+                    elif audio_type == 'character':
+                        audio_by_type['characters'].append(audio_data)
+                    elif audio_type in ['sfx', 'sound_effect']:
+                        audio_by_type['sound_effects'].append(audio_data)
+                    elif audio_type == 'music':
+                        audio_by_type['background_music'].append(audio_data)
 
-                                # Count total files
-                                existing_audio = narration + music + effects + ambiance
+                    existing_audio.append(audio_data)
 
             print(f"📊 Found {len(existing_audio)} pre-generated audio files")
 
@@ -472,7 +485,7 @@ async def generate_entertainment_video(
                     audio_type = audio_file.get('audio_type', 'narrator')
                     audio_by_type[audio_type].append({
                         'id': audio_file['id'],
-                        'url': audio_file['file_url'],
+                        'url': audio_file['audio_url'],
                         'duration': audio_file.get('duration', 0),
                         'name': audio_file.get('file_name', ''),
                         'scene_number': audio_file.get('scene_number', 0),
@@ -480,58 +493,91 @@ async def generate_entertainment_video(
                         'volume': audio_file.get('volume', 1.0)
                     })
 
-                # Store pre-generated audio in video generation record
+                # Check for pre-generated images from image_generations table
+                existing_images = []
+                image_by_type = {
+                    'character_images': [],
+                    'scene_images': []
+                }
+
+                # Query image_generations table for images associated with this chapter
+                images_response = supabase_client.table('image_generations')\
+                    .select('*')\
+                    .eq('user_id', current_user['id'])\
+                    .eq('status', 'completed')\
+                    .execute()
+
+                if images_response.data:
+                    for img in images_response.data:
+                        metadata = img.get('metadata', {})
+                        # Check if image is associated with this chapter
+                        if metadata.get('chapter_id') == chapter_id:
+                            image_type = metadata.get('image_type', 'scene')
+                            image_data = {
+                                'id': img['id'],
+                                'url': img['image_url'],
+                                'image_url': img['image_url'],
+                                'prompt': img.get('image_prompt', ''),
+                                'created_at': img['created_at']
+                            }
+
+                            if image_type == 'character':
+                                image_data['character_name'] = metadata.get('character_name', '')
+                                image_by_type['character_images'].append(image_data)
+                            elif image_type == 'scene':
+                                image_data['scene_number'] = metadata.get('scene_number', 0)
+                                image_by_type['scene_images'].append(image_data)
+
+                            existing_images.append(image_data)
+
+                print(f"📊 Found {len(existing_images)} pre-generated images")
+
+                # Store pre-generated audio and images in video generation record
                 supabase_client.table('video_generations').update({
                     'audio_files': audio_by_type,
-                    'generation_status': 'audio_completed',  # Skip to next step
+                    'image_data': {
+                        'images': image_by_type,
+                        'statistics': {
+                            'total_images': len(existing_images),
+                            'character_images': len(image_by_type['character_images']),
+                            'scene_images': len(image_by_type['scene_images'])
+                        }
+                    },
+                    'generation_status': 'images_completed',  # Skip to next step assuming images are pre-generated
                     'task_metadata': {
                         'audio_source': 'pre_generated',
+                        'image_source': 'pre_generated',
                         'audio_files_count': len(existing_audio),
+                        'image_files_count': len(existing_images),
                         'started_at': datetime.now().isoformat()
                     }
                 }).eq('id', video_gen_id).execute()
 
-                # Start image generation immediately
-                from app.tasks.image_tasks import generate_all_images_for_video
-                print(f"🖼️ Starting image generation for video: {video_gen_id}")
-
-                image_task = generate_all_images_for_video.delay(video_gen_id)
-                print(f"✅ Image task queued successfully: {image_task.id}")
-
-                # Update status to image generation
-                supabase_client.table('video_generations').update({
-                    'image_task_id': image_task.id,
-                    'generation_status': 'generating_images',
-                    'task_metadata': {
-                        'audio_source': 'pre_generated',
-                        'audio_files_count': len(existing_audio),
-                        'image_task_id': image_task.id,
-                        'image_task_state': image_task.state,
-                        'started_at': datetime.now().isoformat()
-                    }
-                }).eq('id', video_gen_id).execute()
-
-                task = image_task  # For response consistency
+                # ✅ FIXED: Queue video generation task since we have pre-generated assets
+                print(f"🎬 Queuing video generation task for video: {video_gen_id}")
+                from app.tasks.video_tasks import generate_all_videos_for_generation
+                task = generate_all_videos_for_generation.delay(video_gen_id)
+                print(f"✅ Video generation task queued successfully: {task.id}")
 
             else:
-                # No pre-generated audio, start normal audio generation
-                print(f"🎵 No pre-generated audio found, starting audio generation for video: {video_gen_id}")
+                raise HTTPException(status_code=400, detail="Can't find pre-generated audio and stop the video generation")
+                # print(f"🎵 No pre-generated audio found, starting audio generation for video: {video_gen_id}")
 
-                from app.tasks.audio_tasks import generate_all_audio_for_video
-                task = generate_all_audio_for_video.delay(video_gen_id)
-                print(f"✅ Audio task queued successfully: {task.id}")
+                # from app.tasks.audio_tasks import generate_all_audio_for_video
+                # task = generate_all_audio_for_video.delay(video_gen_id)
+                # print(f"✅ Audio task queued successfully: {task.id}")
 
-                # Store task ID and update status in database
-                supabase_client.table('video_generations').update({
-                    'audio_task_id': task.id,
-                    'generation_status': 'generating_audio',
-                    'task_metadata': {
-                        'audio_source': 'generated',
-                        'audio_task_id': task.id,
-                        'audio_task_state': task.state,
-                        'started_at': datetime.now().isoformat()
-                    }
-                }).eq('id', video_gen_id).execute()
+                # # Store task ID and update status in database
+                # supabase_client.table('video_generations').update({
+                #     'audio_task_id': task.id,
+                #     'generation_status': 'generating_audio',
+                #     'task_metadata': {
+                #         'audio_source': 'generated',
+                #         'audio_task_id': task.id,
+                #         'audio_task_state': task.state,
+                #         'started_at': datetime.now().isoformat()
+                #     }
+                # }).eq('id', video_gen_id).execute()
 
         
         except Exception as e:
@@ -544,13 +590,25 @@ async def generate_entertainment_video(
             
             raise e
         
+        # Handle response based on whether a task was queued
+        if task:
+            audio_task_id = task.id
+            task_status = task.state
+            status = "queued"
+            message = "Video generation started using saved script"
+        else:
+            audio_task_id = None
+            task_status = "completed"
+            status = "ready"
+            message = "Video generation ready using pre-generated assets"
+
         return VideoGenerationResponse(
             video_generation_id=video_gen_id,
             script_id=script_data['id'],
-            status="queued",
-            audio_task_id=task.id,
-            task_status=task.state,
-            message="Video generation started using saved script",
+            status=status,
+            audio_task_id=audio_task_id,
+            task_status=task_status,
+            message=message,
             script_info={
                 "script_style": script_data['script_style'],
                 "video_style": video_style,  # ✅ Now this works

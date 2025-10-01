@@ -86,13 +86,19 @@ def generate_all_audio_for_video(self, video_generation_id: str):
     
         # Generate all audio types
         audio_service = ModelsLabV7AudioService()
-        
-        # 1. Generate narrator voice
-        narrator_results = asyncio.run(generate_narrator_audio(
-            audio_service, video_generation_id, audio_components['narrator_segments'], chapter_id, user_id
-        ))
-        
-        
+
+        # Generate audio based on script style
+        if script_style == "cinematic_movie":
+            # For cinematic: only background music and sound effects (no narrator, no character voices)
+            narrator_results = []
+            character_results = []
+        else:
+            # For narration: generate narrator voice + background music + sound effects
+            narrator_results = asyncio.run(generate_narrator_audio(
+                audio_service, video_generation_id, audio_components['narrator_segments'], chapter_id, user_id
+            ))
+            character_results = []
+
         # 3. Generate sound effects
         sound_effect_results = asyncio.run(generate_sound_effects_audio(
             audio_service, video_generation_id, audio_components['sound_effects'], chapter_id, user_id
@@ -105,8 +111,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
         
         # Compile results
         total_audio_files = (
-            len(narrator_results) +
-            len(sound_effect_results) + len(background_music_results)
+            len(narrator_results) + len(sound_effect_results) + len(background_music_results)
         )
 
         # Update video generation with audio file references
@@ -131,10 +136,28 @@ def generate_all_audio_for_video(self, video_generation_id: str):
         success_message = f"Audio generation completed! {total_audio_files} audio files created"
         print(f"[AUDIO GENERATION SUCCESS] {success_message}")
         
-        # ✅ NEW: Trigger next step in pipeline
-        print(f"[PIPELINE] Starting image generation after audio completion")
-        from app.tasks.image_tasks import generate_all_images_for_video
-        generate_all_images_for_video.delay(video_generation_id)
+        # ✅ NEW: Check for existing images before triggering image generation
+        print(f"[PIPELINE] Checking for existing images before starting image generation")
+
+        # Query image_generations table for existing images
+        existing_images_response = supabase.table('image_generations')\
+            .select('id')\
+            .eq('video_generation_id', video_generation_id)\
+            .eq('status', 'completed')\
+            .execute()
+
+        existing_images_count = len(existing_images_response.data or [])
+
+        if existing_images_count > 0:
+            print(f"✅ Found {existing_images_count} existing images, skipping image generation")
+            # Update video generation status to indicate images are ready
+            supabase.table('video_generations').update({
+                'generation_status': 'images_completed'
+            }).eq('id', video_generation_id).execute()
+        else:
+            print(f"[PIPELINE] No existing images found, starting image generation")
+            from app.tasks.image_tasks import generate_all_images_for_video
+            generate_all_images_for_video.delay(video_generation_id)
         
         return {
             'status': 'success',
@@ -271,6 +294,142 @@ async def generate_narrator_audio(
     
     print(f"[NARRATOR AUDIO] Completed: {len(narrator_results)}/{len(narrator_segments)} segments")
     return narrator_results
+
+
+async def generate_character_audio(
+    audio_service: ModelsLabV7AudioService,
+    video_gen_id: str,
+    character_dialogues: List[Dict[str, Any]],
+    chapter_id: str,
+    user_id: str
+) -> List[Dict[str, Any]]:
+    """Generate character voice audio for cinematic scripts"""
+
+    print(f"[CHARACTER AUDIO] Generating character voices...")
+    character_results = []
+    supabase = get_supabase()
+
+    # Get available character voices
+    available_voices = list(audio_service.character_voices.items())
+    character_voice_mapping = {}  # Track which voice is assigned to which character
+
+    for i, dialogue in enumerate(character_dialogues):
+        try:
+            character_name = dialogue['character']
+            print(f"[CHARACTER AUDIO] Processing dialogue {i+1}/{len(character_dialogues)} for {character_name}")
+
+            # Assign voice to character if not already assigned
+            if character_name not in character_voice_mapping:
+                # Cycle through voices based on character index or name hash for consistency
+                voice_index = hash(character_name) % len(available_voices)
+                voice_name, voice_id = available_voices[voice_index]
+                character_voice_mapping[character_name] = {
+                    'voice_name': voice_name,
+                    'voice_id': voice_id
+                }
+                print(f"[CHARACTER AUDIO] Assigned voice '{voice_name}' to {character_name}")
+
+            voice_info = character_voice_mapping[character_name]
+
+            # Generate audio
+            result = await audio_service.generate_tts_audio(
+                text=dialogue['text'],
+                voice_id=voice_info['voice_id'],
+                model_id="eleven_multilingual_v2",
+                speed=1.0
+            )
+
+            # Extract audio URL and duration
+            audio_url = None
+            duration = 0
+
+            if result.get('status') == 'success':
+                audio_url = result.get('audio_url')
+                duration = result.get('audio_time', 0)
+
+                if not audio_url:
+                    raise Exception("No audio URL in V7 response")
+            else:
+                raise Exception(f"V7 Audio generation failed: {result.get('error', 'Unknown error')}")
+
+            # Store in database
+            audio_record_data = {
+                'video_generation_id': video_gen_id,
+                'user_id': user_id,
+                'chapter_id': chapter_id,
+                'audio_type': 'character',
+                'text_content': dialogue['text'],
+                'voice_id': voice_info['voice_id'],
+                'audio_url': audio_url,
+                'duration': float(duration),
+                'generation_status': 'completed',
+                'sequence_order': i + 1,
+                'model_id': result.get('model_used', 'eleven_multilingual_v2'),
+                'metadata': {
+                    'chapter_id': chapter_id,
+                    'character_name': character_name,
+                    'voice_name': voice_info['voice_name'],
+                    'line_number': dialogue.get('line_number', i + 1),
+                    'scene': dialogue.get('scene', 1),
+                    'service': 'modelslab_v7',
+                    'model_used': result.get('model_used', 'eleven_multilingual_v2')
+                }
+            }
+
+            audio_record = supabase.table('audio_generations').insert(audio_record_data).execute()
+
+            character_results.append({
+                'id': audio_record.data[0]['id'],
+                'character': character_name,
+                'voice_name': voice_info['voice_name'],
+                'voice_id': voice_info['voice_id'],
+                'scene': dialogue.get('scene', 1),
+                'audio_url': audio_url,
+                'duration': duration,
+                'text': dialogue['text']
+            })
+
+            print(f"[CHARACTER AUDIO] ✅ Generated dialogue {i+1} for {character_name} - Duration: {duration}s")
+
+        except Exception as e:
+            print(f"[CHARACTER AUDIO] ❌ Failed dialogue {i+1} for {dialogue.get('character', 'Unknown')}: {str(e)}")
+
+            # Get voice info for failed record
+            character_name = dialogue['character']
+            voice_info = character_voice_mapping.get(character_name, {'voice_name': 'unknown', 'voice_id': 'unknown'})
+
+            failed_record_data = {
+                'video_generation_id': video_gen_id,
+                'user_id': user_id,
+                'chapter_id': chapter_id,
+                'audio_type': 'character',
+                'text_content': dialogue['text'],
+                'voice_id': voice_info['voice_id'],
+                'generation_status': 'failed',
+                'error_message': str(e),
+                'sequence_order': i + 1,
+                'model_id': 'eleven_multilingual_v2',
+                'metadata': {
+                    'chapter_id': chapter_id,
+                    'character_name': character_name,
+                    'voice_name': voice_info['voice_name'],
+                    'line_number': dialogue.get('line_number', i + 1),
+                    'scene': dialogue.get('scene', 1),
+                    'service': 'modelslab_v7'
+                }
+            }
+            supabase.table('audio_generations').insert(failed_record_data).execute()
+
+    # Store character voice mappings in video generation
+    if character_voice_mapping:
+        supabase.table('video_generations').update({
+            'character_voice_mappings': character_voice_mapping
+        }).eq('id', video_gen_id).execute()
+        print(f"[CHARACTER AUDIO] Stored voice mappings: {character_voice_mapping}")
+
+    print(f"[CHARACTER AUDIO] Completed: {len(character_results)}/{len(character_dialogues)} dialogues")
+    return character_results
+
 
 async def generate_sound_effects_audio(
     audio_service: ModelsLabV7AudioService,  # ✅ Updated type hint

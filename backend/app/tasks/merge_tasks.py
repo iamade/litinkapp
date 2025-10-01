@@ -4,10 +4,105 @@ import subprocess
 import os
 import tempfile
 import requests
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from app.core.database import get_supabase
 from app.services.file_service import FileService
 import json
+from app.schemas.merge import MergeQualityTier, FFmpegParameters, MergeInputFile
+
+
+def update_merge_progress(merge_id: str, progress_percentage: float, current_step: str, statistics: Optional[Dict[str, Any]] = None):
+    """Update merge operation progress in database"""
+    try:
+        supabase = get_supabase()
+
+        # Update merge_operations table with progress
+        update_data = {
+            'progress': int(progress_percentage),
+            'merge_status': 'IN_PROGRESS' if progress_percentage < 100 else 'COMPLETED',
+            'updated_at': 'now()'
+        }
+
+        # Add statistics if provided
+        if statistics:
+            update_data['processing_stats'] = statistics
+
+        supabase.table('merge_operations').update(update_data).eq('id', merge_id).execute()
+
+        print(f"[PROGRESS] {merge_id}: {progress_percentage:.1f}% - {current_step}")
+        if statistics:
+            print(f"[STATISTICS] {statistics}")
+    except Exception as e:
+        print(f"[PROGRESS UPDATE ERROR] {str(e)}")
+
+
+def get_quality_settings(quality_tier: MergeQualityTier, custom_params: Optional[FFmpegParameters] = None) -> Dict[str, Any]:
+    """Get FFmpeg settings based on quality tier"""
+
+    base_settings = {
+        MergeQualityTier.WEB: {
+            'preset': 'fast',
+            'crf': None,  # Use bitrate instead
+            'maxrate': '3M',
+            'bufsize': '6M',
+            'video_codec': 'libx264',
+            'audio_codec': 'aac',
+            'audio_bitrate': '128k'
+        },
+        MergeQualityTier.MEDIUM: {
+            'preset': 'medium',
+            'crf': 23,
+            'maxrate': '5M',
+            'bufsize': '10M',
+            'video_codec': 'libx264',
+            'audio_codec': 'aac',
+            'audio_bitrate': '128k'
+        },
+        MergeQualityTier.HIGH: {
+            'preset': 'slow',
+            'crf': 18,
+            'maxrate': '10M',
+            'bufsize': '20M',
+            'video_codec': 'libx264',
+            'audio_codec': 'aac',
+            'audio_bitrate': '128k'
+        },
+        MergeQualityTier.CUSTOM: {
+            'preset': 'medium',
+            'crf': 23,
+            'maxrate': '5M',
+            'bufsize': '10M',
+            'video_codec': 'libx264',
+            'audio_codec': 'aac',
+            'audio_bitrate': '128k'
+        }
+    }
+
+    settings = base_settings.get(quality_tier, base_settings[MergeQualityTier.WEB]).copy()
+
+    # Override with custom parameters if provided
+    if custom_params and quality_tier == MergeQualityTier.CUSTOM:
+        if custom_params.video_codec:
+            settings['video_codec'] = custom_params.video_codec.value
+        if custom_params.audio_codec:
+            settings['audio_codec'] = custom_params.audio_codec.value
+        if custom_params.video_bitrate:
+            settings['maxrate'] = custom_params.video_bitrate
+        if custom_params.audio_bitrate:
+            settings['audio_bitrate'] = custom_params.audio_bitrate
+        if custom_params.preset:
+            settings['preset'] = custom_params.preset
+        if custom_params.crf is not None:
+            settings['crf'] = custom_params.crf
+        if custom_params.resolution:
+            settings['resolution'] = custom_params.resolution
+        if custom_params.fps:
+            settings['fps'] = custom_params.fps
+        if custom_params.custom_filters:
+            settings['custom_filters'] = custom_params.custom_filters
+
+    return settings
+
 
 @celery_app.task(bind=True)
 def merge_audio_video_for_generation(self, video_generation_id: str):
@@ -38,6 +133,17 @@ def merge_audio_video_for_generation(self, video_generation_id: str):
         audio_files = video_gen.get('audio_files', {})
         video_data_obj = video_gen.get('video_data', {})
         scene_videos = video_data_obj.get('scene_videos', [])
+        # Filter out None and scenes without video_url
+        valid_scene_videos = [s for s in scene_videos if s and s.get('video_url')]
+        if not valid_scene_videos:
+            error_message = "[MERGE] No valid scene videos found, aborting merge step"
+            print(error_message)
+            supabase.table('video_generations').update({
+                'generation_status': 'failed',
+                'error_message': error_message
+            }).eq('id', video_generation_id).execute()
+            raise Exception(error_message)
+        scene_videos = valid_scene_videos
 
         # Fetch key scene shots for transitions
         key_scene_shots = {}
@@ -49,8 +155,14 @@ def merge_audio_video_for_generation(self, video_generation_id: str):
             print(f"[KEY SHOTS] Could not fetch key scene shots: {str(e)}")
 
         # Add key scene shots to scene videos
-        for scene in scene_videos:
+        for idx, scene in enumerate(scene_videos):
+            if scene is None:
+                print(f"[MERGE] Skipping None scene at index {idx}")
+                continue
             scene_id = scene.get('scene_id')
+            if not scene_id:
+                print(f"[MERGE] Skipping scene with missing scene_id at index {idx}: {scene}")
+                continue
             if scene_id in key_scene_shots:
                 scene['key_scene_shot_url'] = key_scene_shots[scene_id]
 
@@ -134,25 +246,31 @@ def merge_audio_video_for_generation(self, video_generation_id: str):
     except Exception as e:
         error_message = f"Audio/Video merge failed: {str(e)}"
         print(f"[AUDIO VIDEO MERGE ERROR] {error_message}")
-        
-        # Update status to failed
+        import traceback
+        traceback.print_exc()
+        # Update status to failed with detailed error
         try:
             supabase = get_supabase()
             supabase.table('video_generations').update({
                 'generation_status': 'failed',
-                'error_message': error_message
+                'error_message': error_message,
+                'merge_failed_at': 'now()'
             }).eq('id', video_generation_id).execute()
-        except:
-            pass
-        
+        except Exception as db_err:
+            print(f"[AUDIO VIDEO MERGE ERROR] Failed to update status in DB: {db_err}")
         # TODO: Send error to frontend
         # send_websocket_update(video_generation_id, {
         #     'step': 'merge_failed',
         #     'status': 'failed',
-        #     'message': error_message
+        #     'message': error_message,
+        #     'traceback': traceback.format_exc()
         # })
-        
-        raise Exception(error_message)
+        # Graceful degradation: do not raise further if already failed
+        return {
+            'status': 'failed',
+            'message': error_message,
+            'error': str(e)
+        }
 
 async def merge_audio_video_scenes(
     video_generation_id: str,
@@ -570,45 +688,61 @@ async def apply_video_filters(
 async def reencode_video(
     input_video: str,
     output_video: str,
-    quality_preset: str = 'high',
-    format_type: str = 'mp4'
+    quality_tier: MergeQualityTier = MergeQualityTier.HIGH,
+    format_type: str = 'mp4',
+    custom_params: Optional[FFmpegParameters] = None
 ) -> Dict[str, Any]:
     """Re-encode video with optimized settings for quality and file size"""
 
-    quality_settings = {
-        'high': {'crf': '18', 'preset': 'slow', 'maxrate': '10M', 'bufsize': '20M'},
-        'medium': {'crf': '23', 'preset': 'medium', 'maxrate': '5M', 'bufsize': '10M'},
-        'low': {'crf': '28', 'preset': 'fast', 'maxrate': '2M', 'bufsize': '4M'},
-        'web': {'crf': '24', 'preset': 'fast', 'maxrate': '3M', 'bufsize': '6M'}  # Optimized for web playback
-    }
-
-    settings = quality_settings.get(quality_preset, quality_settings['high'])
+    settings = get_quality_settings(quality_tier, custom_params)
 
     try:
         cmd = [
             'ffmpeg', '-y', '-i', input_video,
-            '-c:v', 'libx264',
+            '-c:v', settings['video_codec'],
             '-preset', settings['preset'],
-            '-crf', settings['crf'],
-            '-maxrate', settings['maxrate'],
-            '-bufsize', settings['bufsize'],
-            '-c:a', 'aac', '-b:a', '128k',  # Audio settings
+            '-c:a', settings['audio_codec'], '-b:a', settings['audio_bitrate'],
             '-movflags', '+faststart',  # Optimize for web playback
             '-f', format_type,
             output_video
         ]
+
+        # Add CRF if specified (for quality-based encoding)
+        if settings.get('crf') is not None:
+            cmd.extend(['-crf', str(settings['crf'])])
+        else:
+            # Use bitrate-based encoding
+            cmd.extend(['-maxrate', settings['maxrate'], '-bufsize', settings['bufsize']])
+
+        # Add resolution if specified
+        if settings.get('resolution'):
+            cmd.extend(['-vf', f'scale={settings["resolution"]}'])
+
+        # Add FPS if specified
+        if settings.get('fps'):
+            cmd.extend(['-r', str(settings['fps'])])
+
+        # Add custom filters if specified
+        if settings.get('custom_filters'):
+            filter_string = ','.join(settings['custom_filters'])
+            if 'vf' in cmd:
+                # Append to existing video filter
+                vf_index = cmd.index('-vf')
+                cmd[vf_index + 1] = f'{cmd[vf_index + 1]},{filter_string}'
+            else:
+                cmd.extend(['-vf', filter_string])
 
         if format_type == 'webm':
             cmd = [
                 'ffmpeg', '-y', '-i', input_video,
                 '-c:v', 'libvpx-vp9',
                 '-b:v', settings['maxrate'],
-                '-c:a', 'libopus', '-b:a', '128k',
+                '-c:a', 'libopus', '-b:a', settings['audio_bitrate'],
                 '-f', 'webm',
                 output_video
             ]
 
-        print(f"[REENCODE] Re-encoding with {quality_preset} quality to {format_type}")
+        print(f"[REENCODE] Re-encoding with {quality_tier.value} quality to {format_type}")
         import time
         start_time = time.time()
 
@@ -627,7 +761,7 @@ async def reencode_video(
             'success': True,
             'file_size_mb': file_size_mb,
             'processing_time': processing_time,
-            'quality': quality_preset,
+            'quality': quality_tier.value,
             'format': format_type
         }
 
@@ -714,20 +848,20 @@ async def concatenate_final_video(
 
             # Generate multiple quality versions
             quality_versions = []
-            quality_presets = ['web', 'high', 'medium']
+            quality_presets = [MergeQualityTier.WEB, MergeQualityTier.HIGH, MergeQualityTier.MEDIUM]
 
             for preset in quality_presets:
-                quality_output = os.path.join(temp_dir, f"final_video_{preset}.mp4")
+                quality_output = os.path.join(temp_dir, f"final_video_{preset.value}.mp4")
                 reencode_result = await reencode_video(processing_input, quality_output, preset, 'mp4')
                 if reencode_result['success']:
                     quality_versions.append({
-                        'quality': preset,
+                        'quality': preset.value,
                         'file_size_mb': reencode_result['file_size_mb'],
                         'url': None  # Will be set after upload
                     })
 
             # Use web quality as main final video
-            final_output = os.path.join(temp_dir, "final_video_web.mp4")
+            final_output = os.path.join(temp_dir, f"final_video_{MergeQualityTier.WEB.value}.mp4")
 
             processing_time = time.time() - start_time
 
@@ -805,6 +939,465 @@ def prepare_download_metadata(
         'expires_at': None   # For temporary URLs if needed
     }
 
+@celery_app.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 60})
+def process_manual_merge(self, merge_id: str, user_id: str):
+    """Process a manual merge operation with user-controlled parameters"""
+
+    try:
+        print(f"[MANUAL MERGE] Starting manual merge {merge_id} for user {user_id}")
+
+        # Get merge operation data from database
+        supabase = get_supabase()
+        merge_result = supabase.table('merge_operations').select('*').eq('id', merge_id).eq('user_id', user_id).single().execute()
+
+        if not merge_result.data:
+            raise Exception(f"Merge operation {merge_id} not found")
+
+        merge_record = merge_result.data
+
+        # Update status to IN_PROGRESS
+        supabase.table('merge_operations').update({
+            'merge_status': 'IN_PROGRESS',
+            'updated_at': 'now()'
+        }).eq('id', merge_id).execute()
+
+        # Extract merge data from database record
+        merge_data = {
+            'input_sources': merge_record.get('input_sources', []),
+            'quality_tier': merge_record.get('quality_tier', 'web'),
+            'output_format': merge_record.get('output_format', 'mp4'),
+            'ffmpeg_params': merge_record.get('ffmpeg_params'),
+            'merge_name': merge_record.get('merge_name', f'Merge {merge_id}')
+        }
+
+        # Update progress: Starting
+        update_merge_progress(merge_id, 5.0, "Initializing merge operation")
+
+        # Process the manual merge
+        result = asyncio.run(perform_manual_merge(merge_data, user_id, merge_id))
+
+        # Update database with final result
+        final_update = {
+            'merge_status': 'COMPLETED',
+            'progress': 100,
+            'output_file_url': result.get('final_url'),
+            'processing_stats': {
+                'file_size_mb': result.get('file_size_mb', 0),
+                'quality_tier': result.get('quality_tier'),
+                'output_format': result.get('output_format')
+            },
+            'updated_at': 'now()'
+        }
+
+        supabase.table('merge_operations').update(final_update).eq('id', merge_id).execute()
+
+        print(f"[MANUAL MERGE] Completed manual merge {merge_id}")
+
+        # Trigger preview generation after successful merge
+        print(f"[MERGE WORKFLOW] Starting preview generation for merge {merge_id}")
+        generate_merge_preview.delay(merge_id)
+
+    except Exception as e:
+        error_message = str(e)
+        print(f"[MANUAL MERGE ERROR] {merge_id}: {error_message}")
+
+        # Update status to failed
+        try:
+            supabase = get_supabase()
+            supabase.table('merge_operations').update({
+                'merge_status': 'FAILED',
+                'error_message': error_message,
+                'updated_at': 'now()'
+            }).eq('id', merge_id).execute()
+        except:
+            pass
+
+        # Re-raise for Celery retry mechanism
+        raise Exception(error_message)
+
+
+async def perform_manual_merge(merge_data: Dict[str, Any], user_id: str, merge_id: str = None) -> Dict[str, Any]:
+    """Perform the actual manual merge operation"""
+
+    print("[MANUAL MERGE] Performing manual merge with user parameters")
+
+    input_sources = merge_data.get('input_sources', [])
+    quality_tier = MergeQualityTier(merge_data.get('quality_tier', 'web'))
+    output_format = merge_data.get('output_format', 'mp4')
+    ffmpeg_params = merge_data.get('ffmpeg_params')
+    merge_name = merge_data.get('merge_name', 'Manual Merge')
+
+    if not input_sources:
+        raise Exception("No input sources provided for merge")
+
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Update progress: Starting
+            if merge_id:
+                update_merge_progress(merge_id, 5.0, "Preparing input files")
+
+            # Prepare input files
+            prepared_inputs = await prepare_manual_inputs(input_sources, temp_dir)
+
+            if merge_id:
+                update_merge_progress(merge_id, 25.0, "Input files prepared", {
+                    'inputs_prepared': len(prepared_inputs)
+                })
+
+            # Merge inputs based on type
+            if len(prepared_inputs) == 1:
+                # Single input, just process it
+                if merge_id:
+                    update_merge_progress(merge_id, 40.0, "Processing single input")
+                merged_output = await process_single_input(prepared_inputs[0], temp_dir, quality_tier, output_format, ffmpeg_params)
+                if merge_id:
+                    update_merge_progress(merge_id, 70.0, "Single input processed")
+            else:
+                # Multiple inputs, concatenate them
+                if merge_id:
+                    update_merge_progress(merge_id, 40.0, "Concatenating multiple inputs")
+                merged_output = await concatenate_manual_inputs(prepared_inputs, temp_dir, quality_tier, output_format, ffmpeg_params)
+                if merge_id:
+                    update_merge_progress(merge_id, 70.0, "Multiple inputs concatenated")
+
+            if merge_id:
+                update_merge_progress(merge_id, 85.0, "Processing complete, uploading to storage")
+
+            # Upload final result
+            file_service = FileService()
+            final_url = await file_service.upload_file(
+                merged_output,
+                f"manual_merges/{user_id}/{merge_name.replace(' ', '_')}.{output_format}"
+            )
+
+            if not final_url:
+                raise Exception("Failed to upload merged file")
+
+            # Get file size
+            file_size_bytes = os.path.getsize(merged_output)
+            file_size_mb = file_size_bytes / (1024 * 1024)
+
+            if merge_id:
+                update_merge_progress(merge_id, 100.0, "Upload complete", {
+                    'final_url': final_url,
+                    'file_size_mb': file_size_mb
+                })
+
+            return {
+                'success': True,
+                'final_url': final_url,
+                'file_size_mb': file_size_mb,
+                'quality_tier': quality_tier.value,
+                'output_format': output_format
+            }
+
+    except Exception as e:
+        print(f"[MANUAL MERGE ERROR] {str(e)}")
+        raise e
+
+
+async def prepare_manual_inputs(input_sources: List[Dict[str, Any]], temp_dir: str) -> List[Dict[str, Any]]:
+    """Prepare input files for manual merge"""
+
+    prepared_inputs = []
+
+    for i, source in enumerate(input_sources):
+        source_type = source.get('type', 'video')
+        url = source.get('url')
+
+        if not url:
+            continue
+
+        # Download the file
+        file_ext = 'mp4' if source_type == 'video' else ('mp3' if source_type == 'audio' else 'jpg')
+        local_path = os.path.join(temp_dir, f"input_{i}.{file_ext}")
+
+        await download_file(url, local_path)
+
+        # Apply any trimming or processing based on source parameters
+        start_time = source.get('start_time', 0)
+        end_time = source.get('end_time')
+        volume = source.get('volume', 1.0)
+        fade_in = source.get('fade_in', 0)
+        fade_out = source.get('fade_out', 0)
+
+        processed_path = await apply_input_processing(
+            local_path, temp_dir, i, start_time, end_time, volume, fade_in, fade_out
+        )
+
+        prepared_inputs.append({
+            'path': processed_path,
+            'type': source_type,
+            'duration': source.get('duration'),
+            'original_url': url
+        })
+
+    return prepared_inputs
+
+
+async def apply_input_processing(
+    input_path: str, temp_dir: str, index: int,
+    start_time: float, end_time: Optional[float],
+    volume: float, fade_in: float, fade_out: float
+) -> str:
+    """Apply processing (trimming, volume, fades) to input file"""
+
+    output_path = os.path.join(temp_dir, f"processed_input_{index}.mp4")
+
+    cmd = ['ffmpeg', '-y', '-i', input_path]
+
+    # Add trimming if specified
+    if start_time > 0 or end_time is not None:
+        if end_time:
+            cmd.extend(['-ss', str(start_time), '-to', str(end_time)])
+        else:
+            cmd.extend(['-ss', str(start_time)])
+
+    # Add volume adjustment if not 1.0
+    filter_parts = []
+    if volume != 1.0:
+        filter_parts.append(f'volume={volume}')
+
+    # Add fades
+    if fade_in > 0:
+        filter_parts.append(f'afade=t=in:st=0:d={fade_in}')
+    if fade_out > 0:
+        # Calculate fade out start time (assuming we know duration)
+        # For now, apply a simple fade out
+        filter_parts.append(f'afade=t=out:st=10:d={fade_out}')
+
+    if filter_parts:
+        cmd.extend(['-af', ','.join(filter_parts)])
+
+    cmd.append(output_path)
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        # If processing fails, return original
+        print(f"[INPUT PROCESSING] Failed to process {input_path}: {result.stderr}")
+        return input_path
+
+    return output_path
+
+
+async def process_single_input(
+    input_data: Dict[str, Any], temp_dir: str,
+    quality_tier: MergeQualityTier, output_format: str,
+    ffmpeg_params: Optional[FFmpegParameters]
+) -> str:
+    """Process a single input file"""
+
+    input_path = input_data['path']
+    output_path = os.path.join(temp_dir, f"final_output.{output_format}")
+
+    # Apply quality encoding
+    reencode_result = await reencode_video(
+        input_path, output_path, quality_tier, output_format, ffmpeg_params
+    )
+
+    if not reencode_result['success']:
+        raise Exception("Failed to re-encode video")
+
+    return output_path
+
+
+async def concatenate_manual_inputs(
+    inputs: List[Dict[str, Any]], temp_dir: str,
+    quality_tier: MergeQualityTier, output_format: str,
+    ffmpeg_params: Optional[FFmpegParameters]
+) -> str:
+    """Concatenate multiple inputs for manual merge"""
+
+    # Create concat file
+    concat_file = os.path.join(temp_dir, "manual_concat.txt")
+    with open(concat_file, 'w') as f:
+        for input_data in inputs:
+            f.write(f"file '{input_data['path']}'\n")
+
+    # Concatenate
+    raw_concat = os.path.join(temp_dir, "raw_concat.mp4")
+    cmd = [
+        'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+        '-i', concat_file, '-c', 'copy', raw_concat
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise Exception(f"Concatenation failed: {result.stderr}")
+
+    # Apply final encoding
+    final_output = os.path.join(temp_dir, f"final_concat.{output_format}")
+    reencode_result = await reencode_video(
+        raw_concat, final_output, quality_tier, output_format, ffmpeg_params
+    )
+
+    if not reencode_result['success']:
+        raise Exception("Failed to re-encode concatenated video")
+
+    return final_output
+
+
+@celery_app.task(bind=True)
+def process_merge_preview(self, preview_id: str, user_id: str):
+    """Process a merge preview operation"""
+
+    try:
+        print(f"[MERGE PREVIEW] Starting preview {preview_id} for user {user_id}")
+
+        # Mock data for development
+        preview_data = {
+            'input_sources': [],
+            'quality_tier': 'web',
+            'preview_duration': 30.0,
+            'ffmpeg_params': None
+        }
+
+        # Process the preview
+        result = asyncio.run(perform_merge_preview(preview_data, user_id))
+
+        print(f"[MERGE PREVIEW] Completed preview {preview_id}")
+
+    except Exception as e:
+        print(f"[MERGE PREVIEW ERROR] {preview_id}: {str(e)}")
+
+
+async def perform_merge_preview(preview_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    """Perform merge preview generation (first 30 seconds)"""
+
+    print("[MERGE PREVIEW] Generating preview with limited processing")
+
+    input_sources = preview_data.get('input_sources', [])
+    quality_tier = MergeQualityTier(preview_data.get('quality_tier', 'web'))
+    preview_duration = min(preview_data.get('preview_duration', 30.0), 30.0)  # Max 30 seconds
+    ffmpeg_params = preview_data.get('ffmpeg_params')
+
+    if not input_sources:
+        raise Exception("No input sources provided for preview")
+
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Prepare input files (limited processing for preview)
+            prepared_inputs = await prepare_preview_inputs(input_sources, temp_dir, preview_duration)
+
+            # Create preview by concatenating first segments
+            if len(prepared_inputs) == 1:
+                preview_output = prepared_inputs[0]['path']
+            else:
+                preview_output = await concatenate_preview_segments(prepared_inputs, temp_dir, quality_tier, ffmpeg_params)
+
+            # Upload preview
+            file_service = FileService()
+            preview_url = await file_service.upload_file(
+                preview_output,
+                f"merge_previews/{user_id}/preview_{preview_duration}s.mp4"
+            )
+
+            if not preview_url:
+                raise Exception("Failed to upload preview")
+
+            return {
+                'success': True,
+                'preview_url': preview_url,
+                'preview_duration': preview_duration,
+                'quality_tier': quality_tier.value
+            }
+
+    except Exception as e:
+        print(f"[MERGE PREVIEW ERROR] {str(e)}")
+        raise e
+
+
+async def prepare_preview_inputs(
+    input_sources: List[Dict[str, Any]], temp_dir: str, max_duration: float
+) -> List[Dict[str, Any]]:
+    """Prepare input files for preview (extract first segment only)"""
+
+    prepared_inputs = []
+    total_duration = 0
+
+    for i, source in enumerate(input_sources):
+        if total_duration >= max_duration:
+            break
+
+        source_type = source.get('type', 'video')
+        url = source.get('url')
+
+        if not url:
+            continue
+
+        # Download the file
+        file_ext = 'mp4' if source_type == 'video' else ('mp3' if source_type == 'audio' else 'jpg')
+        local_path = os.path.join(temp_dir, f"preview_input_{i}.{file_ext}")
+
+        await download_file(url, local_path)
+
+        # Extract first segment for preview
+        remaining_duration = max_duration - total_duration
+        segment_duration = min(remaining_duration, 10.0)  # Max 10s per input for preview
+
+        preview_segment = await extract_preview_segment(
+            local_path, temp_dir, i, segment_duration
+        )
+
+        if preview_segment:
+            prepared_inputs.append({
+                'path': preview_segment,
+                'type': source_type,
+                'duration': segment_duration
+            })
+            total_duration += segment_duration
+
+    return prepared_inputs
+
+
+async def extract_preview_segment(
+    input_path: str, temp_dir: str, index: int, duration: float
+) -> Optional[str]:
+    """Extract first segment of specified duration for preview"""
+
+    output_path = os.path.join(temp_dir, f"preview_segment_{index}.mp4")
+
+    cmd = [
+        'ffmpeg', '-y', '-i', input_path,
+        '-t', str(duration),  # Duration
+        '-c', 'copy',  # Copy without re-encoding for speed
+        output_path
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"[PREVIEW SEGMENT] Failed to extract segment: {result.stderr}")
+        return None
+
+    return output_path
+
+
+async def concatenate_preview_segments(
+    inputs: List[Dict[str, Any]], temp_dir: str,
+    quality_tier: MergeQualityTier, ffmpeg_params: Optional[FFmpegParameters]
+) -> str:
+    """Concatenate preview segments"""
+
+    # Create concat file
+    concat_file = os.path.join(temp_dir, "preview_concat.txt")
+    with open(concat_file, 'w') as f:
+        for input_data in inputs:
+            f.write(f"file '{input_data['path']}'\n")
+
+    # Quick concatenation for preview
+    output_path = os.path.join(temp_dir, "preview_concat.mp4")
+    cmd = [
+        'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+        '-i', concat_file, '-c', 'copy', output_path
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise Exception(f"Preview concatenation failed: {result.stderr}")
+
+    return output_path
+
+
 async def download_file(url: str, local_path: str):
     """Download file from URL to local path"""
 
@@ -815,4 +1408,115 @@ async def download_file(url: str, local_path: str):
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
 
+@celery_app.task(bind=True, autoretry_for=(Exception,), retry_kwargs={'max_retries': 3, 'countdown': 60})
+def generate_merge_preview(self, merge_id: str):
+    """Generate a preview clip (first 10 seconds) from the merged video"""
+
+    try:
+        print(f"[MERGE PREVIEW] Starting preview generation for merge {merge_id}")
+
+        # Get merge operation data
+        supabase = get_supabase()
+        merge_result = supabase.table('merge_operations').select('*').eq('id', merge_id).single().execute()
+
+        if not merge_result.data:
+            raise Exception(f"Merge operation {merge_id} not found")
+
+        merge_data = merge_result.data
+
+        # Check if merge is completed and has output file
+        if merge_data.get('merge_status') != 'COMPLETED':
+            raise Exception(f"Merge operation {merge_id} is not completed yet")
+
+        output_file_url = merge_data.get('output_file_url')
+        if not output_file_url:
+            raise Exception(f"Merge operation {merge_id} has no output file URL")
+
+        # Generate preview
+        preview_url = asyncio.run(generate_video_preview_clip(output_file_url, merge_id))
+
+        if not preview_url:
+            raise Exception("Failed to generate preview clip")
+
+        # Update merge operation with preview URL
+        supabase.table('merge_operations').update({
+            'preview_url': preview_url,
+            'updated_at': 'now()'
+        }).eq('id', merge_id).execute()
+
+        print(f"[MERGE PREVIEW] Successfully generated preview for merge {merge_id}: {preview_url}")
+        return {'status': 'success', 'preview_url': preview_url}
+
+    except Exception as e:
+        error_message = f"Preview generation failed: {str(e)}"
+        print(f"[MERGE PREVIEW ERROR] {merge_id}: {error_message}")
+
+        # Update merge operation with error (don't overwrite existing errors)
+        try:
+            supabase = get_supabase()
+            current_data = supabase.table('merge_operations').select('error_message').eq('id', merge_id).single().execute()
+            if current_data.data and not current_data.data.get('error_message'):
+                supabase.table('merge_operations').update({
+                    'error_message': f"Preview generation failed: {str(e)}",
+                    'updated_at': 'now()'
+                }).eq('id', merge_id).execute()
+        except:
+            pass
+
+        raise Exception(error_message)
+
+
+async def generate_video_preview_clip(video_url: str, merge_id: str) -> Optional[str]:
+    """Generate a 10-second preview clip from the merged video using FFmpeg"""
+
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Download the merged video
+            video_path = os.path.join(temp_dir, "merged_video.mp4")
+            await download_file(video_url, video_path)
+
+            # Generate preview clip (first 10 seconds)
+            preview_path = os.path.join(temp_dir, "preview_clip.mp4")
+
+            cmd = [
+                'ffmpeg', '-y',  # Overwrite output
+                '-i', video_path,  # Input video
+                '-t', '10',  # Duration: 10 seconds
+                '-c:v', 'libx264',  # Video codec
+                '-preset', 'fast',  # Encoding preset
+                '-crf', '23',  # Quality (lower is better)
+                '-c:a', 'aac',  # Audio codec
+                '-b:a', '128k',  # Audio bitrate
+                '-movflags', '+faststart',  # Optimize for web playback
+                preview_path
+            ]
+
+            print(f"[PREVIEW CLIP] Generating 10-second preview from {video_url}")
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=temp_dir)
+
+            if result.returncode != 0:
+                print(f"[PREVIEW CLIP ERROR] FFmpeg failed: {result.stderr}")
+                return None
+
+            # Upload preview to Supabase Storage
+            file_service = FileService()
+            preview_url = await file_service.upload_file(
+                preview_path,
+                f"merge_previews/{merge_id}/preview_10s.mp4"
+            )
+
+            if not preview_url:
+                print("[PREVIEW CLIP ERROR] Failed to upload preview to storage")
+                return None
+
+            # Get file size for logging
+            file_size_bytes = os.path.getsize(preview_path)
+            file_size_mb = file_size_bytes / (1024 * 1024)
+
+            print(f"[PREVIEW CLIP] Generated preview: {file_size_mb:.1f}MB, URL: {preview_url}")
+            return preview_url
+
+    except Exception as e:
+        print(f"[PREVIEW CLIP ERROR] {str(e)}")
+        return None
     print(f"[DOWNLOAD] Downloaded {url} to {local_path}")

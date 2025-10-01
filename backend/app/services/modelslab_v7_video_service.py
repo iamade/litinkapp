@@ -23,11 +23,12 @@ class ModelsLabV7VideoService:
         self.image_to_video_endpoint = f"{self.base_url}/video-fusion/image-to-video"
         self.lip_sync_endpoint = f"{self.base_url}/video-fusion/lip-sync"
         
-        # ✅ Available Veo 2 models
+        # ✅ Available video models
         self.video_models = {
             'veo2': 'veo2',  # Primary Veo 2 model
             'veo2_pro': 'veo2_pro',  # Enhanced Veo 2 model
-            'veo2_standard': 'veo2'  # Standard Veo 2
+            'veo2_standard': 'veo2',  # Standard Veo 2
+            'seedance-i2v': 'seedance-i2v'  # Fallback model
         }
         
         # ✅ Available lip sync models
@@ -47,52 +48,85 @@ class ModelsLabV7VideoService:
         fps: int = 24,
         motion_strength: float = 0.8
     ) -> Dict[str, Any]:
-        """Generate video from image using ModelsLab V7 Veo 2 API"""
+        """Generate video from image using ModelsLab V7 Veo 2 API with fallback to seedance-i2v"""
         
-        try:
-            payload = {
-                "model_id": model_id,
-                "init_image": image_url,
-                "prompt": prompt,
-                "negative_prompt": negative_prompt,
-                "key": self.api_key
-            }
+        attempts = [
+            {"model_id": model_id, "description": f"primary model {model_id}"},
+            {"model_id": "seedance-i2v", "description": "fallback model seedance-i2v"}
+        ]
+        
+        last_error = None
+        
+        for attempt in attempts:
+            current_model_id = attempt["model_id"]
+            current_description = attempt["description"]
             
-            # Add optional parameters if they're supported
-            if duration != 5.0:
-                payload["duration"] = duration
-            if fps != 24:
-                payload["fps"] = fps
-            if motion_strength != 0.8:
-                payload["motion_strength"] = motion_strength
-            
-            logger.info(f"[MODELSLAB V7 VIDEO] Generating video with Veo 2")
-            logger.info(f"[MODELSLAB V7 VIDEO] Model: {model_id}")
-            logger.info(f"[MODELSLAB V7 VIDEO] Image: {image_url}")
-            logger.info(f"[MODELSLAB V7 VIDEO] Prompt: {prompt[:100]}...")
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.image_to_video_endpoint,
-                    json=payload,
-                    headers=self.headers,
-                    timeout=aiohttp.ClientTimeout(total=120)  # 2 minute timeout
-                ) as response:
-                    
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise Exception(f"HTTP {response.status}: {error_text}")
-                    
-                    result = await response.json()
-                    
-                    logger.info(f"[MODELSLAB V7 VIDEO] Response status: {response.status}")
-                    logger.info(f"[MODELSLAB V7 VIDEO] Response: {result}")
-                    
-                    return self._process_video_response(result, 'image_to_video')
-                    
-        except Exception as e:
-            logger.error(f"[MODELSLAB V7 VIDEO ERROR]: {str(e)}")
-            raise e
+            try:
+                payload = {
+                    "model_id": current_model_id,
+                    "init_image": image_url,
+                    "prompt": prompt,
+                    "negative_prompt": negative_prompt,
+                    "key": self.api_key
+                }
+                
+                # Add optional parameters if they're supported
+                if duration != 5.0:
+                    payload["duration"] = duration
+                if fps != 24:
+                    payload["fps"] = fps
+                if motion_strength != 0.8:
+                    payload["motion_strength"] = motion_strength
+                
+                if current_model_id == "seedance-i2v":
+                    logger.info(f"[MODELSLAB V7 VIDEO] Veo2 unavailable, falling back to seedance-i2v model")
+                    logger.info(f"[MODELSLAB V7 VIDEO] Retrying with same parameters: image={image_url}, prompt={prompt[:100]}...")
+                
+                logger.info(f"[MODELSLAB V7 VIDEO] Generating video with {current_description}")
+                logger.info(f"[MODELSLAB V7 VIDEO] Model: {current_model_id}")
+                logger.info(f"[MODELSLAB V7 VIDEO] Image: {image_url}")
+                logger.info(f"[MODELSLAB V7 VIDEO] Prompt: {prompt[:100]}...")
+                
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self.image_to_video_endpoint,
+                        json=payload,
+                        headers=self.headers,
+                        timeout=aiohttp.ClientTimeout(total=120)  # 2 minute timeout
+                    ) as response:
+                        
+                        if response.status != 200:
+                            error_text = await response.text()
+                            raise Exception(f"HTTP {response.status}: {error_text}")
+                        
+                        result = await response.json()
+                        
+                        logger.info(f"[MODELSLAB V7 VIDEO] Response status: {response.status}")
+                        logger.info(f"[MODELSLAB V7 VIDEO] Response: {result}")
+                        
+                        # Check for specific veo2 error message
+                        if (result.get('status') == 'error' and
+                            'Video cannot be generated at the moment, try use another model' in result.get('message', '')):
+                            logger.warning(f"[MODELSLAB V7 VIDEO] Veo2 model unavailable: {result.get('message')}")
+                            last_error = Exception(f"Veo2 model unavailable: {result.get('message')}")
+                            continue  # Try next model
+                        
+                        return self._process_video_response(result, 'image_to_video')
+                        
+            except Exception as e:
+                logger.error(f"[MODELSLAB V7 VIDEO ERROR] with {current_description}: {str(e)}")
+                last_error = e
+                
+                # If this was the fallback attempt, break and raise the error
+                if current_model_id == "seedance-i2v":
+                    break
+                # Otherwise, continue to fallback
+                continue
+        
+        # If we get here, both attempts failed
+        error_msg = f"Both veo2 and seedance-i2v models failed. Last error: {str(last_error)}"
+        logger.error(f"[MODELSLAB V7 VIDEO] {error_msg}")
+        raise Exception(error_msg)
     
     async def generate_lip_sync(
         self,
@@ -145,7 +179,8 @@ class ModelsLabV7VideoService:
         audio_url: Optional[str] = None,
         dialogue_audio: Optional[List[Dict[str, Any]]] = None,
         style: str = "cinematic",
-        include_lipsync: bool = True
+        include_lipsync: bool = True,
+        script_style: str = None
     ) -> Dict[str, Any]:
         """Generate and enhance video for a complete scene"""
         
@@ -153,7 +188,7 @@ class ModelsLabV7VideoService:
             logger.info(f"[SCENE VIDEO] Enhancing scene: {scene_description[:50]}...")
 
             # Step 1: Generate video from image with character information
-            video_prompt = self._create_scene_video_prompt_with_characters(scene_description, style, dialogue_audio)
+            video_prompt = self._create_scene_video_prompt_with_characters(scene_description, style, dialogue_audio, script_style)
 
             video_result = await self.generate_image_to_video(
                 image_url=image_url,
@@ -388,16 +423,22 @@ engaging visual storytelling, seamless transitions, cinematic composition.
 
         return full_prompt
 
-    def _create_scene_video_prompt_with_characters(self, scene_description: str, style: str, dialogue_audio: Optional[List[Dict[str, Any]]] = None) -> str:
-        """Create optimized prompt for Veo 2 video generation with character information"""
+    def _create_scene_video_prompt_with_characters(self, scene_description: str, style: str, dialogue_audio: Optional[List[Dict[str, Any]]] = None, script_style: str = None) -> str:
+        """Create optimized prompt for Veo 2 video generation with character information and dialogue"""
 
         base_prompt = self._create_scene_video_prompt(scene_description, style)
 
-        # Add character information if dialogue audio is provided
+        # Special handling for cinematic scripts
+        is_cinematic = script_style and 'cinematic' in script_style.lower()
+
+        # Add character information and dialogue if provided
         if dialogue_audio:
             character_info = []
+            dialogue_lines = []
+
             for dialogue in dialogue_audio:
                 character_name = dialogue.get('character', 'Character')
+                dialogue_text = dialogue.get('text', '').strip()
                 character_profile = dialogue.get('character_profile', {})
 
                 # Build character description
@@ -411,12 +452,30 @@ engaging visual storytelling, seamless transitions, cinematic composition.
 
                 character_info.append(char_desc)
 
+                # Include dialogue text for cinematic scripts
+                if dialogue_text:
+                    dialogue_lines.append(f"{character_name}: \"{dialogue_text}\"")
+
             if character_info:
                 characters_text = "Characters present: " + ", ".join(character_info)
                 base_prompt = f"{characters_text}\n\n{base_prompt}"
 
-                # Add instruction for character visibility in video
-                base_prompt += "\n\nEnsure characters are clearly visible and appropriately positioned for dialogue delivery."
+                # Add dialogue information - prioritize for cinematic scripts
+                if dialogue_lines:
+                    if is_cinematic:
+                        # For cinematic scripts, put dialogue first and emphasize character interaction
+                        dialogue_text = "Key dialogue scene:\n" + "\n".join(dialogue_lines)
+                        base_prompt = f"{dialogue_text}\n\nScene context: {base_prompt}"
+
+                        # Enhanced instructions for cinematic dialogue delivery
+                        base_prompt += "\n\nCRITICAL: Generate a cinematic dialogue scene showing characters speaking their lines naturally. Characters must be clearly visible with proper facial expressions, mouth movements, and body language. Focus on character interactions and emotional delivery of the dialogue. Use cinematic camera angles and lighting to enhance the dramatic effect."
+                    else:
+                        # For other scripts, include dialogue but with less emphasis
+                        dialogue_text = "Dialogue in this scene:\n" + "\n".join(dialogue_lines)
+                        base_prompt = f"{base_prompt}\n\n{dialogue_text}"
+
+                        # Standard instruction for character visibility
+                        base_prompt += "\n\nShow characters speaking their dialogue naturally. Ensure characters are clearly visible and appropriately positioned for dialogue delivery with proper facial expressions and mouth movements."
 
         return base_prompt
     
@@ -527,6 +586,7 @@ engaging visual storytelling, seamless transitions, cinematic composition.
             'video_generation': {
                 'veo2': 'Veo 2 (Recommended)',
                 'veo2_pro': 'Veo 2 Pro (Enhanced)',
+                'seedance-i2v': 'Seedance I2V (Fallback)'
             },
             'lip_sync': {
                 'lipsync-2': 'Lip Sync V2 (Latest)',

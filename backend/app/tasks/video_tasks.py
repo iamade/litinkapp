@@ -10,6 +10,51 @@ import json
 from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
 
 
+async def query_existing_character_images(user_id: str, character_names: List[str]) -> List[Dict[str, Any]]:
+    """Query existing character images from database"""
+    try:
+        supabase = get_supabase()
+
+        # Query characters table for images
+        character_images = []
+        for char_name in character_names:
+            # Try to find character by name and user_id
+            from urllib.parse import quote
+            encoded_char_name = quote(f'%{char_name}%')
+            result = supabase.table('characters').select('name, image_url, image_metadata').eq('user_id', user_id).ilike('name', encoded_char_name).execute()
+
+            if result.data:
+                char_data = result.data[0]
+                if char_data.get('image_url'):
+                    character_images.append({
+                        'name': char_data['name'],
+                        'image_url': char_data['image_url'],
+                        'metadata': char_data.get('image_metadata', {})
+                    })
+
+        # If no images in characters table, try image_generations table
+        if not character_images:
+            for char_name in character_names:
+                from urllib.parse import quote
+                encoded_char_name = quote(f'%{char_name}%')
+                result = supabase.table('image_generations').select('character_name, image_url, metadata').eq('user_id', user_id).eq('image_type', 'character').ilike('character_name', encoded_char_name).execute()
+
+                for img_data in result.data or []:
+                    if img_data.get('image_url'):
+                        character_images.append({
+                            'name': img_data['character_name'],
+                            'image_url': img_data['image_url'],
+                            'metadata': img_data.get('metadata', {})
+                        })
+
+        print(f"[CHARACTER IMAGES] Found {len(character_images)} character images for {len(character_names)} characters")
+        return character_images
+
+    except Exception as e:
+        print(f"[CHARACTER IMAGES] Error querying character images: {str(e)}")
+        return []
+
+
 async def extract_scene_dialogue_and_generate_audio(
     video_gen_id: str,
     scene_id: str,
@@ -100,7 +145,7 @@ async def generate_scene_videos(
     video_results = []
     supabase = get_supabase()
     
-    scene_images = image_data.get('scenes', [])  # Updated to match V7 response format
+    scene_images = image_data.get('scene_images', [])  # Fixed key mismatch
     model_id = modelslab_service.get_video_model_for_style(video_style)
     
     for i, scene_description in enumerate(scene_descriptions):
@@ -201,25 +246,29 @@ async def generate_scene_videos(
     print(f"[SCENE VIDEOS V7] Completed: {successful_videos}/{len(scene_descriptions)} videos")
     return video_results
 
-def find_scene_audio(scene_id: str, audio_files: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def find_scene_audio(scene_id: str, audio_files: Dict[str, Any], script_style: str = None) -> Optional[Dict[str, Any]]:
     """Find the primary audio file for a scene (for lip sync)"""
-    
+
     # Priority: Character dialogue > Narrator > None
     character_audio = audio_files.get('characters', [])
     narrator_audio = audio_files.get('narrator', [])
-    
+
     scene_number = int(scene_id.split('_')[1]) if '_' in scene_id else 1
-    
+
     # Look for character dialogue first
     for audio in character_audio:
         if audio.get('scene') == scene_number and audio.get('audio_url'):
             return audio
-    
+
+    # For cinematic scripts, don't fall back to narrator audio
+    if script_style == 'cinematic':
+        return None
+
     # Fall back to narrator audio
     for audio in narrator_audio:
         if audio.get('scene') == scene_number and audio.get('audio_url'):
             return audio
-    
+
     return None
 
 def update_pipeline_step(video_generation_id: str, step_name: str, status: str, error_message: str = None):
@@ -270,9 +319,8 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         video_gen = video_data.data
         user_id = video_gen.get('user_id')  # Get user_id from video generation record
 
-        # Check if image generation is completed
-        if video_gen.get('generation_status') != 'images_completed':
-            raise Exception("Image generation must be completed before video generation")
+        # For split workflow, video generation can proceed without image generation
+        # Character images will be queried from database
 
         # Update status
         supabase.table('video_generations').update({
@@ -285,14 +333,38 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         image_data = video_gen.get('image_data', {})
 
         scene_descriptions = script_data.get('scene_descriptions', [])
+        characters = script_data.get('characters', [])
         video_style = script_data.get('video_style', 'realistic')
-        
+
         print(f"[VIDEO GENERATION] Processing:")
         print(f"- Scenes: {len(scene_descriptions)}")
+        print(f"- Characters: {len(characters)}")
         print(f"- Video Style: {video_style}")
         print(f"- Audio Files: {len(audio_files.get('narrator', [])) + len(audio_files.get('characters', []))}")
-        print(f"- Scene Images: {len(image_data.get('scene_images', []))}")
-        
+
+        # Query existing character images from database
+        character_images = asyncio.run(query_existing_character_images(user_id, characters))
+        print(f"- Character Images: {len(character_images)} found in database")
+
+        # For split workflow, use character images as scene images if no scene images exist
+        if not image_data.get('scene_images'):
+            # Map character images to scenes (use first character image for all scenes, or cycle through)
+            image_data['scene_images'] = []
+            for i, scene in enumerate(scene_descriptions):
+                if character_images:
+                    # Use character images in rotation for scenes
+                    char_image = character_images[i % len(character_images)]
+                    image_data['scene_images'].append({
+                        'image_url': char_image.get('image_url'),
+                        'character_name': char_image.get('name'),
+                        'scene_number': i + 1
+                    })
+                else:
+                    # No images available, will use text-to-video fallback
+                    image_data['scene_images'].append(None)
+
+        print(f"- Scene Images: {len(image_data.get('scene_images', []))} (using character images)")
+
         # Generate videos
         modelslab_service = ModelsLabV7VideoService()
 
@@ -387,7 +459,7 @@ async def generate_scene_videos(
     video_results = []
     supabase = get_supabase()
 
-    scene_images = image_data.get('scenes', [])  # Updated to match V7 response format
+    scene_images = image_data.get('scene_images', [])  # Fixed key mismatch
     model_id = modelslab_service.get_video_model_for_style(video_style)
 
     # Track the previous scene's key scene shot for continuity
@@ -439,7 +511,7 @@ async def generate_scene_videos(
             )
 
             # Find audio for lip sync (legacy support)
-            scene_audio = find_scene_audio(scene_id, audio_files)
+            scene_audio = find_scene_audio(scene_id, audio_files, script_data.get('script_style') if script_data else None)
 
             # ✅ Generate video using V7 Veo 2 with dialogue integration
             result = await modelslab_service.enhance_video_for_scene(
@@ -448,7 +520,8 @@ async def generate_scene_videos(
                 audio_url=scene_audio.get('audio_url') if scene_audio else None,
                 dialogue_audio=scene_dialogue_data.get('dialogue_audio', []),
                 style=video_style,
-                include_lipsync=bool(scene_audio) or bool(scene_dialogue_data.get('dialogue_audio'))
+                include_lipsync=bool(scene_audio) or bool(scene_dialogue_data.get('dialogue_audio')),
+                script_style=script_data.get('script_style') if script_data else None
             )
 
             if result.get('status') == 'success':

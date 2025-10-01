@@ -169,135 +169,6 @@ class ScriptParser:
 
         return effects_found
     
-    # Update your existing _parse_cinematic_movie_script method:
-    def _parse_cinematic_movie_script(self, script: str, characters: List[str], scene_descriptions: List) -> Dict[str, Any]:
-        """Parse cinematic movie script with character dialogues"""
-        
-        # ✅ Debug scene_descriptions format
-        print(f"[SCRIPT PARSER] Scene descriptions type: {type(scene_descriptions)}")
-        if scene_descriptions:
-            print(f"[SCRIPT PARSER] First scene type: {type(scene_descriptions[0])}")
-            if isinstance(scene_descriptions[0], dict):
-                print(f"[SCRIPT PARSER] First scene keys: {list(scene_descriptions[0].keys())}")
-        
-        audio_components = {
-            "narrator_segments": [],
-            "character_dialogues": [],
-            "sound_effects": [],
-            "background_music": []
-        }
-        
-        lines = script.split('\n')
-        current_scene = 0
-        current_character = None
-        
-        for i, line in enumerate(lines):
-            line = line.strip()
-            if not line:
-                continue
-                
-            # Detect scene changes
-            if line.startswith('SCENE') or line.startswith('INT.') or line.startswith('EXT.'):
-                current_scene += 1
-                current_character = None  # Reset character context on scene change
-                
-                # Extract environmental sounds from scene description
-                scene_sounds = self._extract_scene_sounds(line)
-                if scene_sounds:
-                    audio_components["sound_effects"].extend(scene_sounds)
-                continue
-            
-            # Check if line is a character name (ALL CAPS at start of line, no colon)
-            if (line.isupper() and ':' not in line and 
-                not line.startswith('SFX:') and not line.startswith('MUSIC:') and
-                not line.startswith(('SCENE', 'INT.', 'EXT.', 'FADE', 'CUT TO'))):
-                
-                # Verify it's a known character
-                if any(char.upper() == line for char in characters):
-                    current_character = line
-                    continue
-            
-            # Check for dialogue using existing method first
-            character_match = self._detect_character_dialogue(line, characters)
-            if character_match:
-                character_name, dialogue = character_match
-                audio_components["character_dialogues"].append({
-                    "character": character_name,
-                    "text": dialogue,
-                    "scene": current_scene,
-                    "line_number": i + 1
-                })
-                current_character = None  # Reset after dialogue
-                continue
-            
-            # Check for dialogue following character name (cinematic format)
-            if current_character and (line.startswith('"') or line.startswith("'") or 
-                                    (not line.startswith('(') and len(line.split()) > 1)):
-                dialogue = line.strip('"').strip("'")
-                audio_components["character_dialogues"].append({
-                    "character": current_character,
-                    "text": dialogue,
-                    "scene": current_scene,
-                    "line_number": i + 1
-                })
-                current_character = None  # Reset after dialogue
-                continue
-            
-            # Detect sound effects in parentheses or brackets
-            sound_effects = self._extract_sound_effects(line)
-            if sound_effects:
-                for effect in sound_effects:
-                    audio_components["sound_effects"].append({
-                        "description": effect,
-                        "scene": current_scene,
-                        "line_number": i + 1
-                    })
-                continue
-            
-            # Check for explicit sound/music cues
-            if line.startswith('SFX:') or 'SOUND:' in line.upper():
-                effect = line.replace('SFX:', '').replace('SOUND:', '').strip()
-                audio_components["sound_effects"].append({
-                    "description": effect,
-                    "scene": current_scene,
-                    "line_number": i + 1
-                })
-                continue
-                
-            if line.startswith('MUSIC:') or 'BACKGROUND MUSIC:' in line.upper():
-                music = line.replace('MUSIC:', '').replace('BACKGROUND MUSIC:', '').strip()
-                audio_components["background_music"].append({
-                    "description": music,
-                    "scene": current_scene,
-                    "line_number": i + 1
-                })
-                continue
-            
-            # Everything else is narration (if not character dialogue context)
-            if not current_character and self._is_narrator_text(line, characters):
-                audio_components["narrator_segments"].append({
-                    "text": line,
-                    "scene": current_scene,
-                    "line_number": i + 1
-                })
-        
-        # ✅ Add scene-based background music if none specified (with scene format handling)
-        if not audio_components["background_music"]:
-            audio_components["background_music"] = self._generate_background_music_cues(scene_descriptions)
-        
-        # ✅ Add generated sound effects from scene descriptions (NEW METHOD)
-        generated_sound_effects = self._generate_sound_effects(scene_descriptions)
-        audio_components["sound_effects"].extend(generated_sound_effects)
-        
-        # Add default sound effects if none found at all
-        if not audio_components["sound_effects"]:
-            audio_components["sound_effects"] = [{
-                "description": "ambient background sounds",
-                "scene": 1,
-                "line_number": 0
-            }]
-        
-        return audio_components
               
     def _parse_cinematic_movie_script(self, script: str, characters: List[str], scene_descriptions: List[str]) -> Dict[str, Any]:
             """Parse cinematic movie script with character dialogues"""
@@ -342,9 +213,10 @@ class ScriptParser:
                     not line.startswith('SFX:') and not line.startswith('MUSIC:') and
                     not line.startswith(('SCENE', 'INT.', 'EXT.', 'FADE', 'CUT TO'))):
                     
-                    # Verify it's a known character
-                    if any(char.upper() == line for char in characters):
+                    # Verify it's a known character (case-insensitive)
+                    if any(char.upper() == line.upper() for char in characters):
                         current_character = line
+                        print(f"[SCRIPT PARSER DEBUG] Detected character: {line} (line {i+1})")
                         continue
                 
                 # Check for dialogue using existing method first
@@ -403,13 +275,13 @@ class ScriptParser:
                     })
                     continue
                 
-                # Everything else is narration (if not character dialogue context)
-                if not current_character and self._is_narrator_text(line, characters):
-                    audio_components["narrator_segments"].append({
-                        "text": line,
-                        "scene": current_scene,
-                        "line_number": i + 1
-                    })
+                # Everything else is narration (if not character dialogue context) - COMMENTED OUT FOR CINEMATIC SCRIPTS
+                # if not current_character and self._is_narrator_text(line, characters):
+                #     audio_components["narrator_segments"].append({
+                #         "text": line,
+                #         "scene": current_scene,
+                #         "line_number": i + 1
+                #     })
             
             # Add scene-based background music if none specified
             if not audio_components["background_music"]:
@@ -492,28 +364,63 @@ class ScriptParser:
 
     def _detect_character_dialogue(self, line: str, characters: List[str]) -> Tuple[str, str] | None:
         """Detect if a line contains character dialogue"""
-        
-        # Pattern 1: CHARACTER: dialogue
+
+        # Pattern 1: CHARACTER: dialogue (case-insensitive matching)
         colon_pattern = r'^([A-Z][A-Z\s]+):\s*(.+)$'
         match = re.match(colon_pattern, line)
         if match:
             character_name = match.group(1).strip()
             dialogue = match.group(2).strip()
-            
-            # Check if it's a known character or close match
-            if character_name in characters or any(char.upper() == character_name for char in characters):
+
+            # Check if it's a known character (case-insensitive)
+            if character_name in characters or any(char.upper() == character_name.upper() for char in characters):
+                print(f"[SCRIPT PARSER DEBUG] Detected dialogue pattern 1: {character_name}: {dialogue[:50]}...")
                 return (character_name, dialogue)
-        
-        # Pattern 2: "dialogue" - CHARACTER
+
+        # Pattern 2: "dialogue" - CHARACTER (case-insensitive)
         quote_pattern = r'^"(.+)"\s*-\s*([A-Z][A-Za-z\s]+)$'
         match = re.match(quote_pattern, line)
         if match:
             dialogue = match.group(1).strip()
             character_name = match.group(2).strip().upper()
-            
-            if character_name in [char.upper() for char in characters]:
+
+            if character_name.upper() in [char.upper() for char in characters]:
+                print(f"[SCRIPT PARSER DEBUG] Detected dialogue pattern 2: \"{dialogue[:50]}...\" - {character_name}")
                 return (character_name, dialogue)
-        
+
+        # Pattern 3: CHARACTER (dialogue)
+        paren_pattern = r'^([A-Z][A-Z\s]+)\s*\((.+)\)$'
+        match = re.match(paren_pattern, line)
+        if match:
+            character_name = match.group(1).strip()
+            dialogue = match.group(2).strip()
+
+            if character_name in characters or any(char.upper() == character_name.upper() for char in characters):
+                print(f"[SCRIPT PARSER DEBUG] Detected dialogue pattern 3: {character_name} ({dialogue[:50]}...)")
+                return (character_name, dialogue)
+
+        # Pattern 4: dialogue (CHARACTER)
+        reverse_paren_pattern = r'^(.+)\s*\(([A-Z][A-Za-z\s]+)\)$'
+        match = re.match(reverse_paren_pattern, line)
+        if match:
+            dialogue = match.group(1).strip()
+            character_name = match.group(2).strip().upper()
+
+            if character_name.upper() in [char.upper() for char in characters]:
+                print(f"[SCRIPT PARSER DEBUG] Detected dialogue pattern 4: {dialogue[:50]}... ({character_name})")
+                return (character_name, dialogue)
+
+        # Pattern 5: CHARACTER - dialogue
+        dash_pattern = r'^([A-Z][A-Z\s]+)\s*-\s*(.+)$'
+        match = re.match(dash_pattern, line)
+        if match:
+            character_name = match.group(1).strip()
+            dialogue = match.group(2).strip()
+
+            if character_name in characters or any(char.upper() == character_name.upper() for char in characters):
+                print(f"[SCRIPT PARSER DEBUG] Detected dialogue pattern 5: {character_name} - {dialogue[:50]}...")
+                return (character_name, dialogue)
+
         return None
 
     def _is_narrator_text(self, line: str, characters: List[str]) -> bool:

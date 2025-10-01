@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { aiService, PipelineStatus } from '../services/aiService';
+import { aiService } from '../services/aiService';
+import { PipelineStatus } from '../types/pipelinestatus';
 import { toast } from 'react-hot-toast';
 import { UsePipelineStatusOptions, UsePipelineStatusReturn } from '../types/usePipelineStatus';
+import { handlePipelineStatusError } from '../utils/videoGenerationErrors';
 
 
 export const usePipelineStatus = (
@@ -46,6 +48,9 @@ export const usePipelineStatus = (
       if (!mountedRef.current) return;
       
       setPipelineStatus(status);
+      
+      // Check for errors and show notifications
+      handlePipelineStatusError(status, videoGenerationId);
       
       // Call status change callback
       if (onStatusChange) {
