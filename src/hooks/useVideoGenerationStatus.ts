@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  VideoGeneration, 
+import {
+  VideoGeneration,
   GenerationStatus,
   AudioProgress,
   ImageProgress,
   VideoProgress,
   MergeProgress,
-  LipSyncProgress 
+  LipSyncProgress
 } from '../lib/videoGenerationApi';
 import { pollingService, PollingCallbacks } from '../services/videoGenerationPolling';
 
@@ -18,9 +18,16 @@ export interface UseVideoGenerationStatusReturn {
   error: Error | null;
   retryAttempts: number;
   
-  // Progress data
+  // Enhanced progress data
   progress: {
     overall: number;
+    currentStep: string;
+    stepProgress: {
+      image_generation: { status: string; progress: number };
+      audio_generation: { status: string; progress: number };
+      video_generation: { status: string; progress: number };
+      audio_video_merge: { status: string; progress: number };
+    };
     audio?: AudioProgress;
     images?: ImageProgress;
     video?: VideoProgress;
@@ -38,6 +45,7 @@ export interface UseVideoGenerationStatusReturn {
   isComplete: boolean;
   isFailed: boolean;
   isGenerating: boolean;
+  isLoading: boolean;
 }
 
 export const useVideoGenerationStatus = (
@@ -46,27 +54,46 @@ export const useVideoGenerationStatus = (
   const [generation, setGeneration] = useState<VideoGeneration | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  const [currentStep, setCurrentStep] = useState<string>('');
+  const [stepProgress, setStepProgress] = useState({
+    image_generation: { status: 'pending', progress: 0 },
+    audio_generation: { status: 'pending', progress: 0 },
+    video_generation: { status: 'pending', progress: 0 },
+    audio_video_merge: { status: 'pending', progress: 0 }
+  });
   const currentVideoGenId = useRef<string | null>(null);
 
-  // Calculate overall progress
-   // Update the calculateOverallProgress function:
-  const calculateOverallProgress = (status: GenerationStatus | null): number => {
+  // Calculate overall progress from step progress
+  const calculateOverallProgress = (): number => {
+    const totalSteps = Object.values(stepProgress).length;
+    const totalProgress = Object.values(stepProgress).reduce(
+      (sum, step) => sum + step.progress,
+      0
+    );
+    return Math.round(totalProgress / totalSteps);
+  };
+
+  // Enhanced progress calculation with step-by-step tracking
+  const calculateEnhancedProgress = (status: GenerationStatus | null): number => {
     if (!status) return 0;
     
+    // Use step progress if available, otherwise fall back to status-based calculation
+    const overallFromSteps = calculateOverallProgress();
+    if (overallFromSteps > 0) return overallFromSteps;
+    
+    // Fallback to status-based calculation
     switch (status) {
       case 'generating_audio':
         return 15;
       case 'audio_completed':
         return 25;
       case 'generating_images': {
-        // ✅ Fix: Wrap in braces
         const imageProgress = generation?.image_progress;
         return 25 + ((imageProgress?.success_rate || 0) * 0.25);
       }
       case 'images_completed':
         return 50;
       case 'generating_video': {
-        // ✅ Fix: Wrap in braces
         const videoProgress = generation?.video_progress;
         return 50 + ((videoProgress?.success_rate || 0) * 0.25);
       }
@@ -92,6 +119,66 @@ export const useVideoGenerationStatus = (
     onUpdate: (updatedGeneration) => {
       setGeneration(updatedGeneration);
       setError(null);
+      
+      // Update step progress based on generation status
+      const status = updatedGeneration.generation_status;
+      let newCurrentStep = '';
+      let newStepProgress = { ...stepProgress };
+      
+      switch (status) {
+        case 'generating_audio':
+          newCurrentStep = 'Audio Generation';
+          newStepProgress.audio_generation = { status: 'processing', progress: 50 };
+          break;
+        case 'audio_completed':
+          newCurrentStep = 'Audio Generation';
+          newStepProgress.audio_generation = { status: 'completed', progress: 100 };
+          break;
+        case 'generating_images':
+          newCurrentStep = 'Image Generation';
+          newStepProgress.image_generation = { status: 'processing', progress: 50 };
+          break;
+        case 'images_completed':
+          newCurrentStep = 'Image Generation';
+          newStepProgress.image_generation = { status: 'completed', progress: 100 };
+          break;
+        case 'generating_video':
+          newCurrentStep = 'Video Generation';
+          newStepProgress.video_generation = { status: 'processing', progress: 50 };
+          break;
+        case 'video_completed':
+          newCurrentStep = 'Video Generation';
+          newStepProgress.video_generation = { status: 'completed', progress: 100 };
+          break;
+        case 'merging_audio':
+          newCurrentStep = 'Audio/Video Merge';
+          newStepProgress.audio_video_merge = { status: 'processing', progress: 50 };
+          break;
+        case 'applying_lipsync':
+          newCurrentStep = 'Lip Sync';
+          newStepProgress.audio_video_merge = { status: 'completed', progress: 100 };
+          break;
+        case 'completed':
+          newCurrentStep = 'Complete';
+          newStepProgress = {
+            image_generation: { status: 'completed', progress: 100 },
+            audio_generation: { status: 'completed', progress: 100 },
+            video_generation: { status: 'completed', progress: 100 },
+            audio_video_merge: { status: 'completed', progress: 100 }
+          };
+          break;
+        case 'failed':
+        case 'lipsync_failed':
+          newCurrentStep = 'Failed';
+          // Set all steps to failed
+          Object.keys(newStepProgress).forEach(key => {
+            newStepProgress[key as keyof typeof newStepProgress] = { status: 'failed', progress: 0 };
+          });
+          break;
+      }
+      
+      setCurrentStep(newCurrentStep);
+      setStepProgress(newStepProgress);
     },
     onError: (pollingError) => {
       setError(pollingError);
@@ -162,12 +249,15 @@ export const useVideoGenerationStatus = (
   const isComplete = status ? ['completed', 'lipsync_completed'].includes(status) : false;
   const isFailed = status ? ['failed', 'lipsync_failed'].includes(status) : false;
   const isGenerating = isPolling && !isComplete && !isFailed;
-  const retryAttempts = currentVideoGenId.current 
-    ? pollingService.getRetryAttempts(currentVideoGenId.current) 
+  const isLoading = isPolling && !isComplete;
+  const retryAttempts = currentVideoGenId.current
+    ? pollingService.getRetryAttempts(currentVideoGenId.current)
     : 0;
 
   const progress = {
-    overall: calculateOverallProgress(status),
+    overall: calculateOverallProgress(),
+    currentStep,
+    stepProgress,
     audio: generation?.audio_progress,
     images: generation?.image_progress,
     video: generation?.video_progress,
@@ -196,6 +286,7 @@ export const useVideoGenerationStatus = (
     isComplete,
     isFailed,
     isGenerating,
+    isLoading,
   };
 };
 

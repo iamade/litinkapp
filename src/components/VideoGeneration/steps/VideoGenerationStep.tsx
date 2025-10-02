@@ -1,6 +1,7 @@
 import React from 'react';
-import { Video, Play, Clock, AlertCircle } from 'lucide-react';
+import { Video, Play, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 import { useVideoGeneration } from '../../../contexts/VideoGenerationContext';
+import { PollingStatus } from '../PollingStatus';
 
 export const VideoGenerationStep: React.FC = () => {
   const { state } = useVideoGeneration();
@@ -42,12 +43,45 @@ export const VideoGenerationStep: React.FC = () => {
           </div>
         </div>
 
-        {generation.error_message && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
-            <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
-            <div>
-              <div className="text-red-800 font-medium text-sm">Video Generation Error</div>
-              <div className="text-red-700 text-sm mt-1">{generation.error_message}</div>
+        {/* Polling Status */}
+        {generation?.generation_status === 'generating_video' && generation?.id && (
+          <div className="mb-4">
+            <PollingStatus
+              videoGenId={generation.id}
+              showDetails={true}
+            />
+            
+            {/* Current Scene Info */}
+            {videoProgress && (
+              <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                <div className="flex items-center justify-between text-sm text-purple-800">
+                  <span className="font-medium">Current Scene Progress</span>
+                  <span>
+                    Scene {videoProgress.scenes_completed + 1} of {videoProgress.total_scenes}
+                  </span>
+                </div>
+                {videoProgress.success_rate > 0 && (
+                  <div className="mt-1 text-xs text-purple-600">
+                    Success Rate: {Math.round(videoProgress.success_rate)}%
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Error Display */}
+        {generation?.error_message && (
+          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <h5 className="text-red-800 font-medium text-sm mb-1">Video Generation Error</h5>
+                <div className="text-red-700 text-sm mb-2">{generation.error_message}</div>
+                
+                {/* Actionable Error Suggestions */}
+                {getErrorSuggestions(generation.error_message)}
+              </div>
             </div>
           </div>
         )}
@@ -114,7 +148,7 @@ export const VideoGenerationStep: React.FC = () => {
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <h4 className="text-lg font-semibold text-gray-900 mb-4">Scene Videos</h4>
           <div className="space-y-4">
-            {generation.scene_videos.map((video: any, index: number) => (
+            {generation.scene_videos.map((video, index: number) => (
               <div key={index} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
                 <div className="flex-shrink-0">
                   <div className="w-16 h-12 bg-gray-200 rounded overflow-hidden">
@@ -159,17 +193,74 @@ export const VideoGenerationStep: React.FC = () => {
       {/* Status Message */}
       <div className="text-center py-4">
         {generation.generation_status === 'generating_video' ? (
-          <div className="flex items-center justify-center gap-2 text-purple-600">
-            <div className="w-2 h-2 bg-purple-600 rounded-full animate-pulse"></div>
-            <span className="text-sm">Generating video segments... This may take several minutes</span>
+          <div className="space-y-2">
+            <div className="flex items-center justify-center gap-2 text-purple-600">
+              <div className="w-2 h-2 bg-purple-600 rounded-full animate-pulse"></div>
+              <span className="text-sm">
+                Generating video segments... This may take several minutes
+              </span>
+            </div>
+            {generation?.id && (
+              <div className="text-xs text-blue-600">
+                <PollingStatus videoGenId={generation.id} showDetails={false} />
+              </div>
+            )}
           </div>
         ) : generation.generation_status === 'video_completed' ? (
-          <div className="flex items-center justify-center gap-2 text-purple-600">
-            <Video className="w-4 h-4" />
+          <div className="flex items-center justify-center gap-2 text-green-600">
+            <CheckCircle className="w-4 h-4" />
             <span className="text-sm font-medium">Video generation completed!</span>
           </div>
         ) : null}
       </div>
+    </div>
+  );
+};
+
+// Helper function to provide actionable error suggestions
+const getErrorSuggestions = (errorMessage: string): React.ReactNode => {
+  const errorLower = errorMessage.toLowerCase();
+  
+  if (errorLower.includes('generation_failed') || errorLower.includes('failed to generate')) {
+    return (
+      <div className="bg-red-100 p-2 rounded text-xs text-red-800">
+        <strong>Suggested Action:</strong> The video generation service may be experiencing high load.
+        Please wait a moment and try again, or try with a shorter script.
+      </div>
+    );
+  }
+  
+  if (errorLower.includes('timeout') || errorLower.includes('timed out')) {
+    return (
+      <div className="bg-red-100 p-2 rounded text-xs text-red-800">
+        <strong>Suggested Action:</strong> The operation timed out. This can happen with longer videos.
+        Try generating a shorter video or check your internet connection.
+      </div>
+    );
+  }
+  
+  if (errorLower.includes('retrieval_failed') || errorLower.includes('fallback')) {
+    return (
+      <div className="bg-orange-100 p-2 rounded text-xs text-orange-800">
+        <strong>Suggested Action:</strong> Video was generated but retrieval failed.
+        The system is automatically trying alternative methods. Please wait or try again in a moment.
+      </div>
+    );
+  }
+  
+  if (errorLower.includes('safety') || errorLower.includes('content policy')) {
+    return (
+      <div className="bg-yellow-100 p-2 rounded text-xs text-yellow-800">
+        <strong>Suggested Action:</strong> Content was flagged by safety filters.
+        Please review your script for potentially restricted content and try again.
+      </div>
+    );
+  }
+  
+  return (
+    <div className="bg-red-100 p-2 rounded text-xs text-red-800">
+      <strong>Suggested Action:</strong> Please try again in a moment. If the issue persists,
+      contact support with the error details.
     </div>
   );
 };

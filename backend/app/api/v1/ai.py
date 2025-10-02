@@ -3003,3 +3003,268 @@ async def trigger_task_for_step(step: PipelineStep, video_gen_id: str, supabase_
         
         raise HTTPException(status_code=500, detail=f"Failed to start retry task: {str(task_error)}")
 
+@router.get("/video-generation/{video_generation_id}/status")
+async def get_video_generation_polling_status(
+    video_generation_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Comprehensive polling endpoint for video generation status with step-by-step progress"""
+    try:
+        # Verify access to video generation
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_generation_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        video_data = video_response.data
+        overall_status = video_data.get('generation_status', 'pending')
+        
+        # Get pipeline steps for detailed progress
+        steps_response = supabase_client.table('pipeline_steps')\
+            .select('*').eq('video_generation_id', video_generation_id)\
+            .order('step_order').execute()
+        
+        pipeline_steps = steps_response.data or []
+        
+        # Initialize step progress tracking
+        step_progress = {
+            "image_generation": {"status": "pending", "progress": 0},
+            "audio_generation": {"status": "pending", "progress": 0},
+            "video_generation": {"status": "pending", "progress": 0},
+            "audio_video_merge": {"status": "pending", "progress": 0}
+        }
+        
+        # Map pipeline steps to progress tracking
+        for step in pipeline_steps:
+            step_name = step.get('step_name', '').lower()
+            step_status = step.get('status', 'pending')
+            
+            if 'image' in step_name:
+                step_progress["image_generation"]["status"] = step_status
+                step_progress["image_generation"]["progress"] = 100 if step_status == 'completed' else 50
+            elif 'audio' in step_name:
+                step_progress["audio_generation"]["status"] = step_status
+                step_progress["audio_generation"]["progress"] = 100 if step_status == 'completed' else 50
+            elif 'video' in step_name and 'merge' not in step_name:
+                step_progress["video_generation"]["status"] = step_status
+                step_progress["video_generation"]["progress"] = 100 if step_status == 'completed' else 50
+            elif 'merge' in step_name:
+                step_progress["audio_video_merge"]["status"] = step_status
+                step_progress["audio_video_merge"]["progress"] = 100 if step_status == 'completed' else 50
+        
+        # Determine current step based on overall status
+        current_step = "pending"
+        if overall_status == 'generating_audio':
+            current_step = "audio_generation"
+        elif overall_status == 'generating_images':
+            current_step = "image_generation"
+        elif overall_status == 'generating_video':
+            current_step = "video_generation"
+        elif overall_status == 'merging_audio':
+            current_step = "audio_video_merge"
+        elif overall_status == 'completed':
+            current_step = "completed"
+        elif overall_status == 'failed':
+            current_step = "failed"
+        
+        # Calculate overall progress percentage
+        completed_steps = sum(1 for step in step_progress.values() if step["status"] == "completed")
+        total_steps = len(step_progress)
+        progress_percentage = int((completed_steps / total_steps) * 100) if total_steps > 0 else 0
+        
+        # Check for active Celery tasks
+        celery_task_info = await get_celery_task_status(video_data, supabase_client)
+        
+        # Build comprehensive response
+        response_data = {
+            "status": overall_status,
+            "current_step": current_step,
+            "progress_percentage": progress_percentage,
+            "steps": step_progress,
+            "error": video_data.get('error_message'),
+            "video_url": video_data.get('video_url'),
+            "created_at": video_data.get('created_at'),
+            "updated_at": video_data.get('updated_at'),
+            "celery_task": celery_task_info
+        }
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting video generation polling status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def get_celery_task_status(video_data: dict, supabase_client: Client) -> dict:
+    """Get Celery task status information"""
+    try:
+        task_info = {
+            "task_id": None,
+            "task_state": None,
+            "eta": None,
+            "result": None
+        }
+        
+        # Check for task IDs in metadata or direct fields
+        task_metadata = video_data.get('task_metadata', {})
+        audio_task_id = task_metadata.get('audio_task_id') or video_data.get('audio_task_id')
+        image_task_id = task_metadata.get('image_task_id')
+        video_task_id = task_metadata.get('video_task_id')
+        merge_task_id = task_metadata.get('merge_task_id')
+        
+        # Use the most relevant task ID based on current status
+        current_status = video_data.get('generation_status', 'pending')
+        task_id = None
+        
+        if current_status == 'generating_audio' and audio_task_id:
+            task_id = audio_task_id
+        elif current_status == 'generating_images' and image_task_id:
+            task_id = image_task_id
+        elif current_status == 'generating_video' and video_task_id:
+            task_id = video_task_id
+        elif current_status == 'merging_audio' and merge_task_id:
+            task_id = merge_task_id
+        
+        if task_id:
+            try:
+                from app.tasks.celery_app import celery_app
+                task_result = celery_app.AsyncResult(task_id)
+                
+                task_info.update({
+                    "task_id": task_id,
+                    "task_state": task_result.state,
+                    "eta": getattr(task_result, 'eta', None),
+                    "result": str(task_result.result) if task_result.result else None
+                })
+                
+                # If task failed, update error information
+                if task_result.state == 'FAILURE':
+                    task_info["error"] = str(task_result.result)
+                    
+            except Exception as task_error:
+                print(f"Error checking Celery task status: {task_error}")
+                task_info["error"] = f"Failed to check task status: {str(task_error)}"
+        
+        return task_info
+        
+    except Exception as e:
+        print(f"Error in get_celery_task_status: {e}")
+        return {"error": str(e)}
+
+
+@router.post("/video/retry/{task_id}")
+async def retry_video_retrieval(
+    task_id: str,
+    video_url: str = Body(None),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Retry video retrieval for a failed video generation task"""
+    try:
+        print(f"🔄 Starting video retrieval retry for task: {task_id}")
+        
+        # Verify task access
+        task_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', task_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not task_response.data:
+            raise HTTPException(status_code=404, detail="Video generation task not found")
+        
+        task_data = task_response.data
+        current_status = task_data.get('generation_status')
+        
+        # Check if this task is eligible for retry
+        if current_status not in ['video_completed', 'failed', 'retrieval_failed']:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot retry video retrieval. Current status: {current_status}"
+            )
+        
+        # Check retry count
+        retry_count = task_data.get('retry_count', 0)
+        max_retries = 3
+        
+        if retry_count >= max_retries:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum retry attempts ({max_retries}) exceeded"
+            )
+        
+        # Get video URL from request or task data
+        if not video_url:
+            # Try to get video URL from task metadata
+            task_metadata = task_data.get('task_metadata', {})
+            video_url = task_metadata.get('future_links_url') or task_metadata.get('video_url')
+            
+            if not video_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No video URL available for retry. Please provide a video_url parameter."
+                )
+        
+        print(f"🔄 Attempting video retrieval from URL: {video_url}")
+        
+        # Import and use the video service for retry
+        from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
+        video_service = ModelsLabV7VideoService()
+        
+        # Attempt video retrieval
+        retry_result = await video_service.retry_video_retrieval(video_url)
+        
+        if not retry_result.get('success'):
+            # Update retry count and status
+            new_retry_count = retry_count + 1
+            supabase_client.table('video_generations').update({
+                'retry_count': new_retry_count,
+                'last_retry_at': datetime.now().isoformat(),
+                'generation_status': 'retrieval_failed' if new_retry_count < max_retries else 'failed',
+                'error_message': retry_result.get('error', 'Video retrieval failed'),
+                'can_resume': new_retry_count < max_retries
+            }).eq('id', task_id).execute()
+            
+            raise HTTPException(
+                status_code=500,
+                detail=f"Video retrieval failed: {retry_result.get('error', 'Unknown error')}"
+            )
+        
+        # Success - update task with video URL and mark as completed
+        video_url = retry_result.get('video_url')
+        video_duration = retry_result.get('duration', 0)
+        
+        supabase_client.table('video_generations').update({
+            'generation_status': 'completed',
+            'video_url': video_url,
+            'retry_count': retry_count + 1,
+            'last_retry_at': datetime.now().isoformat(),
+            'error_message': None,
+            'can_resume': False,
+            'task_metadata': {
+                **task_data.get('task_metadata', {}),
+                'retry_success': True,
+                'retry_video_url': video_url,
+                'video_duration': video_duration,
+                'final_retrieval_time': datetime.now().isoformat()
+            }
+        }).eq('id', task_id).execute()
+        
+        print(f"✅ Video retrieval retry successful for task: {task_id}")
+        
+        return {
+            'success': True,
+            'message': 'Video retrieval successful',
+            'video_url': video_url,
+            'duration': video_duration,
+            'retry_count': retry_count + 1,
+            'task_id': task_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error in video retrieval retry: {e}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

@@ -208,7 +208,9 @@ async def generate_narrator_audio(
     
     for i, segment in enumerate(narrator_segments):
         try:
-            print(f"[NARRATOR AUDIO] Processing segment {i+1}/{len(narrator_segments)}")
+            scene_id = segment.get('scene', 1)
+            print(f"[NARRATOR AUDIO] Processing segment {i+1}/{len(narrator_segments)} for scene {scene_id}")
+            print(f"[AUDIO GEN] Generating narrator audio for scene_{scene_id}: {segment['text'][:50]}...")
             
             # Generate audio
             result = await audio_service.generate_tts_audio(
@@ -234,6 +236,7 @@ async def generate_narrator_audio(
             # ✅ FIXED: Use correct column names for database
             print(f"[DEBUG] Inserting narrator audio record for video_gen {video_gen_id}")
             print(f"[DEBUG] Audio record chapter_id: {chapter_id}, user_id: {user_id}")
+            scene_id = segment.get('scene', 1)
             audio_record_data = {
                 'video_generation_id': video_gen_id,
                 'user_id': user_id,  # Add user_id
@@ -246,10 +249,11 @@ async def generate_narrator_audio(
                 'generation_status': 'completed',  # ✅ Use 'generation_status'
                 'sequence_order': i + 1,
                 'model_id': result.get('model_used', 'eleven_multilingual_v2'),  # ✅ Add model_id
+                'scene_id': f"scene_{scene_id}",  # ✅ Store scene_id at top level for merge compatibility
                 'metadata': {
                     'chapter_id': chapter_id,
                     'line_number': segment.get('line_number', i + 1),
-                    'scene': segment.get('scene', 1),
+                    'scene': scene_id,
                     'service': 'modelslab_v7',  # ✅ Updated service name
                     'model_used': result.get('model_used', 'eleven_multilingual_v2')
                 }
@@ -316,7 +320,9 @@ async def generate_character_audio(
     for i, dialogue in enumerate(character_dialogues):
         try:
             character_name = dialogue['character']
-            print(f"[CHARACTER AUDIO] Processing dialogue {i+1}/{len(character_dialogues)} for {character_name}")
+            scene_id = dialogue.get('scene', 1)
+            print(f"[CHARACTER AUDIO] Processing dialogue {i+1}/{len(character_dialogues)} for {character_name} in scene {scene_id}")
+            print(f"[AUDIO GEN] Generating character audio for {character_name} in scene_{scene_id}: {dialogue['text'][:50]}...")
 
             # Assign voice to character if not already assigned
             if character_name not in character_voice_mapping:
@@ -353,6 +359,7 @@ async def generate_character_audio(
                 raise Exception(f"V7 Audio generation failed: {result.get('error', 'Unknown error')}")
 
             # Store in database
+            scene_id = dialogue.get('scene', 1)
             audio_record_data = {
                 'video_generation_id': video_gen_id,
                 'user_id': user_id,
@@ -365,12 +372,13 @@ async def generate_character_audio(
                 'generation_status': 'completed',
                 'sequence_order': i + 1,
                 'model_id': result.get('model_used', 'eleven_multilingual_v2'),
+                'scene_id': f"scene_{scene_id}",  # ✅ Store scene_id at top level for merge compatibility
                 'metadata': {
                     'chapter_id': chapter_id,
                     'character_name': character_name,
                     'voice_name': voice_info['voice_name'],
                     'line_number': dialogue.get('line_number', i + 1),
-                    'scene': dialogue.get('scene', 1),
+                    'scene': scene_id,
                     'service': 'modelslab_v7',
                     'model_used': result.get('model_used', 'eleven_multilingual_v2')
                 }
@@ -534,7 +542,9 @@ async def generate_background_music(
     
     for i, music_cue in enumerate(music_cues):
         try:
-            print(f"[BACKGROUND MUSIC] Processing scene {music_cue['scene']}: {music_cue['description']}")
+            scene_id = music_cue['scene']
+            print(f"[BACKGROUND MUSIC] Processing scene {scene_id}: {music_cue['description']}")
+            print(f"[AUDIO GEN] Generating background music for scene_{scene_id}: {music_cue['description'][:50]}...")
             
             # ✅ Use V7 music generation
             result = await audio_service.generate_background_music(
@@ -551,6 +561,7 @@ async def generate_background_music(
                     raise Exception("No audio URL in V7 response")
                     
                 # Store in database
+                scene_id = music_cue['scene']
                 audio_record = supabase.table('audio_generations').insert({
                     'video_generation_id': video_gen_id,
                     'user_id': user_id,  # Add user_id
@@ -561,10 +572,11 @@ async def generate_background_music(
                     'duration': float(duration),
                     'generation_status': 'completed',
                     'sequence_order': i + 1,
+                    'scene_id': f"scene_{scene_id}",  # ✅ Store scene_id at top level for merge compatibility
                     'metadata': {
                         'chapter_id': chapter_id,
                         'music_type': music_cue.get('type', 'background_music'),
-                        'scene': music_cue['scene'],
+                        'scene': scene_id,
                         'service': 'modelslab_v7',
                         'model_used': result.get('model_used', 'music_v1')
                     }

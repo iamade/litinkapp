@@ -534,25 +534,73 @@ class VideoService:
             logs.append(f"[KLINGAI DEBUG] Animation style: {animation_style}")
             logs.append(f"[KLINGAI DEBUG] Target duration: 180s")
             
-            kling_result = await self._generate_kling_video(klingai_content, animation_style, target_duration=180)  # 3 minutes
-            if "video_url" not in kling_result:
-                logs.append(f"[KLINGAI ERROR] KlingAI generation failed: {kling_result}")
-                raise Exception(f"Kling AI video generation failed: {kling_result.get('error')}")
+            # Use multi-scene segmentation for video generation
+            logs.append(f"[SCENE GENERATION] Starting multi-scene video generation")
+            logs.append(f"[SCENE GENERATION] Characters available: {characters}")
             
-            video_url = kling_result["video_url"]
-            logs.append(f"[VIDEO SUCCESS] KlingAI video URL: {video_url}")
+            # Split script into actual scenes
+            scenes = self._split_script_by_scenes(script, characters)
+            logs.append(f"[SCENE GENERATION] Successfully parsed {len(scenes)} scenes")
             
-            # Check if this is a multi-segment video
-            is_multi_segment = kling_result.get("is_segment", False)
-            segment_urls = kling_result.get("segment_urls", [])
-            total_segments = kling_result.get("total_segments", 1)
+            # Generate video for each scene
+            scene_results = []
+            logs.append(f"[SCENE GENERATION] Processing {len(scenes)} scenes from parsed script")
             
-            logs.append(f"[SEGMENT INFO] Is multi-segment: {is_multi_segment}")
-            logs.append(f"[SEGMENT INFO] Total segments: {total_segments}")
-            logs.append(f"[SEGMENT INFO] Segment URLs: {segment_urls}")
+            for i, scene in enumerate(scenes):
+                scene_num = scene['scene_number']
+                logs.append(f"[SCENE {scene_num}/{len(scenes)}] Generating video for {scene['character_count']} characters, {scene['dialogue_count']} dialogues, {scene['action_count']} actions")
+                logs.append(f"[SCENE {scene_num}] Description: {scene['description'][:100]}...")
+                logs.append(f"[SCENE {scene_num}] Prompt length: {len(scene['prompt'])} characters")
+                
+                # Calculate appropriate duration for this scene
+                target_duration = max(10, min(60, scene['dialogue_count'] * 5))  # 5 seconds per dialogue
+                logs.append(f"[SCENE {scene_num}] Target duration: {target_duration}s")
+                
+                # Generate video for this scene
+                scene_kling_result = await self._generate_kling_video(
+                    scene['prompt'],
+                    animation_style,
+                    target_duration=target_duration
+                )
+                
+                if "video_url" not in scene_kling_result:
+                    logs.append(f"[SCENE {scene_num} ERROR] KlingAI generation failed: {scene_kling_result}")
+                    continue
+                
+                scene_video_url = scene_kling_result["video_url"]
+                logs.append(f"[SCENE {scene_num} SUCCESS] Video URL: {scene_video_url}")
+                
+                scene_results.append({
+                    "scene_number": scene_num,
+                    "description": scene['description'],
+                    "video_url": scene_video_url,
+                    "dialogues": scene['dialogues'],
+                    "actions": scene['actions'],
+                    "camera_movements": scene['camera_movements'],
+                    "character_count": scene['character_count'],
+                    "dialogue_count": scene['dialogue_count'],
+                    "action_count": scene['action_count'],
+                    "kling_result": scene_kling_result
+                })
+            
+            if not scene_results:
+                logs.append(f"[SCENE GENERATION ERROR] No scenes were successfully generated")
+                raise Exception("All scene video generations failed")
+            
+            # Use the first scene as the main video for compatibility
+            video_url = scene_results[0]["video_url"]
+            is_multi_segment = len(scene_results) > 1
+            segment_urls = [result["video_url"] for result in scene_results]
+            total_segments = len(scene_results)
+            
+            logs.append(f"[SCENE GENERATION] Completed: {len(scene_results)}/{len(scenes)} scenes generated successfully")
+            logs.append(f"[SCENE GENERATION] Is multi-segment: {is_multi_segment}")
+            logs.append(f"[SCENE GENERATION] Total segments: {total_segments}")
+            logs.append(f"[SCENE GENERATION] Segment URLs: {segment_urls}")
             
             # 6. Save KlingAI video metadata to Supabase DB
             try:
+                # Save main video metadata
                 kling_metadata = {
                     "chapter_id": chapter_id,
                     "video_url": video_url,
@@ -572,6 +620,46 @@ class VideoService:
                 logs.append(f"[DB INSERT] Saving KlingAI video metadata: {kling_metadata}")
                 db_result_kling = self.supabase_service.table("videos").insert(kling_metadata).execute()
                 logs.append(f"[DB INSERT RESULT] {db_result_kling}")
+                
+                # Save individual scene segments to video_segments table
+                if is_multi_segment and scene_results:
+                    logs.append(f"[SCENE DB] Saving {len(scene_results)} individual scene segments")
+                    video_generation_id = db_result_kling.data[0]['id'] if db_result_kling.data else None
+                    
+                    for scene_result in scene_results:
+                        try:
+                            # Extract character names from dialogues
+                            character_names = list(set([d.get("character", "Unknown") for d in scene_result['dialogues']]))
+                            
+                            scene_metadata = {
+                                "video_generation_id": video_generation_id,
+                                "scene_id": f"scene_{scene_result['scene_number']}",
+                                "scene_number": scene_result['scene_number'],
+                                "video_url": scene_result['video_url'],
+                                "scene_description": scene_result['description'],
+                                "character_count": scene_result['character_count'],
+                                "dialogue_count": scene_result['dialogue_count'],
+                                "action_count": scene_result['action_count'],
+                                "camera_movements": scene_result['camera_movements'],
+                                "character_names": character_names,
+                                "created_at": int(time.time()),
+                                "status": "completed",
+                                "prompt_length": len(scene_result.get('kling_result', {}).get('prompt', '')),
+                                "target_duration": scene_result.get('kling_result', {}).get('target_duration', 0)
+                            }
+                            if user_id:
+                                scene_metadata["user_id"] = user_id
+                            
+                            logs.append(f"[SCENE DB] Saving scene {scene_result['scene_number']}: {scene_metadata['scene_description'][:50]}...")
+                            logs.append(f"[SCENE DB] Characters: {character_names}, Dialogues: {scene_result['dialogue_count']}")
+                            scene_db_result = self.supabase_service.table("video_segments").insert(scene_metadata).execute()
+                            logs.append(f"[SCENE DB RESULT] Scene {scene_result['scene_number']} saved successfully with ID: {scene_db_result.data[0]['id'] if scene_db_result.data else 'unknown'}")
+                            
+                        except Exception as scene_db_error:
+                            logs.append(f"[SCENE DB ERROR] Failed to save scene {scene_result['scene_number']}: {scene_db_error}")
+                            import traceback
+                            logs.append(f"[SCENE DB ERROR TRACE] {traceback.format_exc()}")
+                
             except Exception as db_exc:
                 logs.append(f"[DB INSERT ERROR - KlingAI] {db_exc}")
             
@@ -2098,6 +2186,192 @@ Return as JSON with: script, character_details, scene_prompt
             segments = [script]
         
         return segments
+
+    def _split_script_by_scenes(self, script: str, characters: List[str]) -> List[Dict[str, Any]]:
+        """Split script into actual scenes based on scene headers and character dialogues"""
+        print(f"[SCENE SEGMENTATION] Starting scene segmentation for script with {len(script)} characters")
+        print(f"[SCENE SEGMENTATION] Characters: {characters}")
+        
+        from app.services.script_parser import ScriptParser
+        
+        # Use the script parser to extract scene components
+        script_parser = ScriptParser()
+        parsed_components = script_parser.parse_script_for_video_prompt(script, characters)
+        
+        scenes = []
+        
+        # Group dialogues and actions by scene
+        scene_dialogues = {}
+        scene_actions = {}
+        
+        # Group dialogues by scene
+        for dialogue in parsed_components.get("character_dialogues", []):
+            scene_num = dialogue.get("scene", 1)
+            if scene_num not in scene_dialogues:
+                scene_dialogues[scene_num] = []
+            scene_dialogues[scene_num].append(dialogue)
+        
+        # Group actions by scene
+        for action in parsed_components.get("character_actions", []):
+            scene_num = action.get("scene", 1)
+            if scene_num not in scene_actions:
+                scene_actions[scene_num] = []
+            scene_actions[scene_num].append(action)
+        
+        # Create scene objects from scene descriptions
+        for scene_desc in parsed_components.get("scene_descriptions", []):
+            scene_num = scene_desc.get("scene_number", 1)
+            scene_description = scene_desc.get("description", "")
+            
+            # Get dialogues and actions for this scene
+            scene_dialogue_list = scene_dialogues.get(scene_num, [])
+            scene_action_list = scene_actions.get(scene_num, [])
+            
+            # Create scene prompt
+            scene_prompt = self._create_scene_prompt(
+                scene_description,
+                scene_dialogue_list,
+                scene_action_list,
+                scene_desc.get("camera_movements", [])
+            )
+            
+            scenes.append({
+                "scene_number": scene_num,
+                "description": scene_description,
+                "dialogues": scene_dialogue_list,
+                "actions": scene_action_list,
+                "camera_movements": scene_desc.get("camera_movements", []),
+                "prompt": scene_prompt,
+                "character_count": len(set([d.get("character") for d in scene_dialogue_list])),
+                "dialogue_count": len(scene_dialogue_list),
+                "action_count": len(scene_action_list)
+            })
+        
+        # If no scenes were detected by scene headers, create scenes based on character dialogue changes
+        if not scenes:
+            print(f"[SCENE SEGMENTATION] No scene headers detected, creating scenes based on character dialogue changes")
+            scenes = self._create_scenes_from_dialogue_changes(script, characters, parsed_components)
+        
+        print(f"[SCENE SEGMENTATION] Successfully split into {len(scenes)} scenes")
+        for i, scene in enumerate(scenes):
+            print(f"[SCENE {i+1}/{len(scenes)}] Dialogues: {scene['dialogue_count']}, Actions: {scene['action_count']}, Characters: {scene['character_count']}")
+            print(f"[SCENE {i+1}] Description: {scene['description'][:100]}...")
+            print(f"[SCENE {i+1}] Prompt preview: {scene['prompt'][:100]}...")
+        
+        return scenes
+
+    def _create_scene_prompt(self, scene_description: str, dialogues: List[Dict], actions: List[Dict], camera_movements: List[str]) -> str:
+        """Create a comprehensive prompt for a single scene"""
+        prompt_parts = [f"Scene: {scene_description}"]
+        
+        # Add camera movements
+        if camera_movements:
+            prompt_parts.append(f"Camera movements: {', '.join(camera_movements)}")
+        
+        # Add character actions
+        if actions:
+            action_texts = []
+            for action in actions:
+                character = action.get("character", "Unknown")
+                action_desc = action.get("action", "")
+                action_texts.append(f"{character} {action_desc}")
+            prompt_parts.append(f"Character actions: {', '.join(action_texts)}")
+        
+        # Add character dialogues
+        if dialogues:
+            dialogue_texts = []
+            for dialogue in dialogues:
+                character = dialogue.get("character", "Unknown")
+                text = dialogue.get("text", "")
+                dialogue_texts.append(f"{character}: \"{text}\"")
+            prompt_parts.append(f"Dialogues: {' | '.join(dialogue_texts)}")
+        
+        # Add cinematic quality instructions
+        prompt_parts.extend([
+            "Cinematic quality, professional videography",
+            "Smooth camera movements, natural character expressions",
+            "High resolution, realistic lighting and composition"
+        ])
+        
+        return ". ".join(prompt_parts)
+
+    def _create_scenes_from_dialogue_changes(self, script: str, characters: List[str], parsed_components: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Create scenes based on character dialogue changes when no scene headers are detected"""
+        print(f"[DIALOGUE SCENE DETECTION] Creating scenes from dialogue changes")
+        
+        scenes = []
+        current_scene = 1
+        current_character = None
+        scene_dialogues = []
+        scene_actions = []
+        
+        # Process all dialogues and group by character changes
+        dialogues = parsed_components.get("character_dialogues", [])
+        actions = parsed_components.get("character_actions", [])
+        
+        for i, dialogue in enumerate(dialogues):
+            character = dialogue.get("character", "Unknown")
+            
+            # Start new scene when character changes or every 3 dialogues
+            if (current_character and character != current_character) or len(scene_dialogues) >= 3:
+                # Create scene from accumulated dialogues
+                scene_description = f"Scene {current_scene}: {current_character or character} speaks"
+                scene_prompt = self._create_scene_prompt(
+                    scene_description,
+                    scene_dialogues,
+                    scene_actions,
+                    []
+                )
+                
+                scenes.append({
+                    "scene_number": current_scene,
+                    "description": scene_description,
+                    "dialogues": scene_dialogues.copy(),
+                    "actions": scene_actions.copy(),
+                    "camera_movements": [],
+                    "prompt": scene_prompt,
+                    "character_count": len(set([d.get("character") for d in scene_dialogues])),
+                    "dialogue_count": len(scene_dialogues),
+                    "action_count": len(scene_actions)
+                })
+                
+                # Reset for next scene
+                current_scene += 1
+                scene_dialogues.clear()
+                scene_actions.clear()
+            
+            current_character = character
+            scene_dialogues.append(dialogue)
+            
+            # Add relevant actions for this dialogue
+            for action in actions:
+                if action.get("character") == character:
+                    scene_actions.append(action)
+        
+        # Add final scene if there are remaining dialogues
+        if scene_dialogues:
+            scene_description = f"Scene {current_scene}: {current_character or 'Character'} speaks"
+            scene_prompt = self._create_scene_prompt(
+                scene_description,
+                scene_dialogues,
+                scene_actions,
+                []
+            )
+            
+            scenes.append({
+                "scene_number": current_scene,
+                "description": scene_description,
+                "dialogues": scene_dialogues,
+                "actions": scene_actions,
+                "camera_movements": [],
+                "prompt": scene_prompt,
+                "character_count": len(set([d.get("character") for d in scene_dialogues])),
+                "dialogue_count": len(scene_dialogues),
+                "action_count": len(scene_actions)
+            })
+        
+        print(f"[DIALOGUE SCENE DETECTION] Created {len(scenes)} scenes from dialogue changes")
+        return scenes
 
     def _format_dialogues_for_elevenlabs(self, character_dialogues: List[Dict[str, str]]) -> str:
         """Format character dialogues for ElevenLabs audio generation"""

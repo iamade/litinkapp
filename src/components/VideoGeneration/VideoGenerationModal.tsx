@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { X, AlertCircle, CheckCircle } from "lucide-react";
+import { X, AlertCircle } from "lucide-react";
 import {
   useVideoGeneration,
-  useGenerationStatus,
-  useGenerationProgress,
 } from "../../contexts/VideoGenerationContext";
+import { useVideoGenerationStatus } from "../../hooks/useVideoGenerationStatus";
 import { QualityTierSelector } from "./QualityTierSelector";
 import { ProgressIndicators } from "./ProgressIndicators";
 import { AudioGenerationStep } from "./steps/AudioGenerationStep";
@@ -32,8 +31,10 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
 }) => {
   const { state, startGeneration, resetGeneration, clearError } =
     useVideoGeneration();
-  const status = useGenerationStatus();
-  const progress = useGenerationProgress();
+  const {
+    status,
+    progress
+  } = useVideoGenerationStatus(state.currentGeneration?.id);
 
   const [selectedQualityTier, setSelectedQualityTier] = useState<
     "free" | "premium" | "professional"
@@ -185,29 +186,113 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
               currentStep={getCurrentStepNumber(status)}
               overallProgress={progress?.overall || 0}
               status={status}
+              stepProgress={progress?.stepProgress}
+              currentStepName={progress?.currentStep}
             />
           </div>
         )}
 
         {/* Error Display */}
         {state.error && (
-          <div className="p-4 mx-6 mt-6 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
-            <div>
-              <h4 className="text-red-800 font-medium">Error</h4>
-              <p className="text-red-700 text-sm mt-1">{state.error}</p>
+          <div className="p-4 mx-6 mt-6 bg-red-50 border border-red-200 rounded-lg">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <h4 className="text-red-800 font-medium">Generation Error</h4>
+                <p className="text-red-700 text-sm mt-1">{state.error}</p>
+                
+                {/* Actionable error suggestions */}
+                {state.error.toLowerCase().includes('generation_failed') && (
+                  <div className="mt-2 p-2 bg-red-100 rounded text-xs text-red-800">
+                    <strong>Suggested Action:</strong> Try generating with a shorter script or different quality tier.
+                  </div>
+                )}
+                
+                {state.error.toLowerCase().includes('timeout') && (
+                  <div className="mt-2 p-2 bg-orange-100 rounded text-xs text-orange-800">
+                    <strong>Suggested Action:</strong> This can happen with longer videos. Try a shorter version first.
+                  </div>
+                )}
+                
+                {state.error.toLowerCase().includes('retrieval') && (
+                  <div className="mt-2 p-2 bg-blue-100 rounded text-xs text-blue-800">
+                    <strong>Suggested Action:</strong> The system is automatically trying alternative methods. Please wait.
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={clearError}
+                className="p-1 hover:bg-red-100 rounded transition-colors"
+              >
+                <X className="w-4 h-4 text-red-500" />
+              </button>
             </div>
-            <button
-              onClick={clearError}
-              className="ml-auto p-1 hover:bg-red-100 rounded"
-            >
-              <X className="w-4 h-4 text-red-500" />
-            </button>
+            
+            {/* Retry button for errors */}
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => {
+                  clearError();
+                  resetGeneration();
+                  setHasStarted(false);
+                }}
+                className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+              >
+                Start Over
+              </button>
+              <button
+                onClick={() => {
+                  clearError();
+                  handleStartGeneration();
+                }}
+                className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
+              >
+                Retry Generation
+              </button>
+            </div>
           </div>
         )}
 
         {/* Main Content */}
         <div className="p-6 min-h-[400px]">{renderCurrentStep()}</div>
+
+        {/* Footer with enhanced status */}
+        {hasStarted && (
+          <div className="p-6 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {/* Status indicator with dynamic color */}
+                <div className={`w-3 h-3 rounded-full ${
+                  state.error ? 'bg-red-500' :
+                  status === 'completed' ? 'bg-green-500' :
+                  'bg-blue-500 animate-pulse'
+                }`} />
+                
+                <div className="text-sm">
+                  {state.error ? (
+                    <span className="text-red-600 font-medium">Generation Failed</span>
+                  ) : status === 'completed' ? (
+                    <span className="text-green-600 font-medium">Generation Complete</span>
+                  ) : (
+                    <span className="text-blue-600">Processing... This may take several minutes.</span>
+                  )}
+                </div>
+              </div>
+              
+              <div className="text-sm text-gray-500">
+                Last updated:{" "}
+                {state.lastUpdated?.toLocaleTimeString() || "Never"}
+              </div>
+            </div>
+            
+            {/* Additional status info for polling */}
+            {status === 'generating_video' && state.currentGeneration && (
+              <div className="mt-2 text-xs text-gray-600">
+                Polling for video completion - Scene {state.currentGeneration.video_progress?.scenes_completed || 0} of {state.currentGeneration.video_progress?.total_scenes || 0}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Footer */}
         {hasStarted &&

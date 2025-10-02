@@ -410,6 +410,8 @@ export default function BookViewForEntertainment() {
       setVideoStatus("processing");
 
       toast.success(`Video generation started! ${result.message}`);
+      
+      // Start polling - the function now handles its own lifecycle
       pollVideoStatus(result.video_generation_id);
     } catch (error: any) {
       console.error("Error generating video:", error);
@@ -475,14 +477,21 @@ export default function BookViewForEntertainment() {
   }, [videoStatus, selectedChapter]);
 
   // Add status polling
-  // Update the pollVideoStatus function:
+  // Update the pollVideoStatus function with proper lifecycle management:
 
-  const pollVideoStatus = async (videoGenId: string) => {
+  const pollVideoStatus = (videoGenId: string) => {
     const checkStatus = async () => {
+      // Check if component is still mounted
+      if (!mountedRef.current) {
+        console.log("[POLLING] Component unmounted, stopping polling");
+        return;
+      }
+
       try {
         const data = await userService.getVideoGenerationStatus(videoGenId);
         console.log("[POLLING] Status update:", data.generation_status);
 
+        // Check again if component is still mounted before updating state
         if (!mountedRef.current) {
           console.log("[POLLING] Component unmounted, skipping setState");
           return;
@@ -490,20 +499,24 @@ export default function BookViewForEntertainment() {
 
         setVideoStatus(data.generation_status);
 
+        // Update pipeline status if component is still mounted
         if (mountedRef.current) {
           try {
             const pipelineData = await aiService.getPipelineStatus(videoGenId);
-            setPipelineStatus(pipelineData);
-            setLastUpdated(Date.now());
+            if (mountedRef.current) {
+              setPipelineStatus(pipelineData);
+              setLastUpdated(Date.now());
+            }
           } catch (pipelineError) {
             console.warn("Pipeline status not available:", pipelineError);
           }
 
-          if (data.task_metadata?.audio_task_state) {
+          if (data.task_metadata?.audio_task_state && mountedRef.current) {
             setTaskStatus(data.task_metadata.audio_task_state);
           }
 
-          if (data.generation_status === "completed" && data.video_url) {
+          // Handle completion
+          if (data.generation_status === "completed" && data.video_url && mountedRef.current) {
             setVideoUrls((prev) => ({
               ...prev,
               [selectedChapter!.id]: data.video_url!,
@@ -512,21 +525,26 @@ export default function BookViewForEntertainment() {
             toast.success("Video generation completed!");
             setShowPipelineStatus(false);
             setShowExistingGenerations(true);
-            return;
+            return; // Stop polling
           }
 
-          if (data.generation_status === "failed") {
+          // Handle failure
+          if (data.generation_status === "failed" && mountedRef.current) {
             toast.error(data.error_message || "Video generation failed");
             updateProgress("video", "error");
             setShowExistingGenerations(true);
             setTimeout(() => {
-              fetchExistingGenerations();
+              if (mountedRef.current) {
+                fetchExistingGenerations();
+              }
             }, 1000);
-            return;
+            return; // Stop polling
           }
         }
 
+        // Continue polling for active statuses
         if (
+          mountedRef.current &&
           [
             "pending",
             "generating_audio",
@@ -541,7 +559,7 @@ export default function BookViewForEntertainment() {
           ].includes(data.generation_status)
         ) {
           setTimeout(checkStatus, 2000);
-        } else {
+        } else if (mountedRef.current) {
           setShowExistingGenerations(true);
         }
       } catch (error) {
@@ -553,6 +571,7 @@ export default function BookViewForEntertainment() {
       }
     };
 
+    // Start polling
     checkStatus();
   };
 

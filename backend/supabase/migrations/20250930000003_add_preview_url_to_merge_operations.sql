@@ -1,4 +1,4 @@
--- Add preview_url field to merge_operations table for storing preview video URLs
+--- Add preview_url field to merge_operations table for storing preview video URLs
 ALTER TABLE merge_operations ADD COLUMN preview_url TEXT;
 
 -- Add comment for documentation

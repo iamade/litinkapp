@@ -55,6 +55,38 @@ async def query_existing_character_images(user_id: str, character_names: List[st
         return []
 
 
+async def query_existing_scene_images(user_id: str, scene_descriptions: List[str]) -> List[Dict[str, Any]]:
+    """Query existing scene images from database"""
+    try:
+        supabase = get_supabase()
+        scene_images = []
+
+        # Query image_generations table for scene images
+        for scene_desc in scene_descriptions:
+            # Try to find scene images by scene description and user_id
+            from urllib.parse import quote
+            encoded_scene_desc = quote(f'%{scene_desc}%')
+            result = supabase.table('image_generations').select(
+                'scene_description, image_url, metadata, image_type'
+            ).eq('user_id', user_id).eq('image_type', 'scene').ilike('scene_description', encoded_scene_desc).execute()
+
+            for img_data in result.data or []:
+                if img_data.get('image_url'):
+                    scene_images.append({
+                        'scene_description': img_data['scene_description'],
+                        'image_url': img_data['image_url'],
+                        'metadata': img_data.get('metadata', {}),
+                        'image_type': img_data.get('image_type', 'scene')
+                    })
+
+        print(f"[SCENE IMAGES] Found {len(scene_images)} scene images for {len(scene_descriptions)} scenes")
+        return scene_images
+
+    except Exception as e:
+        print(f"[SCENE IMAGES] Error querying scene images: {str(e)}")
+        return []
+
+
 async def extract_scene_dialogue_and_generate_audio(
     video_gen_id: str,
     scene_id: str,
@@ -301,7 +333,7 @@ def update_pipeline_step(video_generation_id: str, step_name: str, status: str, 
 
 @celery_app.task(bind=True)
 def generate_all_videos_for_generation(self, video_generation_id: str):
-    """Main task to generate all videos for a video generation"""
+    """Main task to generate all videos for a video generation with automatic retry"""
     
     try:
         print(f"[VIDEO GENERATION] Starting video generation for: {video_generation_id}")
@@ -322,9 +354,12 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         # For split workflow, video generation can proceed without image generation
         # Character images will be queried from database
 
-        # Update status
+        # Update status and initialize retry tracking
         supabase.table('video_generations').update({
-            'generation_status': 'generating_video'
+            'generation_status': 'generating_video',
+            'retry_count': 0,  # Initialize retry count
+            'can_resume': True,  # Enable retry capability
+            'last_retry_at': None
         }).eq('id', video_generation_id).execute()
 
         # Get script data and generated assets
@@ -346,24 +381,53 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         character_images = asyncio.run(query_existing_character_images(user_id, characters))
         print(f"- Character Images: {len(character_images)} found in database")
 
-        # For split workflow, use character images as scene images if no scene images exist
+        # Query existing scene images from database
+        scene_images = asyncio.run(query_existing_scene_images(user_id, scene_descriptions))
+        print(f"- Scene Images: {len(scene_images)} found in database")
+
+        # For split workflow, prioritize scene images over character images
         if not image_data.get('scene_images'):
-            # Map character images to scenes (use first character image for all scenes, or cycle through)
             image_data['scene_images'] = []
-            for i, scene in enumerate(scene_descriptions):
-                if character_images:
+            for i, scene_description in enumerate(scene_descriptions):
+                scene_image = None
+                
+                # First, try to find a matching scene image for this specific scene
+                for scene_img in scene_images:
+                    if scene_img.get('scene_description') and scene_description.lower() in scene_img['scene_description'].lower():
+                        scene_image = {
+                            'image_url': scene_img.get('image_url'),
+                            'scene_description': scene_img.get('scene_description'),
+                            'image_type': scene_img.get('image_type', 'scene'),
+                            'scene_number': i + 1
+                        }
+                        print(f"[SCENE IMAGE SELECTION] Using scene image for scene_{i+1}: {scene_img.get('scene_description')}")
+                        break
+                
+                # If no scene image found, fall back to character images
+                if not scene_image and character_images:
                     # Use character images in rotation for scenes
                     char_image = character_images[i % len(character_images)]
-                    image_data['scene_images'].append({
+                    scene_image = {
                         'image_url': char_image.get('image_url'),
                         'character_name': char_image.get('name'),
+                        'image_type': 'character_fallback',
                         'scene_number': i + 1
-                    })
-                else:
-                    # No images available, will use text-to-video fallback
-                    image_data['scene_images'].append(None)
+                    }
+                    print(f"[SCENE IMAGE SELECTION] ⚠️ Using character image as fallback for scene_{i+1}: {char_image.get('name')}")
+                
+                # If no images available at all, will use text-to-video fallback
+                image_data['scene_images'].append(scene_image)
 
-        print(f"- Scene Images: {len(image_data.get('scene_images', []))} (using character images)")
+        # Log the final image selection breakdown
+        scene_count = len([img for img in image_data.get('scene_images', []) if img is not None])
+        scene_type_count = len([img for img in image_data.get('scene_images', []) if img and img.get('image_type') == 'scene'])
+        character_fallback_count = len([img for img in image_data.get('scene_images', []) if img and img.get('image_type') == 'character_fallback'])
+        
+        print(f"[IMAGE SELECTION SUMMARY]")
+        print(f"- Total scene images: {scene_count}")
+        print(f"- Scene images (proper): {scene_type_count}")
+        print(f"- Character fallback images: {character_fallback_count}")
+        print(f"- No images (text-to-video fallback): {len(scene_descriptions) - scene_count}")
 
         # Generate videos
         modelslab_service = ModelsLabV7VideoService()
@@ -430,7 +494,43 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         # ✅ Update pipeline step to failed
         update_pipeline_step(video_generation_id, 'video_generation', 'failed', error_message)
         
-        # Update status to failed
+        # Check if this is a video retrieval failure that can be retried
+        is_retrieval_failure = any(keyword in str(e).lower() for keyword in [
+            'retrieval', 'download', 'url', 'video_url', 'future_links', 'fetch_result'
+        ])
+        
+        if is_retrieval_failure:
+            print(f"[VIDEO GENERATION] Video retrieval failure detected, scheduling automatic retry")
+            
+            # Update status to indicate retry will be attempted
+            try:
+                supabase = get_supabase()
+                supabase.table('video_generations').update({
+                    'generation_status': 'retrieval_failed',
+                    'error_message': f"Video retrieval failed, automatic retry scheduled: {str(e)}",
+                    'can_resume': True
+                }).eq('id', video_generation_id).execute()
+                
+                # Schedule automatic retry with initial delay
+                automatic_video_retry_task.apply_async(
+                    args=[video_generation_id],
+                    countdown=30  # 30 seconds initial delay
+                )
+                
+                print(f"[VIDEO GENERATION] ✅ Automatic retry scheduled for video generation {video_generation_id}")
+                
+                return {
+                    'status': 'retry_scheduled',
+                    'message': 'Video retrieval failed, automatic retry scheduled',
+                    'video_generation_id': video_generation_id,
+                    'retry_delay': 30
+                }
+                
+            except Exception as retry_error:
+                print(f"[VIDEO GENERATION] Failed to schedule automatic retry: {retry_error}")
+                # Fall through to regular error handling
+        
+        # Regular error handling for non-retrieval failures
         try:
             supabase = get_supabase()
             supabase.table('video_generations').update({
@@ -461,6 +561,24 @@ async def generate_scene_videos(
 
     scene_images = image_data.get('scene_images', [])  # Fixed key mismatch
     model_id = modelslab_service.get_video_model_for_style(video_style)
+
+    # Parse script for enhanced prompt generation if script data is available
+    parsed_components = None
+    if script_data and script_data.get('script'):
+        try:
+            from app.services.script_parser import ScriptParser
+            script_parser = ScriptParser()
+            characters = script_data.get('characters', [])
+            parsed_components = script_parser.parse_script_for_video_prompt(
+                script=script_data['script'],
+                characters=characters
+            )
+            print(f"[SCENE VIDEOS V7] ✅ Parsed script for enhanced prompt generation:")
+            print(f"- Camera movements: {len(parsed_components.get('camera_movements', []))}")
+            print(f"- Character actions: {len(parsed_components.get('character_actions', []))}")
+            print(f"- Character dialogues: {len(parsed_components.get('character_dialogues', []))}")
+        except Exception as e:
+            print(f"[SCENE VIDEOS V7] ⚠️ Failed to parse script for enhanced prompts: {e}")
 
     # Track the previous scene's key scene shot for continuity
     previous_key_scene_shot = None
@@ -513,7 +631,7 @@ async def generate_scene_videos(
             # Find audio for lip sync (legacy support)
             scene_audio = find_scene_audio(scene_id, audio_files, script_data.get('script_style') if script_data else None)
 
-            # ✅ Generate video using V7 Veo 2 with dialogue integration
+            # ✅ Generate video using V7 Veo 2 with enhanced prompt generation
             result = await modelslab_service.enhance_video_for_scene(
                 scene_description=scene_description,
                 image_url=starting_image_url,
@@ -521,7 +639,10 @@ async def generate_scene_videos(
                 dialogue_audio=scene_dialogue_data.get('dialogue_audio', []),
                 style=video_style,
                 include_lipsync=bool(scene_audio) or bool(scene_dialogue_data.get('dialogue_audio')),
-                script_style=script_data.get('script_style') if script_data else None
+                script_style=script_data.get('script_style') if script_data else None,
+                script_data={
+                    'parsed_components': parsed_components
+                } if parsed_components else None
             )
 
             if result.get('status') == 'success':
@@ -904,3 +1025,255 @@ def create_video_prompt(scene_description: str, style: str) -> str:
     technical_prompt = ", 24fps, smooth motion, high quality, 16:9 aspect ratio"
     
     return base_prompt + style_prompt + technical_prompt
+@celery_app.task(bind=True)
+def retry_video_retrieval_task(self, video_generation_id: str, video_url: str = None):
+    """Celery task to retry video retrieval for a failed video generation"""
+    try:
+        print(f"[VIDEO RETRY TASK] Starting video retrieval retry for: {video_generation_id}")
+        
+        # Get video generation data
+        supabase = get_supabase()
+        video_data = supabase.table('video_generations').select('*').eq('id', video_generation_id).single().execute()
+        
+        if not video_data.data:
+            raise Exception(f"Video generation {video_generation_id} not found")
+        
+        video_gen = video_data.data
+        user_id = video_gen.get('user_id')
+        current_status = video_gen.get('generation_status')
+        
+        # Check if this task is eligible for retry
+        if current_status not in ['video_completed', 'failed', 'retrieval_failed']:
+            raise Exception(f"Cannot retry video retrieval. Current status: {current_status}")
+        
+        # Check retry count
+        retry_count = video_gen.get('retry_count', 0)
+        max_retries = 3
+        
+        if retry_count >= max_retries:
+            raise Exception(f"Maximum retry attempts ({max_retries}) exceeded")
+        
+        # Get video URL from parameter or task data
+        if not video_url:
+            task_metadata = video_gen.get('task_metadata', {})
+            video_url = task_metadata.get('future_links_url') or task_metadata.get('video_url')
+            
+            if not video_url:
+                raise Exception("No video URL available for retry")
+        
+        print(f"[VIDEO RETRY TASK] Attempting video retrieval from URL: {video_url}")
+        
+        # Import and use the video service for retry
+        from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
+        video_service = ModelsLabV7VideoService()
+        
+        # Attempt video retrieval
+        retry_result = asyncio.run(video_service.retry_video_retrieval(video_url))
+        
+        if not retry_result.get('success'):
+            # Update retry count and status
+            new_retry_count = retry_count + 1
+            supabase.table('video_generations').update({
+                'retry_count': new_retry_count,
+                'last_retry_at': 'now()',
+                'generation_status': 'retrieval_failed' if new_retry_count < max_retries else 'failed',
+                'error_message': retry_result.get('error', 'Video retrieval failed'),
+                'can_resume': new_retry_count < max_retries
+            }).eq('id', video_generation_id).execute()
+            
+            raise Exception(f"Video retrieval failed: {retry_result.get('error', 'Unknown error')}")
+        
+        # Success - update task with video URL and mark as completed
+        video_url = retry_result.get('video_url')
+        video_duration = retry_result.get('duration', 0)
+        
+        supabase.table('video_generations').update({
+            'generation_status': 'completed',
+            'video_url': video_url,
+            'retry_count': retry_count + 1,
+            'last_retry_at': 'now()',
+            'error_message': None,
+            'can_resume': False,
+            'task_metadata': {
+                **video_gen.get('task_metadata', {}),
+                'retry_success': True,
+                'retry_video_url': video_url,
+                'video_duration': video_duration,
+                'final_retrieval_time': 'now()'
+            }
+        }).eq('id', video_generation_id).execute()
+        
+        print(f"[VIDEO RETRY TASK] ✅ Video retrieval retry successful for: {video_generation_id}")
+        
+        return {
+            'status': 'success',
+            'message': 'Video retrieval successful',
+            'video_url': video_url,
+            'duration': video_duration,
+            'retry_count': retry_count + 1,
+            'video_generation_id': video_generation_id
+        }
+        
+    except Exception as e:
+        error_message = f"Video retrieval retry failed: {str(e)}"
+        print(f"[VIDEO RETRY TASK] ❌ {error_message}")
+        
+        # Update status to failed
+        try:
+            supabase = get_supabase()
+            supabase.table('video_generations').update({
+                'generation_status': 'failed',
+                'error_message': error_message
+            }).eq('id', video_generation_id).execute()
+        except:
+            pass
+        
+        raise Exception(error_message)
+@celery_app.task(bind=True)
+def automatic_video_retry_task(self, video_generation_id: str):
+    """Automatic retry task with exponential backoff for failed video retrievals"""
+    try:
+        print(f"[AUTO RETRY TASK] Starting automatic retry for: {video_generation_id}")
+        
+        # Get video generation data
+        supabase = get_supabase()
+        video_data = supabase.table('video_generations').select('*').eq('id', video_generation_id).single().execute()
+        
+        if not video_data.data:
+            raise Exception(f"Video generation {video_generation_id} not found")
+        
+        video_gen = video_data.data
+        current_status = video_gen.get('generation_status')
+        
+        # Only retry if in a retryable state
+        if current_status not in ['video_completed', 'failed', 'retrieval_failed']:
+            print(f"[AUTO RETRY TASK] Skipping - current status {current_status} not retryable")
+            return {
+                'status': 'skipped',
+                'message': f'Current status {current_status} not eligible for automatic retry'
+            }
+        
+        # Check retry count
+        retry_count = video_gen.get('retry_count', 0)
+        max_automatic_retries = 2  # Maximum automatic retries before manual intervention
+        
+        if retry_count >= max_automatic_retries:
+            print(f"[AUTO RETRY TASK] Maximum automatic retries ({max_automatic_retries}) reached")
+            # Update status to indicate manual retry is needed
+            supabase.table('video_generations').update({
+                'generation_status': 'retrieval_failed',
+                'can_resume': True,
+                'error_message': f'Automatic retries exhausted. Please try manual retry.'
+            }).eq('id', video_generation_id).execute()
+            
+            return {
+                'status': 'max_retries_reached',
+                'message': f'Maximum automatic retries ({max_automatic_retries}) reached'
+            }
+        
+        # Calculate exponential backoff delay
+        base_delay = 30  # 30 seconds
+        exponential_delay = base_delay * (2 ** retry_count)  # 30s, 60s, 120s, etc.
+        max_delay = 300  # 5 minutes maximum
+        
+        actual_delay = min(exponential_delay, max_delay)
+        
+        print(f"[AUTO RETRY TASK] Retry {retry_count + 1}/{max_automatic_retries}, waiting {actual_delay}s")
+        
+        # Wait for exponential backoff
+        import time
+        time.sleep(actual_delay)
+        
+        # Get video URL from task metadata
+        task_metadata = video_gen.get('task_metadata', {})
+        video_url = task_metadata.get('future_links_url') or task_metadata.get('video_url')
+        
+        if not video_url:
+            print(f"[AUTO RETRY TASK] No video URL available for retry")
+            return {
+                'status': 'no_url',
+                'message': 'No video URL available for automatic retry'
+            }
+        
+        print(f"[AUTO RETRY TASK] Attempting automatic video retrieval from URL: {video_url}")
+        
+        # Import and use the video service for retry
+        from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
+        video_service = ModelsLabV7VideoService()
+        
+        # Attempt video retrieval
+        retry_result = asyncio.run(video_service.retry_video_retrieval(video_url))
+        
+        if not retry_result.get('success'):
+            # Update retry count and status
+            new_retry_count = retry_count + 1
+            supabase.table('video_generations').update({
+                'retry_count': new_retry_count,
+                'last_retry_at': 'now()',
+                'generation_status': 'retrieval_failed' if new_retry_count < max_automatic_retries else 'failed',
+                'error_message': retry_result.get('error', 'Video retrieval failed'),
+                'can_resume': new_retry_count < max_automatic_retries
+            }).eq('id', video_generation_id).execute()
+            
+            # Schedule next automatic retry if we haven't reached max
+            if new_retry_count < max_automatic_retries:
+                print(f"[AUTO RETRY TASK] Scheduling next automatic retry")
+                automatic_video_retry_task.apply_async(
+                    args=[video_generation_id],
+                    countdown=actual_delay * 2  # Double the delay for next retry
+                )
+            
+            return {
+                'status': 'failed',
+                'message': f'Automatic retry failed: {retry_result.get("error", "Unknown error")}',
+                'retry_count': new_retry_count,
+                'next_retry_scheduled': new_retry_count < max_automatic_retries
+            }
+        
+        # Success - update task with video URL and mark as completed
+        video_url = retry_result.get('video_url')
+        video_duration = retry_result.get('duration', 0)
+        
+        supabase.table('video_generations').update({
+            'generation_status': 'completed',
+            'video_url': video_url,
+            'retry_count': retry_count + 1,
+            'last_retry_at': 'now()',
+            'error_message': None,
+            'can_resume': False,
+            'task_metadata': {
+                **video_gen.get('task_metadata', {}),
+                'retry_success': True,
+                'retry_video_url': video_url,
+                'video_duration': video_duration,
+                'final_retrieval_time': 'now()',
+                'automatic_retry_used': True
+            }
+        }).eq('id', video_generation_id).execute()
+        
+        print(f"[AUTO RETRY TASK] ✅ Automatic video retrieval successful for: {video_generation_id}")
+        
+        return {
+            'status': 'success',
+            'message': 'Automatic video retrieval successful',
+            'video_url': video_url,
+            'duration': video_duration,
+            'retry_count': retry_count + 1,
+            'video_generation_id': video_generation_id
+        }
+        
+    except Exception as e:
+        error_message = f"Automatic video retry failed: {str(e)}"
+        print(f"[AUTO RETRY TASK] ❌ {error_message}")
+        
+        # Update status to failed
+        try:
+            supabase = get_supabase()
+            supabase.table('video_generations').update({
+                'generation_status': 'failed',
+                'error_message': error_message
+            }).eq('id', video_generation_id).execute()
+        except:
+            pass
+        
+        raise Exception(error_message)

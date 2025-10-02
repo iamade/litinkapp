@@ -154,6 +154,25 @@ class VideoGenerationAPI {
   }
 
   /**
+   * Get enhanced generation status with step-by-step progress
+   */
+  async getEnhancedGenerationStatus(videoGenId: string): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    current_step: string;
+    progress_percentage: number;
+    steps: {
+      image_generation: { status: string; progress: number };
+      audio_generation: { status: string; progress: number };
+      video_generation: { status: string; progress: number };
+      audio_video_merge: { status: string; progress: number };
+    };
+    error: string | null;
+    video_url: string | null;
+  }> {
+    return apiClient.get(`/ai/video-generation/${videoGenId}/status`);
+  }
+
+  /**
    * Get detailed audio generation progress
    */
   async getAudioProgress(videoGenId: string): Promise<{

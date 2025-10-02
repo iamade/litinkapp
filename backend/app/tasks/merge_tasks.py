@@ -377,33 +377,45 @@ async def prepare_audio_tracks(
     # Process narrator audio
     narrator_files = audio_files.get('narrator', [])
     for audio in narrator_files:
-        scene_id = audio.get('scene') or audio.get('scene_id')
+        # Extract scene_id from top level or metadata
+        scene_id = audio.get('scene') or audio.get('scene_id') or audio.get('metadata', {}).get('scene')
         if scene_id:
             if scene_id not in scene_audio_tracks:
                 scene_audio_tracks[scene_id] = {'narrator': [], 'characters': [], 'sound_effects': []}
             scene_audio_tracks[scene_id]['narrator'].append(audio)
+            print(f"[AUDIO PREP] Narrator audio mapped to scene {scene_id}")
     
     # Process character audio
     character_files = audio_files.get('characters', [])
     for audio in character_files:
-        scene_id = audio.get('scene') or audio.get('scene_id')
+        # Extract scene_id from top level or metadata
+        scene_id = audio.get('scene') or audio.get('scene_id') or audio.get('metadata', {}).get('scene')
         if scene_id:
             if scene_id not in scene_audio_tracks:
                 scene_audio_tracks[scene_id] = {'narrator': [], 'characters': [], 'sound_effects': []}
             scene_audio_tracks[scene_id]['characters'].append(audio)
+            print(f"[AUDIO PREP] Character audio mapped to scene {scene_id}")
     
     # Process sound effects
     sound_effects = audio_files.get('sound_effects', [])
     for audio in sound_effects:
-        scene_id = audio.get('scene') or audio.get('scene_id')
+        # Extract scene_id from top level or metadata
+        scene_id = audio.get('scene') or audio.get('scene_id') or audio.get('metadata', {}).get('scene')
         if scene_id:
             if scene_id not in scene_audio_tracks:
                 scene_audio_tracks[scene_id] = {'narrator': [], 'characters': [], 'sound_effects': []}
             scene_audio_tracks[scene_id]['sound_effects'].append(audio)
+            print(f"[AUDIO PREP] Sound effect mapped to scene {scene_id}")
     
     total_audio_files = len(narrator_files) + len(character_files) + len(sound_effects)
     
+    # Log detailed scene mapping information
     print(f"[AUDIO PREP] Organized {total_audio_files} audio files across {len(scene_audio_tracks)} scenes")
+    for scene_id, tracks in scene_audio_tracks.items():
+        narrator_count = len(tracks['narrator'])
+        character_count = len(tracks['characters'])
+        sfx_count = len(tracks['sound_effects'])
+        print(f"[AUDIO PREP] Scene {scene_id}: {narrator_count} narrator, {character_count} character, {sfx_count} sfx files")
     
     return {
         'scene_audio_tracks': scene_audio_tracks,

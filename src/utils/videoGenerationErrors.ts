@@ -14,6 +14,23 @@ export interface VideoGenerationError {
 export const getErrorMessage = (error: VideoGenerationError): string => {
   const errorMessage = error.error || error.message || 'Unknown error occurred';
   
+  // Handle polling-specific error patterns
+  if (errorMessage.includes('generation_failed') || errorMessage.includes('failed to generate')) {
+    return 'Video generation failed: The AI service was unable to create the video. This may be due to content complexity or service limitations.';
+  }
+  
+  if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
+    return 'Video generation timeout: The operation took too long to complete. This can happen with longer videos or during high service load.';
+  }
+  
+  if (errorMessage.includes('retrieval_failed') || errorMessage.includes('fallback')) {
+    return 'Video retrieval failed: The video was generated but we encountered issues retrieving it. The system is automatically trying alternative methods.';
+  }
+  
+  if (errorMessage.includes('polling') && errorMessage.includes('max attempts')) {
+    return 'Video polling timeout: Unable to retrieve video status after multiple attempts. The system will continue trying in the background.';
+  }
+  
   // Handle specific error patterns
   if (errorMessage.includes('[MERGE] No valid scene videos found')) {
     return 'Video generation failed: No valid videos were created to merge. This could be due to content restrictions or generation issues.';
@@ -27,7 +44,7 @@ export const getErrorMessage = (error: VideoGenerationError): string => {
     return 'Content was flagged by safety filters. Please modify your script and try again.';
   }
   
-  if (errorMessage.includes('API') || errorMessage.includes('timeout')) {
+  if (errorMessage.includes('API') || errorMessage.includes('service unavailable')) {
     return 'Service temporarily unavailable. Please try again in a moment.';
   }
   
@@ -68,7 +85,23 @@ export const showVideoGenerationError = (error: VideoGenerationError): void => {
   const userMessage = getErrorMessage(error);
   const generationInfo = error.generationId ? ` (Generation: ${error.generationId.slice(-8)})` : '';
   
-  const errorDetails = `Video Generation Failed${generationInfo}\n\n${userMessage}\n\nYou can retry the generation or contact support if the issue persists.`;
+  // Add specific suggestions based on error type
+  let suggestion = '';
+  const errorLower = (error.error || error.message || '').toLowerCase();
+  
+  if (errorLower.includes('generation_failed')) {
+    suggestion = '\n\n💡 Try generating a shorter video or simplifying your script content.';
+  } else if (errorLower.includes('timeout')) {
+    suggestion = '\n\n⏱️ This can happen with longer videos. Try generating a shorter version first.';
+  } else if (errorLower.includes('retrieval_failed') || errorLower.includes('fallback')) {
+    suggestion = '\n\n🔄 The system is automatically trying alternative retrieval methods. Please wait a moment.';
+  } else if (errorLower.includes('polling')) {
+    suggestion = '\n\n🔄 The system will continue polling in the background. You can check back later.';
+  } else {
+    suggestion = '\n\n🔄 You can retry the generation or contact support if the issue persists.';
+  }
+  
+  const errorDetails = `Video Generation Failed${generationInfo}\n\n${userMessage}${suggestion}`;
   
   toast.error(errorDetails, {
     duration: 15000, // 15 seconds for users to read

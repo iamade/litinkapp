@@ -6,6 +6,257 @@ class ScriptParser:
     def __init__(self):
         pass
 
+    def parse_script_for_video_prompt(self, script: str, characters: List[str]) -> Dict[str, Any]:
+        """Parse script to extract components for enhanced video prompt generation"""
+        
+        print(f"[VIDEO PROMPT PARSER] Parsing script for video prompt generation")
+        print(f"[VIDEO PROMPT PARSER] Script length: {len(script)} characters")
+        print(f"[VIDEO PROMPT PARSER] Characters: {characters}")
+        
+        parsed_components = {
+            "scene_descriptions": [],
+            "camera_movements": [],
+            "character_actions": [],
+            "character_dialogues": [],
+            "scene_transitions": []
+        }
+        
+        lines = script.split('\n')
+        current_scene = 0
+        current_character = None
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Detect scene changes and extract camera directions
+            if line.startswith('SCENE') or line.startswith('INT.') or line.startswith('EXT.'):
+                current_scene += 1
+                current_character = None
+                
+                # Extract camera movements from scene descriptions
+                camera_movements = self._extract_camera_movements(line)
+                if camera_movements:
+                    parsed_components["camera_movements"].extend(camera_movements)
+                
+                # Add scene description
+                parsed_components["scene_descriptions"].append({
+                    "scene_number": current_scene,
+                    "description": line,
+                    "camera_movements": camera_movements
+                })
+                continue
+            
+            # Extract camera movements from all lines (not just scene headers)
+            camera_movements = self._extract_camera_movements(line)
+            if camera_movements:
+                parsed_components["camera_movements"].extend(camera_movements)
+            
+            # Check for character name (ALL CAPS at start of line)
+            if (line.isupper() and ':' not in line and
+                not line.startswith('SFX:') and not line.startswith('MUSIC:') and
+                not line.startswith(('SCENE', 'INT.', 'EXT.', 'FADE', 'CUT TO'))):
+                
+                # Verify it's a known character (case-insensitive)
+                if any(char.upper() == line.upper() for char in characters):
+                    current_character = line
+                    print(f"[VIDEO PROMPT PARSER] Detected character: {line} (line {i+1})")
+                    continue
+            
+            # Extract character actions from parentheses
+            character_actions = self._extract_character_actions(line)
+            if character_actions:
+                for action in character_actions:
+                    parsed_components["character_actions"].append({
+                        "character": current_character or "Unknown",
+                        "action": action,
+                        "scene": current_scene,
+                        "line_number": i + 1
+                    })
+            
+            # Extract character dialogue with attribution
+            character_match = self._detect_character_dialogue(line, characters)
+            if character_match:
+                character_name, dialogue = character_match
+                print(f"[VIDEO PROMPT PARSER] Found dialogue: {character_name} says: {dialogue[:50]}...")
+                parsed_components["character_dialogues"].append({
+                    "character": character_name,
+                    "text": dialogue,
+                    "scene": current_scene,
+                    "line_number": i + 1,
+                    "attributed_dialogue": f"{character_name} says: {dialogue}"
+                })
+                current_character = None
+                continue
+            
+            # Handle dialogue lines that follow character names
+            if current_character and self._is_dialogue_line(line):
+                print(f"[VIDEO PROMPT PARSER] Found dialogue following character {current_character}: {line[:50]}...")
+                parsed_components["character_dialogues"].append({
+                    "character": current_character,
+                    "text": line,
+                    "scene": current_scene,
+                    "line_number": i + 1,
+                    "attributed_dialogue": f"{current_character} says: {line}"
+                })
+                current_character = None
+                continue
+            
+            # Extract scene transitions
+            transitions = self._extract_scene_transitions(line)
+            if transitions:
+                parsed_components["scene_transitions"].extend(transitions)
+        
+        print(f"[VIDEO PROMPT PARSER] Parsing completed:")
+        print(f"- Scenes: {len(parsed_components['scene_descriptions'])}")
+        print(f"- Camera movements: {len(parsed_components['camera_movements'])}")
+        print(f"- Character actions: {len(parsed_components['character_actions'])}")
+        print(f"- Character dialogues: {len(parsed_components['character_dialogues'])}")
+        print(f"- Scene transitions: {len(parsed_components['scene_transitions'])}")
+        
+        return parsed_components
+
+    def _extract_camera_movements(self, text: str) -> List[str]:
+        """Extract camera movements from scene descriptions"""
+        camera_movements = []
+        text_lower = text.lower()
+        
+        # Camera movement keywords - expanded list
+        camera_keywords = {
+            'zoom': ['zoom in', 'zoom out', 'camera zooms', 'zooming', 'zoom shot'],
+            'pan': ['pan left', 'pan right', 'camera pans', 'panning', 'pan shot'],
+            'shot': ['wide shot', 'close-up', 'medium shot', 'long shot', 'extreme close-up', 'full shot', 'two shot', 'over the shoulder'],
+            'follow': ['camera follows', 'tracking shot', 'follow shot', 'camera tracks'],
+            'angle': ['high angle', 'low angle', 'dutch angle', 'bird\'s eye view', 'worm\'s eye view'],
+            'movement': ['dolly shot', 'crane shot', 'steadycam', 'handheld', 'tilt up', 'tilt down'],
+            'camera': ['camera moves', 'camera angle', 'camera view', 'camera position']
+        }
+        
+        # Look for exact matches first
+        for category, keywords in camera_keywords.items():
+            for keyword in keywords:
+                if keyword in text_lower:
+                    # Extract the full sentence containing the camera movement
+                    sentences = re.split(r'[.!?]', text)
+                    for sentence in sentences:
+                        if keyword in sentence.lower():
+                            camera_movements.append(sentence.strip())
+        
+        # Also look for camera movements in the entire text
+        camera_patterns = [
+            r'(?:camera|shot|view|angle)[^.]*?(?:zoom|pan|track|follow|dolly|tilt|close|wide|medium|long|extreme|over|under|high|low)[^.]*?\.',
+            r'(?:wide|close|medium|long|extreme|over|under|high|low)[^.]*?(?:shot|view|angle)[^.]*?\.'
+        ]
+        
+        for pattern in camera_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            camera_movements.extend(matches)
+        
+        # Remove duplicates and empty strings
+        camera_movements = list(set([cm.strip() for cm in camera_movements if cm.strip()]))
+        
+        return camera_movements
+
+    def _extract_character_actions(self, text: str) -> List[str]:
+        """Extract character actions from parentheses"""
+        actions = []
+        
+        # Pattern for actions in parentheses: (action description)
+        parentheses_pattern = r'\(([^)]+)\)'
+        matches = re.findall(parentheses_pattern, text)
+        
+        for match in matches:
+            # Skip if it's a sound effect or camera direction
+            if not any(keyword in match.upper() for keyword in ['SOUND', 'NOISE', 'MUSIC', 'AUDIO', 'SFX', 'CAMERA', 'FADE', 'CUT']):
+                actions.append(match.strip())
+        
+        return actions
+
+    def _extract_scene_transitions(self, text: str) -> List[str]:
+        """Extract scene transitions"""
+        transitions = []
+        text_upper = text.upper()
+        
+        transition_keywords = ['FADE IN', 'FADE OUT', 'CUT TO', 'DISSOLVE TO', 'WIPE TO']
+        
+        for keyword in transition_keywords:
+            if keyword in text_upper:
+                transitions.append(keyword)
+        
+        return transitions
+
+    def _is_dialogue_line(self, line: str) -> bool:
+        """Check if a line looks like dialogue (not scene description or action)"""
+        line = line.strip()
+        
+        # Skip if it's a scene header, character name, or action
+        if (line.startswith(('SCENE', 'INT', 'EXT', 'FADE', 'CUT')) or
+            line.isupper() or
+            line.startswith('(') and line.endswith(')')):
+            return False
+        
+        # Check if it looks like dialogue (has punctuation, reasonable length)
+        if (len(line) > 5 and
+            any(char in line for char in ['.', '!', '?', ',', '"', "'"]) and
+            not line.startswith('[') and not line.endswith(']')):
+            return True
+        
+        return False
+
+    def _detect_character_dialogue(self, line: str, characters: List[str]) -> Tuple[str, str] | None:
+        """Detect if a line contains character dialogue for video prompt parsing"""
+        line = line.strip()
+        
+        # Pattern 1: CHARACTER: dialogue
+        colon_pattern = r'^([A-Z][A-Z\s]+):\s*(.+)$'
+        match = re.match(colon_pattern, line)
+        if match:
+            character_name = match.group(1).strip()
+            dialogue = match.group(2).strip()
+            
+            # Check if it's a known character
+            if character_name in characters or any(char.upper() == character_name.upper() for char in characters):
+                print(f"[VIDEO PROMPT PARSER] Detected dialogue pattern 1: {character_name}: {dialogue[:50]}...")
+                return (character_name, dialogue)
+        
+        # Pattern 2: CHARACTER says: "dialogue" (case-insensitive)
+        says_pattern = r'^([A-Za-z\s]+)\s+says:\s*"([^"]*)"$'
+        match = re.match(says_pattern, line, re.IGNORECASE)
+        if match:
+            character_name = match.group(1).strip()
+            dialogue = match.group(2).strip()
+            
+            # Check if it's a known character (case-insensitive)
+            # Also check if any character name is contained in this character name
+            for char in characters:
+                if (char.upper() == character_name.upper() or
+                    char.upper() in character_name.upper() or
+                    character_name.upper() in char.upper()):
+                    print(f"[VIDEO PROMPT PARSER] Detected dialogue pattern 2: {char} says: {dialogue[:50]}...")
+                    return (char, dialogue)
+        
+        # Pattern 3: Simple dialogue line (no character attribution)
+        # Check if this looks like dialogue (not scene description, not action)
+        if (len(line) > 10 and
+            not line.startswith(('SCENE', 'INT', 'EXT', 'FADE', 'CUT')) and
+            not line.startswith('(') and
+            '"' in line and
+            any(char in line for char in ['.', '!', '?', ','])):
+            
+            # Try to extract dialogue between quotes
+            quote_pattern = r'"([^"]*)"'
+            quote_matches = re.findall(quote_pattern, line)
+            if quote_matches:
+                dialogue = quote_matches[0]
+                # Try to find character from context
+                for char in characters:
+                    if char.lower() in line.lower():
+                        print(f"[VIDEO PROMPT PARSER] Detected dialogue pattern 3: {char} says: {dialogue[:50]}...")
+                        return (char, dialogue)
+        
+        return None
+
     def parse_script_for_audio(self, script: str, characters: List[str], scene_descriptions: List[str], script_style: str = "cinematic_movie") -> Dict[str, Any]:
         """Parse script to extract different audio components based on style"""
         
