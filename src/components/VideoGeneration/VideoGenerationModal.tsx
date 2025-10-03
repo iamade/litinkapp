@@ -32,8 +32,11 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
   const { state, startGeneration, resetGeneration, clearError } =
     useVideoGeneration();
   const {
+    data: generationData,
     status,
-    progress
+    progress,
+    error: hookError,
+    isLoading: hookIsLoading
   } = useVideoGenerationStatus(state.currentGeneration?.id);
 
   const [selectedQualityTier, setSelectedQualityTier] = useState<
@@ -99,14 +102,40 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
   };
 
   const renderCurrentStep = () => {
+    // Show loading placeholder while fetching status
+    if (hookIsLoading && !status) {
+      return (
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className="w-8 h-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-gray-600">Fetching video status…</p>
+          </div>
+        </div>
+      );
+    }
+
+    // Show empty state placeholder
     if (!hasStarted || !status) {
       return (
-        <QualityTierSelector
-          selectedTier={selectedQualityTier}
-          onSelect={setSelectedQualityTier}
-          onStartGeneration={handleStartGeneration}
-          scriptId={scriptId}
-        />
+        <div>
+          {!hasStarted ? (
+            <QualityTierSelector
+              selectedTier={selectedQualityTier}
+              onSelect={setSelectedQualityTier}
+              onStartGeneration={handleStartGeneration}
+              scriptId={scriptId}
+            />
+          ) : (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <div className="w-6 h-6 bg-gray-400 rounded-full animate-pulse"></div>
+                </div>
+                <p className="text-gray-600">No status yet. Waiting for job to start.</p>
+              </div>
+            </div>
+          )}
+        </div>
       );
     }
 
@@ -184,37 +213,42 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
           <div className="p-6 border-b border-gray-200">
             <ProgressIndicators
               currentStep={getCurrentStepNumber(status)}
-              overallProgress={progress?.overall || 0}
+              overallProgress={progress?.overall ?? 0}
               status={status}
               stepProgress={progress?.stepProgress}
-              currentStepName={progress?.currentStep}
+              currentStepName={progress?.currentStep ?? 'Loading...'}
             />
           </div>
         )}
 
         {/* Error Display */}
-        {state.error && (
+        {(state.error || hookError) && (
           <div className="p-4 mx-6 mt-6 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
               <div className="flex-1">
                 <h4 className="text-red-800 font-medium">Generation Error</h4>
-                <p className="text-red-700 text-sm mt-1">{state.error}</p>
+                <p className="text-red-700 text-sm mt-1">
+                  {state.error || hookError?.message || 'An unknown error occurred'}
+                </p>
                 
-                {/* Actionable error suggestions */}
-                {state.error.toLowerCase().includes('generation_failed') && (
+                {/* Actionable error suggestions with null-safe checks */}
+                {(state.error?.toLowerCase().includes('generation_failed') ||
+                  hookError?.message?.toLowerCase().includes('generation_failed')) && (
                   <div className="mt-2 p-2 bg-red-100 rounded text-xs text-red-800">
                     <strong>Suggested Action:</strong> Try generating with a shorter script or different quality tier.
                   </div>
                 )}
                 
-                {state.error.toLowerCase().includes('timeout') && (
+                {(state.error?.toLowerCase().includes('timeout') ||
+                  hookError?.message?.toLowerCase().includes('timeout')) && (
                   <div className="mt-2 p-2 bg-orange-100 rounded text-xs text-orange-800">
                     <strong>Suggested Action:</strong> This can happen with longer videos. Try a shorter version first.
                   </div>
                 )}
                 
-                {state.error.toLowerCase().includes('retrieval') && (
+                {(state.error?.toLowerCase().includes('retrieval') ||
+                  hookError?.message?.toLowerCase().includes('retrieval')) && (
                   <div className="mt-2 p-2 bg-blue-100 rounded text-xs text-blue-800">
                     <strong>Suggested Action:</strong> The system is automatically trying alternative methods. Please wait.
                   </div>
@@ -285,10 +319,16 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
               </div>
             </div>
             
-            {/* Additional status info for polling */}
-            {status === 'generating_video' && state.currentGeneration && (
+            {/* Additional status info for polling with null-safe access */}
+            {status === 'generating_video' && (generationData || state.currentGeneration) && (
               <div className="mt-2 text-xs text-gray-600">
-                Polling for video completion - Scene {state.currentGeneration.video_progress?.scenes_completed || 0} of {state.currentGeneration.video_progress?.total_scenes || 0}
+                Polling for video completion - Scene {
+                  generationData?.video_progress?.scenes_completed ??
+                  state.currentGeneration?.video_progress?.scenes_completed ?? 0
+                } of {
+                  generationData?.video_progress?.total_scenes ??
+                  state.currentGeneration?.video_progress?.total_scenes ?? 0
+                }
               </div>
             )}
           </div>

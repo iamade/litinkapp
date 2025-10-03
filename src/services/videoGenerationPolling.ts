@@ -30,6 +30,190 @@ export interface VideoGenerationStatusResponse {
   video_url: string | null;
 }
 
+// New reactive polling types
+export type VideoGenPollingParams = {
+  scriptId: string;
+  signal?: AbortSignal;
+  onUpdate?: (u: { scriptId: string; status: unknown; payload?: unknown }) => void;
+  onError?: (e: unknown) => void;
+};
+
+// New reactive polling function
+export function startVideoGenerationPolling(params: VideoGenPollingParams): () => void {
+  const { scriptId, signal, onUpdate, onError } = params;
+  
+  // Create a cleanup function that will stop polling
+  let isCleanedUp = false;
+  let currentTimer: NodeJS.Timeout | null = null;
+  let currentRetryAttempts = 0;
+  const maxRetries = 5;
+  const retryDelay = 2000;
+  
+  const stopPolling = () => {
+    isCleanedUp = true;
+    if (currentTimer) {
+      clearTimeout(currentTimer);
+      currentTimer = null;
+    }
+  };
+
+  // Handle abort signal
+  if (signal) {
+    signal.addEventListener('abort', () => {
+      if (!signal.aborted) return;
+      stopPolling();
+    });
+  }
+
+  const poll = async () => {
+    if (isCleanedUp || signal?.aborted) {
+      return;
+    }
+
+    try {
+      // Use the existing polling service but keyed by scriptId
+      // This assumes the backend can handle scriptId-based polling
+      const statusResponse = await videoGenerationAPI.getEnhancedGenerationStatus(scriptId);
+      
+      // Reset retry attempts on successful poll
+      currentRetryAttempts = 0;
+      
+      // Convert to existing VideoGeneration format for compatibility
+      const generation = convertStatusResponse(scriptId, statusResponse);
+      
+      // Call onUpdate with scriptId for stale update protection
+      onUpdate?.({
+        scriptId,
+        status: generation.generation_status,
+        payload: generation
+      });
+      
+      // Check if generation is complete
+      if (isCompleteStatus(statusResponse.status)) {
+        stopPolling();
+        return;
+      }
+
+      // Schedule next poll with smart interval
+      const nextInterval = getPollingInterval(statusResponse.status);
+      if (nextInterval > 0 && !isCleanedUp && !signal?.aborted) {
+        currentTimer = setTimeout(poll, nextInterval);
+      }
+
+    } catch (error) {
+      if (isCleanedUp || signal?.aborted) {
+        return;
+      }
+      
+      if (currentRetryAttempts < maxRetries) {
+        currentRetryAttempts++;
+        currentTimer = setTimeout(poll, retryDelay);
+      } else {
+        onError?.(error);
+        stopPolling();
+      }
+    }
+  };
+
+  // Start polling immediately
+  poll();
+
+  // Return cleanup function
+  return stopPolling;
+}
+
+// Helper functions for the new polling system
+function isCompleteStatus(status: string): boolean {
+  return ['completed', 'failed'].includes(status);
+}
+
+function getPollingInterval(status: string): number {
+  switch (status) {
+    case 'pending':
+      return 3000;
+    case 'processing':
+      return 2000;
+    case 'completed':
+      return 0;
+    case 'failed':
+      return 0;
+    default:
+      return 2500;
+  }
+}
+
+function convertStatusResponse(
+  scriptId: string,
+  statusResponse: VideoGenerationStatusResponse
+): VideoGeneration {
+  const generationStatus = mapStatusToGenerationStatus(statusResponse.status);
+  
+  return {
+    id: scriptId, // Use scriptId as the generation ID for new system
+    script_id: scriptId,
+    user_id: '', // Will be populated from existing data
+    quality_tier: 'free', // Default, will be updated
+    generation_status: generationStatus,
+    video_url: statusResponse.video_url || undefined,
+    created_at: new Date().toISOString(),
+    error_message: statusResponse.error || undefined,
+    audio_progress: {
+      narrator_files: 0,
+      character_files: 0,
+      sound_effects: 0,
+      background_music: 0
+    },
+    image_progress: {
+      total_characters: 0,
+      characters_completed: 0,
+      total_scenes: 0,
+      scenes_completed: 0,
+      total_images_generated: 0,
+      success_rate: statusResponse.steps.image_generation.progress
+    },
+    video_progress: {
+      total_scenes: 0,
+      scenes_completed: 0,
+      total_videos_generated: 0,
+      successful_videos: 0,
+      failed_videos: 0,
+      success_rate: statusResponse.steps.video_generation.progress
+    },
+    merge_progress: {
+      total_scenes_merged: 0,
+      total_duration: 0,
+      audio_tracks_mixed: 0,
+      file_size_mb: 0,
+      processing_time: 0,
+      sync_accuracy: 'pending'
+    },
+    lipsync_progress: {
+      characters_lip_synced: 0,
+      scenes_processed: 0,
+      processing_method: 'pending',
+      total_scenes_processed: 0,
+      scenes_with_lipsync: 0
+    }
+  };
+}
+
+function mapStatusToGenerationStatus(status: string): GenerationStatus {
+  switch (status) {
+    case 'pending':
+      return 'generating_audio';
+    case 'processing':
+      return 'generating_video';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'generating_audio';
+  }
+}
+
+// Legacy polling class (kept for backward compatibility)
+
 class VideoGenerationPolling {
   private timers: Map<string, NodeJS.Timeout> = new Map();
   private retryAttempts: Map<string, number> = new Map();

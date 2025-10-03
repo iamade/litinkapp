@@ -523,6 +523,7 @@ export const userService = {
       },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      scriptId: data.scriptId,
     });
   },
 

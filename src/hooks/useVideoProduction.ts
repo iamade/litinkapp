@@ -1,5 +1,5 @@
 // src/hooks/useVideoProduction.ts
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
 import { userService } from '../services/userService';
 import type {
@@ -14,19 +14,29 @@ interface FFmpegOptions {
   videoUrl?: string;
 }
 
-interface UseVideoProductionProps {
+// New params type for reactive hook
+type UseVideoProductionParams = {
+  scriptId?: string;
+  versionKey?: number;
+  chapterId?: string;
+  imageUrls?: string[];
+  audioFiles?: string[];
+};
+
+// Legacy hook signature for backward compatibility
+export const useVideoProduction = (props: {
   chapterId: string;
   scriptId?: string;
   imageUrls?: string[];
   audioFiles?: string[];
-}
+}) => {
+  return useVideoProductionWithParams(props);
+};
 
-export const useVideoProduction = ({
-  chapterId,
-  scriptId,
-  imageUrls = [],
-  audioFiles = []
-}: UseVideoProductionProps) => {
+// New reactive hook
+export function useVideoProductionWithParams(params: UseVideoProductionParams) {
+  const { scriptId, versionKey, chapterId, imageUrls = [], audioFiles = [] } = params;
+  
   const [videoProduction, setVideoProduction] = useState<VideoProduction | null>(null);
   const [scenes, setScenes] = useState<VideoScene[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -39,35 +49,63 @@ export const useVideoProduction = ({
     outputFormat: 'mp4',
     quality: 'high'
   });
+  
+  // Refs for cancellation and stale update protection
+  const activeScriptIdRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Update active scriptId ref
+  useEffect(() => { 
+    activeScriptIdRef.current = scriptId ?? null; 
+  }, [scriptId]);
 
   // Load existing video production
   const loadVideoProduction = useCallback(async () => {
     if (!chapterId) return;
     
+    // Abort previous request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setIsLoading(true);
     try {
       const data = await userService.getVideoProduction(chapterId);
+
+      // Guard against stale scriptId
+      if (activeScriptIdRef.current !== scriptId) return;
+
       if (data) {
         setVideoProduction(data);
-        setScenes(data.scenes || []);
-        setEditorSettings(data.editorSettings || editorSettings);
+        setScenes((data as any).scenes || []);
+        setEditorSettings((data as any).editorSettings || editorSettings);
       }
     } catch (error) {
-      console.error('Error loading video production:', error);
+      if (!controller.signal.aborted) {
+        console.error('Error loading video production:', error);
+      }
     } finally {
-      setIsLoading(false);
+      if (!controller.signal.aborted) {
+        setIsLoading(false);
+      }
     }
-  }, [chapterId]);
+  }, [chapterId, scriptId, versionKey]);
 
-  // Initialize scenes from images and audio
+  // Initialize scenes from images and audio with script context
   const initializeScenes = useCallback(async () => {
     if (!imageUrls.length) {
       toast.error('No images available to create scenes');
       return;
     }
 
+    // Reset scenes when script changes to ensure proper mapping
+    if (activeScriptIdRef.current !== scriptId) {
+      setScenes([]);
+      return;
+    }
+
     const newScenes: VideoScene[] = imageUrls.map((imageUrl, index) => ({
-      id: `scene-${Date.now()}-${index}`,
+      id: `scene-${Date.now()}-${index}-${scriptId || 'no-script'}`,
       sceneNumber: index + 1,
       imageUrl,
       audioFiles: audioFiles[index] ? [audioFiles[index]] : [],
@@ -79,9 +117,12 @@ export const useVideoProduction = ({
       status: 'pending'
     }));
 
-    setScenes(newScenes);
-    toast.success(`Initialized ${newScenes.length} scenes`);
-  }, [imageUrls, audioFiles]);
+    // Guard against stale scriptId
+    if (activeScriptIdRef.current === scriptId) {
+      setScenes(newScenes);
+      toast.success(`Initialized ${newScenes.length} scenes for script ${scriptId?.substring(0, 8)}...`);
+    }
+  }, [imageUrls, audioFiles, scriptId]);
 
   // Update scene
   const updateScene = useCallback((sceneId: string, updates: Partial<VideoScene>) => {
@@ -126,7 +167,7 @@ export const useVideoProduction = ({
   }, []);
 
   // Process with FFmpeg - disabled per architecture (should use backend processing)
-  const processWithFFmpeg = useCallback(async (options?: Partial<FFmpegOptions>) => {
+  const processWithFFmpeg = useCallback(async () => {
     toast.error('Video processing is handled in the backend. Use the AI generation pipeline for video processing.');
     return;
   }, []);
@@ -160,7 +201,10 @@ export const useVideoProduction = ({
 
   // Save production
   const saveProduction = useCallback(async () => {
-    if (!chapterId) return;
+    if (!chapterId) {
+      toast.error('Chapter ID is required for saving video production');
+      return;
+    }
 
     setIsLoading(true);
     try {
@@ -172,7 +216,7 @@ export const useVideoProduction = ({
       };
 
       const result = await userService.saveVideoProduction(data);
-      setVideoProduction(result);
+      setVideoProduction(result as any);
       toast.success('Video production saved');
     } catch (error) {
       console.error('Error saving production:', error);
@@ -182,7 +226,70 @@ export const useVideoProduction = ({
     }
   }, [chapterId, scenes, editorSettings, scriptId]);
 
+  // Start video pipeline
+  const startPipeline = useCallback(async () => {
+    if (!scriptId) {
+      toast.error('Script ID is required to start video pipeline');
+      return;
+    }
+
+    setIsRendering(true);
+    try {
+      // This would call the backend to start the video generation pipeline
+      // For now, we'll just show a message
+      toast.success(`Starting video pipeline for script: ${scriptId}`);
+      // TODO: Implement actual pipeline start
+    } catch (error) {
+      console.error('Error starting video pipeline:', error);
+      toast.error('Failed to start video pipeline');
+    } finally {
+      setIsRendering(false);
+    }
+  }, [scriptId]);
+
+  // Render video
+  const renderVideo = useCallback(async () => {
+    if (!scriptId) {
+      toast.error('Script ID is required to render video');
+      return;
+    }
+
+    setIsRendering(true);
+    try {
+      // This would call the backend to render the video
+      // For now, we'll just show a message
+      toast.success(`Rendering video for script: ${scriptId}`);
+      // TODO: Implement actual video rendering
+    } catch (error) {
+      console.error('Error rendering video:', error);
+      toast.error('Failed to render video');
+    } finally {
+      setIsRendering(false);
+    }
+  }, [scriptId]);
+
+  // Auto-load video production when dependencies change
   useEffect(() => {
+    loadVideoProduction();
+  }, [loadVideoProduction]);
+
+  // Reset scenes when script changes to prevent stale data
+  useEffect(() => {
+    // Only clear when switching to a real new script (avoid transient null clears)
+    if (scriptId && activeScriptIdRef.current !== scriptId) {
+      setScenes([]);
+      activeScriptIdRef.current = scriptId;
+    }
+  }, [scriptId]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const refetch = useCallback(() => {
     loadVideoProduction();
   }, [loadVideoProduction]);
 
@@ -201,6 +308,9 @@ export const useVideoProduction = ({
     renderWithOpenShot,
     processWithFFmpeg,
     downloadVideo,
-    saveProduction
+    saveProduction,
+    startPipeline,
+    renderVideo,
+    refetch
   };
-};
+}

@@ -4,6 +4,13 @@ import { userService } from "../services/userService";
 import { toast } from "react-hot-toast";
 import BookViewForLearning from "./BookViewForLearning";
 import BookViewForEntertainment from "./BookViewForEntertainment";
+import { ErrorBoundary } from "../components/ErrorBoundary";
+
+interface Chapter {
+  id: string;
+  title: string;
+  content: string;
+}
 
 interface Book {
   id: string;
@@ -13,15 +20,15 @@ interface Book {
   cover_image_url?: string;
   book_type: string;
   difficulty?: string;
-  tags?: any;
+  tags?: string[]; // Replace 'any' with string[]
   language?: string;
   user_id: string;
   status: string;
   total_chapters?: number;
-  estimated_duration?: any;
+  estimated_duration?: number | string; // Replace 'any' with number or string
   created_at: string;
   updated_at: string;
-  chapters?: any[];
+  chapters?: Chapter[]; // Replace 'any[]' with Chapter[]
 }
 
 export default function BookView() {
@@ -59,8 +66,16 @@ export default function BookView() {
 
   // Route to appropriate component based on book type
   if (book.book_type === "learning") {
-    return <BookViewForLearning />;
+    return (
+      <ErrorBoundary>
+        <BookViewForLearning />
+      </ErrorBoundary>
+    );
   } else {
-    return <BookViewForEntertainment />;
+    return (
+      <ErrorBoundary>
+        <BookViewForEntertainment book={book} />
+      </ErrorBoundary>
+    );
   }
 }

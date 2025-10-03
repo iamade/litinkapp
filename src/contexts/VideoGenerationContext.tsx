@@ -13,6 +13,7 @@ import {
 } from "../lib/videoGenerationApi";
 import { pollingService } from "../services/videoGenerationPolling";
 import { handleVideoGenerationStatusError, showVideoGenerationSuccess } from "../utils/videoGenerationErrors";
+import { useScriptSelection } from "./ScriptSelectionContext";
 
 // Simplified state interface
 export interface VideoGenerationState {
@@ -52,6 +53,24 @@ export const VideoGenerationProvider: React.FC<{
   });
 
   const currentVideoGenId = useRef<string | null>(null);
+  const pollingAbortRef = useRef<AbortController | null>(null);
+  const activeScriptIdRef = useRef<string | null>(null);
+  
+  // Use script selection context
+  const { selectedScriptId, versionToken, subscribe } = useScriptSelection();
+
+  // Reset video generation context state
+  const resetVideoGenerationContextState = useCallback(() => {
+    pollingAbortRef.current?.abort();
+    pollingAbortRef.current = null;
+    currentVideoGenId.current = null;
+    setState({
+      currentGeneration: null,
+      isGenerating: false,
+      error: null,
+      lastUpdated: null,
+    });
+  }, []);
 
   // Start polling for status updates
   const startPolling = useCallback((videoGenId: string) => {
@@ -59,6 +78,11 @@ export const VideoGenerationProvider: React.FC<{
 
     pollingService.startPolling(videoGenId, {
       onUpdate: (generation) => {
+        // Guard against stale updates from previous scripts
+        if (generation.script_id !== activeScriptIdRef.current) {
+          return;
+        }
+        
         // Check for errors and show notifications
         handleVideoGenerationStatusError(generation, videoGenId);
         
@@ -80,6 +104,11 @@ export const VideoGenerationProvider: React.FC<{
         }));
       },
       onComplete: (generation) => {
+        // Guard against stale updates from previous scripts
+        if (generation.script_id !== activeScriptIdRef.current) {
+          return;
+        }
+        
         // Show success notification for completed generation
         if (generation.generation_status === 'completed') {
           showVideoGenerationSuccess(videoGenId);
@@ -163,10 +192,52 @@ export const VideoGenerationProvider: React.FC<{
     setState((prev) => ({ ...prev, error: null }));
   }, []);
 
+  // Update active script ID ref when selectedScriptId changes
+  useEffect(() => {
+    activeScriptIdRef.current = selectedScriptId ?? null;
+  }, [selectedScriptId]);
+
+  // Subscribe to SCRIPT_CHANGED events
+  useEffect(() => {
+    const unsubscribe = subscribe((evt) => {
+      if (evt === 'SCRIPT_CHANGED') {
+        // Cancel any in-flight polling and reset context state
+        resetVideoGenerationContextState();
+      }
+    });
+    return unsubscribe;
+  }, [subscribe, resetVideoGenerationContextState]);
+
+  // Re-key polling when selectedScriptId or versionToken changes
+  useEffect(() => {
+    // Stop previous polling
+    pollingAbortRef.current?.abort();
+    pollingAbortRef.current = null;
+
+    if (!selectedScriptId) {
+      // No script selected, ensure polling is stopped
+      stopPolling();
+      return;
+    }
+
+    // If we have an active generation for the current script, restart polling
+    if (currentVideoGenId.current && state.currentGeneration?.script_id === selectedScriptId) {
+      const controller = new AbortController();
+      pollingAbortRef.current = controller;
+      startPolling(currentVideoGenId.current);
+    }
+
+    return () => {
+      pollingAbortRef.current?.abort();
+      pollingAbortRef.current = null;
+    };
+  }, [selectedScriptId, versionToken, startPolling, stopPolling, state.currentGeneration?.script_id]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopPolling();
+      pollingAbortRef.current?.abort();
     };
   }, [stopPolling]);
 

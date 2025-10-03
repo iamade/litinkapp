@@ -10,12 +10,20 @@ import {
 } from '../lib/videoGenerationApi';
 import { pollingService, PollingCallbacks } from '../services/videoGenerationPolling';
 
+// Debug logging guard
+const DEBUG = false;
+
 export interface UseVideoGenerationStatusReturn {
-  // Current state
+  // Stable return shape as requested
+  data: VideoGeneration | null;
+  error: Error | null;
+  isLoading: boolean;
+  refetch: () => void;
+  
+  // Additional state for backward compatibility
   generation: VideoGeneration | null;
   status: GenerationStatus | null;
   isPolling: boolean;
-  error: Error | null;
   retryAttempts: number;
   
   // Enhanced progress data
@@ -45,15 +53,16 @@ export interface UseVideoGenerationStatusReturn {
   isComplete: boolean;
   isFailed: boolean;
   isGenerating: boolean;
-  isLoading: boolean;
 }
 
 export const useVideoGenerationStatus = (
   videoGenId?: string
 ): UseVideoGenerationStatusReturn => {
+  // Initialize with isLoading=true, data=null as required
   const [generation, setGeneration] = useState<VideoGeneration | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [isPolling, setIsPolling] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // Start with loading state
   const [currentStep, setCurrentStep] = useState<string>('');
   const [stepProgress, setStepProgress] = useState({
     image_generation: { status: 'pending', progress: 0 },
@@ -73,55 +82,56 @@ export const useVideoGenerationStatus = (
     return Math.round(totalProgress / totalSteps);
   };
 
-  // Enhanced progress calculation with step-by-step tracking
-  const calculateEnhancedProgress = (status: GenerationStatus | null): number => {
-    if (!status) return 0;
-    
-    // Use step progress if available, otherwise fall back to status-based calculation
-    const overallFromSteps = calculateOverallProgress();
-    if (overallFromSteps > 0) return overallFromSteps;
-    
-    // Fallback to status-based calculation
-    switch (status) {
-      case 'generating_audio':
-        return 15;
-      case 'audio_completed':
-        return 25;
-      case 'generating_images': {
-        const imageProgress = generation?.image_progress;
-        return 25 + ((imageProgress?.success_rate || 0) * 0.25);
-      }
-      case 'images_completed':
-        return 50;
-      case 'generating_video': {
-        const videoProgress = generation?.video_progress;
-        return 50 + ((videoProgress?.success_rate || 0) * 0.25);
-      }
-      case 'video_completed':
-        return 75;
-      case 'merging_audio':
-        return 85;
-      case 'applying_lipsync':
-        return 95;
-      case 'lipsync_completed':
-      case 'completed':
-        return 100;
-      case 'failed':
-      case 'lipsync_failed':
-        return 0;
-      default:
-        return 0;
+  // Debug logging with safe types
+  const logDebug = (message: string, data?: unknown) => {
+    if (DEBUG) {
+      console.log(`[useVideoGenerationStatus] ${message}`, data);
     }
   };
 
-  // Polling callbacks
+  // Reset state when generationId changes
+  useEffect(() => {
+    if (videoGenId !== currentVideoGenId.current) {
+      logDebug('Resetting state for new videoGenId', { old: currentVideoGenId.current, new: videoGenId });
+      setGeneration(null);
+      setError(null);
+      setIsLoading(true);
+      setCurrentStep('');
+      setStepProgress({
+        image_generation: { status: 'pending', progress: 0 },
+        audio_generation: { status: 'pending', progress: 0 },
+        video_generation: { status: 'pending', progress: 0 },
+        audio_video_merge: { status: 'pending', progress: 0 }
+      });
+    }
+  }, [videoGenId]);
+
+  // Polling callbacks with proper structure
   const callbacks: PollingCallbacks = {
-    onUpdate: (updatedGeneration) => {
+    onUpdate: useCallback((updatedGeneration: VideoGeneration) => {
+      logDebug('Received generation update', updatedGeneration);
+      
+      // Handle 204 No Content or null responses
+      if (!updatedGeneration) {
+        logDebug('Received null/undefined generation, setting data to null');
+        setGeneration(null);
+        setError(null);
+        setIsLoading(false);
+        setStepProgress({
+          image_generation: { status: "pending", progress: 0 },
+          audio_generation: { status: "pending", progress: 0 },
+          video_generation: { status: "pending", progress: 0 },
+          audio_video_merge: { status: "pending", progress: 0 },
+        });
+        return;
+      }
+
       setGeneration(updatedGeneration);
       setError(null);
+      setIsLoading(false);
       
-      // Update step progress based on generation status
-      const status = updatedGeneration.generation_status;
+      // Null-safe access to generation status
+      const status = updatedGeneration?.generation_status ?? null;
       let newCurrentStep = '';
       let newStepProgress = { ...stepProgress };
       
@@ -179,32 +189,50 @@ export const useVideoGenerationStatus = (
       
       setCurrentStep(newCurrentStep);
       setStepProgress(newStepProgress);
-    },
-    onError: (pollingError) => {
+    }, [stepProgress]),
+    
+    onError: useCallback((pollingError: Error) => {
+      logDebug('Polling error occurred', pollingError);
       setError(pollingError);
       setIsPolling(false);
-    },
-    onComplete: (completedGeneration) => {
+      setIsLoading(false);
+    }, []),
+    
+    onComplete: useCallback((completedGeneration: VideoGeneration) => {
+      logDebug('Polling completed', completedGeneration);
       setGeneration(completedGeneration);
       setIsPolling(false);
-    },
-    onRetry: (attempt, retryError) => {
-      console.log(`Polling retry attempt ${attempt}:`, retryError.message);
-    }
+      setIsLoading(false);
+    }, []),
+    
+    onRetry: useCallback((attempt: number, retryError: Error) => {
+      logDebug(`Polling retry attempt ${attempt}`, retryError);
+    }, [])
   };
 
-  // Start polling function
+  // Start polling function with proper state management
   const startPolling = useCallback((newVideoGenId: string) => {
+    logDebug('Starting polling', { newVideoGenId });
+    
     if (currentVideoGenId.current) {
       pollingService.stopPolling(currentVideoGenId.current);
     }
     
     currentVideoGenId.current = newVideoGenId;
     setIsPolling(true);
+    setIsLoading(true);
     setError(null);
     
     pollingService.startPolling(newVideoGenId, callbacks);
-  }, []);
+  }, [callbacks]);
+
+  // Refetch function for stable return shape
+  const refetch = useCallback(() => {
+    if (currentVideoGenId.current) {
+      logDebug('Refetching data', { videoGenId: currentVideoGenId.current });
+      startPolling(currentVideoGenId.current);
+    }
+  }, [startPolling]);
 
   // Stop polling function
   const stopPolling = useCallback(() => {
@@ -244,16 +272,16 @@ export const useVideoGenerationStatus = (
     };
   }, [stopPolling]);
 
-  // Derived state
-  const status = generation?.generation_status || null;
+  // Derived state with null-safe guards
+  const status = generation?.generation_status ?? null;
   const isComplete = status ? ['completed', 'lipsync_completed'].includes(status) : false;
   const isFailed = status ? ['failed', 'lipsync_failed'].includes(status) : false;
   const isGenerating = isPolling && !isComplete && !isFailed;
-  const isLoading = isPolling && !isComplete;
   const retryAttempts = currentVideoGenId.current
     ? pollingService.getRetryAttempts(currentVideoGenId.current)
     : 0;
 
+  // Safe progress calculation with defaults
   const progress = {
     overall: calculateOverallProgress(),
     currentStep,
@@ -266,11 +294,16 @@ export const useVideoGenerationStatus = (
   };
 
   return {
-    // Current state
+    // Stable return shape as requested
+    data: generation,
+    error,
+    isLoading,
+    refetch,
+    
+    // Additional state for backward compatibility
     generation,
     status,
     isPolling,
-    error,
     retryAttempts,
     
     // Progress data
@@ -286,7 +319,6 @@ export const useVideoGenerationStatus = (
     isComplete,
     isFailed,
     isGenerating,
-    isLoading,
   };
 };
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
+import { useScriptSelection } from '../contexts/ScriptSelectionContext';
 import { userService } from "../services/userService";
 import { toast } from "react-hot-toast";
 import {
@@ -84,6 +85,9 @@ type WorkflowTab = "plot" | "script" | "images" | "audio" | "video";
 
 export default function BookViewForEntertainment() {
   const { id } = useParams();
+
+  // Wire selectChapter from ScriptSelectionContext
+  const { selectChapter } = useScriptSelection();
 
   // State declarations - all hooks at the top level
   const [book, setBook] = useState<Book | null>(null);
@@ -378,6 +382,7 @@ export default function BookViewForEntertainment() {
       // Set first chapter as selected by default
       if (bookData.chapters && bookData.chapters.length > 0) {
         setSelectedChapter(bookData.chapters[0]);
+        selectChapter(bookData.chapters[0].id, { reason: 'load' });
       }
     } catch (error) {
       console.error("Error loading book:", error);
@@ -718,18 +723,23 @@ export default function BookViewForEntertainment() {
 
   // Add audio generation hook
   const {
-    audioAssets,
+    files,
     isLoading: isLoadingAudio,
-    loadAudioAssets,
-  } = useAudioGeneration(selectedChapter?.id || '');
+    loadAudio,
+  } = useAudioGeneration({
+    chapterId: selectedChapter?.id || '',
+    scriptId: selectedScript?.id,
+  });
 
   // Load images and audio when chapter changes
   useEffect(() => {
     if (selectedChapter) {
       loadImages();
-      loadAudioAssets();
+      if (selectedScript?.id) {
+        loadAudio();
+      }
     }
-  }, [selectedChapter, loadImages, loadAudioAssets]);
+  }, [selectedChapter, selectedScript?.id, loadImages, loadAudio]);
 
   // Update generated URLs when images/audio change
   useEffect(() => {
@@ -742,36 +752,17 @@ export default function BookViewForEntertainment() {
   }, [sceneImages]);
 
   useEffect(() => {
-    // Extract audio file URLs from audioAssets
+    // Extract audio file URLs from files
     const audioUrls: string[] = [];
-    if (audioAssets) {
-      // Extract narration URLs
-      (audioAssets.narration || []).forEach((narrationItem) => {
-        if (narrationItem.url) {
-          audioUrls.push(narrationItem.url);
-        }
-      });
-      // Extract music URLs
-      (audioAssets.music || []).forEach((musicItem) => {
-        if (musicItem.url) {
-          audioUrls.push(musicItem.url);
-        }
-      });
-      // Extract sound effects URLs
-      (audioAssets.effects || []).forEach((effectItem) => {
-        if (effectItem.url) {
-          audioUrls.push(effectItem.url);
-        }
-      });
-      // Extract ambiance URLs
-      (audioAssets.ambiance || []).forEach((ambianceItem) => {
-        if (ambianceItem.url) {
-          audioUrls.push(ambianceItem.url);
+    if (files) {
+      files.forEach((file) => {
+        if (file.url) {
+          audioUrls.push(file.url);
         }
       });
     }
     setGeneratedAudioFiles(audioUrls);
-  }, [audioAssets]);
+  }, [files]);
 
   // Render workflow tab content
   const renderTabContent = () => {
@@ -1041,7 +1032,10 @@ if (!selectedChapter) {
                 return (
                   <button
                     key={chapter.id}
-                    onClick={() => setSelectedChapter(chapter)}
+                    onClick={() => {
+                      setSelectedChapter(chapter);
+                      selectChapter(chapter.id, { reason: 'user' });
+                    }}
                     className={`w-full text-left p-3 rounded-lg transition-colors mb-2 ${
                       selectedChapter?.id === chapter.id
                         ? "bg-blue-50 border-blue-200 border"

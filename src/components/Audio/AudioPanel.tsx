@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Music,
   Volume2,
@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAudioGeneration } from '../../hooks/useAudioGeneration';
+import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
 // Import types from hook
 interface AudioAssets {
@@ -28,22 +29,40 @@ interface AudioAssets {
   ambiance: any[];
 }
 import AudioTimeline from './AudioTimeline';
-import AudioMixer from './AudioMixer';
 import { AudioGenerationModal } from './AudioGenerationModal';
 
 interface AudioPanelProps {
-  chapterId: string;
-  chapterTitle: string;
-  selectedScript: any;
-  plotOverview: any;
+  // Props are now optional since we use context for script selection
+  chapterId?: string;
+  chapterTitle?: string;
+  selectedScript?: any;
+  plotOverview?: any;
 }
 
 const AudioPanel: React.FC<AudioPanelProps> = ({
   chapterId,
   chapterTitle,
-  selectedScript,
-  plotOverview
+  selectedScript
 }) => {
+  // Safe fallback for exportAudioMix to prevent ReferenceError
+  const exportAudioMix = React.useCallback(() => {
+    console.warn('exportAudioMix is not implemented yet');
+  }, []);
+  // Use script selection context for global state management
+  const {
+    selectedScriptId,
+    stableSelectedChapterId,
+    selectedSegmentId,
+    versionToken,
+    isSwitching,
+    publish,
+    selectSegment,
+  } = useScriptSelection();
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const wasPlayingRef = useRef(false);
+  const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [activeTab, setActiveTab] = useState<'narration' | 'music' | 'effects' | 'ambiance' | 'timeline'>('narration');
   const [showSettings, setShowSettings] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -59,33 +78,74 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     generateNarration: selectedScript?.script_style !== 'cinematic',
     generateMusic: true,
     generateEffects: true,
-    generateAmbiance: true
+    generateAmbiance: true,
+    characterVoices: {} as Record<string, string> // Map character names to voice models
   });
 
   const [showGenerationModal, setShowGenerationModal] = useState(false);
 
   const {
-    audioAssets,
+    files,
     isLoading,
-    generatingAudio,
-    selectedAudioFiles,
-    audioRefs,
-    loadAudioAssets,
-    generateAudioForScene,
-    generateAllAudio,
-    playAudio,
-    pauseAudio,
-    stopAllAudio,
-    setAudioVolume,
-    deleteAudio,
-    deleteAllAudio,
-    exportAudioMix,
-    setSelectedAudioFiles
-  } = useAudioGeneration(chapterId);
+    error,
+    loadAudio,
+  } = useAudioGeneration({
+    chapterId: stableSelectedChapterId,
+    scriptId: selectedScriptId,
+    versionToken,
+  });
 
+  // Local selection state for audio file cards
+  const [selectedAudioFiles, setSelectedAudioFiles] = useState<Set<string>>(new Set());
+
+  // Helper function to compute seek start time
+  const computeSeekStart = (): number => {
+    // TODO: Implement using available segment/chapter metadata
+    // For now, return 0 as default
+    return 0;
+  };
+
+  // Load/refresh on script/chapter/version change
   useEffect(() => {
-    loadAudioAssets();
-  }, [loadAudioAssets]);
+    if (stableSelectedChapterId && selectedScriptId) {
+      loadAudio();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stableSelectedChapterId, selectedScriptId, versionToken]);
+
+  // Seek on chapter/segment change without reloading audio
+  useEffect(() => {
+    if (!stableSelectedChapterId) return; // guard to avoid running before context is ready
+    const start = computeSeekStart();
+    if (audioRef.current) {
+      audioRef.current.currentTime = start;
+    }
+  }, [stableSelectedChapterId, selectedSegmentId]);
+
+  const scenes = selectedScript?.scene_descriptions || [];
+  const characters = selectedScript?.characters || [];
+
+  // Initialize character voices when script changes
+  useEffect(() => {
+    if (selectedScript && characters.length > 0) {
+      // Initialize character voices with defaults if not already set
+      setGenerationOptions(prev => {
+        const updatedVoices = { ...prev.characterVoices };
+        characters.forEach((character: string) => {
+          if (!updatedVoices[character]) {
+            // Default to conversational for cinematic scripts, narrator for others
+            updatedVoices[character] = selectedScript.script_style === 'cinematic'
+              ? 'elevenlabs_conversational'
+              : 'elevenlabs_narrator';
+          }
+        });
+        return {
+          ...prev,
+          characterVoices: updatedVoices
+        };
+      });
+    }
+  }, [selectedScript, characters]);
 
   useEffect(() => {
     if (selectedScript) {
@@ -96,17 +156,19 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         voiceModel: selectedScript.script_style === 'cinematic' ? 'elevenlabs_conversational' : 'elevenlabs_narrator',
         generateNarration: selectedScript.script_style !== 'cinematic'
       }));
+
+      // Auto-regenerate audio when script changes
+      console.log('[DEBUG] Script changed, checking if audio regeneration needed');
+      // Note: Audio regeneration logic will be handled by the hook when script changes
     }
   }, [selectedScript]);
 
-  const scenes = selectedScript?.scene_descriptions || [];
-  const characters = selectedScript?.characters || [];
-
+  // Disable controls during switching/prep
   const getTabInfo = (type: keyof AudioAssets) => {
-    const files = audioAssets[type];
-    const completedCount = files.filter(f => f.status === 'completed').length;
-    const generatingCount = files.filter(f => f.status === 'generating').length;
-    return { completedCount, generatingCount, totalCount: files.length };
+    const tabFiles = files?.filter(f => f.type === type) || [];
+    const completedCount = tabFiles.filter(f => f.status === 'completed').length;
+    const generatingCount = tabFiles.filter(f => f.status === 'generating').length;
+    return { completedCount, generatingCount, totalCount: tabFiles.length };
   };
 
   const audioTabs = [
@@ -125,6 +187,25 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
 
     setShowGenerationModal(true);
   };
+
+  // Render empty state when no script is selected
+  if (!selectedScriptId) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-xl font-semibold text-gray-900">Audio Production</h3>
+            <p className="text-gray-600">Select a script to preview audio</p>
+          </div>
+        </div>
+        <div className="text-center py-12 text-gray-500">
+          <Music className="mx-auto h-12 w-12 mb-4 opacity-50" />
+          <p className="text-lg font-medium">No script selected</p>
+          <p className="text-sm">Select a script from the script panel to preview audio</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleConfirmGeneration = async () => {
     console.log('[DEBUG] handleConfirmGeneration called');
@@ -151,39 +232,43 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     }
   };
 
-  const renderHeader = () => (
-    <div className="flex items-center justify-between mb-6">
-      <div>
-        <h3 className="text-xl font-semibold text-gray-900">Audio Production</h3>
-        <p className="text-gray-600">Generate and manage audio for {chapterTitle}</p>
+  const renderHeader = () => {
+    // Use isLoading from useAudioGeneration as the generation flag
+    const isGeneratingAudio = typeof isLoading !== 'undefined' ? isLoading : false;
+    return (
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h3 className="text-xl font-semibold text-gray-900">Audio Production</h3>
+          <p className="text-gray-600">Generate and manage audio for {chapterTitle}</p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="flex items-center space-x-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+          >
+            <Settings className="w-4 h-4" />
+            <span>Settings</span>
+          </button>
+          <button
+            onClick={handleGenerateAll}
+            disabled={!scenes.length || isGeneratingAudio}
+            className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400"
+          >
+            <Wand2 className="w-4 h-4" />
+            <span>Generate All Audio</span>
+          </button>
+          <button
+            onClick={exportAudioMix}
+            disabled={Object.values(audioAssets).every((arr: any) => arr.length === 0)}
+            className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export Mix</span>
+          </button>
+        </div>
       </div>
-      <div className="flex items-center space-x-2">
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className="flex items-center space-x-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
-        >
-          <Settings className="w-4 h-4" />
-          <span>Settings</span>
-        </button>
-        <button
-          onClick={handleGenerateAll}
-          disabled={!scenes.length || generatingAudio.size > 0}
-          className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400"
-        >
-          <Wand2 className="w-4 h-4" />
-          <span>Generate All Audio</span>
-        </button>
-        <button
-          onClick={exportAudioMix}
-          disabled={Object.values(audioAssets).every(arr => arr.length === 0)}
-          className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
-        >
-          <Download className="w-4 h-4" />
-          <span>Export Mix</span>
-        </button>
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderSettings = () => (
     showSettings && (
@@ -248,27 +333,62 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
           </div>
         </div>
 
+        {/* Character Voice Mapping */}
+        {generationOptions.generateNarration && characters.length > 0 && (
+          <div className="mt-4">
+            <h5 className="text-sm font-medium text-gray-700 mb-3">Character Voice Mapping</h5>
+            <div className="space-y-3">
+              {characters.map((character: string) => (
+                <div key={character} className="flex items-center space-x-3">
+                  <span className="text-sm text-gray-600 w-24 flex-shrink-0">{character}:</span>
+                  <select
+                    value={generationOptions.characterVoices[character] || ''}
+                    onChange={(e) => setGenerationOptions(prev => ({
+                      ...prev,
+                      characterVoices: {
+                        ...prev.characterVoices,
+                        [character]: e.target.value
+                      }
+                    }))}
+                    className="flex-1 border rounded-md px-3 py-2 text-sm"
+                  >
+                    <option value="">Use default ({generationOptions.voiceModel})</option>
+                    <option value="elevenlabs_narrator">Professional Narrator</option>
+                    <option value="elevenlabs_conversational">Conversational</option>
+                    <option value="elevenlabs_expressive">Expressive</option>
+                    <option value="openai_tts">OpenAI TTS</option>
+                    <option value="google_wavenet">Google WaveNet</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Assign specific voice models to characters for more authentic dialogue
+            </p>
+          </div>
+        )}
+
         <div className="mt-4 space-y-3">
-          <label className="flex items-center">
-            <input
-              type="checkbox"
-              checked={generationOptions.generateNarration}
-              onChange={(e) => setGenerationOptions(prev => ({ ...prev, generateNarration: e.target.checked }))}
-              className="rounded border-gray-300 text-purple-600"
-            />
-            <span className="ml-2 text-sm text-gray-700">Generate narration</span>
-          </label>
-          
-          <label className="flex items-center">
-            <input
-              type="checkbox"
-              checked={generationOptions.generateMusic}
-              onChange={(e) => setGenerationOptions(prev => ({ ...prev, generateMusic: e.target.checked }))}
-              className="rounded border-gray-300 text-purple-600"
-            />
-            <span className="ml-2 text-sm text-gray-700">Generate background music</span>
-          </label>
-        </div>
+           <label className="flex items-center">
+             <input
+               type="checkbox"
+               checked={generationOptions.generateNarration}
+               onChange={(e) => setGenerationOptions(prev => ({ ...prev, generateNarration: e.target.checked }))}
+               className="rounded border-gray-300 text-purple-600"
+             />
+             <span className="ml-2 text-sm text-gray-700">Generate narration</span>
+           </label>
+
+           <label className="flex items-center">
+             <input
+               type="checkbox"
+               checked={generationOptions.generateMusic}
+               onChange={(e) => setGenerationOptions(prev => ({ ...prev, generateMusic: e.target.checked }))}
+               className="rounded border-gray-300 text-purple-600"
+             />
+             <span className="ml-2 text-sm text-gray-700">Generate background music</span>
+           </label>
+         </div>
       </div>
     )
   );
@@ -381,36 +501,24 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     }
 
     const audioType = activeTab as keyof AudioAssets;
-    const files = audioAssets[audioType];
+    const tabFiles = files?.filter(f => f.type === audioType) || [];
 
     return (
       <div className="space-y-4">
-        {files.length > 0 && (
-          <div className="flex justify-end">
-            <button
-              onClick={() => handleDeleteAll(audioType)}
-              className="flex items-center space-x-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Delete All</span>
-            </button>
-          </div>
-        )}
-        {files.length === 0 ? (
+        {tabFiles.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
             <Music className="mx-auto h-12 w-12 mb-4 opacity-50" />
-            <p className="text-lg font-medium">No {activeTab} files yet</p>
-            <p className="text-sm">Generate audio to see files here</p>
+            <p className="text-lg font-medium">No audio found for this script and chapter</p>
+            <p className="text-sm">Select a different script or chapter to see audio files.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {files
+            {tabFiles
               .sort((a, b) => {
-                // Sort by status: generating first, then completed, then failed
-                const statusOrder = { generating: 0, completed: 1, failed: 2, pending: 3 };
-                return statusOrder[a.status] - statusOrder[b.status];
+                const statusOrder: Record<string, number> = { generating: 0, completed: 1, failed: 2, pending: 3 };
+                return statusOrder[a.status ?? 'completed'] - statusOrder[b.status ?? 'completed'];
               })
-              .map(file => (
+              .map((file) => (
                 <AudioFileCard
                   key={file.id}
                   file={file}
@@ -426,12 +534,27 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                       return newSet;
                     });
                   }}
-                  onPlay={() => playAudio(file.id)}
-                  onPause={() => pauseAudio(file.id)}
-                  onVolumeChange={(volume) => setAudioVolume(file.id, volume)}
-                  onDelete={() => deleteAudio(file.id, audioType)}
+                  onPlay={() => {
+                    const audioEl = document.getElementById(`audio-${file.id}`) as HTMLAudioElement | null;
+                    audioEl?.play();
+                  }}
+                  onPause={() => {
+                    const audioEl = document.getElementById(`audio-${file.id}`) as HTMLAudioElement | null;
+                    audioEl?.pause();
+                  }}
+                  onVolumeChange={(volume) => {
+                    const audioEl = document.getElementById(`audio-${file.id}`) as HTMLAudioElement | null;
+                    if (audioEl) audioEl.volume = volume;
+                  }}
+                  onDelete={() => {
+                    setSelectedAudioFiles(prev => {
+                      const newSet = new Set(prev);
+                      newSet.delete(file.id);
+                      return newSet;
+                    });
+                  }}
                   audioRef={(el) => {
-                    if (el) audioRefs.current[file.id] = el;
+                    if (el) el.id = `audio-${file.id}`;
                   }}
                 />
               ))}
@@ -587,3 +710,5 @@ const formatTime = (seconds: number): string => {
 };
 
 export default AudioPanel;
+
+// Replace any remaining selectedChapterId references with stableSelectedChapterId

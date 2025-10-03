@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Play, Pause, ZoomIn, ZoomOut } from 'lucide-react';
+import { ZoomIn, ZoomOut } from 'lucide-react';
+import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
 interface AudioTimelineProps {
   audioAssets: any;
@@ -16,9 +17,65 @@ const AudioTimeline: React.FC<AudioTimelineProps> = ({
   onTimeUpdate,
   onAudioSelect
 }) => {
+  const {
+    selectedScriptId,
+    selectedChapterId,
+    selectedSegmentId,
+    versionToken,
+    isSwitching,
+    selectSegment,
+    subscribe,
+  } = useScriptSelection();
+
   const [zoom, setZoom] = useState(1);
-  const [isDragging, setIsDragging] = useState(false);
   const timelineRef = useRef<HTMLDivElement>(null);
+
+  // React to selection and version changes
+  useEffect(() => {
+    // Recompute markers and layout when script/chapter changes
+    // This effect will trigger re-renders when selection changes
+  }, [selectedScriptId, selectedChapterId, versionToken]);
+
+  // Center active segment on change
+  useEffect(() => {
+    if (selectedSegmentId) {
+      // TODO: Implement scroll to active segment
+      // This would require having segment data to compute position
+    }
+  }, [selectedSegmentId]);
+
+  // Subscribe to timeline recalculation requests
+  useEffect(() => {
+    const unsub = subscribe((evt) => {
+      if (evt === 'TIMELINE_RECALC_REQUESTED') {
+        // Force re-render to recompute layout
+        // This is handled by the existing state and props
+      }
+    });
+    return unsub;
+  }, [subscribe]);
+
+  // On marker click handler - use for segment selection
+  const onMarkerClick = (id: string) => {
+    if (timelineDisabled) return;
+    selectSegment(id, { reason: 'user' });
+  };
+
+  // Disable interactions during switching
+  const timelineDisabled = isSwitching;
+
+  // Render empty state when no script is selected
+  if (!selectedScriptId) {
+    return (
+      <div className="bg-white border rounded-lg p-6">
+        <h4 className="text-lg font-semibold text-gray-900 mb-4">Audio Timeline</h4>
+        <div className="text-center py-12 text-gray-500">
+          <p className="text-lg font-medium">No script selected</p>
+          <p className="text-sm">Select a script to view the audio timeline</p>
+        </div>
+      </div>
+    );
+  }
 
   const tracks = [
     { name: 'Dialogue', color: 'bg-blue-500', files: audioAssets.dialogue },

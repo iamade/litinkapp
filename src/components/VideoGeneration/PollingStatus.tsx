@@ -13,18 +13,29 @@ export const PollingStatus: React.FC<PollingStatusProps> = ({
   className = '',
   showDetails = true
 }) => {
-  if (!videoGenId) return null;
+  // Show placeholder if no videoGenId provided
+  if (!videoGenId) {
+    return showDetails ? (
+      <div className={`bg-gray-50 border border-gray-200 rounded-lg p-4 ${className}`}>
+        <div className="flex items-center justify-center text-gray-500">
+          <span className="text-sm">No status yet. Waiting for job to start.</span>
+        </div>
+      </div>
+    ) : null;
+  }
 
-  const pollingAttempts = pollingService.getPollingAttempts(videoGenId);
-  const pollingElapsedTime = pollingService.getPollingElapsedTime(videoGenId);
-  const isFallbackRetrieval = pollingService.isFallbackRetrieval(videoGenId);
+  // Null-safe access to polling service methods
+  const pollingAttempts = pollingService.getPollingAttempts(videoGenId) ?? 0;
+  const pollingElapsedTime = pollingService.getPollingElapsedTime(videoGenId) ?? 0;
+  const isFallbackRetrieval = pollingService.isFallbackRetrieval(videoGenId) ?? false;
   
-  // Calculate polling progress for 2-minute window
-  const pollingProgress = Math.min(100, (pollingElapsedTime / (2 * 60 * 1000)) * 100);
+  // Calculate polling progress for 2-minute window with safe defaults
+  const pollingProgress = Math.min(100, Math.max(0, (pollingElapsedTime / (2 * 60 * 1000)) * 100));
   const pollingTimeRemaining = Math.max(0, (2 * 60 * 1000) - pollingElapsedTime);
   
-  // Format time remaining
+  // Format time remaining with null safety
   const formatTimeRemaining = (ms: number): string => {
+    if (!ms || ms < 0) return '0s';
     const seconds = Math.ceil(ms / 1000);
     if (seconds < 60) return `${seconds}s`;
     const minutes = Math.floor(seconds / 60);
@@ -42,7 +53,7 @@ export const PollingStatus: React.FC<PollingStatusProps> = ({
           </h5>
         </div>
         <div className="text-blue-700 text-sm font-medium">
-          Attempt {pollingAttempts}/24
+          Attempt {Math.max(0, pollingAttempts)}/24
         </div>
       </div>
       
@@ -50,7 +61,7 @@ export const PollingStatus: React.FC<PollingStatusProps> = ({
       <div className="mb-2">
         <div className="flex items-center justify-between text-xs text-blue-600 mb-1">
           <span>Polling Progress</span>
-          <span>{Math.round(pollingProgress)}%</span>
+          <span>{Math.round(Math.max(0, pollingProgress))}%</span>
         </div>
         <div className="w-full bg-blue-200 rounded-full h-2">
           <div 
@@ -101,16 +112,24 @@ export const PollingStatus: React.FC<PollingStatusProps> = ({
 
 // Simplified inline polling status for compact display
 export const InlinePollingStatus: React.FC<{ videoGenId?: string }> = ({ videoGenId }) => {
-  if (!videoGenId) return null;
+  if (!videoGenId) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-gray-500">
+        <div className="w-3 h-3 bg-gray-300 rounded-full"></div>
+        <span>No status yet</span>
+      </div>
+    );
+  }
 
-  const pollingAttempts = pollingService.getPollingAttempts(videoGenId);
-  const isFallbackRetrieval = pollingService.isFallbackRetrieval(videoGenId);
+  // Null-safe access with fallbacks
+  const pollingAttempts = pollingService.getPollingAttempts(videoGenId) ?? 0;
+  const isFallbackRetrieval = pollingService.isFallbackRetrieval(videoGenId) ?? false;
 
   return (
     <div className="flex items-center gap-2 text-xs text-blue-600">
       <RefreshCw className="w-3 h-3 animate-spin" />
       <span>
-        Polling ({pollingAttempts}/24)
+        Polling ({Math.max(0, pollingAttempts)}/24)
         {isFallbackRetrieval && (
           <span className="text-orange-600 ml-1">• Fallback Active</span>
         )}

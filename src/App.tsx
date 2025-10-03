@@ -15,6 +15,7 @@ import BookView from "./pages/BookView";
 import SubscriptionPage from "./pages/SubscriptionPage";
 import { setLoadingContextSetter } from "./lib/api";
 import { VideoGenerationProvider } from "./contexts/VideoGenerationContext";
+import { ScriptSelectionProvider } from "./contexts/ScriptSelectionContext";
 
 // Global Loading Context
 export const LoadingContext = createContext({
@@ -44,28 +45,30 @@ export function LoadingProvider({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <AuthProvider>
-      <VideoGenerationProvider>
-        <LoadingProvider>
-          <Router>
-            <Toaster position="top-center" reverseOrder={false} />
-            <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50">
-              <Navbar />
-              <Routes>
-                <Route path="/" element={<HomePage />} />
-                <Route path="/auth" element={<AuthPage />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/author" element={<AuthorPanel />} />
-                <Route path="/learn" element={<LearningMode />} />
-                <Route path="/explore" element={<EntertainmentMode />} />
-                <Route path="/profile" element={<Profile />} />
-                <Route path="/upload" element={<BookUpload />} />
-                <Route path="/book/:id" element={<BookView />} />
-                <Route path="/subscription" element={<SubscriptionPage />} />
-              </Routes>
-            </div>
-          </Router>
-        </LoadingProvider>
-      </VideoGenerationProvider>
+      <ScriptSelectionProvider>
+        <VideoGenerationProvider>
+          <LoadingProvider>
+            <Router>
+              <Toaster position="top-center" reverseOrder={false} />
+              <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50">
+                <Navbar />
+                <Routes>
+                  <Route path="/" element={<HomePage />} />
+                  <Route path="/auth" element={<AuthPage />} />
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/author" element={<AuthorPanel />} />
+                  <Route path="/learn" element={<LearningMode />} />
+                  <Route path="/explore" element={<EntertainmentMode />} />
+                  <Route path="/profile" element={<Profile />} />
+                  <Route path="/upload" element={<BookUpload />} />
+                  <Route path="/book/:id" element={<BookView />} />
+                  <Route path="/subscription" element={<SubscriptionPage />} />
+                </Routes>
+              </div>
+            </Router>
+          </LoadingProvider>
+        </VideoGenerationProvider>
+      </ScriptSelectionProvider>
     </AuthProvider>
   );
 }

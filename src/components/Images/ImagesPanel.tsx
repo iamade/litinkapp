@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Image, 
-  Users, 
-  Camera, 
-  Download, 
-  Trash2, 
-  RefreshCw, 
-  Settings, 
-  Grid3X3, 
+import {
+  Image,
+  Users,
+  Camera,
+  Download,
+  Trash2,
+  RefreshCw,
+  Settings,
+  Grid3X3,
   List,
-  Play,
   Loader2,
   Eye,
   Plus,
@@ -17,6 +16,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useImageGeneration } from '../../hooks/useImageGeneration';
+import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
 interface SceneImage {
   sceneNumber: number;
@@ -47,18 +47,23 @@ interface ImageGenerationOptions {
 }
 
 interface ImagesPanelProps {
-  chapterId: string;
   chapterTitle: string;
   selectedScript: any;
   plotOverview: any;
 }
 
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
-  chapterId,
   chapterTitle,
   selectedScript,
   plotOverview
 }) => {
+  const {
+    selectedScriptId,
+    stableSelectedChapterId,
+    versionToken,
+    isSwitching
+  } = useScriptSelection();
+
   const [activeTab, setActiveTab] = useState<'scenes' | 'characters'>('characters');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showSettings, setShowSettings] = useState(false);
@@ -75,7 +80,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const {
     sceneImages,
     characterImages,
-    isLoading,
     generatingScenes,
     generatingCharacters,
     loadImages,
@@ -85,11 +89,39 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     deleteImage,
     generateAllSceneImages,
     generateAllCharacterImages
-  } = useImageGeneration(chapterId);
+  } = useImageGeneration(stableSelectedChapterId ?? '');
 
+// Log selectedChapterId to verify it's being passed correctly
+console.log("ImagesPanel: stableSelectedChapterId:", stableSelectedChapterId);
+  // Trigger refresh on selection/version changes
   useEffect(() => {
+    if (!stableSelectedChapterId) {
+      console.warn('ImagesPanel: stableSelectedChapterId is null, skipping loadImages');
+      return;
+    }
     loadImages();
-  }, [loadImages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stableSelectedChapterId, versionToken]);
+
+  // Empty state when no script or chapter is selected
+  if (!selectedScriptId || !stableSelectedChapterId) {
+    return (
+      <div className="flex items-center justify-center h-64 text-gray-500">
+        <div className="text-center">
+          <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
+          <p className="text-lg font-medium">Select a script to view images</p>
+          <p className="text-sm">Choose a script from the sidebar to generate and view scene images</p>
+          {!stableSelectedChapterId && (
+            <p className="text-xs text-orange-500 mt-2">Chapter ID not available</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Disable actions during switching
+  const isDisabled = isSwitching;
+
 
   const scenes = selectedScript?.scene_descriptions || [];
   const characters = selectedScript?.characters || plotOverview?.characters?.map((c: any) => c.name) || [];
@@ -138,11 +170,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       <div>
         <h3 className="text-xl font-semibold text-gray-900">Scene Images</h3>
         <p className="text-gray-600">Generate character and scene visualizations for {chapterTitle}</p>
+        {isSwitching && (
+          <div className="flex items-center space-x-2 mt-1 text-sm text-blue-600">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Switching script...</span>
+          </div>
+        )}
       </div>
       <div className="flex items-center space-x-2">
         <button
           onClick={() => setShowSettings(!showSettings)}
-          className="flex items-center space-x-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+          disabled={isDisabled}
+          className="flex items-center space-x-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Settings className="w-4 h-4" />
           <span>Settings</span>
@@ -150,13 +189,15 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         <div className="flex border rounded-md">
           <button
             onClick={() => setViewMode('grid')}
-            className={`p-2 ${viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+            disabled={isDisabled}
+            className={`p-2 ${viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             <Grid3X3 className="w-4 h-4" />
           </button>
           <button
             onClick={() => setViewMode('list')}
-            className={`p-2 ${viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+            disabled={isDisabled}
+            className={`p-2 ${viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             <List className="w-4 h-4" />
           </button>
@@ -327,27 +368,31 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
             : 'space-y-4'
         }`}>
-          {scenes.map((scene: any, idx: number) => (
-            <SceneImageCard
-              key={scene.scene_number || idx}
-              scene={scene}
-              sceneImage={sceneImages[scene.scene_number || idx + 1]}
-              isGenerating={generatingScenes.has(scene.scene_number || idx + 1)}
-              viewMode={viewMode}
-              onGenerate={() => generateSceneImage(
-                scene.scene_number || idx + 1,
-                scene.visual_description || scene.description || '',
-                generationOptions
-              )}
-              onRegenerate={() => regenerateImage(
-                'scene',
-                scene.scene_number || idx + 1,
-                generationOptions
-              )}
-              onDelete={() => deleteImage('scene', scene.scene_number || idx + 1)}
-              onView={() => setSelectedImage(sceneImages[scene.scene_number || idx + 1]?.imageUrl || null)}
-            />
-          ))}
+          {scenes.map((scene: any, idx: number) => {
+            const sceneNumber = scene.scene_number || idx + 1;
+            const sceneImage = sceneImages?.[sceneNumber];
+            return (
+              <SceneImageCard
+                key={sceneNumber}
+                scene={scene}
+                sceneImage={sceneImage}
+                isGenerating={generatingScenes.has(sceneNumber)}
+                viewMode={viewMode}
+                onGenerate={() => generateSceneImage(
+                  sceneNumber,
+                  scene.visual_description || scene.description || '',
+                  generationOptions
+                )}
+                onRegenerate={() => regenerateImage(
+                  'scene',
+                  sceneNumber,
+                  generationOptions
+                )}
+                onDelete={() => deleteImage('scene', sceneNumber)}
+                onView={() => setSelectedImage(sceneImage?.imageUrl || null)}
+              />
+            );
+          })}
         </div>
       )}
     </div>
@@ -379,26 +424,29 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'
             : 'space-y-4'
         }`}>
-          {characters.map((character: string) => (
-            <CharacterImageCard
-              key={character}
-              characterName={character}
-              characterImage={characterImages[character]}
-              characterDetails={plotOverview?.characters?.find((c: any) => c.name === character)}
-              isGenerating={generatingCharacters.has(character)}
-              viewMode={viewMode}
-              onGenerate={() => {
-                const char = plotOverview?.characters?.find((c: any) => c.name === character);
-                const description = char 
-                  ? `${char.physicalDescription}. ${char.personality}. ${char.role}`
-                  : `Portrait of ${character}, detailed character design`;
-                generateCharacterImage(character, description, generationOptions);
-              }}
-              onRegenerate={() => regenerateImage('character', character, generationOptions)}
-              onDelete={() => deleteImage('character', character)}
-              onView={() => setSelectedImage(characterImages[character]?.imageUrl || null)}
-            />
-          ))}
+          {characters.map((character: string) => {
+            const characterImage = characterImages?.[character];
+            return (
+              <CharacterImageCard
+                key={character}
+                characterName={character}
+                characterImage={characterImage}
+                characterDetails={plotOverview?.characters?.find((c: any) => c.name === character)}
+                isGenerating={generatingCharacters.has(character)}
+                viewMode={viewMode}
+                onGenerate={() => {
+                  const char = plotOverview?.characters?.find((c: any) => c.name === character);
+                  const description = char
+                    ? `${char.physicalDescription}. ${char.personality}. ${char.role}`
+                    : `Portrait of ${character}, detailed character design`;
+                  generateCharacterImage(character, description, generationOptions);
+                }}
+                onRegenerate={() => regenerateImage('character', character, generationOptions)}
+                onDelete={() => deleteImage('character', character)}
+                onView={() => setSelectedImage(characterImage?.imageUrl || null)}
+              />
+            );
+          })}
         </div>
       )}
     </div>
