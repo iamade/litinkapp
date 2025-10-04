@@ -6,7 +6,7 @@ from app.services.embeddings_service import EmbeddingsService
 
 
 class RAGService:
-    """Retrieval Augmented Generation service for video content with PlotDrive integration"""
+    """Retrieval Augmented Generation service for video content with PlotDrive integration and script versioning/evaluation"""
     
     def __init__(self, supabase_client=None):
         self.db = supabase_client
@@ -104,12 +104,17 @@ class RAGService:
             return []
     
     async def generate_video_script(
-        self, 
-        chapter_context: Dict[str, Any], 
+        self,
+        chapter_context: Dict[str, Any],
         video_style: str = "realistic",
-        script_style: str = "cinematic_movie"
+        script_style: str = "cinematic_movie",
+        versioning: bool = True,
+        evaluate: bool = False
     ) -> Dict[str, Any]:
-        """Generate optimized video script from chapter context using the full RAG-enhanced prompt. script_style can be 'cinematic_movie' or 'cinematic_narration'."""
+        """
+        Generate optimized video script from chapter context using the full RAG-enhanced prompt.
+        Supports versioning, evaluation, and status updates.
+        """
         try:
             enhanced_context = chapter_context.get('total_context', chapter_context['chapter']['content'])
             prompt = self._get_script_generation_prompt(enhanced_context, video_style, script_style)
@@ -121,13 +126,75 @@ class RAGService:
             
             # Generate character details for each character
             character_details = await self._generate_character_details(characters, enhanced_context)
-            
+
+            # Create/update character records and collect their IDs
+            character_ids = []
+            for name in characters:
+                char_result = self.db.table('characters').select('id').eq('name', name).eq('book_id', chapter_context['book']['id']).single().execute()
+                if char_result.data:
+                    character_ids.append(char_result.data['id'])
+                else:
+                    char_id = str(uuid.uuid4())
+                    char_data = {
+                        "id": char_id,
+                        "book_id": chapter_context['book']['id'],
+                        "name": name,
+                        "role": "supporting",
+                        "character_arc": "",
+                        "physical_description": "",
+                        "personality": "",
+                        "want": "",
+                        "need": "",
+                        "lie": "",
+                        "ghost": "",
+                        "archetypes": [],
+                        "generation_method": "rag_script",
+                        "created_at": datetime.now().isoformat(),
+                        "updated_at": datetime.now().isoformat()
+                    }
+                    self.db.table('characters').insert(char_data).execute()
+                    character_ids.append(char_id)
+
+            # --- Versioning: Always create a new script record ---
+            script_record = {
+                "chapter_id": chapter_context['chapter']['id'],
+                "user_id": chapter_context['chapter']['user_id'],
+                "script_style": script_style,
+                "script": script,
+                "characters": characters,
+                "character_details": character_details,
+                "character_ids": character_ids,
+                "video_style": video_style,
+                "created_at": datetime.now().isoformat(),
+                "status": "draft"
+            }
+            script_result = self.db.table('scripts').insert(script_record).execute()
+            script_id = script_result.data[0]['id']
+
+            # --- Evaluation integration ---
+            evaluation_result = None
+            if evaluate:
+                try:
+                    from app.services.deepseek_script_service import DeepSeekScriptService
+                    deepseek = DeepSeekScriptService()
+                    evaluation_result = await deepseek.evaluate_script(script, plot_context=enhanced_context)
+                    if evaluation_result.get("status") == "success" and evaluation_result.get("scores"):
+                        self.db.table('scripts').update({
+                            "evaluation": evaluation_result["scores"],
+                            "status": "evaluated"
+                        }).eq('id', script_id).execute()
+                except Exception as eval_error:
+                    print(f"Script evaluation failed: {eval_error}")
+
             return {
                 "script": script,
                 "characters": characters,
                 "character_details": character_details,
+                "character_ids": character_ids,
                 "script_style": script_style,
-                "video_style": video_style
+                "video_style": video_style,
+                "script_id": script_id,
+                "evaluation": evaluation_result
             }
         except Exception as e:
             print(f"Error generating video script: {e}")
@@ -135,8 +202,11 @@ class RAGService:
                 "script": "",
                 "characters": [],
                 "character_details": "",
+                "character_ids": [],
                 "script_style": script_style,
-                "video_style": video_style
+                "video_style": video_style,
+                "script_id": None,
+                "evaluation": None
             }
     
     def _get_script_generation_prompt(self, context: str, video_style: str, script_style: str = "cinematic_movie") -> str:

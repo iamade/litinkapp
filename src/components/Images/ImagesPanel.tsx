@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { userService } from '../../services/userService';
+import { Tables } from '../../types/supabase';
 import {
   Image,
   Users,
@@ -48,8 +50,8 @@ interface ImageGenerationOptions {
 
 interface ImagesPanelProps {
   chapterTitle: string;
-  selectedScript: any;
-  plotOverview: any;
+  selectedScript: unknown;
+  plotOverview: { characters?: Tables<'characters'>[] } | null;
 }
 
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
@@ -132,8 +134,41 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   const isDisabled = isSwitching;
 
 
-  const scenes = selectedScript?.scene_descriptions || [];
-  const characters = selectedScript?.characters || plotOverview?.characters?.map((c: any) => c.name) || [];
+  const scenes =
+    typeof selectedScript === "object" && selectedScript !== null && "scene_descriptions" in selectedScript
+      ? (selectedScript as { scene_descriptions?: any[] }).scene_descriptions || []
+      : [];
+  // Centralized character fetch: use characters table via userService
+  // Centralized character fetch: use userService from import, not window
+  import { userService } from '../../services/userService';
+  import { Tables } from '../../types/supabase';
+
+  const [characters, setCharacters] = useState<Tables<'characters'>[]>([]);
+  useEffect(() => {
+    async function fetchCharacters() {
+      if (!stableSelectedChapterId) return;
+      try {
+        // Fetch characters for the chapter from backend (characters table)
+        // Replace with actual API call to fetch characters for the chapter
+        // Fallback to plotOverview.characters if API not available
+        if (typeof userService.getChapterCharacters === 'function') {
+          const chapterCharacters = await userService.getChapterCharacters(stableSelectedChapterId);
+          if (chapterCharacters && Array.isArray(chapterCharacters)) {
+            setCharacters(chapterCharacters);
+            return;
+          }
+        }
+        if (plotOverview?.characters) {
+          setCharacters(plotOverview.characters);
+        } else {
+          setCharacters([]);
+        }
+      } catch {
+        setCharacters([]);
+      }
+    }
+    fetchCharacters();
+  }, [stableSelectedChapterId, plotOverview]);
 
   const handleGenerateAllScenes = async () => {
     if (!scenes.length) {
@@ -161,17 +196,25 @@ console.log('[DEBUG ImagesPanel] Component state:', {
     // Build character details from plot overview
     const characterDetails: Record<string, string> = {};
     if (plotOverview?.characters) {
-      plotOverview.characters.forEach((char: any) => {
-        characterDetails[char.name] = `${char.physicalDescription}. ${char.personality}. ${char.role}`;
+      (plotOverview?.characters ?? []).forEach((char) => {
+        if (typeof char === "object" && char !== null && "name" in char) {
+          characterDetails[(char as { name: string }).name] =
+            `${(char as any).physical_description ?? ""}. ${(char as any).personality ?? ""}. ${(char as any).role ?? ""}`;
+        }
       });
     } else {
       // Fallback to basic descriptions
-      characters.forEach((char: string) => {
-        characterDetails[char] = `Portrait of ${char}, detailed character design`;
+      characters.forEach((char) => {
+        const name = typeof char === "string" ? char : (char as { name: string }).name;
+        characterDetails[name] = `Portrait of ${name}, detailed character design`;
       });
     }
 
-    await generateAllCharacterImages(characters, characterDetails, generationOptions);
+    await generateAllCharacterImages(
+      characters.map((char) => (typeof char === "string" ? char : (char as { name: string }).name)),
+      characterDetails,
+      generationOptions
+    );
   };
 
   const renderHeader = () => (
@@ -455,25 +498,26 @@ console.log('[DEBUG ImagesPanel] Component state:', {
               ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'
               : 'space-y-4'
           }`}>
-            {characters.map((character: string) => {
-              const characterImage = characterImages?.[character];
+            {characters.map((character) => {
+              const characterKey = typeof character === "string" ? character : character.name;
+              const characterImage = characterImages?.[characterKey];
               return (
                 <CharacterImageCard
-                  key={character}
-                  characterName={character}
+                  key={characterKey}
+                  characterName={characterKey}
                   characterImage={characterImage}
-                  characterDetails={plotOverview?.characters?.find((c: any) => c.name === character)}
-                  isGenerating={generatingCharacters.has(character)}
+                  characterDetails={character}
+                  isGenerating={generatingCharacters.has(characterKey)}
                   viewMode={viewMode}
                   onGenerate={() => {
-                    const char = plotOverview?.characters?.find((c: any) => c.name === character);
-                    const description = char
-                      ? `${char.physicalDescription}. ${char.personality}. ${char.role}`
-                      : `Portrait of ${character}, detailed character design`;
-                    generateCharacterImage(character, description, generationOptions);
+                    const description =
+                      typeof character === "object" && character.physical_description && character.personality && character.role
+                        ? `${character.physical_description}. ${character.personality}. ${character.role}`
+                        : `Portrait of ${characterKey}, detailed character design`;
+                    generateCharacterImage(characterKey, description, generationOptions);
                   }}
-                  onRegenerate={() => regenerateImage('character', character, generationOptions)}
-                  onDelete={() => deleteImage('character', character)}
+                  onRegenerate={() => regenerateImage('character', characterKey, generationOptions)}
+                  onDelete={() => deleteImage('character', characterKey)}
                   onView={() => setSelectedImage(characterImage?.imageUrl || null)}
                 />
               );
@@ -637,7 +681,7 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
 interface CharacterImageCardProps {
   characterName: string;
   characterImage?: CharacterImage;
-  characterDetails?: any;
+  characterDetails?: Tables<'characters'> | string;
   isGenerating: boolean;
   viewMode: 'grid' | 'list';
   onGenerate: () => void;
@@ -672,12 +716,18 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
           
           <div className="flex-1 min-w-0">
             <h5 className="font-medium text-gray-900">{characterName}</h5>
-            <p className="text-sm text-gray-600">{characterDetails?.role}</p>
-            {characterDetails?.physicalDescription && (
-              <p className="text-sm text-gray-500 line-clamp-2 mt-1">
-                {characterDetails.physicalDescription}
-              </p>
-            )}
+            <p className="text-sm text-gray-600">
+              {typeof characterDetails === "object" && characterDetails !== null
+                ? (characterDetails as any).role ?? ""
+                : ""}
+            </p>
+            {typeof characterDetails === "object" &&
+              characterDetails !== null &&
+              (characterDetails as any).physical_description && (
+                <p className="text-sm text-gray-500 line-clamp-2 mt-1">
+                  {(characterDetails as any).physical_description}
+                </p>
+              )}
           </div>
 
           <div className="flex items-center space-x-2">
@@ -720,13 +770,18 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
 
       <div className="p-4">
         <h5 className="font-medium text-gray-900 mb-1">{characterName}</h5>
-        <p className="text-sm text-gray-600 mb-2">{characterDetails?.role}</p>
-        
-        {characterDetails?.physicalDescription && (
-          <p className="text-xs text-gray-500 line-clamp-3">
-            {characterDetails.physicalDescription}
-          </p>
-        )}
+        <p className="text-sm text-gray-600 mb-2">
+          {typeof characterDetails === "object" && characterDetails !== null
+            ? (characterDetails as any).role ?? ""
+            : ""}
+        </p>
+        {typeof characterDetails === "object" &&
+          characterDetails !== null &&
+          (characterDetails as any).physical_description && (
+            <p className="text-xs text-gray-500 line-clamp-3">
+              {(characterDetails as any).physical_description}
+            </p>
+          )}
       </div>
     </div>
   );

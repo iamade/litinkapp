@@ -196,6 +196,21 @@ class StandaloneImageService:
                 await self._update_image_record_error(record_id, str(e))
             raise ImageGenerationError(f"Character image generation failed: {str(e)}")
 
+    async def get_canonical_character_image(
+        self,
+        character_id: str,
+        user_id: str
+    ) -> Optional[str]:
+        """
+        Retrieve the canonical image_url for a character from centralized storage.
+        """
+        from app.services.character_service import CharacterService
+        character_service = CharacterService(self.db)
+        character = await character_service.get_character_by_id(character_id, user_id)
+        if character and character.image_url:
+            return character.image_url
+        return None
+
     async def batch_generate_images(
         self,
         image_requests: List[Dict[str, Any]],

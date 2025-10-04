@@ -48,6 +48,7 @@ class CharacterService:
     """
     Core character management service that handles character archetype analysis,
     image generation, and character data management for the plot generation system.
+    Adds support for linking characters to scripts, managing image URLs, retrieving all book characters, and handling character-to-voice mappings.
     """
 
     def __init__(self, supabase_client=None):
@@ -275,6 +276,89 @@ class CharacterService:
         except Exception as e:
             logger.error(f"[CharacterService] Error retrieving characters for plot {plot_overview_id}: {str(e)}")
             return []
+
+    async def link_characters_to_script(self, script_id: str, character_ids: List[str], user_id: str) -> bool:
+        """
+        Link characters to a script using the character_ids column in the scripts table.
+        """
+        try:
+            # Validate all character IDs belong to the user
+            for char_id in character_ids:
+                char = await self.get_character_by_id(char_id, user_id)
+                if not char:
+                    raise CharacterNotFoundError(f"Character {char_id} not found or access denied")
+
+            # Update the script record
+            update_data = {
+                "character_ids": character_ids,
+                "updated_at": datetime.now().isoformat()
+            }
+            result = self.db.table('scripts').update(update_data).eq('id', script_id).execute()
+            return bool(result.data)
+        except Exception as e:
+            logger.error(f"[CharacterService] Error linking characters to script {script_id}: {str(e)}")
+            return False
+
+    async def update_character_image_url(self, character_id: str, image_url: str, user_id: str) -> bool:
+        """
+        Update the image URL for a character.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+            update_data = {
+                "image_url": image_url,
+                "updated_at": datetime.now().isoformat()
+            }
+            result = self.db.table('characters').update(update_data).eq('id', character_id).execute()
+            return bool(result.data)
+        except Exception as e:
+            logger.error(f"[CharacterService] Error updating image URL for character {character_id}: {str(e)}")
+            return False
+
+    async def get_all_characters_for_book(self, book_id: str, user_id: str) -> List[CharacterResponse]:
+        """
+        Retrieve all characters for a given book.
+        """
+        try:
+            # Validate user has access to the book
+            book_result = self.db.table('books').select('user_id').eq('id', book_id).single().execute()
+            if not book_result.data or book_result.data['user_id'] != user_id:
+                raise PermissionDeniedError("Access denied to book")
+            result = self.db.table('characters').select('*').eq('book_id', book_id).execute()
+            return [CharacterResponse(**char_data) for char_data in result.data or []]
+        except Exception as e:
+            logger.error(f"[CharacterService] Error retrieving all characters for book {book_id}: {str(e)}")
+            return []
+
+    async def set_character_voice_mapping(self, character_id: str, voice_id: str, user_id: str) -> bool:
+        """
+        Set the voice mapping for a character.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+            update_data = {
+                "voice_id": voice_id,
+                "updated_at": datetime.now().isoformat()
+            }
+            result = self.db.table('characters').update(update_data).eq('id', character_id).execute()
+            return bool(result.data)
+        except Exception as e:
+            logger.error(f"[CharacterService] Error setting voice mapping for character {character_id}: {str(e)}")
+            return False
+
+    async def get_character_voice_mapping(self, character_id: str, user_id: str) -> Optional[str]:
+        """
+        Get the voice mapping for a character.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+            result = self.db.table('characters').select('voice_id').eq('id', character_id).single().execute()
+            if result.data:
+                return result.data.get("voice_id")
+            return None
+        except Exception as e:
+            logger.error(f"[CharacterService] Error retrieving voice mapping for character {character_id}: {str(e)}")
+            return None
 
     async def delete_character(self, character_id: str, user_id: str) -> bool:
         """

@@ -1176,6 +1176,112 @@ async def get_script_details(
         print(f"Error getting script details: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- Script Evaluation Endpoint ---
+@router.post("/evaluate-script/{script_id}")
+async def evaluate_script(
+    script_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Evaluate a script using DeepSeekScriptService (LLM) for coherence, storytelling, character consistency, video suitability.
+    Returns scores and feedback.
+    """
+    try:
+        # Fetch script and chapter context
+        script_record = supabase_client.table('scripts').select('*').eq('id', script_id).eq('user_id', current_user['id']).single().execute()
+        if not script_record.data:
+            raise HTTPException(status_code=404, detail="Script not found")
+        script = script_record.data['script']
+        chapter_id = script_record.data.get('chapter_id')
+        plot_context = None
+        if chapter_id:
+            chapter = supabase_client.table('chapters').select('content').eq('id', chapter_id).single().execute()
+            plot_context = chapter.data['content'] if chapter.data else None
+
+        # Evaluate using DeepSeekScriptService
+        from app.services.deepseek_script_service import DeepSeekScriptService
+        deepseek = DeepSeekScriptService()
+        result = await deepseek.evaluate_script(script, plot_context=plot_context)
+
+        # Optionally update script status and store evaluation
+        if result.get("status") == "success" and result.get("scores"):
+            supabase_client.table('scripts').update({
+                "evaluation": result["scores"],
+                "status": "evaluated"
+            }).eq('id', script_id).execute()
+
+        return result
+    except Exception as e:
+        print(f"Error evaluating script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Script Status Management Endpoints ---
+@router.post("/script-status/{script_id}")
+async def update_script_status(
+    script_id: str,
+    status: str = Body(...),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Update the status of a script (draft, evaluated, approved, rejected, active).
+    """
+    try:
+        allowed_statuses = ["draft", "evaluated", "approved", "rejected", "active", "ready"]
+        if status not in allowed_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+        script_record = supabase_client.table('scripts').select('id', 'user_id').eq('id', script_id).single().execute()
+        if not script_record.data or script_record.data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to update this script")
+        supabase_client.table('scripts').update({"status": status}).eq('id', script_id).execute()
+        return {"message": "Status updated", "script_id": script_id, "status": status}
+    except Exception as e:
+        print(f"Error updating script status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/activate-script/{script_id}")
+async def activate_script(
+    script_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Set a script as active for its chapter (deactivate others).
+    """
+    try:
+        script_record = supabase_client.table('scripts').select('id', 'chapter_id', 'user_id').eq('id', script_id).single().execute()
+        if not script_record.data or script_record.data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to activate this script")
+        chapter_id = script_record.data['chapter_id']
+        # Deactivate other scripts for this chapter/user
+        supabase_client.table('scripts').update({"status": "ready"}).eq('chapter_id', chapter_id).eq('user_id', current_user['id']).neq('id', script_id).execute()
+        # Activate selected script
+        supabase_client.table('scripts').update({"status": "active"}).eq('id', script_id).execute()
+        return {"message": "Script activated", "script_id": script_id}
+    except Exception as e:
+        print(f"Error activating script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/deactivate-script/{script_id}")
+async def deactivate_script(
+    script_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Deactivate a script (set status to ready).
+    """
+    try:
+        script_record = supabase_client.table('scripts').select('id', 'user_id').eq('id', script_id).single().execute()
+        if not script_record.data or script_record.data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to deactivate this script")
+        supabase_client.table('scripts').update({"status": "ready"}).eq('id', script_id).execute()
+        return {"message": "Script deactivated", "script_id": script_id}
+    except Exception as e:
+        print(f"Error deactivating script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # get_character_images endpoint:
 
 @router.get("/character-images/{video_gen_id}")

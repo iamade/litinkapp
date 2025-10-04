@@ -84,9 +84,18 @@ class PlotService:
             )
             logger.info(f"[PlotService] Characters generated: {len(characters_data)} characters")
 
+            # Data consistency: Remove duplicate character names before storing
+            seen_names = set()
+            unique_characters = []
+            for char in characters_data:
+                name = char.get("name", "")
+                if name and name not in seen_names:
+                    unique_characters.append(char)
+                    seen_names.add(name)
+
             # 6. Store plot overview and characters in database
             stored_data = await self._store_plot_overview(
-                plot_data, characters_data, user_id, book_id, book_context
+                plot_data, unique_characters, user_id, book_id, book_context
             )
 
             # 7. Record usage for billing
@@ -97,7 +106,7 @@ class PlotService:
                 metadata={
                     "book_id": book_id,
                     "model_used": plot_data.get("model_used"),
-                    "characters_generated": len(characters_data)
+                    "characters_generated": len(unique_characters)
                 }
             )
 
@@ -349,8 +358,34 @@ Return ONLY a valid JSON object with these exact keys:
     ) -> List[Dict[str, Any]]:
         """
         Generate characters with archetype analysis using AI.
+        Extract all named characters from book context and support non-fiction personas.
         """
         try:
+            # Extract named characters from book context (fiction and non-fiction)
+            named_characters = []
+            chapters_summary = book_context.get("chapters_summary", "")
+            import re
+            # Find capitalized names (basic heuristic)
+            named_characters += list(set(re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", chapters_summary)))
+            # For non-fiction, generate fictional personas if book_type is non-fiction
+            if book_context.get("book", {}).get("book_type", "").lower() == "non-fiction":
+                # Generate fictional personas for non-fiction content
+                personas_prompt = (
+                    f"Generate 3 fictional personas relevant to this non-fiction book context:\n{chapters_summary[:1000]}"
+                )
+                personas_response = await self.openrouter.analyze_content(
+                    content=personas_prompt,
+                    user_tier=model_tier,
+                    analysis_type="personas"
+                )
+                if personas_response.get("status") == "success":
+                    try:
+                        personas = json.loads(personas_response["result"])
+                        if isinstance(personas, list):
+                            named_characters += [p.get("name", "") for p in personas if p.get("name")]
+                    except Exception:
+                        pass
+
             # Prepare character generation prompt
             prompt = self._build_character_generation_prompt(plot_context, book_context)
 
@@ -361,12 +396,29 @@ Return ONLY a valid JSON object with these exact keys:
                 analysis_type="characters"
             )
 
-            if response["status"] != "success":
+            characters_data = []
+            if response["status"] == "success":
+                characters_data = self._parse_character_generation_response(response["result"])
+            else:
                 logger.warning(f"[PlotService] Character generation failed, using fallback")
-                return []
 
-            # Parse character data
-            characters_data = self._parse_character_generation_response(response["result"])
+            # Add extracted named characters if not already present
+            existing_names = {c.get("name", "") for c in characters_data}
+            for name in named_characters:
+                if name and name not in existing_names:
+                    characters_data.append({
+                        "name": name,
+                        "role": "supporting",
+                        "character_arc": "",
+                        "physical_description": "",
+                        "personality": "",
+                        "want": "",
+                        "need": "",
+                        "lie": "",
+                        "ghost": "",
+                        "archetypes": [],
+                        "generation_method": "context_extraction"
+                    })
 
             # Analyze archetypes for each character
             for character in characters_data:
@@ -641,6 +693,7 @@ Return a JSON object with:
                 "logline": plot_data.get("logline") or f"A compelling {plot_data.get('genre', 'fiction')} story about personal growth and discovery.",
                 "themes": themes_value,
                 "story_type": plot_data.get("story_type") or "hero's journey",
+                "script_story_type": plot_data.get("story_type") or "hero's journey",  # Added field
                 "genre": plot_data.get("genre") or book_context.get("book", {}).get("genre", "fiction"),
                 "tone": plot_data.get("tone") or "hopeful",
                 "audience": plot_data.get("audience") or "adult",
