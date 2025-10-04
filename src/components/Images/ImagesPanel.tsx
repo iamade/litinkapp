@@ -89,16 +89,25 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     deleteImage,
     generateAllSceneImages,
     generateAllCharacterImages
-  } = useImageGeneration(stableSelectedChapterId ?? '');
+  } = useImageGeneration(stableSelectedChapterId ?? '', selectedScriptId);
 
-// Log selectedChapterId to verify it's being passed correctly
-console.log("ImagesPanel: stableSelectedChapterId:", stableSelectedChapterId);
+// Debug logging for image loading
+console.log('[DEBUG ImagesPanel] Component state:', {
+  selectedScriptId,
+  stableSelectedChapterId,
+  versionToken,
+  isSwitching,
+  sceneImagesCount: Object.keys(sceneImages || {}).length,
+  characterImagesCount: Object.keys(characterImages || {}).length
+});
+
   // Trigger refresh on selection/version changes
   useEffect(() => {
     if (!stableSelectedChapterId) {
       console.warn('ImagesPanel: stableSelectedChapterId is null, skipping loadImages');
       return;
     }
+    console.log('[DEBUG ImagesPanel] useEffect triggered - loading images for chapter:', stableSelectedChapterId);
     loadImages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stableSelectedChapterId, versionToken]);
@@ -342,115 +351,138 @@ console.log("ImagesPanel: stableSelectedChapterId:", stableSelectedChapterId);
     </div>
   );
 
-  const renderScenesTab = () => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-lg font-semibold text-gray-900">Scene Images</h4>
-        <button
-          onClick={handleGenerateAllScenes}
-          disabled={!scenes.length || generatingScenes.size > 0}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
-        >
-          <Wand2 className="w-4 h-4" />
-          <span>Generate All Scenes</span>
-        </button>
+  const renderScenesTab = () => {
+    // Use all chapter-level images without script filtering
+    const sourceSceneImages = sceneImages || {};
+    const hasImages = Object.keys(sourceSceneImages).length > 0;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="text-lg font-semibold text-gray-900">Scene Images</h4>
+          <button
+            onClick={handleGenerateAllScenes}
+            disabled={!scenes.length || generatingScenes.size > 0}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+          >
+            <Wand2 className="w-4 h-4" />
+            <span>Generate All Scenes</span>
+          </button>
+        </div>
+
+        {!scenes.length ? (
+          <div className="text-center py-12 text-gray-500">
+            <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
+            <p className="text-lg font-medium">No scenes available</p>
+            <p className="text-sm">Generate a script first to create scene images</p>
+          </div>
+        ) : !hasImages ? (
+          <div className="text-center py-8 text-gray-500">
+            <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
+            <p className="text-lg font-medium">No images generated yet</p>
+            <p className="text-sm">Generate images for the current chapter scenes</p>
+          </div>
+        ) : (
+          <div className={`${
+            viewMode === 'grid'
+              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
+              : 'space-y-4'
+          }`}>
+            {scenes.map((scene: any, idx: number) => {
+              const sceneNumber = scene.scene_number || idx + 1;
+              const sceneImage = sourceSceneImages?.[sceneNumber];
+              return (
+                <SceneImageCard
+                  key={sceneNumber}
+                  scene={scene}
+                  sceneImage={sceneImage}
+                  isGenerating={generatingScenes.has(sceneNumber)}
+                  viewMode={viewMode}
+                  onGenerate={() => generateSceneImage(
+                    sceneNumber,
+                    scene.visual_description || scene.description || '',
+                    generationOptions
+                  )}
+                  onRegenerate={() => regenerateImage(
+                    'scene',
+                    sceneNumber,
+                    generationOptions
+                  )}
+                  onDelete={() => deleteImage('scene', sceneNumber)}
+                  onView={() => setSelectedImage(sceneImage?.imageUrl || null)}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
+    );
+  };
 
-      {!scenes.length ? (
-        <div className="text-center py-12 text-gray-500">
-          <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
-          <p className="text-lg font-medium">No scenes available</p>
-          <p className="text-sm">Generate a script first to create scene images</p>
-        </div>
-      ) : (
-        <div className={`${
-          viewMode === 'grid' 
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
-            : 'space-y-4'
-        }`}>
-          {scenes.map((scene: any, idx: number) => {
-            const sceneNumber = scene.scene_number || idx + 1;
-            const sceneImage = sceneImages?.[sceneNumber];
-            return (
-              <SceneImageCard
-                key={sceneNumber}
-                scene={scene}
-                sceneImage={sceneImage}
-                isGenerating={generatingScenes.has(sceneNumber)}
-                viewMode={viewMode}
-                onGenerate={() => generateSceneImage(
-                  sceneNumber,
-                  scene.visual_description || scene.description || '',
-                  generationOptions
-                )}
-                onRegenerate={() => regenerateImage(
-                  'scene',
-                  sceneNumber,
-                  generationOptions
-                )}
-                onDelete={() => deleteImage('scene', sceneNumber)}
-                onView={() => setSelectedImage(sceneImage?.imageUrl || null)}
-              />
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+  const renderCharactersTab = () => {
+    // Use all chapter-level character images without script filtering
+    const hasCharacterImages = characterImages && Object.keys(characterImages).length > 0;
 
-  const renderCharactersTab = () => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-lg font-semibold text-gray-900">Character Images</h4>
-        <button
-          onClick={handleGenerateAllCharacters}
-          disabled={!characters.length || generatingCharacters.size > 0}
-          className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400"
-        >
-          <Wand2 className="w-4 h-4" />
-          <span>Generate All Characters</span>
-        </button>
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="text-lg font-semibold text-gray-900">Character Images</h4>
+          <button
+            onClick={handleGenerateAllCharacters}
+            disabled={!characters.length || generatingCharacters.size > 0}
+            className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400"
+          >
+            <Wand2 className="w-4 h-4" />
+            <span>Generate All Characters</span>
+          </button>
+        </div>
+
+        {!characters.length ? (
+          <div className="text-center py-12 text-gray-500">
+            <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
+            <p className="text-lg font-medium">No characters available</p>
+            <p className="text-sm">Generate a plot overview or script to create character images</p>
+          </div>
+        ) : !hasCharacterImages ? (
+          <div className="text-center py-8 text-gray-500">
+            <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
+            <p className="text-lg font-medium">No character images generated yet</p>
+            <p className="text-sm">Generate images for the current chapter characters</p>
+          </div>
+        ) : (
+          <div className={`${
+            viewMode === 'grid'
+              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'
+              : 'space-y-4'
+          }`}>
+            {characters.map((character: string) => {
+              const characterImage = characterImages?.[character];
+              return (
+                <CharacterImageCard
+                  key={character}
+                  characterName={character}
+                  characterImage={characterImage}
+                  characterDetails={plotOverview?.characters?.find((c: any) => c.name === character)}
+                  isGenerating={generatingCharacters.has(character)}
+                  viewMode={viewMode}
+                  onGenerate={() => {
+                    const char = plotOverview?.characters?.find((c: any) => c.name === character);
+                    const description = char
+                      ? `${char.physicalDescription}. ${char.personality}. ${char.role}`
+                      : `Portrait of ${character}, detailed character design`;
+                    generateCharacterImage(character, description, generationOptions);
+                  }}
+                  onRegenerate={() => regenerateImage('character', character, generationOptions)}
+                  onDelete={() => deleteImage('character', character)}
+                  onView={() => setSelectedImage(characterImage?.imageUrl || null)}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
-
-      {!characters.length ? (
-        <div className="text-center py-12 text-gray-500">
-          <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
-          <p className="text-lg font-medium">No characters available</p>
-          <p className="text-sm">Generate a plot overview or script to create character images</p>
-        </div>
-      ) : (
-        <div className={`${
-          viewMode === 'grid'
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'
-            : 'space-y-4'
-        }`}>
-          {characters.map((character: string) => {
-            const characterImage = characterImages?.[character];
-            return (
-              <CharacterImageCard
-                key={character}
-                characterName={character}
-                characterImage={characterImage}
-                characterDetails={plotOverview?.characters?.find((c: any) => c.name === character)}
-                isGenerating={generatingCharacters.has(character)}
-                viewMode={viewMode}
-                onGenerate={() => {
-                  const char = plotOverview?.characters?.find((c: any) => c.name === character);
-                  const description = char
-                    ? `${char.physicalDescription}. ${char.personality}. ${char.role}`
-                    : `Portrait of ${character}, detailed character design`;
-                  generateCharacterImage(character, description, generationOptions);
-                }}
-                onRegenerate={() => regenerateImage('character', character, generationOptions)}
-                onDelete={() => deleteImage('character', character)}
-                onView={() => setSelectedImage(characterImage?.imageUrl || null)}
-              />
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -728,6 +760,7 @@ const ImageThumbnail: React.FC<ImageThumbnailProps> = ({
       </div>
     );
   }
+
 
   if (imageUrl) {
     return (

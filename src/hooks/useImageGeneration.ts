@@ -30,8 +30,8 @@ interface ImageGenerationOptions {
   lightingMood: string;
 }
 
-export const useImageGeneration = (chapterId: string | null) => {
-  const [sceneImages, setSceneImages] = useState<Record<number, SceneImage>>({});
+export const useImageGeneration = (chapterId: string | null, selectedScriptId: string | null) => {
+  const [sceneImages, setSceneImages] = useState<Record<string | number, SceneImage>>({});
   const [characterImages, setCharacterImages] = useState<Record<string, CharacterImage>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [generatingScenes, setGeneratingScenes] = useState<Set<number>>(new Set());
@@ -55,6 +55,7 @@ export const useImageGeneration = (chapterId: string | null) => {
       return;
     }
 
+    console.log('[DEBUG useImageGeneration] loadImages called for chapterId:', chapterId);
     const requestKey = chapterId;
     if (inflightRef.current === requestKey) return; // prevent duplicate fetch
     inflightRef.current = requestKey;
@@ -63,7 +64,7 @@ export const useImageGeneration = (chapterId: string | null) => {
     try {
       const response = await userService.getChapterImages(chapterId);
       if (!isMountedRef.current || inflightRef.current !== requestKey) return; // stale
-      const sceneImagesMap: Record<number, SceneImage> = {};
+      const sceneImagesMap: Record<string | number, SceneImage> = {};
       const characterImagesMap: Record<string, CharacterImage> = {};
 
       if (response.images && Array.isArray(response.images)) {
@@ -124,7 +125,7 @@ export const useImageGeneration = (chapterId: string | null) => {
       if (inflightRef.current === requestKey) inflightRef.current = null;
       if (isMountedRef.current) setIsLoading(false);
     }
-  }, [chapterId]);
+  }, [chapterId, selectedScriptId]);
 
   const generateSceneImage = async (
     sceneNumber: number,
@@ -249,6 +250,65 @@ export const useImageGeneration = (chapterId: string | null) => {
     }
   };
 
+  const regenerateImage = async (
+    type: 'scene' | 'character',
+    identifier: number | string,
+    options: ImageGenerationOptions
+  ) => {
+    if (type === 'scene' && typeof identifier === 'number') {
+      const existingImage = sceneImages[identifier];
+      if (existingImage) {
+        await generateSceneImage(identifier, existingImage.prompt, options);
+      }
+    } else if (type === 'character' && typeof identifier === 'string') {
+      const existingImage = characterImages[identifier];
+      if (existingImage) {
+        await generateCharacterImage(identifier, existingImage.prompt, options);
+      }
+    }
+  };
+
+  const deleteImage = async (type: 'scene' | 'character', identifier: number | string) => {
+    // TODO: Implement actual deletion via API
+    if (type === 'scene' && typeof identifier === 'number') {
+      setSceneImages(prev => {
+        const updated = { ...prev };
+        delete updated[identifier];
+        return updated;
+      });
+    } else if (type === 'character' && typeof identifier === 'string') {
+      setCharacterImages(prev => {
+        const updated = { ...prev };
+        delete updated[identifier];
+        return updated;
+      });
+    }
+  };
+
+  const generateAllSceneImages = async (
+    scenes: Array<{ scene_number?: number; visual_description?: string; description?: string }>,
+    options: ImageGenerationOptions
+  ) => {
+    for (const [idx, scene] of scenes.entries()) {
+      const sceneNumber = scene.scene_number || idx + 1;
+      const description = scene.visual_description || scene.description || '';
+      if (description) {
+        await generateSceneImage(sceneNumber, description, options);
+      }
+    }
+  };
+
+  const generateAllCharacterImages = async (
+    characters: string[],
+    characterDetails: Record<string, string>,
+    options: ImageGenerationOptions
+  ) => {
+    for (const character of characters) {
+      const description = characterDetails[character] || `Portrait of ${character}, detailed character design`;
+      await generateCharacterImage(character, description, options);
+    }
+  };
+
   return {
     sceneImages,
     characterImages,
@@ -257,6 +317,10 @@ export const useImageGeneration = (chapterId: string | null) => {
     generatingCharacters,
     loadImages,
     generateSceneImage,
-    generateCharacterImage
+    generateCharacterImage,
+    regenerateImage,
+    deleteImage,
+    generateAllSceneImages,
+    generateAllCharacterImages
   };
 };

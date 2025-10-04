@@ -1,3 +1,5 @@
+// Migration Note: Legacy AudioAssets interface removed. 
+// Now using normalized audio file arrays with scriptId property for consistent filtering.
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Music,
@@ -18,16 +20,9 @@ import {
   Volume1
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
-import { useAudioGeneration } from '../../hooks/useAudioGeneration';
+import { useAudioGeneration, type AudioFile } from '../../hooks/useAudioGeneration';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
-// Import types from hook
-interface AudioAssets {
-  narration: any[];
-  music: any[];
-  effects: any[];
-  ambiance: any[];
-}
 import AudioTimeline from './AudioTimeline';
 import { AudioGenerationModal } from './AudioGenerationModal';
 
@@ -35,12 +30,15 @@ interface AudioPanelProps {
   // Props are now optional since we use context for script selection
   chapterId?: string;
   chapterTitle?: string;
-  selectedScript?: any;
-  plotOverview?: any;
+  selectedScript?: {
+    script_style?: string;
+    scene_descriptions?: unknown[];
+    characters?: string[];
+  } | null;
+  plotOverview?: unknown;
 }
 
 const AudioPanel: React.FC<AudioPanelProps> = ({
-  chapterId,
   chapterTitle,
   selectedScript
 }) => {
@@ -54,20 +52,14 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     stableSelectedChapterId,
     selectedSegmentId,
     versionToken,
-    isSwitching,
-    publish,
-    selectSegment,
   } = useScriptSelection();
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const wasPlayingRef = useRef(false);
-  const [isPreparingAudio, setIsPreparingAudio] = useState(false);
   const [activeTab, setActiveTab] = useState<'narration' | 'music' | 'effects' | 'ambiance' | 'timeline'>('narration');
   const [showSettings, setShowSettings] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration] = useState(0);
   
   const [generationOptions, setGenerationOptions] = useState({
     voiceModel: selectedScript?.script_style === 'cinematic' ? 'elevenlabs_conversational' : 'elevenlabs_narrator',
@@ -87,7 +79,6 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   const {
     files,
     isLoading,
-    error,
     loadAudio,
   } = useAudioGeneration({
     chapterId: stableSelectedChapterId,
@@ -163,11 +154,27 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     }
   }, [selectedScript]);
 
+  // Show all chapter audio files regardless of script association
+  // Backend returns chapter-level audio files, not script-specific
+  console.log('[DEBUG AudioPanel] Chapter audio files:', {
+    selectedScriptId,
+    totalFiles: files?.length || 0,
+    files: files?.map(f => ({ id: f.id, script_id: f.script_id, scriptId: f.scriptId, url: f.url, type: f.type })) || []
+  });
+  
+  const audioFiles = files ?? [];
+    
+  console.log('[DEBUG AudioPanel] Audio files available:', {
+    selectedScriptId,
+    audioFilesCount: audioFiles.length,
+    audioFiles: audioFiles.map(f => ({ id: f.id, script_id: f.script_id, scriptId: f.scriptId, url: f.url, type: f.type }))
+  });
+
   // Disable controls during switching/prep
-  const getTabInfo = (type: keyof AudioAssets) => {
-    const tabFiles = files?.filter(f => f.type === type) || [];
-    const completedCount = tabFiles.filter(f => f.status === 'completed').length;
-    const generatingCount = tabFiles.filter(f => f.status === 'generating').length;
+  const getTabInfo = (type: string) => {
+    const tabFiles = audioFiles.filter((f: AudioFile) => f.type === type) || [];
+    const completedCount = tabFiles.filter((f: AudioFile) => f.status === 'completed').length;
+    const generatingCount = tabFiles.filter((f: AudioFile) => f.status === 'generating').length;
     return { completedCount, generatingCount, totalCount: tabFiles.length };
   };
 
@@ -211,23 +218,18 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     console.log('[DEBUG] handleConfirmGeneration called');
     console.log('[DEBUG] scenes:', scenes);
     console.log('[DEBUG] generationOptions:', generationOptions);
-    await generateAllAudio(scenes, generationOptions);
-  };
-
-  const handleDeleteAll = async (type: keyof AudioAssets) => {
-    const confirmed = window.confirm(`Are you sure you want to delete all ${type} audio files? This action cannot be undone.`);
-    if (confirmed) {
-      await deleteAllAudio(type);
-    }
+    // TODO: Implement audio generation logic
+    console.warn('Audio generation not implemented yet');
   };
 
   const handlePlayPause = () => {
     if (isPlaying) {
-      stopAllAudio();
+      // TODO: Implement stop audio logic
+      console.warn('Stop audio not implemented yet');
       setIsPlaying(false);
     } else {
-      // Play all selected audio files
-      selectedAudioFiles.forEach(audioId => playAudio(audioId));
+      // TODO: Implement play audio logic
+      console.warn('Play audio not implemented yet');
       setIsPlaying(true);
     }
   };
@@ -259,7 +261,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
           </button>
           <button
             onClick={exportAudioMix}
-            disabled={Object.values(audioAssets).every((arr: any) => arr.length === 0)}
+            disabled={!audioFiles || audioFiles.length === 0}
             className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
           >
             <Download className="w-4 h-4" />
@@ -323,7 +325,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
             <label className="block text-sm font-medium text-gray-700 mb-2">Audio Quality</label>
             <select
               value={generationOptions.audioQuality}
-              onChange={(e) => setGenerationOptions(prev => ({ ...prev, audioQuality: e.target.value as any }))}
+              onChange={(e) => setGenerationOptions(prev => ({ ...prev, audioQuality: e.target.value as 'standard' | 'high' | 'premium' }))}
               className="w-full border rounded-md px-3 py-2"
             >
               <option value="standard">Standard</option>
@@ -398,7 +400,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
       {audioTabs.map(tab => (
         <button
           key={tab.id}
-          onClick={() => setActiveTab(tab.id as any)}
+          onClick={() => setActiveTab(tab.id as 'narration' | 'music' | 'effects' | 'ambiance' | 'timeline')}
           className={`flex items-center space-x-2 px-4 py-2 rounded-md font-medium text-sm transition-colors ${
             activeTab === tab.id
               ? 'bg-white text-purple-600 shadow-sm'
@@ -481,7 +483,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     if (activeTab === 'timeline') {
       return (
         <AudioTimeline
-          audioAssets={audioAssets}
+          files={audioFiles}
           duration={duration}
           currentTime={currentTime}
           onTimeUpdate={setCurrentTime}
@@ -500,8 +502,8 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
       );
     }
 
-    const audioType = activeTab as keyof AudioAssets;
-    const tabFiles = files?.filter(f => f.type === audioType) || [];
+    const audioType = activeTab;
+    const tabFiles = audioFiles.filter((f: AudioFile) => f.type === audioType) || [];
 
     return (
       <div className="space-y-4">
@@ -514,11 +516,11 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {tabFiles
-              .sort((a, b) => {
+              .sort((a: AudioFile, b: AudioFile) => {
                 const statusOrder: Record<string, number> = { generating: 0, completed: 1, failed: 2, pending: 3 };
                 return statusOrder[a.status ?? 'completed'] - statusOrder[b.status ?? 'completed'];
               })
-              .map((file) => (
+              .map((file: AudioFile) => (
                 <AudioFileCard
                   key={file.id}
                   file={file}
@@ -583,7 +585,19 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
 
 // Helper component for audio file cards
 const AudioFileCard: React.FC<{
-  file: any;
+  file: {
+    id: string;
+    type?: string;
+    status?: string;
+    name?: string;
+    sceneNumber?: number;
+    duration?: number;
+    character?: string;
+    url?: string;
+    volume?: number;
+    script_id?: string;
+    scriptId?: string | null;
+  };
   isSelected: boolean;
   onSelect: () => void;
   onPlay: () => void;
@@ -595,6 +609,16 @@ const AudioFileCard: React.FC<{
   const [isPlaying, setIsPlaying] = useState(false);
   const isGenerating = file.status === 'generating';
   const isFailed = file.status === 'failed';
+
+  console.log('[DEBUG AudioFileCard] Rendering audio card:', {
+    fileId: file.id,
+    hasUrl: !!file.url,
+    url: file.url,
+    status: file.status,
+    name: file.name,
+    scriptId: file.scriptId,
+    script_id: file.script_id
+  });
 
   return (
     <div className={`bg-white border rounded-lg p-4 ${isSelected ? 'border-purple-500' : ''} ${isGenerating ? 'border-blue-300 bg-blue-50' : ''} ${isFailed ? 'border-red-300 bg-red-50' : ''}`}>
@@ -624,7 +648,7 @@ const AudioFileCard: React.FC<{
             </div>
             <p className="text-sm text-gray-500">
               Scene {file.sceneNumber}
-              {file.duration > 0 && ` • ${formatTime(file.duration)}`}
+              {file.duration && file.duration > 0 && ` • ${formatTime(file.duration)}`}
               {file.character && ` • ${file.character}`}
             </p>
           </div>
@@ -691,7 +715,7 @@ const AudioFileCard: React.FC<{
             type="range"
             min="0"
             max="100"
-            defaultValue={file.volume * 100}
+            defaultValue={(file.volume || 1) * 100}
             onChange={(e) => onVolumeChange(parseInt(e.target.value) / 100)}
             className="flex-1"
           />

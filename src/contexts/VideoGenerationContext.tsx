@@ -78,10 +78,8 @@ export const VideoGenerationProvider: React.FC<{
 
     pollingService.startPolling(videoGenId, {
       onUpdate: (generation) => {
-        // Guard against stale updates from previous scripts
-        if (generation.script_id !== activeScriptIdRef.current) {
-          return;
-        }
+        // Remove script_id validation to allow video previews from any script for the same chapter
+        // This ensures all valid scene videos are displayed regardless of script association
         
         // Check for errors and show notifications
         handleVideoGenerationStatusError(generation, videoGenId);
@@ -104,10 +102,7 @@ export const VideoGenerationProvider: React.FC<{
         }));
       },
       onComplete: (generation) => {
-        // Guard against stale updates from previous scripts
-        if (generation.script_id !== activeScriptIdRef.current) {
-          return;
-        }
+        // Remove script_id validation to allow completion from any script for the same chapter
         
         // Show success notification for completed generation
         if (generation.generation_status === 'completed') {

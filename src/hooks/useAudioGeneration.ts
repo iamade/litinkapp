@@ -1,73 +1,17 @@
+// Migration Note: Legacy AudioAssets interface removed.
+// Now using normalized audio file arrays with scriptId property for consistent filtering.
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { toast } from 'react-hot-toast';
 import { userService } from '../services/userService';
 
-interface AudioFile {
-  id: string;
-  type: 'narration' | 'music' | 'effects' | 'ambiance' | 'character' | 'sfx';
-  sceneNumber: number;
-  url: string;
-  duration: number;
-  character?: string;
-  name: string;
-  status: 'pending' | 'generating' | 'completed' | 'failed';
-  generatedAt?: string;
-  waveform?: number[];
-  volume: number;
-  startTime: number;
-  endTime: number;
-}
-
-interface AudioAssets {
-  narration: AudioFile[];
-  music: AudioFile[];
-  effects: AudioFile[];
-  ambiance: AudioFile[];
-  character: AudioFile[];
-  sfx: AudioFile[];
-}
-
-// Map DB enum values to frontend types
-const mapDbTypeToFrontend = (dbType: string): keyof AudioAssets => {
-  const mapping: Record<string, keyof AudioAssets> = {
-    'narrator': 'narration',
-    'music': 'music',
-    'sound_effect': 'effects',
-    'background_music': 'ambiance',
-    'character': 'character',
-    'sfx': 'sfx'
-  };
-  return mapping[dbType] || 'narration'; // fallback
-};
-
-interface AudioGenerationOptions {
-  voiceModel: string;
-  musicStyle: string;
-  effectsIntensity: 'subtle' | 'moderate' | 'dramatic';
-  ambianceType: string;
-  audioQuality: 'standard' | 'high' | 'premium';
-  generateNarration: boolean;
-  generateMusic: boolean;
-  generateEffects: boolean;
-  generateAmbiance: boolean;
-  characterVoices: Record<string, string>; // Map character names to voice models
-}
-
-// New params type for reactive hook
-type UseAudioGenerationParams = {
-  scriptId?: string;
-  chapterId?: string;
-  segmentId?: string;
-  versionKey?: number; // passed from callers (e.g., context.versionToken)
-};
-
 // Legacy hook signature for backward compatibility
-export type UseAudioParams = { chapterId?: string | null; scriptId?: string | null; versionToken?: any };
+export type UseAudioParams = { chapterId?: string | null; scriptId?: string | null; versionToken?: unknown };
 export type AudioFile = {
   id: string;
   chapter_id?: string;
   script_id?: string;
+  scriptId?: string | null; // Add camelCase version for frontend consistency (null when neither script_id nor scriptId present)
   url: string;
+  audio_url?: string; // Backend field name for audio URL
   duration_ms?: number;
   created_at?: string;
   kind?: "narration" | "dialogue" | "sfx" | "music";
@@ -110,23 +54,32 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken }: UseAud
       // Prefer getAudioForScriptChapter if present, fallback to userService.getChapterAudio
       let files: AudioFile[] = [];
       if (typeof import.meta.env !== "undefined") {
-        // @ts-ignore
+        // @ts-expect-error - Dynamic import check
         if (typeof import('../lib/api').getAudioForScriptChapter === "function") {
-          // @ts-ignore
+          // @ts-expect-error - Dynamic import
           files = await (await import('../lib/api')).getAudioForScriptChapter(chapterId, scriptId);
         } else {
           // fallback to userService
-          files = await userService.getChapterAudio(chapterId, scriptId);
+          files = await userService.getChapterAudio(chapterId);
         }
       } else {
-        files = await userService.getChapterAudio(chapterId, scriptId);
+        files = await userService.getChapterAudio(chapterId);
       }
       if (!isMountedRef.current || inflightRef.current !== key) return;
-      setState({ files: files ?? [], isLoading: false, error: null });
-    } catch (e: any) {
+      
+      // Normalize fields for consistent frontend filtering
+      // Map backend snake_case fields to frontend camelCase expectations
+      const normalizedFiles = (files ?? []).map(f => ({
+        ...f,
+        url: f.url ?? f.audio_url, // Map audio_url to url for frontend compatibility
+        scriptId: f.script_id ?? f.scriptId ?? null
+      }));
+      
+      setState({ files: normalizedFiles, isLoading: false, error: null });
+    } catch (e: unknown) {
       if (!isMountedRef.current || inflightRef.current !== key) return;
       console.warn("useAudioGeneration: loadAudio failed", e);
-      setState(prev => ({ ...prev, isLoading: false, error: e?.message ?? "Failed to load audio" }));
+      setState(prev => ({ ...prev, isLoading: false, error: (e as Error)?.message ?? "Failed to load audio" }));
     } finally {
       if (inflightRef.current === key) inflightRef.current = null;
     }

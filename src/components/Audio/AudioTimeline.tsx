@@ -3,7 +3,7 @@ import { ZoomIn, ZoomOut } from 'lucide-react';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
 interface AudioTimelineProps {
-  audioAssets: any;
+  files: any[];
   duration: number;
   currentTime: number;
   onTimeUpdate: (time: number) => void;
@@ -11,7 +11,7 @@ interface AudioTimelineProps {
 }
 
 const AudioTimeline: React.FC<AudioTimelineProps> = ({
-  audioAssets,
+  files,
   duration,
   currentTime,
   onTimeUpdate,
@@ -78,11 +78,10 @@ const AudioTimeline: React.FC<AudioTimelineProps> = ({
   }
 
   const tracks = [
-    { name: 'Dialogue', color: 'bg-blue-500', files: audioAssets.dialogue },
-    { name: 'Narration', color: 'bg-green-500', files: audioAssets.narration },
-    { name: 'Music', color: 'bg-purple-500', files: audioAssets.music },
-    { name: 'Effects', color: 'bg-orange-500', files: audioAssets.effects },
-    { name: 'Ambiance', color: 'bg-teal-500', files: audioAssets.ambiance }
+    { name: 'Narration', color: 'bg-green-500', files: files?.filter(f => f.type === 'narration') || [] },
+    { name: 'Music', color: 'bg-purple-500', files: files?.filter(f => f.type === 'music') || [] },
+    { name: 'Effects', color: 'bg-orange-500', files: files?.filter(f => f.type === 'effects') || [] },
+    { name: 'Ambiance', color: 'bg-teal-500', files: files?.filter(f => f.type === 'ambiance') || [] }
   ];
 
   const handleTimelineClick = (e: React.MouseEvent) => {
