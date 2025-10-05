@@ -1,5 +1,6 @@
 from typing import Dict, Any, List, Optional
-from supabase import create_client
+import uuid
+from datetime import datetime
 from app.core.database import get_supabase
 from app.services.ai_service import AIService
 from app.services.embeddings_service import EmbeddingsService
@@ -114,46 +115,87 @@ class RAGService:
         """
         Generate optimized video script from chapter context using the full RAG-enhanced prompt.
         Supports versioning, evaluation, and status updates.
+        Conditional adaptation for fiction/non-fiction content.
         """
         try:
             enhanced_context = chapter_context.get('total_context', chapter_context['chapter']['content'])
-            prompt = self._get_script_generation_prompt(enhanced_context, video_style, script_style)
+
+            # Extract script_story_type and genre from plot overview if available
+            plot_overview = chapter_context.get('plot_overview', {})
+            script_story_type = plot_overview.get('script_story_type', None)
+            genre = plot_overview.get('genre', None)
+
+            # Determine personas for non-fiction formats
+            personas = None
+            if script_story_type in ["documentary", "educational", "tutorial", "interview", "discussion", "non-fiction"]:
+                # Use specialized personas for non-fiction
+                if script_story_type == "documentary":
+                    personas = ["Narrator", "Expert", "Interviewee"]
+                elif script_story_type in ["educational", "tutorial"]:
+                    personas = ["Instructor", "Student"]
+                elif script_story_type in ["interview", "discussion"]:
+                    personas = ["Host", "Guest", "Expert"]
+                else:
+                    personas = ["Narrator"]
+
+            prompt = self._get_script_generation_prompt(
+                enhanced_context,
+                video_style,
+                script_style,
+                script_story_type=script_story_type,
+                genre=genre,
+                personas=personas,
+            )
             print(f"[RAG DEBUG] AI Prompt for Video Script:\n{prompt}\n")
             script = await self.ai_service.generate_text_from_prompt(prompt)
-            
-            # Extract characters from the generated script
-            characters = self._extract_characters_from_script(script)
-            
-            # Generate character details for each character
-            character_details = await self._generate_character_details(characters, enhanced_context)
+
+            # Conditional character extraction for fiction/non-fiction
+            if script_story_type == "fiction" or not script_story_type:
+                characters = self._extract_characters_from_script(script)
+                character_details = await self._generate_character_details(characters, enhanced_context)
+            else:
+                # For non-fiction, extract personas used in the script
+                characters = personas or []
+                character_details = f"Non-fiction personas: {', '.join(characters)}"
+
 
             # Create/update character records and collect their IDs
             character_ids = []
             for name in characters:
-                char_result = self.db.table('characters').select('id').eq('name', name).eq('book_id', chapter_context['book']['id']).single().execute()
-                if char_result.data:
-                    character_ids.append(char_result.data['id'])
-                else:
-                    char_id = str(uuid.uuid4())
-                    char_data = {
-                        "id": char_id,
-                        "book_id": chapter_context['book']['id'],
-                        "name": name,
-                        "role": "supporting",
-                        "character_arc": "",
-                        "physical_description": "",
-                        "personality": "",
-                        "want": "",
-                        "need": "",
-                        "lie": "",
-                        "ghost": "",
-                        "archetypes": [],
-                        "generation_method": "rag_script",
-                        "created_at": datetime.now().isoformat(),
-                        "updated_at": datetime.now().isoformat()
-                    }
-                    self.db.table('characters').insert(char_data).execute()
-                    character_ids.append(char_id)
+                try:
+                    # Look up character by name and book_id - use limit(1) instead of single() to avoid exceptions
+                    char_result = self.db.table('characters').select('id').eq('name', name).eq('book_id', chapter_context['book']['id']).limit(1).execute()
+                    if char_result.data and len(char_result.data) > 0:
+                        character_ids.append(char_result.data[0]['id'])
+                    else:
+                        # Create new character with proper fields
+                        char_id = str(uuid.uuid4())
+                        char_data = {
+                            "id": char_id,
+                            "book_id": chapter_context['book']['id'],
+                            "name": name,
+                            "role": "supporting",
+                            "character_arc": "",
+                            "physical_description": "",
+                            "personality": "",
+                            "want": "",
+                            "need": "",
+                            "lie": "",
+                            "ghost": "",
+                            "archetypes": [],
+                            "generation_method": "rag_script",
+                            "created_at": datetime.now().isoformat(),
+                            "updated_at": datetime.now().isoformat()
+                        }
+                        # Insert character and handle potential errors
+                        insert_result = self.db.table('characters').insert(char_data).execute()
+                        if insert_result.data and len(insert_result.data) > 0:
+                            character_ids.append(char_id)
+                        else:
+                            print(f"Warning: Failed to create character '{name}'")
+                except Exception as char_error:
+                    print(f"Error processing character '{name}': {char_error}")
+                    continue
 
             # --- Versioning: Always create a new script record ---
             script_record = {
@@ -209,13 +251,28 @@ class RAGService:
                 "evaluation": None
             }
     
-    def _get_script_generation_prompt(self, context: str, video_style: str, script_style: str = "cinematic_movie") -> str:
-        """Construct a prompt based on the full RAG-enhanced context, video_style, and script_style."""
-        if video_style == "entertainment":
-            # Use a cinematic/story prompt for entertainment books
+    def _get_script_generation_prompt(
+        self,
+        context: str,
+        video_style: str,
+        script_style: str = "cinematic_movie",
+        script_story_type: Optional[str] = None,
+        genre: Optional[str] = None,
+        personas: Optional[List[str]] = None,
+    ) -> str:
+        """
+        Construct a prompt based on the full RAG-enhanced context, video_style, script_style,
+        and conditional adaptation for fiction/non-fiction content.
+        """
+        # Determine story type and genre
+        story_type = script_story_type or "fiction"
+        genre = genre or "general"
+
+        # Fiction: traditional character-driven narrative
+        if story_type == "fiction":
             if script_style == "cinematic_movie":
                 return f"""
-Given the following book and chapter context, generate a cinematic screenplay-style script for a {video_style} video adaptation. 
+Given the following book and chapter context, generate a cinematic screenplay-style script for a {video_style} video adaptation.
 
 The script should include:
 1. Character names in CAPS
@@ -261,59 +318,103 @@ Format the script as a cinematic narration with:
 
 Return only the narration script.
 """
+        # Non-fiction: conditional adaptation
         else:
-            # Default: tutorial/learning prompt (as before)
-            if script_style == "cinematic_movie":
+            # Documentary format
+            if story_type == "documentary" or (genre and "documentary" in genre.lower()):
+                persona_str = ", ".join(personas or ["Narrator", "Expert", "Interviewee"])
                 return f"""
-Given the following book and chapter context, generate a detailed tutorial script for a {video_style} style video. 
+Given the following non-fiction context, generate a documentary-style video script.
 
 The script should include:
-1. Clear educational content delivery
-2. Conversational teaching tone
-3. Step-by-step explanations
-4. Examples and demonstrations
-5. Natural speech patterns and transitions
-6. Engaging educational narrative
-7. Focus on learning objectives
+1. Narrator-driven segments introducing the topic
+2. Expert interviews and factual explanations
+3. Discussion of real events, facts, or concepts
+4. Clear transitions between narration and interviews
+5. Personas: {persona_str}
 
 Use the context below:
 
 {context}
 
-Format the script as a tutorial with:
-- Clear introduction of the topic
-- Educational content delivery
-- Examples and explanations
-- Natural speech patterns
-- Engaging teaching style
+Format the script as:
+- Narrator segments (clearly marked)
+- Interview questions and answers (with persona names)
+- Factual explanations and commentary
 
-Return only the tutorial script.
+Return only the documentary script.
 """
-            else:
+            # Educational/tutorial format
+            elif story_type == "educational" or (genre and "educational" in genre.lower()) or (genre and "tutorial" in genre.lower()):
+                persona_str = ", ".join(personas or ["Instructor", "Student"])
                 return f"""
-Given the following book and chapter context, generate a detailed tutorial narration script for a {video_style} style video.
+Given the following non-fiction context, generate an educational/tutorial video script.
 
 The script should include:
-1. Engaging educational storytelling
-2. Descriptive language that explains concepts
-3. Clear learning objectives
-4. Educational content delivery
-5. Smooth transitions between topics
-6. Multiple educational segments that build understanding
-7. Rich, educational language suitable for voice-over
+1. Step-by-step explanations of concepts or processes
+2. Instructor-led teaching segments
+3. Example demonstrations
+4. Student questions and answers (if applicable)
+5. Personas: {persona_str}
 
 Use the context below:
 
 {context}
 
-Format the script as educational narration with:
-- Clear topic introductions
-- Concept explanations and descriptions
-- Educational examples and demonstrations
-- Smooth transitions between topics
-- Engaging educational language
+Format the script as:
+- Introduction by Instructor
+- Sequential tutorial steps
+- Example demonstrations
+- Student interactions (if present)
+- Summary/conclusion
 
-Return only the tutorial narration script.
+Return only the educational/tutorial script.
+"""
+            # Interview/discussion format
+            elif story_type == "interview" or (genre and "interview" in genre.lower()) or (genre and "discussion" in genre.lower()):
+                persona_str = ", ".join(personas or ["Host", "Guest", "Expert"])
+                return f"""
+Given the following non-fiction context, generate an interview/discussion-style video script.
+
+The script should include:
+1. Host-led introduction
+2. Discussion between multiple personas (Host, Guest, Expert, etc.)
+3. Q&A segments
+4. Factual commentary and insights
+5. Personas: {persona_str}
+
+Use the context below:
+
+{context}
+
+Format the script as:
+- Host introduction
+- Discussion/Q&A segments (with persona names)
+- Commentary and insights
+
+Return only the interview/discussion script.
+"""
+            # Default non-fiction fallback
+            else:
+                persona_str = ", ".join(personas or ["Narrator"])
+                return f"""
+Given the following non-fiction context, generate a factual narration video script.
+
+The script should include:
+1. Narrator-driven explanation of the topic
+2. Clear, concise factual delivery
+3. Logical structure and transitions
+4. Personas: {persona_str}
+
+Use the context below:
+
+{context}
+
+Format the script as:
+- Narrator segments
+- Factual explanations
+
+Return only the factual narration script.
 """
     
     def _extract_characters_from_script(self, script: str) -> List[str]:
