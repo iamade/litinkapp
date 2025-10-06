@@ -247,16 +247,20 @@ export const userService = {
       targetDuration?: number | "auto";
       sceneCount?: number;
       focusAreas?: string[];
+      scriptStoryType?: string;
     }
   ): Promise<ScriptResult> => {
-    return apiClient.post<ScriptResult>(`/ai/generate-script-and-scenes`, {
+    const requestPayload = {
       chapter_id: chapterId,
       script_style: scriptStyle,
       target_duration: options?.targetDuration,
       include_character_profiles: options?.includeCharacterProfiles,
       scene_count: options?.sceneCount,
       focus_areas: options?.focusAreas,
-    });
+      scriptStoryType: options?.scriptStoryType,
+    };
+    console.log('[DEBUG] userService.generateScriptAndScenes - sending payload:', requestPayload);
+    return apiClient.post<ScriptResult>(`/ai/generate-script-and-scenes`, requestPayload);
   },
 
   getChapterScripts: async (

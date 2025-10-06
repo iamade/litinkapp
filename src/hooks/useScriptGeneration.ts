@@ -66,6 +66,7 @@ interface ScriptGenerationOptions {
   targetDuration?: number | "auto";
   sceneCount?: number;
   focusAreas: string[];
+  scriptStoryType?: string;
 }
 
 export const useScriptGeneration = (chapterId: string) => {
@@ -84,28 +85,36 @@ export const useScriptGeneration = (chapterId: string) => {
 
     setIsLoading(true);
     try {
+      console.log('[DEBUG] useScriptGeneration - loadScripts called for chapterId:', chapterId);
       const response = await userService.getChapterScripts(chapterId);
+      console.log('[DEBUG] useScriptGeneration - API response:', response);
       const scripts = response.scripts || [];
-      
-      // Convert legacy scripts to new format
-      const formattedScripts: ChapterScript[] = scripts.map((script: any) => ({
-        id: script.id,
-        chapter_id: script.chapter_id,
-        script_style: script.script_style,
-        script_name: script.script_name || 'Unnamed Script',
-        script: script.script,
-        scene_descriptions: (script.scene_descriptions || []) as unknown as SceneDescription[],
-        characters: script.characters || [],
-        character_details: script.character_details || '',
-        acts: script.acts || [],
-        beats: script.beats || [],
-        scenes: script.scenes || [],
-        created_at: script.created_at,
-        status: script.status || 'draft'
-      }));
+      console.log('[DEBUG] useScriptGeneration - scripts from API:', scripts);
 
+      // Convert legacy scripts to new format
+      const formattedScripts: ChapterScript[] = scripts.map((script: any) => {
+        console.log('[DEBUG] useScriptGeneration - processing script:', script.id, 'scriptStoryType:', script.scriptStoryType);
+        return {
+          id: script.id,
+          chapter_id: script.chapter_id,
+          script_style: script.script_style,
+          script_name: script.script_name || 'Unnamed Script',
+          script: script.script,
+          scene_descriptions: (script.scene_descriptions || []) as unknown as SceneDescription[],
+          characters: script.characters || [],
+          character_details: script.character_details || '',
+          acts: script.acts || [],
+          beats: script.beats || [],
+          scenes: script.scenes || [],
+          created_at: script.created_at,
+          status: script.status || 'draft',
+          scriptStoryType: script.scriptStoryType || script.script_story_type // Handle both camelCase and snake_case
+        };
+      });
+
+      console.log('[DEBUG] useScriptGeneration - formattedScripts:', formattedScripts);
       setGeneratedScripts(formattedScripts);
-      
+
       // Auto-select first script if none selected
       if (!selectedScript && formattedScripts.length > 0) {
         setSelectedScript(formattedScripts[0]);
@@ -124,6 +133,7 @@ export const useScriptGeneration = (chapterId: string) => {
   ) => {
     setIsGeneratingScript(true);
     try {
+      console.log('[DEBUG] useScriptGeneration.generateScript - options:', options);
       const result = await userService.generateScriptAndScenes(
         chapterId,
         scriptStyle,
@@ -131,7 +141,8 @@ export const useScriptGeneration = (chapterId: string) => {
           targetDuration: options.targetDuration,
           includeCharacterProfiles: options.includeCharacterProfiles,
           sceneCount: options.sceneCount,
-          focusAreas: options.focusAreas
+          focusAreas: options.focusAreas,
+          scriptStoryType: options.scriptStoryType
         }
       );
       

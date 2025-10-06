@@ -125,18 +125,17 @@ class RAGService:
             script_story_type = plot_overview.get('script_story_type', None)
             genre = plot_overview.get('genre', None)
 
-            # Determine personas for non-fiction formats
+            # Generate fictional personas for non-fiction content
             personas = None
-            if script_story_type in ["documentary", "educational", "tutorial", "interview", "discussion", "non-fiction"]:
-                # Use specialized personas for non-fiction
-                if script_story_type == "documentary":
-                    personas = ["Narrator", "Expert", "Interviewee"]
-                elif script_story_type in ["educational", "tutorial"]:
-                    personas = ["Instructor", "Student"]
-                elif script_story_type in ["interview", "discussion"]:
-                    personas = ["Host", "Guest", "Expert"]
-                else:
-                    personas = ["Narrator"]
+            if script_story_type in ["non-fiction", "educational", "tutorial", "documentary"]:
+                from app.services.character_service import CharacterService
+                character_service = CharacterService(self.db)
+                personas = await character_service.generate_non_fiction_personas(
+                    content=enhanced_context,
+                    genre=genre or "general",
+                    num_personas=5,
+                    user_tier="free"
+                )
 
             prompt = self._get_script_generation_prompt(
                 enhanced_context,
@@ -144,58 +143,18 @@ class RAGService:
                 script_style,
                 script_story_type=script_story_type,
                 genre=genre,
-                personas=personas,
+                personas=[persona["name"] for persona in personas] if personas else None,
             )
             print(f"[RAG DEBUG] AI Prompt for Video Script:\n{prompt}\n")
             script = await self.ai_service.generate_text_from_prompt(prompt)
 
-            # Conditional character extraction for fiction/non-fiction
+            # Extract characters for fiction or use personas for non-fiction
             if script_story_type == "fiction" or not script_story_type:
                 characters = self._extract_characters_from_script(script)
                 character_details = await self._generate_character_details(characters, enhanced_context)
             else:
-                # For non-fiction, extract personas used in the script
-                characters = personas or []
+                characters = [persona["name"] for persona in personas] if personas else []
                 character_details = f"Non-fiction personas: {', '.join(characters)}"
-
-
-            # Create/update character records and collect their IDs
-            character_ids = []
-            for name in characters:
-                try:
-                    # Look up character by name and book_id - use limit(1) instead of single() to avoid exceptions
-                    char_result = self.db.table('characters').select('id').eq('name', name).eq('book_id', chapter_context['book']['id']).limit(1).execute()
-                    if char_result.data and len(char_result.data) > 0:
-                        character_ids.append(char_result.data[0]['id'])
-                    else:
-                        # Create new character with proper fields
-                        char_id = str(uuid.uuid4())
-                        char_data = {
-                            "id": char_id,
-                            "book_id": chapter_context['book']['id'],
-                            "name": name,
-                            "role": "supporting",
-                            "character_arc": "",
-                            "physical_description": "",
-                            "personality": "",
-                            "want": "",
-                            "need": "",
-                            "lie": "",
-                            "ghost": "",
-                            "archetypes": [],
-                            "generation_method": "rag_script",
-                            "created_at": datetime.now().isoformat(),
-                            "updated_at": datetime.now().isoformat()
-                        }
-                        # Insert character and handle potential errors
-                        insert_result = self.db.table('characters').insert(char_data).execute()
-                        if insert_result.data and len(insert_result.data) > 0:
-                            character_ids.append(char_id)
-                        else:
-                            print(f"Warning: Failed to create character '{name}'")
-                except Exception as char_error:
-                    print(f"Error processing character '{name}': {char_error}")
-                    continue
 
             # --- Versioning: Always create a new script record ---
             script_record = {
@@ -205,7 +164,6 @@ class RAGService:
                 "script": script,
                 "characters": characters,
                 "character_details": character_details,
-                "character_ids": character_ids,
                 "video_style": video_style,
                 "created_at": datetime.now().isoformat(),
                 "status": "draft"
@@ -232,7 +190,6 @@ class RAGService:
                 "script": script,
                 "characters": characters,
                 "character_details": character_details,
-                "character_ids": character_ids,
                 "script_style": script_style,
                 "video_style": video_style,
                 "script_id": script_id,
@@ -244,7 +201,6 @@ class RAGService:
                 "script": "",
                 "characters": [],
                 "character_details": "",
-                "character_ids": [],
                 "script_style": script_style,
                 "video_style": video_style,
                 "script_id": None,

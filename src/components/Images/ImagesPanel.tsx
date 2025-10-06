@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { userService } from '../../services/userService';
-import { Tables } from '../../types/supabase';
 import {
   Image,
   Users,
@@ -16,6 +14,8 @@ import {
   Plus,
   Wand2
 } from 'lucide-react';
+import { userService } from '../../services/userService';
+import { Tables } from '../../types/supabase';
 import { toast } from 'react-hot-toast';
 import { useImageGeneration } from '../../hooks/useImageGeneration';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
@@ -51,7 +51,7 @@ interface ImageGenerationOptions {
 interface ImagesPanelProps {
   chapterTitle: string;
   selectedScript: unknown;
-  plotOverview: { characters?: Tables<'characters'>[] } | null;
+  plotOverview: { characters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string }> } | null;
 }
 
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
@@ -140,23 +140,19 @@ console.log('[DEBUG ImagesPanel] Component state:', {
       : [];
   // Centralized character fetch: use characters table via userService
   // Centralized character fetch: use userService from import, not window
-  import { userService } from '../../services/userService';
-  import { Tables } from '../../types/supabase';
 
-  const [characters, setCharacters] = useState<Tables<'characters'>[]>([]);
+  const [characters, setCharacters] = useState<any[]>([]);
   useEffect(() => {
     async function fetchCharacters() {
       if (!stableSelectedChapterId) return;
       try {
-        // Fetch characters for the chapter from backend (characters table)
-        // Replace with actual API call to fetch characters for the chapter
-        // Fallback to plotOverview.characters if API not available
-        if (typeof userService.getChapterCharacters === 'function') {
-          const chapterCharacters = await userService.getChapterCharacters(stableSelectedChapterId);
-          if (chapterCharacters && Array.isArray(chapterCharacters)) {
-            setCharacters(chapterCharacters);
-            return;
-          }
+        // Fetch characters for the chapter using userService API
+        try {
+          const chapterCharacters = await userService.getCharactersByChapter(stableSelectedChapterId);
+          setCharacters(chapterCharacters || []);
+        } catch (error) {
+          console.error('Error fetching characters:', error);
+          setCharacters([]);
         }
         if (plotOverview?.characters) {
           setCharacters(plotOverview.characters);

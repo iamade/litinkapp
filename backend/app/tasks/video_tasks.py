@@ -1,7 +1,6 @@
 from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List, Optional
-from app.services.modelslab_image_service import ModelsLabImageService
 from app.services.modelslab_video_service import ModelsLabVideoService
 from app.services.video_service import VideoService
 from app.core.database import get_supabase
@@ -10,81 +9,10 @@ import json
 from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
 
 
-async def query_existing_character_images(user_id: str, character_names: List[str]) -> List[Dict[str, Any]]:
-    """Query existing character images from database"""
-    try:
-        supabase = get_supabase()
-
-        # Query characters table for images
-        character_images = []
-        for char_name in character_names:
-            # Try to find character by name and user_id
-            from urllib.parse import quote
-            encoded_char_name = quote(f'%{char_name}%')
-            result = supabase.table('characters').select('name, image_url, image_metadata').eq('user_id', user_id).ilike('name', encoded_char_name).execute()
-
-            if result.data:
-                char_data = result.data[0]
-                if char_data.get('image_url'):
-                    character_images.append({
-                        'name': char_data['name'],
-                        'image_url': char_data['image_url'],
-                        'metadata': char_data.get('image_metadata', {})
-                    })
-
-        # If no images in characters table, try image_generations table
-        if not character_images:
-            for char_name in character_names:
-                from urllib.parse import quote
-                encoded_char_name = quote(f'%{char_name}%')
-                result = supabase.table('image_generations').select('character_name, image_url, metadata').eq('user_id', user_id).eq('image_type', 'character').ilike('character_name', encoded_char_name).execute()
-
-                for img_data in result.data or []:
-                    if img_data.get('image_url'):
-                        character_images.append({
-                            'name': img_data['character_name'],
-                            'image_url': img_data['image_url'],
-                            'metadata': img_data.get('metadata', {})
-                        })
-
-        print(f"[CHARACTER IMAGES] Found {len(character_images)} character images for {len(character_names)} characters")
-        return character_images
-
-    except Exception as e:
-        print(f"[CHARACTER IMAGES] Error querying character images: {str(e)}")
-        return []
+# Removed image generation logic
 
 
-async def query_existing_scene_images(user_id: str, scene_descriptions: List[str]) -> List[Dict[str, Any]]:
-    """Query existing scene images from database"""
-    try:
-        supabase = get_supabase()
-        scene_images = []
-
-        # Query image_generations table for scene images
-        for scene_desc in scene_descriptions:
-            # Try to find scene images by scene description and user_id
-            from urllib.parse import quote
-            encoded_scene_desc = quote(f'%{scene_desc}%')
-            result = supabase.table('image_generations').select(
-                'scene_description, image_url, metadata, image_type'
-            ).eq('user_id', user_id).eq('image_type', 'scene').ilike('scene_description', encoded_scene_desc).execute()
-
-            for img_data in result.data or []:
-                if img_data.get('image_url'):
-                    scene_images.append({
-                        'scene_description': img_data['scene_description'],
-                        'image_url': img_data['image_url'],
-                        'metadata': img_data.get('metadata', {}),
-                        'image_type': img_data.get('image_type', 'scene')
-                    })
-
-        print(f"[SCENE IMAGES] Found {len(scene_images)} scene images for {len(scene_descriptions)} scenes")
-        return scene_images
-
-    except Exception as e:
-        print(f"[SCENE IMAGES] Error querying scene images: {str(e)}")
-        return []
+# Removed scene image generation logic
 
 
 async def extract_scene_dialogue_and_generate_audio(

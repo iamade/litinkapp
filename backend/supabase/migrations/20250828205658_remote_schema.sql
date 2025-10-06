@@ -1,114 +1,144 @@
 
 
-SET statement_timeout = 0;
-SET lock_timeout = 0;
-SET idle_in_transaction_session_timeout = 0;
-SET client_encoding = 'UTF8';
-SET standard_conforming_strings = on;
-SELECT pg_catalog.set_config('search_path', '', false);
-SET check_function_bodies = false;
-SET xmloption = content;
-SET client_min_messages = warning;
-SET row_security = off;
+-- SET statement_timeout = 0;
+-- SET lock_timeout = 0;
+-- SET idle_in_transaction_session_timeout = 0;
+-- SET client_encoding = 'UTF8';
+-- SET standard_conforming_strings = 'on';
+-- SELECT pg_catalog.set_config('search_path', '', false);
+-- SET check_function_bodies = false;
+-- SET xmloption = content;
+-- SET client_min_messages = warning;
+-- SET row_security = off;
 
 
-COMMENT ON SCHEMA "public" IS 'standard public schema';
-
-
-
-CREATE EXTENSION IF NOT EXISTS "pg_graphql" WITH SCHEMA "graphql";
+-- COMMENT ON SCHEMA "public" IS 'standard public schema';
 
 
 
-
-
-
-CREATE EXTENSION IF NOT EXISTS "pg_stat_statements" WITH SCHEMA "extensions";
+-- CREATE EXTENSION IF NOT EXISTS "pg_graphql" WITH SCHEMA "graphql";
 
 
 
 
 
 
-CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA "extensions";
+-- CREATE EXTENSION IF NOT EXISTS "pg_stat_statements" WITH SCHEMA "extensions";
 
 
 
 
 
 
-CREATE EXTENSION IF NOT EXISTS "supabase_vault" WITH SCHEMA "vault";
+-- CREATE EXTENSION IF NOT EXISTS "pgcrypto" WITH SCHEMA "extensions";
 
 
 
 
 
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA "extensions";
+-- CREATE EXTENSION IF NOT EXISTS "supabase_vault" WITH SCHEMA "vault";
 
 
 
 
 
 
-CREATE EXTENSION IF NOT EXISTS "vector" WITH SCHEMA "public";
+-- CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA "extensions";
 
 
 
 
 
 
-CREATE TYPE "public"."badge_rarity" AS ENUM (
-    'common',
-    'uncommon',
-    'rare',
-    'epic',
-    'legendary'
-);
+-- CREATE EXTENSION IF NOT EXISTS "vector" WITH SCHEMA "public";
+
+
+
+
+
+
+-- DO $$
+-- BEGIN
+--    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'badge_rarity') THEN
+--        CREATE TYPE "public"."badge_rarity" AS ENUM (
+--            'common',
+--            'uncommon',
+--            'rare',
+--            'epic',
+--            'legendary'
+        );
+    END IF;
+END;
+$$;
 
 
 ALTER TYPE "public"."badge_rarity" OWNER TO "postgres";
 
 
-CREATE TYPE "public"."book_status" AS ENUM (
-    'PROCESSING',
-    'GENERATING',
-    'READY',
-    'FAILED',
-    'QUEUED',
-    'published',
-    'failed',
-    'PENDING_PAYMENT'
-);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'book_status') THEN
+        CREATE TYPE "public"."book_status" AS ENUM (
+            'PROCESSING',
+            'GENERATING',
+            'READY',
+            'FAILED',
+            'QUEUED',
+            'published',
+            'failed',
+            'PENDING_PAYMENT'
+        );
+    END IF;
+END;
+$$;
 
 
 ALTER TYPE "public"."book_status" OWNER TO "postgres";
 
 
-CREATE TYPE "public"."book_type" AS ENUM (
-    'learning',
-    'entertainment'
-);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'book_type') THEN
+        CREATE TYPE "public"."book_type" AS ENUM (
+            'learning',
+            'entertainment'
+        );
+    END IF;
+END;
+$$;
 
 
 ALTER TYPE "public"."book_type" OWNER TO "postgres";
 
 
-CREATE TYPE "public"."difficulty_level" AS ENUM (
-    'easy',
-    'medium',
-    'hard'
-);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'difficulty_level') THEN
+        CREATE TYPE "public"."difficulty_level" AS ENUM (
+            'easy',
+            'medium',
+            'hard'
+        );
+    END IF;
+END;
+$$;
 
 
 ALTER TYPE "public"."difficulty_level" OWNER TO "postgres";
 
 
-CREATE TYPE "public"."user_role" AS ENUM (
-    'author',
-    'explorer',
-    'superadmin'
-);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+        CREATE TYPE "public"."user_role" AS ENUM (
+            'author',
+            'explorer',
+            'superadmin'
+        );
+    END IF;
+END;
+$$;
 
 
 ALTER TYPE "public"."user_role" OWNER TO "postgres";
@@ -500,221 +530,675 @@ CREATE TABLE IF NOT EXISTS "public"."videos" (
 ALTER TABLE "public"."videos" OWNER TO "postgres";
 
 
-ALTER TABLE ONLY "public"."badges"
-    ADD CONSTRAINT "badges_name_key" UNIQUE ("name");
-
-
-
-ALTER TABLE ONLY "public"."badges"
-    ADD CONSTRAINT "badges_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."book_embeddings"
-    ADD CONSTRAINT "book_embeddings_book_id_chunk_type_chunk_index_key" UNIQUE ("book_id", "chunk_type", "chunk_index");
-
-
-
-ALTER TABLE ONLY "public"."book_embeddings"
-    ADD CONSTRAINT "book_embeddings_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."book_sections"
-    ADD CONSTRAINT "book_sections_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."books"
-    ADD CONSTRAINT "books_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."chapter_embeddings"
-    ADD CONSTRAINT "chapter_embeddings_chapter_id_chunk_index_key" UNIQUE ("chapter_id", "chunk_index");
-
-
-
-ALTER TABLE ONLY "public"."chapter_embeddings"
-    ADD CONSTRAINT "chapter_embeddings_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."chapters"
-    ADD CONSTRAINT "chapters_book_id_chapter_number_key" UNIQUE ("book_id", "chapter_number");
-
-
-
-ALTER TABLE ONLY "public"."chapters"
-    ADD CONSTRAINT "chapters_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."learning_content"
-    ADD CONSTRAINT "learning_content_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."nft_collectibles"
-    ADD CONSTRAINT "nft_collectibles_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."profiles"
-    ADD CONSTRAINT "profiles_email_key" UNIQUE ("email");
-
-
-
-ALTER TABLE ONLY "public"."profiles"
-    ADD CONSTRAINT "profiles_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."quiz_attempts"
-    ADD CONSTRAINT "quiz_attempts_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."quizzes"
-    ADD CONSTRAINT "quizzes_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."story_choices"
-    ADD CONSTRAINT "story_choices_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."user_badges"
-    ADD CONSTRAINT "user_badges_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."user_badges"
-    ADD CONSTRAINT "user_badges_user_id_badge_id_key" UNIQUE ("user_id", "badge_id");
-
-
-
-ALTER TABLE ONLY "public"."user_collectibles"
-    ADD CONSTRAINT "user_collectibles_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."user_collectibles"
-    ADD CONSTRAINT "user_collectibles_user_id_collectible_id_key" UNIQUE ("user_id", "collectible_id");
-
-
-
-ALTER TABLE ONLY "public"."user_progress"
-    ADD CONSTRAINT "user_progress_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."user_progress"
-    ADD CONSTRAINT "user_progress_user_id_book_id_key" UNIQUE ("user_id", "book_id");
-
-
-
-ALTER TABLE ONLY "public"."user_story_progress"
-    ADD CONSTRAINT "user_story_progress_pkey" PRIMARY KEY ("id");
-
-
-
-ALTER TABLE ONLY "public"."user_story_progress"
-    ADD CONSTRAINT "user_story_progress_user_id_book_id_key" UNIQUE ("user_id", "book_id");
-
-
-
-ALTER TABLE ONLY "public"."videos"
-    ADD CONSTRAINT "videos_pkey" PRIMARY KEY ("id");
-
-
-
-CREATE INDEX "idx_book_embeddings_book_id" ON "public"."book_embeddings" USING "btree" ("book_id");
-
-
-
-CREATE INDEX "idx_book_embeddings_embedding" ON "public"."book_embeddings" USING "ivfflat" ("embedding" "public"."vector_cosine_ops") WITH ("lists"='100');
-
-
-
-CREATE INDEX "idx_book_sections_book_id" ON "public"."book_sections" USING "btree" ("book_id");
-
-
-
-CREATE INDEX "idx_book_sections_order" ON "public"."book_sections" USING "btree" ("book_id", "order_index");
-
-
-
-CREATE INDEX "idx_books_author_id" ON "public"."books" USING "btree" ("user_id");
-
-
-
-CREATE INDEX "idx_books_original_file_storage_path" ON "public"."books" USING "btree" ("original_file_storage_path");
-
-
-
-CREATE INDEX "idx_books_payment_status" ON "public"."books" USING "btree" ("payment_status");
-
-
-
-CREATE INDEX "idx_books_stripe_checkout_session_id" ON "public"."books" USING "btree" ("stripe_checkout_session_id");
-
-
-
-CREATE INDEX "idx_chapter_embeddings_book_id" ON "public"."chapter_embeddings" USING "btree" ("book_id");
-
-
-
-CREATE INDEX "idx_chapter_embeddings_chapter_id" ON "public"."chapter_embeddings" USING "btree" ("chapter_id");
-
-
-
-CREATE INDEX "idx_chapter_embeddings_embedding" ON "public"."chapter_embeddings" USING "ivfflat" ("embedding" "public"."vector_cosine_ops") WITH ("lists"='100');
-
-
-
-CREATE INDEX "idx_chapters_book_id" ON "public"."chapters" USING "btree" ("book_id");
-
-
-
-CREATE INDEX "idx_chapters_order" ON "public"."chapters" USING "btree" ("section_id", "order_index");
-
-
-
-CREATE INDEX "idx_chapters_section_id" ON "public"."chapters" USING "btree" ("section_id");
-
-
-
-CREATE INDEX "idx_learning_content_book_id" ON "public"."learning_content" USING "btree" ("book_id");
-
-
-
-CREATE INDEX "idx_learning_content_chapter_id" ON "public"."learning_content" USING "btree" ("chapter_id");
-
-
-
-CREATE INDEX "idx_learning_content_generation_progress" ON "public"."learning_content" USING "btree" ("generation_progress");
-
-
-
-CREATE INDEX "idx_learning_content_status" ON "public"."learning_content" USING "btree" ("status");
-
-
-
-CREATE INDEX "idx_learning_content_tavus_url" ON "public"."learning_content" USING "btree" ("tavus_url");
-
-
-
-CREATE INDEX "idx_learning_content_tavus_video_id" ON "public"."learning_content" USING "btree" ("tavus_video_id");
-
-
-
-CREATE INDEX "idx_learning_content_type" ON "public"."learning_content" USING "btree" ("content_type");
-
-
-
-CREATE INDEX "idx_learning_content_user_id" ON "public"."learning_content" USING "btree" ("user_id");
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'badges_name_key'
+    ) THEN
+        ALTER TABLE ONLY "public"."badges"
+            ADD CONSTRAINT "badges_name_key" UNIQUE ("name");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'badges_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."badges"
+            ADD CONSTRAINT "badges_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'book_embeddings_book_id_chunk_type_chunk_index_key'
+    ) THEN
+        ALTER TABLE ONLY "public"."book_embeddings"
+            ADD CONSTRAINT "book_embeddings_book_id_chunk_type_chunk_index_key" UNIQUE ("book_id", "chunk_type", "chunk_index");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'book_embeddings_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."book_embeddings"
+            ADD CONSTRAINT "book_embeddings_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'book_sections_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."book_sections"
+            ADD CONSTRAINT "book_sections_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'books_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."books"
+            ADD CONSTRAINT "books_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chapter_embeddings_chapter_id_chunk_index_key'
+    ) THEN
+        ALTER TABLE ONLY "public"."chapter_embeddings"
+            ADD CONSTRAINT "chapter_embeddings_chapter_id_chunk_index_key" UNIQUE ("chapter_id", "chunk_index");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chapter_embeddings_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."chapter_embeddings"
+            ADD CONSTRAINT "chapter_embeddings_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chapters_book_id_chapter_number_key'
+    ) THEN
+        ALTER TABLE ONLY "public"."chapters"
+            ADD CONSTRAINT "chapters_book_id_chapter_number_key" UNIQUE ("book_id", "chapter_number");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chapters_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."chapters"
+            ADD CONSTRAINT "chapters_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'learning_content_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."learning_content"
+            ADD CONSTRAINT "learning_content_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'nft_collectibles_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."nft_collectibles"
+            ADD CONSTRAINT "nft_collectibles_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'profiles_email_key'
+    ) THEN
+        ALTER TABLE ONLY "public"."profiles"
+            ADD CONSTRAINT "profiles_email_key" UNIQUE ("email");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'profiles_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."profiles"
+            ADD CONSTRAINT "profiles_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'quiz_attempts_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."quiz_attempts"
+            ADD CONSTRAINT "quiz_attempts_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'quizzes_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."quizzes"
+            ADD CONSTRAINT "quizzes_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'story_choices_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."story_choices"
+            ADD CONSTRAINT "story_choices_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'user_badges_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."user_badges"
+            ADD CONSTRAINT "user_badges_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'user_badges_user_id_badge_id_key'
+    ) THEN
+        ALTER TABLE ONLY "public"."user_badges"
+            ADD CONSTRAINT "user_badges_user_id_badge_id_key" UNIQUE ("user_id", "badge_id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'user_collectibles_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."user_collectibles"
+            ADD CONSTRAINT "user_collectibles_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'user_collectibles_user_id_collectible_id_key'
+    ) THEN
+        ALTER TABLE ONLY "public"."user_collectibles"
+            ADD CONSTRAINT "user_collectibles_user_id_collectible_id_key" UNIQUE ("user_id", "collectible_id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'user_progress_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."user_progress"
+            ADD CONSTRAINT "user_progress_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'user_progress_user_id_book_id_key'
+    ) THEN
+        ALTER TABLE ONLY "public"."user_progress"
+            ADD CONSTRAINT "user_progress_user_id_book_id_key" UNIQUE ("user_id", "book_id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'user_story_progress_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."user_story_progress"
+            ADD CONSTRAINT "user_story_progress_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'user_story_progress_user_id_book_id_key'
+    ) THEN
+        ALTER TABLE ONLY "public"."user_story_progress"
+            ADD CONSTRAINT "user_story_progress_user_id_book_id_key" UNIQUE ("user_id", "book_id");
+    END IF;
+END $$;
+
+
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'videos_pkey'
+    ) THEN
+        ALTER TABLE ONLY "public"."videos"
+            ADD CONSTRAINT "videos_pkey" PRIMARY KEY ("id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'book_embeddings'
+          AND indexname = 'idx_book_embeddings_book_id'
+    ) THEN
+        CREATE INDEX "idx_book_embeddings_book_id" ON "public"."book_embeddings" USING "btree" ("book_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'book_embeddings'
+          AND indexname = 'idx_book_embeddings_embedding'
+    ) THEN
+        CREATE INDEX "idx_book_embeddings_embedding" ON "public"."book_embeddings" USING "ivfflat" ("embedding" "public"."vector_cosine_ops") WITH ("lists"='100');
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'book_sections'
+          AND indexname = 'idx_book_sections_book_id'
+    ) THEN
+        CREATE INDEX "idx_book_sections_book_id" ON "public"."book_sections" USING "btree" ("book_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'book_sections'
+          AND indexname = 'idx_book_sections_order'
+    ) THEN
+        CREATE INDEX "idx_book_sections_order" ON "public"."book_sections" USING "btree" ("book_id", "order_index");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'books'
+          AND indexname = 'idx_books_author_id'
+    ) THEN
+        CREATE INDEX "idx_books_author_id" ON "public"."books" USING "btree" ("user_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'books'
+          AND indexname = 'idx_books_original_file_storage_path'
+    ) THEN
+        CREATE INDEX "idx_books_original_file_storage_path" ON "public"."books" USING "btree" ("original_file_storage_path");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'books'
+          AND indexname = 'idx_books_payment_status'
+    ) THEN
+        CREATE INDEX "idx_books_payment_status" ON "public"."books" USING "btree" ("payment_status");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'books'
+          AND indexname = 'idx_books_stripe_checkout_session_id'
+    ) THEN
+        CREATE INDEX "idx_books_stripe_checkout_session_id" ON "public"."books" USING "btree" ("stripe_checkout_session_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'chapter_embeddings'
+          AND indexname = 'idx_chapter_embeddings_book_id'
+    ) THEN
+        CREATE INDEX "idx_chapter_embeddings_book_id" ON "public"."chapter_embeddings" USING "btree" ("book_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'chapter_embeddings'
+          AND indexname = 'idx_chapter_embeddings_chapter_id'
+    ) THEN
+        CREATE INDEX "idx_chapter_embeddings_chapter_id" ON "public"."chapter_embeddings" USING "btree" ("chapter_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'chapter_embeddings'
+          AND indexname = 'idx_chapter_embeddings_embedding'
+    ) THEN
+        CREATE INDEX "idx_chapter_embeddings_embedding" ON "public"."chapter_embeddings" USING "ivfflat" ("embedding" "public"."vector_cosine_ops") WITH ("lists"='100');
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'chapters'
+          AND indexname = 'idx_chapters_book_id'
+    ) THEN
+        CREATE INDEX "idx_chapters_book_id" ON "public"."chapters" USING "btree" ("book_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'chapters'
+          AND indexname = 'idx_chapters_order'
+    ) THEN
+        CREATE INDEX "idx_chapters_order" ON "public"."chapters" USING "btree" ("section_id", "order_index");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'chapters'
+          AND indexname = 'idx_chapters_section_id'
+    ) THEN
+        CREATE INDEX "idx_chapters_section_id" ON "public"."chapters" USING "btree" ("section_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'learning_content'
+          AND indexname = 'idx_learning_content_book_id'
+    ) THEN
+        CREATE INDEX "idx_learning_content_book_id" ON "public"."learning_content" USING "btree" ("book_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'learning_content'
+          AND indexname = 'idx_learning_content_chapter_id'
+    ) THEN
+        CREATE INDEX "idx_learning_content_chapter_id" ON "public"."learning_content" USING "btree" ("chapter_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'learning_content'
+          AND indexname = 'idx_learning_content_generation_progress'
+    ) THEN
+        CREATE INDEX "idx_learning_content_generation_progress" ON "public"."learning_content" USING "btree" ("generation_progress");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'learning_content'
+          AND indexname = 'idx_learning_content_status'
+    ) THEN
+        CREATE INDEX "idx_learning_content_status" ON "public"."learning_content" USING "btree" ("status");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'learning_content'
+          AND indexname = 'idx_learning_content_tavus_url'
+    ) THEN
+        CREATE INDEX "idx_learning_content_tavus_url" ON "public"."learning_content" USING "btree" ("tavus_url");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'learning_content'
+          AND indexname = 'idx_learning_content_tavus_video_id'
+    ) THEN
+        CREATE INDEX "idx_learning_content_tavus_video_id" ON "public"."learning_content" USING "btree" ("tavus_video_id");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'learning_content'
+          AND indexname = 'idx_learning_content_type'
+    ) THEN
+        CREATE INDEX "idx_learning_content_type" ON "public"."learning_content" USING "btree" ("content_type");
+    END IF;
+END $$;
+
+
+
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'learning_content'
+          AND indexname = 'idx_learning_content_user_id'
+    ) THEN
+        CREATE INDEX "idx_learning_content_user_id" ON "public"."learning_content" USING "btree" ("user_id");
+    END IF;
+END $$;
 
 
 

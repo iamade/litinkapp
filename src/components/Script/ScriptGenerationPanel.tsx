@@ -28,6 +28,7 @@ interface ChapterScript {
   scenes: Scene[];
   created_at: string;
   status: 'draft' | 'ready' | 'approved';
+  scriptStoryType?: string; // Added property for story type
 }
 
 interface Act {
@@ -79,6 +80,7 @@ interface ScriptGenerationOptions {
   targetDuration?: number | "auto";
   sceneCount?: number;
   focusAreas: string[];
+  scriptStoryType?: string; // Added property for script story type
 }
 
 const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
@@ -126,7 +128,15 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [showFullScript, setShowFullScript] = useState(false);
 
   const handleGenerateScript = () => {
-    onGenerateScript(scriptStyle, generationOptions);
+    console.log('[DEBUG] ScriptGenerationPanel - handleGenerateScript called with:', {
+      scriptStyle,
+      generationOptions,
+      scriptStoryType: generationOptions.scriptStoryType || "default"
+    });
+    onGenerateScript(scriptStyle, {
+      ...generationOptions,
+      scriptStoryType: generationOptions.scriptStoryType || "default"
+    });
   };
 
   const toggleSceneExpansion = (sceneNumber: number) => {
@@ -194,6 +204,21 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               ? 'Interactive dialogue between characters' 
               : 'Narrative voice-over storytelling'}
           </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Script Story Type</label>
+          <input
+            type="text"
+            value={generationOptions.scriptStoryType || ""}
+            onChange={(e) => setGenerationOptions(prev => ({
+              ...prev,
+              scriptStoryType: e.target.value
+            }))}
+            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Enter story type"
+          />
+          
+
         </div>
 
         <div>
@@ -359,7 +384,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                 {selectedScript.script_name || (selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script')}
               </h3>
               <p className="text-gray-600">
-                {selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script'} • {chapterTitle} • {selectedScript.scenes?.length || 0} scenes •
+                {selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script'} • Story Type: {selectedScript.scriptStoryType || 'N/A'} • {chapterTitle} • {selectedScript.scenes?.length || 0} scenes •
                 {selectedScript.characters?.length || 0} characters
               </p>
             </div>
@@ -622,7 +647,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
             {script.script_name || (script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration')}
           </h4>
           <p className="text-sm text-gray-500">
-            {script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Created: {new Date(script.created_at).toLocaleDateString()}
+            {script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Story Type: {script.scriptStoryType || 'N/A'} • Created: {new Date(script.created_at).toLocaleDateString()}
           </p>
         </div>
         <div className="flex items-center space-x-2">

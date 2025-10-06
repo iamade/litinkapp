@@ -11,6 +11,7 @@ interface PlotOverview {
   audience: string;
   setting: string;
   characters: Character[];
+  script_story_type: string;
 }
 
 interface Character {

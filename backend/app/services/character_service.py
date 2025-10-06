@@ -69,69 +69,68 @@ class CharacterService:
         user_tier: str = "free"
     ) -> List[Dict[str, Any]]:
         """
-        Generate non-fiction personas (narrator, expert, interviewer, subject matter expert, historical figure)
-        using AI analysis for Phase 1B non-fiction content handling.
+        Generate fictional personas based on non-fiction content.
         Returns structured persona data with appropriate archetypes.
         """
         try:
-            logger.info("[CharacterService] Starting non-fiction persona generation")
-            # Define non-fiction archetypes
-            non_fiction_archetypes = [
+            logger.info("[CharacterService] Starting fictional persona generation for non-fiction content")
+            # Define fictional archetypes for non-fiction adaptation
+            fictional_archetypes = [
                 {
-                    "name": "Narrator",
-                    "description": "Explains concepts and guides the audience",
-                    "category": "NonFiction",
-                    "traits": {"clarity": 0.9, "guidance": 0.8, "engagement": 0.7},
-                    "typical_roles": ["narrator", "guide"],
+                    "name": "Protagonist",
+                    "description": "The central character driving the story forward",
+                    "category": "Fiction",
+                    "traits": {"leadership": 0.9, "determination": 0.8, "charisma": 0.7},
+                    "typical_roles": ["hero", "main character"],
                     "is_active": True
                 },
                 {
-                    "name": "Expert",
-                    "description": "Provides authoritative insights and analysis",
-                    "category": "NonFiction",
-                    "traits": {"authority": 0.9, "insight": 0.8, "analysis": 0.7},
-                    "typical_roles": ["expert", "analyst"],
+                    "name": "Mentor",
+                    "description": "A wise figure offering guidance and support",
+                    "category": "Fiction",
+                    "traits": {"wisdom": 0.9, "guidance": 0.8, "experience": 0.7},
+                    "typical_roles": ["teacher", "guide"],
                     "is_active": True
                 },
                 {
-                    "name": "Interviewer",
-                    "description": "Asks questions and facilitates discussion",
-                    "category": "NonFiction",
-                    "traits": {"curiosity": 0.9, "facilitation": 0.8, "communication": 0.7},
-                    "typical_roles": ["interviewer", "host"],
+                    "name": "Antagonist",
+                    "description": "The opposing force creating conflict in the story",
+                    "category": "Fiction",
+                    "traits": {"ambition": 0.9, "opposition": 0.8, "power": 0.7},
+                    "typical_roles": ["villain", "rival"],
                     "is_active": True
                 },
                 {
-                    "name": "Subject Matter Expert",
-                    "description": "Specialized knowledge in specific topics",
-                    "category": "NonFiction",
-                    "traits": {"expertise": 0.9, "depth": 0.8, "specialization": 0.7},
-                    "typical_roles": ["specialist", "consultant"],
+                    "name": "Sidekick",
+                    "description": "A loyal companion supporting the protagonist",
+                    "category": "Fiction",
+                    "traits": {"loyalty": 0.9, "support": 0.8, "friendship": 0.7},
+                    "typical_roles": ["companion", "ally"],
                     "is_active": True
                 },
                 {
-                    "name": "Historical Figure",
-                    "description": "Represents real people from the content",
-                    "category": "NonFiction",
-                    "traits": {"authenticity": 0.9, "historical": 0.8, "representation": 0.7},
-                    "typical_roles": ["historical figure", "real person"],
+                    "name": "Comic Relief",
+                    "description": "Provides humor and lightens the mood",
+                    "category": "Fiction",
+                    "traits": {"humor": 0.9, "wit": 0.8, "charm": 0.7},
+                    "typical_roles": ["jester", "funny friend"],
                     "is_active": True
                 }
             ]
-            # Compose AI prompt for persona analysis
+            # Compose AI prompt for fictional persona analysis
             prompt = f"""
-Analyze the following non-fiction content and generate {num_personas} personas suitable for the genre '{genre}'.
-Each persona should be one of: Narrator, Expert, Interviewer, Subject Matter Expert, Historical Figure.
-For each persona, provide:
-- Persona type (from the list above)
-- Name (invented or real, as appropriate)
-- Brief description
-- Key traits
-- Archetype match (from the non-fiction archetypes)
-Return a JSON array of persona objects.
-Content:
-{content}
-"""
+            Analyze the following non-fiction content and generate {num_personas} fictional personas suitable for the genre '{genre}'.
+            Each persona should be one of: Protagonist, Mentor, Antagonist, Sidekick, Comic Relief.
+            For each persona, provide:
+            - Persona type (from the list above)
+            - Name (invented)
+            - Brief description
+            - Key traits
+            - Archetype match (from the fictional archetypes)
+            Return a JSON array of persona objects.
+            Content:
+            {content}
+            """
             # Use OpenRouterService for AI analysis
             response = await self.openrouter.analyze_content(
                 content=prompt,
@@ -143,17 +142,17 @@ Content:
                     personas = json.loads(response["result"])
                     # Attach archetype details to each persona
                     for persona in personas:
-                        match = next((a for a in non_fiction_archetypes if a["name"].lower() == persona.get("persona_type", "").lower()), None)
+                        match = next((a for a in fictional_archetypes if a["name"].lower() == persona.get("persona_type", "").lower()), None)
                         persona["archetype"] = match if match else {}
                     return personas
                 except Exception as e:
-                    logger.warning(f"[CharacterService] AI response not valid JSON for non-fiction personas: {str(e)}")
+                    logger.warning(f"[CharacterService] AI response not valid JSON for fictional personas: {str(e)}")
                     return []
             else:
-                logger.warning(f"[CharacterService] Non-fiction persona generation failed: {response.get('error')}")
+                logger.warning(f"[CharacterService] Fictional persona generation failed: {response.get('error')}")
                 return []
         except Exception as e:
-            logger.error(f"[CharacterService] Error generating non-fiction personas: {str(e)}")
+            logger.error(f"[CharacterService] Error generating fictional personas: {str(e)}")
             return []
 
     async def analyze_character_archetypes(

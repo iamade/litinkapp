@@ -1137,6 +1137,7 @@ async def list_chapter_scripts(
 ):
     """List all scripts for a chapter by current user"""
     try:
+        print(f"[DEBUG] list_chapter_scripts called for chapter_id: {chapter_id}, user_id: {current_user['id']}")
         scripts = supabase_client.table('scripts')\
             .select('*')\
             .eq('chapter_id', chapter_id)\
@@ -1144,9 +1145,14 @@ async def list_chapter_scripts(
             .order('created_at', desc=True)\
             .execute()
 
+        print(f"[DEBUG] list_chapter_scripts - raw scripts data: {scripts.data}")
+        scripts_data = scripts.data or []
+        for script in scripts_data:
+            print(f"[DEBUG] list_chapter_scripts - script {script.get('id')}: script_story_type = {script.get('script_story_type')}")
+
         return {
             'chapter_id': chapter_id,
-            'scripts': scripts.data or []
+            'scripts': scripts_data
         }
 
     except Exception as e:
@@ -2178,6 +2184,10 @@ async def generate_script_and_scenes(
         script_style = validate_script_style(request.get('script_style', 'cinematic'))
         script_name = request.get('script_name')  # Optional custom name for the script
         plot_context = request.get('plot_context')  # Optional plot context for enhanced generation
+        script_story_type = request.get('scriptStoryType')  # Extract script story type
+
+        print(f"[DEBUG] generate_script_and_scenes - received request: {request}")
+        print(f"[DEBUG] generate_script_and_scenes - scriptStoryType: {script_story_type}")
 
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
@@ -2354,8 +2364,11 @@ async def generate_script_and_scenes(
             "character_details": character_details,
             "metadata": script_data["metadata"],
             "status": "ready",
-            "service_used": "openrouter"
+            "service_used": "openrouter",
+            "script_story_type": script_story_type  # Store the script story type
         }
+
+        print(f"[DEBUG] generate_script_and_scenes - storing script_record with script_story_type: {script_story_type}")
 
         # Always insert new script (allow multiple scripts per chapter)
         script_result = supabase_client.table('scripts').insert(script_record).execute()

@@ -1,13 +1,14 @@
-import React, { useEffect } from 'react';
-import { BookOpen, Loader2 } from 'lucide-react';
-import { usePlotGeneration } from '../../hooks/usePlotGeneration';
+import React, { useEffect } from "react";
+import { BookOpen, Loader2 } from "lucide-react";
+import { usePlotGeneration } from "../../hooks/usePlotGeneration";
 
 interface PlotOverviewPanelProps {
   bookId: string;
 }
 
 const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
-  const { plotOverview, isGenerating, isLoading, generatePlot, loadPlot } = usePlotGeneration(bookId);
+  const { plotOverview, isGenerating, isLoading, generatePlot, loadPlot } =
+    usePlotGeneration(bookId);
 
   useEffect(() => {
     loadPlot();
@@ -59,6 +60,8 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
     );
   }
 
+  const normalizedGenre = plotOverview.genre?.toLowerCase() || "";
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -86,30 +89,48 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
             <h4 className="font-semibold text-gray-900 mb-2">Logline</h4>
             <p className="text-gray-700">{plotOverview.logline}</p>
           </div>
-
           {/* Genre, Tone, Audience */}
           <div className="bg-white p-4 rounded-lg border">
             <h4 className="font-semibold text-gray-900 mb-3">Genre & Tone</h4>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Genre</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Genre
+                </label>
                 <p className="text-gray-700">{plotOverview.genre}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tone</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tone
+                </label>
                 <p className="text-gray-700">{plotOverview.tone}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Audience</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Audience
+                </label>
                 <p className="text-gray-700">{plotOverview.audience}</p>
               </div>
             </div>
           </div>
-
           {/* Setting */}
           <div className="bg-white p-4 rounded-lg border">
             <h4 className="font-semibold text-gray-900 mb-2">Setting</h4>
             <p className="text-gray-700">{plotOverview.setting}</p>
+          </div>
+          {/* Conditional Story Type */}
+          <div className="bg-white p-4 rounded-lg border">
+            {normalizedGenre.includes("non-fiction") || normalizedGenre.includes("nonfiction") ? (
+              <>
+                <h4 className="font-semibold text-gray-900 mb-2">Script Story Type</h4>
+                <p className="text-gray-700">{plotOverview.script_story_type}</p>
+              </>
+            ) : (
+              <>
+                <h4 className="font-semibold text-gray-900 mb-2">Script Story Type</h4>
+                <p className="text-gray-700">{plotOverview.script_story_type}</p>
+              </>
+            )}
           </div>
         </div>
 
@@ -120,7 +141,10 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
             <h4 className="font-semibold text-gray-900 mb-2">Themes</h4>
             <div className="space-y-2">
               {plotOverview.themes.map((theme, idx) => (
-                <span key={idx} className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm mr-2 mb-2">
+                <span
+                  key={idx}
+                  className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm mr-2 mb-2"
+                >
                   {theme}
                 </span>
               ))}
@@ -139,27 +163,39 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
               <h4 className="font-semibold text-gray-900 mb-3">Characters</h4>
               <div className="space-y-4">
                 {plotOverview.characters.map((character, idx) => (
-                  <div key={idx} className="border-b border-gray-200 pb-4 last:border-b-0 last:pb-0">
+                  <div
+                    key={idx}
+                    className="border-b border-gray-200 pb-4 last:border-b-0 last:pb-0"
+                  >
                     <h5 className="font-medium text-gray-900 mb-2">{character.name}</h5>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                       <div>
-                        <span className="font-medium text-gray-700">Role:</span> {character.role}
+                        <span className="font-medium text-gray-700">Role:</span>{" "}
+                        {character.role}
                       </div>
                       <div>
-                        <span className="font-medium text-gray-700">Personality:</span> {character.personality}
+                        <span className="font-medium text-gray-700">Personality:</span>{" "}
+                        {character.personality}
                       </div>
                       <div className="md:col-span-2">
-                        <span className="font-medium text-gray-700">Physical Description:</span> {character.physical_description}
+                        <span className="font-medium text-gray-700">
+                          Physical Description:
+                        </span>{" "}
+                        {character.physical_description}
                       </div>
                       <div className="md:col-span-2">
-                        <span className="font-medium text-gray-700">Character Arc:</span> {character.character_arc}
+                        <span className="font-medium text-gray-700">Character Arc:</span>{" "}
+                        {character.character_arc}
                       </div>
                       {character.archetypes && character.archetypes.length > 0 && (
                         <div className="md:col-span-2">
                           <span className="font-medium text-gray-700">Archetypes:</span>
                           <div className="flex flex-wrap gap-1 mt-1">
                             {character.archetypes.map((archetype, archIdx) => (
-                              <span key={archIdx} className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs">
+                              <span
+                                key={archIdx}
+                                className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs"
+                              >
                                 {archetype}
                               </span>
                             ))}
