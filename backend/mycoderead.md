@@ -18,3 +18,8 @@ supabase db push
 supabase db reset
 
 supabase migration repair --status reverted 20250622172107 20250622172143 20250629205410 20250629205651
+
+updates from alpha
+
+use loguru for logging
+rewrite the config for Literal["local","staging","production"] 
