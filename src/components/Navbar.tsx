@@ -28,16 +28,21 @@ export default function Navbar() {
   };
 
   const navItems = [
-    { path: "/", label: "Home", showWhenLoggedIn: true },
+    // { path: "/", label: "Home", showWhenLoggedIn: true },
+    // {
+    //   path: "/learn",
+    //   label: "Learn",
+    //   showWhenLoggedIn: true,
+    // },
     {
-      path: "/learn",
-      label: "Learn",
+      path: "/dashboard",
+      label: "Dashboard",
       showWhenLoggedIn: true,
     },
     {
       path: "/explore",
       label: "Explore",
-      showWhenLoggedIn: true,
+      showWhenLoggedIn: false,
       onClick: handleExploreClick,
     },
     ...(user?.role === "author"
@@ -88,12 +93,7 @@ export default function Navbar() {
           <div className="hidden md:flex items-center space-x-4">
             {user ? (
               <div className="flex items-center space-x-4">
-                <Link
-                  to="/dashboard"
-                  className="text-sm font-medium text-gray-700 hover:text-purple-600 transition-colors"
-                >
-                  Dashboard
-                </Link>
+               
                 {user.role === "author" && (
                   <Link
                     to="/author"
