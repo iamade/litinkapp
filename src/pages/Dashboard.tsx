@@ -225,6 +225,12 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="mt-4 md:mt-0 flex space-x-2">
+            <Link
+              to="/creator"
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-medium hover:from-blue-700 hover:to-purple-700 transition-all transform hover:scale-105"
+            >
+              Creator Mode
+            </Link>
             <button
               onClick={handleEdit}
               className="px-4 py-2 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition-all"

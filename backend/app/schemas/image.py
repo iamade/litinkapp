@@ -8,6 +8,7 @@ class SceneImageRequest(BaseModel):
     style: str = "cinematic"
     aspect_ratio: str = "16:9"
     custom_prompt: Optional[str] = None
+    script_id: Optional[str] = None
 
 
 class CharacterImageRequest(BaseModel):
@@ -17,6 +18,7 @@ class CharacterImageRequest(BaseModel):
     style: str = "realistic"
     aspect_ratio: str = "3:4"
     custom_prompt: Optional[str] = None
+    script_id: Optional[str] = None
 
 
 class BatchImageRequest(BaseModel):

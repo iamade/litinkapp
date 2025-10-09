@@ -1,11 +1,16 @@
 from typing import Dict, Any, Optional, List
 import httpx
 from openai import AsyncOpenAI
+from openai.types.chat import (
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+)
 from app.core.config import settings
 import logging
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
 
 class ModelTier(Enum):
     FREE = "free"
@@ -13,6 +18,7 @@ class ModelTier(Enum):
     STANDARD = "standard"
     PREMIUM = "premium"
     PROFESSIONAL = "professional"
+
 
 class OpenRouterService:
     """
@@ -28,7 +34,7 @@ class OpenRouterService:
             "max_tokens": 2000,
             "temperature": 0.7,
             "cost_per_1k_input": 0.00006,
-            "cost_per_1k_output": 0.00006
+            "cost_per_1k_output": 0.00006,
         },
         ModelTier.BASIC: {
             "primary": "deepseek-chat-v3-0324:free",
@@ -36,7 +42,7 @@ class OpenRouterService:
             "max_tokens": 3000,
             "temperature": 0.7,
             "cost_per_1k_input": 0.00014,
-            "cost_per_1k_output": 0.00028
+            "cost_per_1k_output": 0.00028,
         },
         ModelTier.STANDARD: {
             "primary": "anthropic/claude-3-haiku-20240307",
@@ -44,7 +50,7 @@ class OpenRouterService:
             "max_tokens": 4000,
             "temperature": 0.7,
             "cost_per_1k_input": 0.00025,
-            "cost_per_1k_output": 0.00125
+            "cost_per_1k_output": 0.00125,
         },
         ModelTier.PREMIUM: {
             "primary": "openai/gpt-4o-mini",
@@ -52,7 +58,7 @@ class OpenRouterService:
             "max_tokens": 8000,
             "temperature": 0.7,
             "cost_per_1k_input": 0.00015,
-            "cost_per_1k_output": 0.00060
+            "cost_per_1k_output": 0.00060,
         },
         ModelTier.PROFESSIONAL: {
             "primary": "openai/gpt-4o",
@@ -60,8 +66,8 @@ class OpenRouterService:
             "max_tokens": 16000,
             "temperature": 0.8,
             "cost_per_1k_input": 0.00250,
-            "cost_per_1k_output": 0.01000
-        }
+            "cost_per_1k_output": 0.01000,
+        },
     }
 
     def __init__(self):
@@ -73,8 +79,8 @@ class OpenRouterService:
             base_url=settings.OPENROUTER_BASE_URL,
             default_headers={
                 "HTTP-Referer": settings.FRONTEND_URL,  # Optional, for rankings
-                "X-Title": "LitinkAI"  # Optional, shows in OpenRouter dashboard
-            }
+                "X-Title": "LitinkAI",  # Optional, shows in OpenRouter dashboard
+            },
         )
 
         # Initialize cost tracking
@@ -87,7 +93,7 @@ class OpenRouterService:
         script_type: str = "cinematic",
         target_duration: Optional[int] = None,
         plot_context: Optional[Dict[str, Any]] = None,
-        use_fallback: bool = False
+        use_fallback: bool = False,
     ) -> Dict[str, Any]:
         """
         Generate script using tier-appropriate model
@@ -97,62 +103,99 @@ class OpenRouterService:
 
         try:
             # Prepare messages based on script type
-            messages = self._prepare_script_messages(content, script_type, target_duration, plot_context)
+            messages = self._prepare_script_messages(
+                content, script_type, target_duration, plot_context
+            )
 
             # Log the request
-            logger.info(f"[OpenRouter] Generating {script_type} script with {model} for {user_tier.value} tier")
+            logger.info(
+                f"[OpenRouter] Generating {script_type} script with {model} for {user_tier.value} tier"
+            )
 
             # Make the API call
-            response = await self.client.chat.completions.create(
+            create_fn: Any = getattr(self.client.chat.completions, "create")
+            response = await create_fn(
                 model=model,
                 messages=messages,
                 max_tokens=config["max_tokens"],
                 temperature=config["temperature"],
-                stream=False
+                stream=False,
             )
 
-            # Handle both parsed and raw response formats
-            if hasattr(response, 'json'):
-                # Raw httpx.Response object - parse manually
-                try:
-                    parsed_response = response.json()
-                    generated_content = parsed_response['choices'][0]['message']['content']
-                    usage_raw = parsed_response['usage']
-                    logger.info(f"[OpenRouter] Parsed raw response for {model}")
-                except Exception as e:
-                    logger.error(f"[OpenRouter] Failed to parse raw response for {model}: {str(e)}")
-                    raise ValueError(f"Failed to parse API response: {str(e)}")
-            else:
-                # Standard parsed OpenAI response
-                generated_content = response.choices[0].message.content
-                usage_raw = response.usage
+            # Handle OpenAI client response (should always be parsed)
+            try:
+                # Check if response is properly parsed
+                if hasattr(response, "choices") and response.choices:
+                    generated_content = response.choices[0].message.content
+                    usage_raw = response.usage
+                    logger.info(
+                        f"[OpenRouter] Successfully parsed response for {model}"
+                    )
+                else:
+                    # Fallback: try to parse as JSON string if response is raw
+                    if hasattr(response, "json"):
+                        try:
+                            parsed_response = response.json()
+                            if isinstance(parsed_response, str):
+                                # If json() returns a string, it might be double-encoded
+                                import json
+
+                                parsed_response = json.loads(parsed_response)
+                            generated_content = parsed_response["choices"][0][
+                                "message"
+                            ]["content"]
+                            usage_raw = parsed_response["usage"]
+                            logger.info(
+                                f"[OpenRouter] Parsed raw JSON response for {model}"
+                            )
+                        except Exception as json_error:
+                            logger.error(
+                                f"[OpenRouter] Failed to parse JSON response: {str(json_error)}"
+                            )
+                            raise ValueError(
+                                f"Failed to parse JSON API response: {str(json_error)}"
+                            )
+                    else:
+                        raise ValueError(
+                            "Invalid response format: no choices or json method available"
+                        )
+            except Exception as e:
+                logger.error(
+                    f"[OpenRouter] Failed to parse response for {model}: {str(e)}"
+                )
+                raise ValueError(f"Failed to parse API response: {str(e)}")
 
             # Normalize usage to dict for consistent access
             if isinstance(usage_raw, dict):
                 usage = usage_raw
             else:
                 usage = {
-                    'prompt_tokens': usage_raw.prompt_tokens,
-                    'completion_tokens': usage_raw.completion_tokens,
-                    'total_tokens': usage_raw.total_tokens
+                    "prompt_tokens": usage_raw.prompt_tokens,
+                    "completion_tokens": usage_raw.completion_tokens,
+                    "total_tokens": usage_raw.total_tokens,
                 }
 
             # Clean narrator elements from cinematic scripts
             if script_type == "cinematic_movie":
-                generated_content = self._clean_narrator_from_cinematic_script(generated_content)
+                # delegate cleaning to CostTracker which defines the helper
+                generated_content = self.cost_tracker._clean_narrator_from_cinematic_script(
+                    generated_content
+                )
 
             # Calculate cost
-            input_cost = (usage['prompt_tokens'] / 1000) * config["cost_per_1k_input"]
-            output_cost = (usage['completion_tokens'] / 1000) * config["cost_per_1k_output"]
+            input_cost = (usage["prompt_tokens"] / 1000) * config["cost_per_1k_input"]
+            output_cost = (usage["completion_tokens"] / 1000) * config[
+                "cost_per_1k_output"
+            ]
             total_cost = input_cost + output_cost
 
             # Track the cost
             await self.cost_tracker.track(
                 user_tier=user_tier,
                 model=model,
-                input_tokens=usage['prompt_tokens'],
-                output_tokens=usage['completion_tokens'],
-                cost=total_cost
+                input_tokens=usage["prompt_tokens"],
+                output_tokens=usage["completion_tokens"],
+                cost=total_cost,
             )
 
             return {
@@ -161,11 +204,11 @@ class OpenRouterService:
                 "model_used": model,
                 "tier": user_tier.value,
                 "usage": {
-                    "prompt_tokens": usage['prompt_tokens'],
-                    "completion_tokens": usage['completion_tokens'],
-                    "total_tokens": usage['total_tokens'],
-                    "estimated_cost": total_cost
-                }
+                    "prompt_tokens": usage["prompt_tokens"],
+                    "completion_tokens": usage["completion_tokens"],
+                    "total_tokens": usage["total_tokens"],
+                    "estimated_cost": total_cost,
+                },
             }
 
         except Exception as e:
@@ -178,7 +221,7 @@ class OpenRouterService:
                     content=content,
                     user_tier=user_tier,
                     script_type=script_type,
-                    use_fallback=True
+                    use_fallback=True,
                 )
 
             # If fallback also failed, return error
@@ -186,10 +229,16 @@ class OpenRouterService:
                 "status": "error",
                 "error": str(e),
                 "model_attempted": model,
-                "tier": user_tier.value
+                "tier": user_tier.value,
             }
 
-    def _prepare_script_messages(self, content: str, script_type: str, target_duration: Optional[int] = None, plot_context: Optional[Dict[str, Any]] = None) -> List[Dict[str, str]]:
+    def _prepare_script_messages(
+        self,
+        content: str,
+        script_type: str,
+        target_duration: Optional[int] = None,
+        plot_context: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, str]]:
         """
         Prepare messages for different script types
         """
@@ -208,7 +257,6 @@ class OpenRouterService:
                 - Action descriptions in present tense
                 - Appropriate screenplay formatting and spacing
                 - Focus on character-to-character interactions only""",
-
             "narration": """You are a professional narrator. Convert the content into an engaging narration script with:
                 - Rich, descriptive voice-over text
                 - Scene descriptions for visual context
@@ -216,7 +264,6 @@ class OpenRouterService:
                 - Clear pacing and transitions
                 - Complete story coverage with all key elements
                 - Narrative flow that captures the full story""",
-
             "educational": """You are an educational content creator. Convert the content into a clear, educational script with:
                 - Clear learning objectives
                 - Step-by-step explanations
@@ -224,20 +271,19 @@ class OpenRouterService:
                 - Engaging but informative tone
                 - Complete coverage of all educational content
                 - Comprehensive explanations without omissions""",
-
             "marketing": """You are a marketing copywriter. Convert the content into a compelling marketing script with:
                 - Hook in the first 3 seconds
                 - Clear value proposition
                 - Call-to-action
                 - Emotional engagement
                 - Complete product/service story
-                - All key benefits and features covered"""
+                - All key benefits and features covered""",
         }
 
         system_prompt = system_prompts.get(script_type, system_prompts["cinematic"])
 
         # Add plot context guidance to system prompt if available
-        if plot_context and plot_context.get('enhanced_content'):
+        if plot_context and plot_context.get("enhanced_content"):
             plot_guidance = "\n\nIMPORTANT: Use the provided plot context as your primary guide for character development, story consistency, and thematic elements. Stay true to the established plot, characters, and story world without introducing conflicting elements or deviating from the core narrative."
             system_prompt += plot_guidance
 
@@ -257,21 +303,18 @@ class OpenRouterService:
             user_content += "\n\nDuration: Auto - Create a comprehensive script that captures the FULL STORY from each page. Include:\n- All major plot points and story developments\n- Complete character arcs and interactions\n- Key descriptive elements and settings\n- Important dialogue and narrative moments\n- Full story coverage without omissions or shortcuts"
 
         # Add plot context to user message if available
-        if plot_context and plot_context.get('enhanced_content'):
+        if plot_context and plot_context.get("enhanced_content"):
             user_content += f"\n\nPLOT CONTEXT (Use this as your guide - do not deviate from established characters, plot, or story elements):\n{plot_context['enhanced_content']}\n\nCHAPTER CONTENT:\n{content}"
         else:
             user_content += f"\n\nContent:\n{content}"
 
         return [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
+            {"role": "user", "content": user_content},
         ]
 
     async def analyze_content(
-        self,
-        content: str,
-        user_tier: ModelTier,
-        analysis_type: str = "summary"
+        self, content: str, user_tier: ModelTier, analysis_type: str = "summary"
     ) -> Dict[str, Any]:
         """
         Analyze content for various purposes (summary, keywords, difficulty, etc.)
@@ -291,30 +334,35 @@ class OpenRouterService:
                 "keywords": "Extract 5-10 key topics or themes from this content.",
                 "difficulty": "Assess the reading difficulty level of this content (elementary, middle school, high school, college, professional).",
                 "genre": "Identify the genre and style of this content.",
-                "characters": "List all characters mentioned in this content with brief descriptions."
+                "characters": "List all characters mentioned in this content with brief descriptions.",
             }
 
             prompt = analysis_prompts.get(analysis_type, analysis_prompts["summary"])
             system_prompt = "You are a content analyst."
-            user_message = f"{prompt}\n\nContent:\n{content[:3000]}"  # Limit content for analysis
+            user_message = (
+                f"{prompt}\n\nContent:\n{content[:3000]}"  # Limit content for analysis
+            )
             max_tokens = 500
             temperature = 0.3  # Lower temperature for analysis
 
         try:
-            response = await self.client.chat.completions.create(
+            create_fn: Any = getattr(self.client.chat.completions, "create")
+            response = await create_fn(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
+                    {"role": "user", "content": user_message},
                 ],
                 max_tokens=max_tokens,
-                temperature=temperature
+                temperature=temperature,
             )
 
             # Calculate cost
             usage = response.usage
             input_cost = (usage.prompt_tokens / 1000) * config["cost_per_1k_input"]
-            output_cost = (usage.completion_tokens / 1000) * config["cost_per_1k_output"]
+            output_cost = (usage.completion_tokens / 1000) * config[
+                "cost_per_1k_output"
+            ]
             total_cost = input_cost + output_cost
 
             # Track the cost
@@ -323,7 +371,7 @@ class OpenRouterService:
                 model=model,
                 input_tokens=usage.prompt_tokens,
                 output_tokens=usage.completion_tokens,
-                cost=total_cost
+                cost=total_cost,
             )
 
             return {
@@ -335,17 +383,13 @@ class OpenRouterService:
                     "prompt_tokens": usage.prompt_tokens,
                     "completion_tokens": usage.completion_tokens,
                     "total_tokens": usage.total_tokens,
-                    "estimated_cost": total_cost
-                }
+                    "estimated_cost": total_cost,
+                },
             }
 
         except Exception as e:
             logger.error(f"[OpenRouter] Analysis error: {str(e)}")
-            return {
-                "status": "error",
-                "error": str(e),
-                "analysis_type": analysis_type
-            }
+            return {"status": "error", "error": str(e), "analysis_type": analysis_type}
 
     def _get_special_system_prompt(self, analysis_type: str) -> str:
         """
@@ -354,7 +398,7 @@ class OpenRouterService:
         prompts = {
             "plot_overview": """You are a professional literary analyst and story consultant with extensive experience in narrative structure, character development, and thematic analysis. You excel at creating compelling plot overviews that capture the essence of stories.""",
             "characters": """You are an expert character developer and psychologist specializing in creating deep, multidimensional characters with clear motivations, arcs, and personality traits. You understand Jungian archetypes and narrative character functions.""",
-            "archetype_analysis": """You are a Jungian psychology expert specializing in archetypal analysis of characters in literature. You can identify and explain how characters embody classic archetypes and their narrative functions."""
+            "archetype_analysis": """You are a Jungian psychology expert specializing in archetypal analysis of characters in literature. You can identify and explain how characters embody classic archetypes and their narrative functions.""",
         }
 
         return prompts.get(analysis_type, "You are a content analyst.")
@@ -370,28 +414,25 @@ class OpenRouterService:
             # Convert Model objects to dicts
             models = []
             for model in models_response.data:
-                models.append({
-                    "id": model.id,
-                    "name": getattr(model, 'name', model.id) or model.id,
-                    "context_length": getattr(model, 'context_length', 4096) or 4096,
-                    "pricing": getattr(model, 'pricing', {}) or {},
-                    "supported": model.id in [
-                        config["primary"] for config in self.MODEL_CONFIGS.values()
-                    ]
-                })
+                models.append(
+                    {
+                        "id": model.id,
+                        "name": getattr(model, "name", model.id) or model.id,
+                        "context_length": getattr(model, "context_length", 4096)
+                        or 4096,
+                        "pricing": getattr(model, "pricing", {}) or {},
+                        "supported": model.id
+                        in [
+                            config["primary"] for config in self.MODEL_CONFIGS.values()
+                        ],
+                    }
+                )
 
-            return {
-                "status": "success",
-                "models": models
-            }
+            return {"status": "success", "models": models}
 
         except Exception as e:
             logger.error(f"Error fetching available models: {str(e)}")
-            return {
-                "status": "error",
-                "error": str(e),
-                "models": []
-            }
+            return {"status": "error", "error": str(e), "models": []}
 
 
 class CostTracker:
@@ -409,14 +450,16 @@ class CostTracker:
         model: str,
         input_tokens: int,
         output_tokens: int,
-        cost: float
+        cost: float,
     ):
         """
         Track API usage and costs
         """
         # Store in database for billing
         # This is a simplified version - expand based on your needs
-        logger.info(f"[Cost Tracking] Model: {model}, Tokens: {input_tokens + output_tokens}, Cost: ${cost:.6f}")
+        logger.info(
+            f"[Cost Tracking] Model: {model}, Tokens: {input_tokens + output_tokens}, Cost: ${cost:.6f}"
+        )
 
         # You would typically:
         # 1. Store in database
@@ -430,7 +473,7 @@ class CostTracker:
         """
         import re
 
-        lines = script_content.split('\n')
+        lines = script_content.split("\n")
         cleaned_lines = []
 
         for line in lines:
@@ -438,12 +481,12 @@ class CostTracker:
 
             # Skip narrator/voice-over indicators
             narrator_indicators = [
-                r'^\s*NARRATOR\s*:',
-                r'^\s*VOICE\s*OVER\s*:',
-                r'^\s*V\.O\.\s*:',
-                r'^\s*VOICE-OVER\s*:',
-                r'^\s*NARRATOR\s*\(',
-                r'^\s*VOICE\s*\(',
+                r"^\s*NARRATOR\s*:",
+                r"^\s*VOICE\s*OVER\s*:",
+                r"^\s*V\.O\.\s*:",
+                r"^\s*VOICE-OVER\s*:",
+                r"^\s*NARRATOR\s*\(",
+                r"^\s*VOICE\s*\(",
             ]
 
             # Check if line starts with narrator indicators (case insensitive)
@@ -459,11 +502,11 @@ class CostTracker:
 
             # Also skip lines that contain narrator descriptions
             narrator_descriptions = [
-                'narrator',
-                'voice over',
-                'voice-over',
-                'v.o.',
-                'voiceover'
+                "narrator",
+                "voice over",
+                "voice-over",
+                "v.o.",
+                "voiceover",
             ]
 
             line_lower = line.lower()
@@ -476,8 +519,8 @@ class CostTracker:
             cleaned_lines.append(line)
 
         # Join back and clean up extra blank lines
-        cleaned_content = '\n'.join(cleaned_lines)
+        cleaned_content = "\n".join(cleaned_lines)
         # Remove multiple consecutive blank lines
-        cleaned_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', cleaned_content)
+        cleaned_content = re.sub(r"\n\s*\n\s*\n+", "\n\n", cleaned_content)
 
         return cleaned_content.strip()

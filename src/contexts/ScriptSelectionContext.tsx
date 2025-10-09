@@ -4,10 +4,10 @@ type Reason = 'user' | 'navigation' | 'load' | 'system';
 type ScriptSelectionEvent = 'SCRIPT_CHANGED' | 'CHAPTER_CHANGED' | 'SEGMENT_CHANGED' | 'TIMELINE_RECALC_REQUESTED';
 
 type Ids = {
-  scriptId: string | null;
-  chapterId: string | null;
-  segmentId: string | null;
-};
+   script_id: string | null;
+   chapterId: string | null;
+   segmentId: string | null;
+ };
 
 export type EventPayload = {
   prev: Ids;
@@ -77,8 +77,8 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
       // emit after commit via microtask to ensure consumers see latest state
       queueMicrotask(() => {
         emit('SCRIPT_CHANGED', {
-          prev: { scriptId: prev.selectedScriptId, chapterId: prev.selectedChapterId, segmentId: prev.selectedSegmentId },
-          next: { scriptId: next.selectedScriptId, chapterId: next.selectedChapterId, segmentId: next.selectedSegmentId },
+          prev: { script_id: prev.selectedScriptId, chapterId: prev.selectedChapterId, segmentId: prev.selectedSegmentId },
+          next: { script_id: next.selectedScriptId, chapterId: next.selectedChapterId, segmentId: next.selectedSegmentId },
           reason,
           timestamp: Date.now(),
           versionToken: nextVersion,
@@ -104,8 +104,8 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
       };
       queueMicrotask(() => {
         emit('CHAPTER_CHANGED', {
-          prev: { scriptId: prev.selectedScriptId, chapterId: prev.selectedChapterId, segmentId: prev.selectedSegmentId },
-          next: { scriptId: next.selectedScriptId, chapterId: next.selectedChapterId, segmentId: next.selectedSegmentId },
+          prev: { script_id: prev.selectedScriptId, chapterId: prev.selectedChapterId, segmentId: prev.selectedSegmentId },
+          next: { script_id: next.selectedScriptId, chapterId: next.selectedChapterId, segmentId: next.selectedSegmentId },
           reason,
           timestamp: Date.now(),
           versionToken: nextVersion,
@@ -127,8 +127,8 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
       };
       queueMicrotask(() => {
         emit('SEGMENT_CHANGED', {
-          prev: { scriptId: prev.selectedScriptId, chapterId: prev.selectedChapterId, segmentId: prev.selectedSegmentId },
-          next: { scriptId: next.selectedScriptId, chapterId: next.selectedChapterId, segmentId: next.selectedSegmentId },
+          prev: { script_id: prev.selectedScriptId, chapterId: prev.selectedChapterId, segmentId: prev.selectedSegmentId },
+          next: { script_id: next.selectedScriptId, chapterId: next.selectedChapterId, segmentId: next.selectedSegmentId },
           reason,
           timestamp: Date.now(),
           versionToken: nextVersion,
@@ -141,8 +141,8 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
   const publish = useCallback((evt: ScriptSelectionEvent, extra?: Partial<EventPayload>) => {
     const now = Date.now();
     const payload: EventPayload = {
-      prev: { scriptId: state.selectedScriptId, chapterId: state.selectedChapterId, segmentId: state.selectedSegmentId },
-      next: { scriptId: state.selectedScriptId, chapterId: state.selectedChapterId, segmentId: state.selectedSegmentId },
+      prev: { script_id: state.selectedScriptId, chapterId: state.selectedChapterId, segmentId: state.selectedSegmentId },
+      next: { script_id: state.selectedScriptId, chapterId: state.selectedChapterId, segmentId: state.selectedSegmentId },
       reason: extra?.reason ?? 'system',
       timestamp: extra?.timestamp ?? now,
       versionToken: extra?.versionToken ?? state.versionToken,

@@ -28,6 +28,7 @@ interface SceneImage {
   generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
   generatedAt?: string;
   id?: string;
+  script_id?: string;
 }
 
 interface CharacterImage {
@@ -391,8 +392,15 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   );
 
   const renderScenesTab = () => {
-    // Use all chapter-level images without script filtering
-    const sourceSceneImages = sceneImages || {};
+    // Filter images by selected script_id, accepting both script_id and scriptId fields
+    const filteredSceneImages = Object.entries(sceneImages || {}).reduce((acc, [key, image]) => {
+      const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+      if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
+        acc[key] = image;
+      }
+      return acc;
+    }, {} as Record<string | number, SceneImage>);
+    const sourceSceneImages = filteredSceneImages;
     const hasImages = Object.keys(sourceSceneImages).length > 0;
 
     return (
@@ -459,8 +467,15 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   };
 
   const renderCharactersTab = () => {
-    // Use all chapter-level character images without script filtering
-    const hasCharacterImages = characterImages && Object.keys(characterImages).length > 0;
+    // Filter character images by selected script_id, accepting both script_id and scriptId fields
+    const filteredCharacterImages = Object.entries(characterImages || {}).reduce((acc, [key, image]) => {
+      const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+      if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
+        acc[key] = image;
+      }
+      return acc;
+    }, {} as Record<string, CharacterImage>);
+    const hasCharacterImages = filteredCharacterImages && Object.keys(filteredCharacterImages).length > 0;
 
     return (
       <div className="space-y-4">
@@ -496,7 +511,7 @@ console.log('[DEBUG ImagesPanel] Component state:', {
           }`}>
             {characters.map((character) => {
               const characterKey = typeof character === "string" ? character : character.name;
-              const characterImage = characterImages?.[characterKey];
+              const characterImage = filteredCharacterImages?.[characterKey];
               return (
                 <CharacterImageCard
                   key={characterKey}

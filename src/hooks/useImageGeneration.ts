@@ -10,6 +10,7 @@ interface SceneImage {
   generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
   generatedAt?: string;
   id?: string;
+  script_id?: string;
 }
 
 interface CharacterImage {
@@ -19,6 +20,7 @@ interface CharacterImage {
   generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
   generatedAt?: string;
   id?: string;
+  script_id?: string;
 }
 
 interface ImageGenerationOptions {
@@ -68,9 +70,11 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       const characterImagesMap: Record<string, CharacterImage> = {};
 
       if (response.images && Array.isArray(response.images)) {
-        response.images.forEach((img: { id: string; image_url?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string }) => {
+        response.images.forEach((img: { id: string; image_url?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
           const metadata = img.metadata ?? {};
           const url = img.image_url ?? "";
+          // Normalize script_id from either field
+          const normalizedScriptId = img.script_id ?? img.scriptId;
 
           // Scene images: accept explicit scene or fallback when image_type missing but URL exists
           if (
@@ -90,6 +94,7 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
               generationStatus: img.status === "completed" ? "completed" : "failed",
               generatedAt: img.created_at,
               id: img.id,
+              script_id: normalizedScriptId,
             };
             return;
           }
@@ -103,6 +108,7 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
               generationStatus: img.status === "completed" ? "completed" : "failed",
               generatedAt: img.created_at,
               id: img.id,
+              script_id: normalizedScriptId,
             };
             return;
           }

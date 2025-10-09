@@ -43,7 +43,8 @@ class StandaloneImageService:
         user_id: str,
         style: str = "cinematic",
         aspect_ratio: str = "16:9",
-        custom_prompt: Optional[str] = None
+        custom_prompt: Optional[str] = None,
+        script_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate a standalone scene image and store in database.
@@ -71,7 +72,8 @@ class StandaloneImageService:
                 image_type="scene",
                 scene_description=scene_description,
                 style=style,
-                aspect_ratio=aspect_ratio
+                aspect_ratio=aspect_ratio,
+                script_id=script_id
             )
 
             # Build enhanced prompt
@@ -121,7 +123,8 @@ class StandaloneImageService:
         user_id: str,
         style: str = "realistic",
         aspect_ratio: str = "3:4",
-        custom_prompt: Optional[str] = None
+        custom_prompt: Optional[str] = None,
+        script_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate a standalone character image and store in database.
@@ -151,7 +154,8 @@ class StandaloneImageService:
                 character_name=character_name,
                 character_description=character_description,
                 style=style,
-                aspect_ratio=aspect_ratio
+                aspect_ratio=aspect_ratio,
+                script_id=script_id
             )
 
             # Build enhanced prompt
@@ -215,7 +219,8 @@ class StandaloneImageService:
         self,
         image_requests: List[Dict[str, Any]],
         user_id: str,
-        max_concurrent: int = 3
+        max_concurrent: int = 3,
+        script_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Generate multiple standalone images with controlled concurrency.
@@ -245,7 +250,8 @@ class StandaloneImageService:
                     character_name=request.get("character_name"),
                     character_description=request.get("character_description"),
                     style=request.get("style", "cinematic"),
-                    aspect_ratio=request.get("aspect_ratio", "16:9")
+                    aspect_ratio=request.get("aspect_ratio", "16:9"),
+                    script_id=script_id
                 )
                 record_ids.append(record_id)
 
@@ -421,7 +427,8 @@ class StandaloneImageService:
         character_name: Optional[str] = None,
         character_description: Optional[str] = None,
         style: Optional[str] = None,
-        aspect_ratio: Optional[str] = None
+        aspect_ratio: Optional[str] = None,
+        script_id: Optional[str] = None
     ) -> str:
         """
         Create initial database record for image generation.
@@ -435,6 +442,7 @@ class StandaloneImageService:
                 "image_type": image_type,
                 "scene_description": scene_description,
                 "character_name": character_name,
+                "script_id": script_id,
                 "status": "pending",
                 "created_at": datetime.now().isoformat(),
                 "metadata": {

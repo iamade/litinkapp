@@ -10,6 +10,7 @@ class AudioGenerationRequest(BaseModel):
     speed: Optional[float] = 1.0
     duration: Optional[float] = None
     custom_prompt: Optional[str] = None
+    script_id: Optional[str] = None
 
 
 class AudioGenerationResponse(BaseModel):

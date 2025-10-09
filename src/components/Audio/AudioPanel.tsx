@@ -162,17 +162,15 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     files: files?.map(f => ({ id: f.id, script_id: f.script_id, scriptId: f.scriptId, url: f.url, type: f.type })) || []
   });
   
-  const audioFiles = files ?? [];
-    
-  console.log('[DEBUG AudioPanel] Audio files available:', {
-    selectedScriptId,
-    audioFilesCount: audioFiles.length,
-    audioFiles: audioFiles.map(f => ({ id: f.id, script_id: f.script_id, scriptId: f.scriptId, url: f.url, type: f.type }))
+  // Filter audio files by selected script_id, accepting both script_id and scriptId fields
+  const filteredAudioFiles = (files ?? []).filter((file) => {
+    const normalizedScriptId = file.script_id ?? file.scriptId;
+    return !selectedScriptId || normalizedScriptId === selectedScriptId;
   });
 
   // Disable controls during switching/prep
   const getTabInfo = (type: string) => {
-    const tabFiles = audioFiles.filter((f: AudioFile) => f.type === type) || [];
+    const tabFiles = filteredAudioFiles.filter((f: AudioFile) => f.type === type) || [];
     const completedCount = tabFiles.filter((f: AudioFile) => f.status === 'completed').length;
     const generatingCount = tabFiles.filter((f: AudioFile) => f.status === 'generating').length;
     return { completedCount, generatingCount, totalCount: tabFiles.length };
@@ -261,7 +259,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
           </button>
           <button
             onClick={exportAudioMix}
-            disabled={!audioFiles || audioFiles.length === 0}
+            disabled={!filteredAudioFiles || filteredAudioFiles.length === 0}
             className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
           >
             <Download className="w-4 h-4" />
@@ -483,7 +481,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     if (activeTab === 'timeline') {
       return (
         <AudioTimeline
-          files={audioFiles}
+          files={filteredAudioFiles}
           duration={duration}
           currentTime={currentTime}
           onTimeUpdate={setCurrentTime}
@@ -503,7 +501,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     }
 
     const audioType = activeTab;
-    const tabFiles = audioFiles.filter((f: AudioFile) => f.type === audioType) || [];
+    const tabFiles = filteredAudioFiles.filter((f: AudioFile) => f.type === audioType) || [];
 
     return (
       <div className="space-y-4">

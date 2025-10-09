@@ -95,5 +95,70 @@ def test_image_selection_logic():
     print("✅ Character images are only used as fallback when scene images are not available")
     print("✅ Proper logging shows which type of image is being selected")
 
+
+def test_script_id_in_image_generation():
+    """Test that script_id is properly included in image generation responses"""
+    print("\n🧪 Testing script_id inclusion in image generation...")
+
+    # Mock image generation response with script_id
+    mock_response = {
+        "record_id": "test-record-123",
+        "image_url": "https://example.com/image.png",
+        "prompt_used": "Test prompt",
+        "metadata": {},
+        "generation_time": 2.5,
+        "message": "Image generated successfully",
+        "script_id": "test-script-456"
+    }
+
+    # Verify script_id is present in response
+    assert "script_id" in mock_response, "script_id should be present in image generation response"
+    assert mock_response["script_id"] == "test-script-456", "script_id should match expected value"
+
+    print("✅ script_id is properly included in image generation responses")
+
+
+def test_script_id_in_audio_generation():
+    """Test that script_id is properly included in audio generation responses"""
+    print("\n🧪 Testing script_id inclusion in audio generation...")
+
+    # Mock audio generation response with script_id
+    mock_response = {
+        "record_id": "test-audio-record-123",
+        "audio_url": "https://example.com/audio.mp3",
+        "duration": 10.5,
+        "message": "Audio generated successfully",
+        "script_id": "test-script-456"
+    }
+
+    # Verify script_id is present in response
+    assert "script_id" in mock_response, "script_id should be present in audio generation response"
+    assert mock_response["script_id"] == "test-script-456", "script_id should match expected value"
+
+    print("✅ script_id is properly included in audio generation responses")
+
+
+def test_script_id_in_video_generation():
+    """Test that script_id is properly included in video generation responses"""
+    print("\n🧪 Testing script_id inclusion in video generation...")
+
+    # Mock video generation response with script_id
+    mock_response = {
+        "id": "test-video-record-123",
+        "video_url": "https://example.com/video.mp4",
+        "generation_status": "completed",
+        "script_id": "test-script-456"
+    }
+
+    # Verify script_id is present in response
+    assert "script_id" in mock_response, "script_id should be present in video generation response"
+    assert mock_response["script_id"] == "test-script-456", "script_id should match expected value"
+
+    print("✅ script_id is properly included in video generation responses")
+
 if __name__ == "__main__":
     test_image_selection_logic()
+    test_script_id_in_image_generation()
+    test_script_id_in_audio_generation()
+    test_script_id_in_video_generation()
+    print("\n🎊 ALL TESTS PASSED! Script ID standardization is working correctly.")

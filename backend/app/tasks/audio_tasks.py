@@ -237,10 +237,21 @@ async def generate_narrator_audio(
             print(f"[DEBUG] Inserting narrator audio record for video_gen {video_gen_id}")
             print(f"[DEBUG] Audio record chapter_id: {chapter_id}, user_id: {user_id}")
             scene_id = segment.get('scene', 1)
+
+            # Get script_id from video generation
+            script_id = None
+            try:
+                video_data = supabase.table('video_generations').select('script_id').eq('id', video_gen_id).single().execute()
+                if video_data.data:
+                    script_id = video_data.data.get('script_id')
+            except Exception as e:
+                print(f"[DEBUG] Could not get script_id from video generation: {e}")
+
             audio_record_data = {
                 'video_generation_id': video_gen_id,
                 'user_id': user_id,  # Add user_id
                 'chapter_id': chapter_id,  # Add chapter_id
+                'script_id': script_id,  # Add script_id
                 'audio_type': 'narrator',
                 'text_content': segment['text'],
                 'voice_id': narrator_voice,
@@ -360,10 +371,21 @@ async def generate_character_audio(
 
             # Store in database
             scene_id = dialogue.get('scene', 1)
+
+            # Get script_id from video generation
+            script_id = None
+            try:
+                video_data = supabase.table('video_generations').select('script_id').eq('id', video_gen_id).single().execute()
+                if video_data.data:
+                    script_id = video_data.data.get('script_id')
+            except Exception as e:
+                print(f"[DEBUG] Could not get script_id from video generation: {e}")
+
             audio_record_data = {
                 'video_generation_id': video_gen_id,
                 'user_id': user_id,
                 'chapter_id': chapter_id,
+                'script_id': script_id,  # Add script_id
                 'audio_type': 'character',
                 'text_content': dialogue['text'],
                 'voice_id': voice_info['voice_id'],
@@ -471,10 +493,20 @@ async def generate_sound_effects_audio(
                     raise Exception("No audio URL in V7 response")
                     
                 # Store in database
+                # Get script_id from video generation
+                script_id = None
+                try:
+                    video_data = supabase.table('video_generations').select('script_id').eq('id', video_gen_id).single().execute()
+                    if video_data.data:
+                        script_id = video_data.data.get('script_id')
+                except Exception as e:
+                    print(f"[DEBUG] Could not get script_id from video generation: {e}")
+
                 audio_data = {
                     'video_generation_id': video_gen_id,
                     'user_id': user_id,  # Add user_id
                     'chapter_id': chapter_id,  # Add chapter_id
+                    'script_id': script_id,  # Add script_id
                     'audio_type': 'sfx',
                     'text_content': effect['description'],
                     'audio_url': audio_url,
@@ -562,10 +594,21 @@ async def generate_background_music(
                     
                 # Store in database
                 scene_id = music_cue['scene']
+
+                # Get script_id from video generation
+                script_id = None
+                try:
+                    video_data = supabase.table('video_generations').select('script_id').eq('id', video_gen_id).single().execute()
+                    if video_data.data:
+                        script_id = video_data.data.get('script_id')
+                except Exception as e:
+                    print(f"[DEBUG] Could not get script_id from video generation: {e}")
+
                 audio_record = supabase.table('audio_generations').insert({
                     'video_generation_id': video_gen_id,
                     'user_id': user_id,  # Add user_id
                     'chapter_id': chapter_id,  # Add chapter_id
+                    'script_id': script_id,  # Add script_id
                     'audio_type': 'music',
                     'text_content': music_cue['description'],
                     'audio_url': audio_url,

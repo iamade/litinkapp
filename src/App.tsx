@@ -9,6 +9,7 @@ import Dashboard from "./pages/Dashboard";
 import AuthorPanel from "./pages/AuthorPanel";
 import LearningMode from "./pages/LearningMode";
 import EntertainmentMode from "./pages/EntertainmentMode";
+import CreatorMode from "./pages/CreatorMode";
 import Profile from "./pages/Profile";
 import BookUpload from "./pages/BookUpload";
 import BookView from "./pages/BookView";
@@ -59,6 +60,7 @@ function App() {
                   <Route path="/author" element={<AuthorPanel />} />
                   <Route path="/learn" element={<LearningMode />} />
                   <Route path="/explore" element={<EntertainmentMode />} />
+                  <Route path="/creator" element={<CreatorMode />} />
                   <Route path="/profile" element={<Profile />} />
                   <Route path="/upload" element={<BookUpload />} />
                   <Route path="/book/:id" element={<BookView />} />

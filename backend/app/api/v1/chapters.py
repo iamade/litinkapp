@@ -167,7 +167,8 @@ async def generate_scene_image(
             user_id=current_user['id'],
             style=request.style,
             aspect_ratio=request.aspect_ratio,
-            custom_prompt=request.custom_prompt
+            custom_prompt=request.custom_prompt,
+            script_id=request.script_id
         )
 
         # Add chapter association to metadata
@@ -223,6 +224,7 @@ async def generate_character_image(
             'image_type': 'character',
             'character_name': character_info['name'],
             'scene_description': character_info['description'],
+            'script_id': request.script_id,
             'status': 'pending',
             'metadata': {
                 'chapter_id': chapter_id,
@@ -637,6 +639,7 @@ async def generate_chapter_audio(
             'chapter_id': chapter_id,
             'audio_type': audio_type,
             'text_content': text_content,
+            'script_id': request.script_id,
             'generation_status': 'pending',
             'metadata': {
                 'scene_number': scene_number,
