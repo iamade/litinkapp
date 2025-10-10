@@ -73,15 +73,27 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       const characterImagesMap: Record<string, CharacterImage> = {};
 
       if (response.images && Array.isArray(response.images)) {
-        response.images.forEach((img: { id: string; image_url?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
+        response.images.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
           const metadata = img.metadata ?? {};
           const url = img.image_url ?? "";
+          const imageType = img.image_type || metadata.image_type;
+          const characterName = img.character_name || metadata.character_name;
+
           // Normalize script_id from either field
           const normalizedScriptId = img.script_id ?? img.scriptId;
 
+          console.log('[DEBUG useImageGeneration] Processing image:', {
+            id: img.id,
+            imageType,
+            characterName,
+            hasUrl: !!url,
+            scriptId: normalizedScriptId,
+            selectedScriptId
+          });
+
           // Scene images: accept explicit scene or fallback when image_type missing but URL exists
           if (
-            (metadata.image_type === "scene" || !metadata.image_type) &&
+            (imageType === "scene" || !imageType) &&
             (typeof metadata.scene_number === "number" || url)
           ) {
             // Use scene_number if present, else fallback to index or hash if needed
@@ -102,10 +114,10 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
             return;
           }
 
-          // Character images: keep explicit match but avoid throwing away items for missing non-critical fields
-          if (metadata.image_type === "character" && metadata.character_name) {
-            characterImagesMap[metadata.character_name] = {
-              name: metadata.character_name,
+          // Character images: use character_name from top level or metadata
+          if (imageType === "character" && characterName) {
+            characterImagesMap[characterName] = {
+              name: characterName,
               imageUrl: url,
               prompt: metadata.image_prompt ?? "",
               generationStatus: img.status === "completed" ? "completed" : "failed",

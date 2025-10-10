@@ -62,6 +62,7 @@ class ImageRecord(BaseModel):
     image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     image_prompt: Optional[str] = None
+    script_id: Optional[str] = None
     status: str
     generation_time_seconds: Optional[float] = None
     width: Optional[int] = None
