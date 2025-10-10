@@ -483,16 +483,18 @@ console.log('[DEBUG ImagesPanel] Component state:', {
     });
 
     // Filter character images by selected script_id, accepting both script_id and scriptId fields
+    // Include images that match the selected script OR have no script_id (legacy images)
     const filteredCharacterImages = Object.entries(characterImages || {}).reduce((acc, [key, image]) => {
       const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+      const shouldInclude = !selectedScriptId || !normalizedScriptId || normalizedScriptId === selectedScriptId;
       console.log('[DEBUG ImagesPanel] Character filtering:', {
         characterName: key,
         imageUrl: image.imageUrl,
         imageScriptId: normalizedScriptId,
         selectedScriptId,
-        willInclude: !selectedScriptId || normalizedScriptId === selectedScriptId
+        willInclude: shouldInclude
       });
-      if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
+      if (shouldInclude) {
         acc[key] = image;
       }
       return acc;
