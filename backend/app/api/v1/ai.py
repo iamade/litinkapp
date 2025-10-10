@@ -2371,8 +2371,8 @@ async def generate_script_and_scenes(
         print(f"[DEBUG] generate_script_and_scenes - storing script_record with script_story_type: {script_story_type}")
 
         # Always insert new script (allow multiple scripts per chapter)
-        script_result = supabase_client.table('scripts').insert(script_record).execute()
-        script_id = script_result.data[0]['id']
+        script_insert_result = supabase_client.table('scripts').insert(script_record).execute()
+        script_id = script_insert_result.data[0]['id']
 
         # ✅ Record usage for billing/limits
         await subscription_manager.record_usage(
@@ -2381,7 +2381,7 @@ async def generate_script_and_scenes(
             cost_usd=usage.get('estimated_cost', 0.0),
             metadata={
                 'script_style': script_style,
-                'model_used': script_result.get('model_used'),
+                'model_used': script_data["metadata"].get('model_used', 'unknown'),
                 'tokens_used': usage.get('total_tokens', 0)
             }
         )
