@@ -135,37 +135,35 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   const isDisabled = isSwitching;
 
 
+  // Get scenes from selected script
   const scenes =
     typeof selectedScript === "object" && selectedScript !== null && "scene_descriptions" in selectedScript
       ? (selectedScript as { scene_descriptions?: any[] }).scene_descriptions || []
       : [];
-  // Centralized character fetch: use characters table via userService
-  // Centralized character fetch: use userService from import, not window
 
-  const [characters, setCharacters] = useState<any[]>([]);
-  useEffect(() => {
-    async function fetchCharacters() {
-      if (!stableSelectedChapterId) return;
-      try {
-        // Fetch characters for the chapter using userService API
-        try {
-          const chapterCharacters = await userService.getCharactersByChapter(stableSelectedChapterId);
-          setCharacters(chapterCharacters || []);
-        } catch (error) {
-          console.error('Error fetching characters:', error);
-          setCharacters([]);
-        }
-        if (plotOverview?.characters) {
-          setCharacters(plotOverview.characters);
-        } else {
-          setCharacters([]);
-        }
-      } catch {
-        setCharacters([]);
+  // Get characters from selected script (primary source) or fallback to plot overview
+  const characters = React.useMemo(() => {
+    // First priority: characters from the selected script
+    if (typeof selectedScript === "object" && selectedScript !== null && "characters" in selectedScript) {
+      const scriptCharacters = (selectedScript as { characters?: any[] }).characters || [];
+      if (scriptCharacters.length > 0) {
+        console.log('[DEBUG ImagesPanel] Using characters from selected script:', scriptCharacters);
+        // Convert simple string array to object format if needed
+        return scriptCharacters.map(char =>
+          typeof char === 'string' ? { name: char } : char
+        );
       }
     }
-    fetchCharacters();
-  }, [stableSelectedChapterId, plotOverview]);
+
+    // Fallback: use plot overview characters
+    if (plotOverview?.characters && plotOverview.characters.length > 0) {
+      console.log('[DEBUG ImagesPanel] Using characters from plot overview:', plotOverview.characters);
+      return plotOverview.characters;
+    }
+
+    console.log('[DEBUG ImagesPanel] No characters available');
+    return [];
+  }, [selectedScript, plotOverview]);
 
   const handleGenerateAllScenes = async () => {
     if (!scenes.length) {
@@ -495,45 +493,49 @@ console.log('[DEBUG ImagesPanel] Component state:', {
           <div className="text-center py-12 text-gray-500">
             <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
             <p className="text-lg font-medium">No characters available</p>
-            <p className="text-sm">Generate a plot overview or script to create character images</p>
-          </div>
-        ) : !hasCharacterImages ? (
-          <div className="text-center py-8 text-gray-500">
-            <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
-            <p className="text-lg font-medium">No character images generated yet</p>
-            <p className="text-sm">Generate images for the current chapter characters</p>
+            <p className="text-sm">Generate a script to see character images</p>
           </div>
         ) : (
-          <div className={`${
-            viewMode === 'grid'
-              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'
-              : 'space-y-4'
-          }`}>
-            {characters.map((character) => {
-              const characterKey = typeof character === "string" ? character : character.name;
-              const characterImage = filteredCharacterImages?.[characterKey];
-              return (
-                <CharacterImageCard
-                  key={characterKey}
-                  characterName={characterKey}
-                  characterImage={characterImage}
-                  characterDetails={character}
-                  isGenerating={generatingCharacters.has(characterKey)}
-                  viewMode={viewMode}
-                  onGenerate={() => {
-                    const description =
-                      typeof character === "object" && character.physical_description && character.personality && character.role
-                        ? `${character.physical_description}. ${character.personality}. ${character.role}`
-                        : `Portrait of ${characterKey}, detailed character design`;
-                    generateCharacterImage(characterKey, description, generationOptions);
-                  }}
-                  onRegenerate={() => regenerateImage('character', characterKey, generationOptions)}
-                  onDelete={() => deleteImage('character', characterKey)}
-                  onView={() => setSelectedImage(characterImage?.imageUrl || null)}
-                />
-              );
-            })}
-          </div>
+          <>
+            {!hasCharacterImages && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <p className="text-sm text-blue-800">
+                  <strong>{characters.length} character{characters.length !== 1 ? 's' : ''}</strong> found in the selected script.
+                  Generate images individually or use "Generate All Characters" button.
+                </p>
+              </div>
+            )}
+            <div className={`${
+              viewMode === 'grid'
+                ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'
+                : 'space-y-4'
+            }`}>
+              {characters.map((character) => {
+                const characterKey = typeof character === "string" ? character : character.name;
+                const characterImage = filteredCharacterImages?.[characterKey];
+                return (
+                  <CharacterImageCard
+                    key={characterKey}
+                    characterName={characterKey}
+                    characterImage={characterImage}
+                    characterDetails={character}
+                    isGenerating={generatingCharacters.has(characterKey)}
+                    viewMode={viewMode}
+                    onGenerate={() => {
+                      const description =
+                        typeof character === "object" && character.physical_description && character.personality && character.role
+                          ? `${character.physical_description}. ${character.personality}. ${character.role}`
+                          : `Portrait of ${characterKey}, detailed character design`;
+                      generateCharacterImage(characterKey, description, generationOptions);
+                    }}
+                    onRegenerate={() => regenerateImage('character', characterKey, generationOptions)}
+                    onDelete={() => deleteImage('character', characterKey)}
+                    onView={() => setSelectedImage(characterImage?.imageUrl || null)}
+                  />
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     );
