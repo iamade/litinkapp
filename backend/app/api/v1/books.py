@@ -147,7 +147,7 @@ async def get_learning_books_with_progress(
         return []
 
 
-@router.get("/", response_model=List[BookSchema])
+@router.get("", response_model=List[BookSchema])
 async def get_books(
     supabase_client: Client = Depends(get_supabase),
     current_user: User = Depends(get_current_user)
