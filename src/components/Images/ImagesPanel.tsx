@@ -137,11 +137,41 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   const isDisabled = isSwitching;
 
 
-  // Get scenes from selected script
-  const scenes =
-    typeof selectedScript === "object" && selectedScript !== null && "scene_descriptions" in selectedScript
-      ? (selectedScript as { scene_descriptions?: any[] }).scene_descriptions || []
-      : [];
+  // Get scenes from selected script and normalize format
+  const scenes = React.useMemo(() => {
+    if (typeof selectedScript === "object" && selectedScript !== null && "scene_descriptions" in selectedScript) {
+      const sceneDescriptions = (selectedScript as { scene_descriptions?: any[] }).scene_descriptions || [];
+
+      // Transform scene_descriptions to proper scene objects
+      return sceneDescriptions.map((scene, idx) => {
+        // If it's already an object with the right structure, return it
+        if (typeof scene === 'object' && scene !== null && ('visual_description' in scene || 'description' in scene)) {
+          return {
+            scene_number: scene.scene_number || idx + 1,
+            visual_description: scene.visual_description || scene.description || '',
+            ...scene
+          };
+        }
+
+        // If it's a string, convert it to an object
+        if (typeof scene === 'string') {
+          return {
+            scene_number: idx + 1,
+            visual_description: scene,
+            description: scene
+          };
+        }
+
+        // Fallback for any other format
+        return {
+          scene_number: idx + 1,
+          visual_description: String(scene),
+          description: String(scene)
+        };
+      });
+    }
+    return [];
+  }, [selectedScript]);
 
   // Get characters from selected script (primary source) or fallback to plot overview
   const characters = React.useMemo(() => {
