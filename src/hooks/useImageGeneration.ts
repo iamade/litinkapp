@@ -52,6 +52,8 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
   }, [pollingIntervals]);
 
   const loadImages = useCallback(async () => {
+    console.log('[DEBUG useImageGeneration] loadImages ENTRY - chapterId:', chapterId);
+
     if (!chapterId) {
       console.warn("useImageGeneration: No chapterId; clearing images and skipping fetch");
       setSceneImages({});
@@ -60,14 +62,21 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       return;
     }
 
-    console.log('[DEBUG useImageGeneration] loadImages called for chapterId:', chapterId);
+    console.log('[DEBUG useImageGeneration] loadImages proceeding for chapterId:', chapterId);
     const requestKey = chapterId;
-    if (inflightRef.current === requestKey) return; // prevent duplicate fetch
+
+    if (inflightRef.current === requestKey) {
+      console.log('[DEBUG useImageGeneration] Duplicate request detected, skipping');
+      return; // prevent duplicate fetch
+    }
+
     inflightRef.current = requestKey;
 
     setIsLoading(true);
     try {
+      console.log('[DEBUG useImageGeneration] Calling userService.getChapterImages...');
       const response = await userService.getChapterImages(chapterId);
+      console.log('[DEBUG useImageGeneration] Got response:', response);
       if (!isMountedRef.current || inflightRef.current !== requestKey) return; // stale
       const sceneImagesMap: Record<string | number, SceneImage> = {};
       const characterImagesMap: Record<string, CharacterImage> = {};
@@ -134,15 +143,18 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       setSceneImages(sceneImagesMap);
       setCharacterImages(characterImagesMap);
     } catch (error: unknown) {
+      console.error('[DEBUG useImageGeneration] Error in loadImages:', error);
       if (!isMountedRef.current || inflightRef.current !== requestKey) return;
       if ((error as Error).message?.includes('404') || (error as Error).message?.includes('Not found')) {
+        console.log('[DEBUG useImageGeneration] 404 error, clearing images');
         setSceneImages({});
         setCharacterImages({});
       } else {
-        console.error('Error loading images:', error);
+        console.error('[DEBUG useImageGeneration] Unexpected error loading images:', error);
         toast.error('Failed to load images');
       }
     } finally {
+      console.log('[DEBUG useImageGeneration] loadImages FINALLY block');
       if (inflightRef.current === requestKey) inflightRef.current = null;
       if (isMountedRef.current) setIsLoading(false);
     }
