@@ -77,7 +77,16 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       console.log('[DEBUG useImageGeneration] Calling userService.getChapterImages...');
       const response = await userService.getChapterImages(chapterId);
       console.log('[DEBUG useImageGeneration] Got response:', response);
-      if (!isMountedRef.current || inflightRef.current !== requestKey) return; // stale
+      console.log('[DEBUG useImageGeneration] Checking staleness:', {
+        isMounted: isMountedRef.current,
+        inflightRef: inflightRef.current,
+        requestKey,
+        isStale: !isMountedRef.current || inflightRef.current !== requestKey
+      });
+      if (!isMountedRef.current || inflightRef.current !== requestKey) {
+        console.warn('[DEBUG useImageGeneration] STALE REQUEST - aborting image processing');
+        return; // stale
+      }
       const sceneImagesMap: Record<string | number, SceneImage> = {};
       const characterImagesMap: Record<string, CharacterImage> = {};
 
