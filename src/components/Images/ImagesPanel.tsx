@@ -143,6 +143,8 @@ console.log('[DEBUG ImagesPanel] Component state:', {
 
   // Get characters from selected script (primary source) or fallback to plot overview
   const characters = React.useMemo(() => {
+    console.log('[DEBUG ImagesPanel] Recalculating characters - selectedScriptId:', selectedScriptId);
+
     // First priority: characters from the selected script
     if (typeof selectedScript === "object" && selectedScript !== null && "characters" in selectedScript) {
       const scriptCharacters = (selectedScript as { characters?: any[] }).characters || [];
@@ -163,7 +165,7 @@ console.log('[DEBUG ImagesPanel] Component state:', {
 
     console.log('[DEBUG ImagesPanel] No characters available');
     return [];
-  }, [selectedScript, plotOverview]);
+  }, [selectedScriptId, selectedScript, plotOverview]);
 
   const handleGenerateAllScenes = async () => {
     if (!scenes.length) {

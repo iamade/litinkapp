@@ -86,8 +86,8 @@ type WorkflowTab = "plot" | "script" | "images" | "audio" | "video";
 export default function BookViewForEntertainment() {
   const { id } = useParams();
 
-  // Wire selectChapter from ScriptSelectionContext
-  const { selectChapter } = useScriptSelection();
+  // Wire selectChapter and selectedScriptId from ScriptSelectionContext
+  const { selectChapter, selectedScriptId } = useScriptSelection();
 
   // State declarations - all hooks at the top level
   const [book, setBook] = useState<Book | null>(null);
@@ -696,7 +696,6 @@ export default function BookViewForEntertainment() {
 
   const {
     generatedScripts,
-    selectedScript,
     isLoading: isLoadingScripts,
     isGeneratingScript,
     loadScripts,
@@ -705,6 +704,11 @@ export default function BookViewForEntertainment() {
     updateScript,
     deleteScript
   } = useScriptGeneration(selectedChapter?.id || '');
+
+  // Derive selectedScript from generatedScripts using context's selectedScriptId
+  const selectedScript = React.useMemo(() => {
+    return generatedScripts.find(script => script.id === selectedScriptId) || null;
+  }, [generatedScripts, selectedScriptId]);
 
   useEffect(() => {
     if (selectedChapter) {
