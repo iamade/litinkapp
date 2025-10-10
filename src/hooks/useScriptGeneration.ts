@@ -146,7 +146,7 @@ export const useScriptGeneration = (chapterId: string) => {
         }
       );
       
-      // Create new script object
+      // Create new script object with all fields from result
       const newScript: ChapterScript = {
         id: result.script_id || Date.now().toString(),
         chapter_id: chapterId,
@@ -160,16 +160,18 @@ export const useScriptGeneration = (chapterId: string) => {
         beats: [],
         scenes: [],
         created_at: new Date().toISOString(),
-        status: 'draft'
+        status: 'ready',
+        scriptStoryType: options.scriptStoryType || result.scriptStoryType
       };
 
+      // Add to the beginning of the list and select it immediately
       setGeneratedScripts(prev => [newScript, ...prev]);
       setSelectedScript(newScript);
-      
+
       toast.success('Script generated successfully!');
-      
-      // Reload to get updated data from server
-      await loadScripts();
+
+      // Reload in background to sync with server (don't await to show immediately)
+      loadScripts().catch(console.error);
     } catch (error) {
       console.error('Error generating script:', error);
       toast.error('Failed to generate script');
