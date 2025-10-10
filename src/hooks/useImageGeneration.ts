@@ -158,7 +158,8 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
         scene_description: sceneDescription,
         style: options.style,
         aspect_ratio: options.aspectRatio,
-        custom_prompt: options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined
+        custom_prompt: options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined,
+        script_id: selectedScriptId ?? undefined
       };
 
       const result = await userService.generateSceneImage(chapterId!, sceneNumber, request);
@@ -218,7 +219,8 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
         character_description: characterDescription,
         style: options.style,
         aspect_ratio: options.aspectRatio,
-        custom_prompt: options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined
+        custom_prompt: options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined,
+        script_id: selectedScriptId ?? undefined
       };
 
       const result = await userService.generateCharacterImage(chapterId!, request);
@@ -342,7 +344,7 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
               generationStatus: 'completed',
               generatedAt: new Date().toISOString(),
               id: recordId,
-              script_id: selectedScriptId ?? undefined
+              script_id: status.script_id ?? selectedScriptId ?? undefined
             }
           }));
 
@@ -360,6 +362,9 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
             newMap.delete(recordId);
             return newMap;
           });
+
+          // Reload all images from database to get the complete data
+          loadImages();
 
           toast.success(`Generated image for ${characterName}`);
         } else if (status.status === 'failed') {

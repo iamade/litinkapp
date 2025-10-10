@@ -478,12 +478,24 @@ console.log('[DEBUG ImagesPanel] Component state:', {
     // Filter character images by selected script_id, accepting both script_id and scriptId fields
     const filteredCharacterImages = Object.entries(characterImages || {}).reduce((acc, [key, image]) => {
       const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+      console.log('[DEBUG ImagesPanel] Character filtering:', {
+        characterName: key,
+        imageScriptId: normalizedScriptId,
+        selectedScriptId,
+        willInclude: !selectedScriptId || normalizedScriptId === selectedScriptId
+      });
       if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
         acc[key] = image;
       }
       return acc;
     }, {} as Record<string, CharacterImage>);
     const hasCharacterImages = filteredCharacterImages && Object.keys(filteredCharacterImages).length > 0;
+
+    console.log('[DEBUG ImagesPanel] Filtered results:', {
+      totalCharacterImages: Object.keys(characterImages || {}).length,
+      filteredCount: Object.keys(filteredCharacterImages).length,
+      selectedScriptId
+    });
 
     return (
       <div className="space-y-4">

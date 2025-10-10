@@ -102,6 +102,7 @@ class ImageStatusResponse(BaseModel):
     status: str  # 'pending', 'processing', 'completed', 'failed'
     image_url: Optional[str] = None
     prompt: Optional[str] = None
+    script_id: Optional[str] = None
     error_message: Optional[str] = None
     generation_time_seconds: Optional[float] = None
     created_at: str
