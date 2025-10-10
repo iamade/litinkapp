@@ -475,11 +475,19 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   };
 
   const renderCharactersTab = () => {
+    console.log('[DEBUG ImagesPanel] renderCharactersTab called:', {
+      characterImagesKeys: Object.keys(characterImages || {}),
+      characterImagesCount: Object.keys(characterImages || {}).length,
+      selectedScriptId,
+      charactersFromScript: characters.map(c => typeof c === 'string' ? c : c.name)
+    });
+
     // Filter character images by selected script_id, accepting both script_id and scriptId fields
     const filteredCharacterImages = Object.entries(characterImages || {}).reduce((acc, [key, image]) => {
       const normalizedScriptId = image.script_id ?? (image as any).scriptId;
       console.log('[DEBUG ImagesPanel] Character filtering:', {
         characterName: key,
+        imageUrl: image.imageUrl,
         imageScriptId: normalizedScriptId,
         selectedScriptId,
         willInclude: !selectedScriptId || normalizedScriptId === selectedScriptId
@@ -494,6 +502,7 @@ console.log('[DEBUG ImagesPanel] Component state:', {
     console.log('[DEBUG ImagesPanel] Filtered results:', {
       totalCharacterImages: Object.keys(characterImages || {}).length,
       filteredCount: Object.keys(filteredCharacterImages).length,
+      filteredKeys: Object.keys(filteredCharacterImages),
       selectedScriptId
     });
 
