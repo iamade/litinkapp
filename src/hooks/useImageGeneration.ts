@@ -337,13 +337,33 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     scenes: Array<{ scene_number?: number; visual_description?: string; description?: string }>,
     options: ImageGenerationOptions
   ) => {
+    console.log('[useImageGeneration] generateAllSceneImages called', {
+      scenesCount: scenes.length,
+      chapterId,
+      options
+    });
+
+    if (!chapterId) {
+      console.error('[useImageGeneration] No chapterId available, cannot generate images');
+      toast.error('Chapter ID is required to generate images');
+      return;
+    }
+
     for (const [idx, scene] of scenes.entries()) {
       const sceneNumber = scene.scene_number || idx + 1;
       const description = scene.visual_description || scene.description || '';
+      console.log(`[useImageGeneration] Processing scene ${sceneNumber}/${scenes.length}`, {
+        sceneNumber,
+        hasDescription: !!description
+      });
+
       if (description) {
         await generateSceneImage(sceneNumber, description, options);
+      } else {
+        console.warn(`[useImageGeneration] Scene ${sceneNumber} has no description, skipping`);
       }
     }
+    console.log('[useImageGeneration] All scenes processed');
   };
 
   const generateAllCharacterImages = async (

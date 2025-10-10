@@ -190,10 +190,19 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   };
 
   const handleConfirmGeneration = async () => {
+    console.log('[ImagesPanel] handleConfirmGeneration called', {
+      confirmAction,
+      scenesCount: scenes.length,
+      charactersCount: characters.length,
+      generationOptions
+    });
+
     setShowConfirmModal(false);
 
     if (confirmAction === 'scenes') {
+      console.log('[ImagesPanel] Generating all scene images...');
       await generateAllSceneImages(scenes, generationOptions);
+      console.log('[ImagesPanel] Scene image generation complete');
     } else if (confirmAction === 'characters') {
       // Build character details from plot overview
       const characterDetails: Record<string, string> = {};
