@@ -62,6 +62,7 @@ class ImageRecord(BaseModel):
     image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     image_prompt: Optional[str] = None
+    script_id: Optional[str] = None
     status: str
     generation_time_seconds: Optional[float] = None
     width: Optional[int] = None
@@ -101,6 +102,8 @@ class ImageStatusResponse(BaseModel):
     record_id: str
     status: str  # 'pending', 'processing', 'completed', 'failed'
     image_url: Optional[str] = None
+    prompt: Optional[str] = None
+    script_id: Optional[str] = None
     error_message: Optional[str] = None
     generation_time_seconds: Optional[float] = None
     created_at: str

@@ -475,15 +475,38 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   };
 
   const renderCharactersTab = () => {
+    console.log('[DEBUG ImagesPanel] renderCharactersTab called:', {
+      characterImagesKeys: Object.keys(characterImages || {}),
+      characterImagesCount: Object.keys(characterImages || {}).length,
+      selectedScriptId,
+      charactersFromScript: characters.map(c => typeof c === 'string' ? c : c.name)
+    });
+
     // Filter character images by selected script_id, accepting both script_id and scriptId fields
+    // Include images that match the selected script OR have no script_id (legacy images)
     const filteredCharacterImages = Object.entries(characterImages || {}).reduce((acc, [key, image]) => {
       const normalizedScriptId = image.script_id ?? (image as any).scriptId;
-      if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
+      const shouldInclude = !selectedScriptId || !normalizedScriptId || normalizedScriptId === selectedScriptId;
+      console.log('[DEBUG ImagesPanel] Character filtering:', {
+        characterName: key,
+        imageUrl: image.imageUrl,
+        imageScriptId: normalizedScriptId,
+        selectedScriptId,
+        willInclude: shouldInclude
+      });
+      if (shouldInclude) {
         acc[key] = image;
       }
       return acc;
     }, {} as Record<string, CharacterImage>);
     const hasCharacterImages = filteredCharacterImages && Object.keys(filteredCharacterImages).length > 0;
+
+    console.log('[DEBUG ImagesPanel] Filtered results:', {
+      totalCharacterImages: Object.keys(characterImages || {}).length,
+      filteredCount: Object.keys(filteredCharacterImages).length,
+      filteredKeys: Object.keys(filteredCharacterImages),
+      selectedScriptId
+    });
 
     return (
       <div className="space-y-4">
