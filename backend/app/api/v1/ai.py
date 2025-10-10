@@ -98,6 +98,15 @@ def extract_characters(character_details: str, script_style: str = "cinematic_mo
         exclude_words = {'The', 'And', 'But', 'For', 'Are', 'With', 'This', 'That', 'From', 'They', 'Will', 'Have', 'Been', 'One', 'Two', 'Three'}
         characters = [char for char in potential_chars if char not in exclude_words]
 
+    # Filter out invalid character names (pronouns and generic terms)
+    invalid_names = {
+        'he', 'she', 'it', 'they', 'him', 'her', 'his', 'hers', 'its', 'their', 'theirs',
+        'i', 'me', 'my', 'mine', 'we', 'us', 'our', 'ours', 'you', 'your', 'yours',
+        'cat', 'dog', 'baby', 'child', 'man', 'woman', 'boy', 'girl', 'person',
+        'uncle', 'aunt', 'mother', 'father', 'brother', 'sister', 'cousin'
+    }
+    characters = [char for char in characters if char.lower() not in invalid_names]
+
     # Filter characters based on script style for frontend selection
     if script_style == "cinematic_narration":
         # For narration scripts, exclude narrator-like entities that aren't speaking characters
@@ -2284,9 +2293,24 @@ async def generate_script_and_scenes(
         script = script_result.get('content', '')
         usage = script_result.get('usage', {})
 
-        # ✅ Generate scene breakdown using OpenRouter
+        # ✅ Generate scene breakdown using OpenRouter with better structure detection
         scene_breakdown_result = await openrouter_service.analyze_content(
-            content=f"Please break down this script into 5-8 detailed scene descriptions for video generation. Format each scene as 'Scene X: [Detailed description]' where X is the scene number:\n\n{script}",
+            content=f"""Extract ALL scenes from this script. Identify acts and scenes properly.
+
+For each scene, provide:
+- Act number (I, II, or III)
+- Scene number within the act
+- Location and time of day
+- Key action/description (2-3 sentences)
+- Characters involved
+
+Format each scene as:
+ACT [I/II/III] - SCENE [number]: [Location] - [Time]
+Description: [detailed visual description]
+Characters: [list of characters]
+
+Script to analyze:
+{script}""",
             user_tier=user_model_tier,
             analysis_type="summary"  # Use summary type but with scene-specific prompt
         )
@@ -2297,8 +2321,8 @@ async def generate_script_and_scenes(
             analysis_result = scene_breakdown_result.get('result', '')
             scene_descriptions = parse_scene_descriptions(analysis_result)
 
-        # Limit to reasonable number of scenes
-        scene_descriptions = scene_descriptions[:10]
+        # Allow more scenes (up to 30 for complete story coverage)
+        scene_descriptions = scene_descriptions[:30]
 
         # ✅ Generate character analysis using OpenRouter
         character_analysis_result = await openrouter_service.analyze_content(

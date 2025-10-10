@@ -198,14 +198,14 @@ class PlotService:
 
             book = book_response.data
 
-            # Get chapter summaries for context (limit to avoid token limits)
+            # Get ALL chapter summaries for complete character extraction
             chapters_response = self.db.table('chapters').select(
                 'id, title, chapter_number, content'
-            ).eq('book_id', book_id).order('chapter_number').limit(10).execute()
+            ).eq('book_id', book_id).order('chapter_number').execute()
 
             chapters = chapters_response.data or []
 
-            # Extract key content snippets
+            # Extract key content snippets from ALL chapters
             context_parts = []
             for chapter in chapters:
                 # Take first 500 characters of each chapter for context
@@ -475,10 +475,19 @@ Return ONLY a valid JSON object with these exact keys:
             else:
                 logger.warning(f"[PlotService] Character generation failed, using fallback")
 
+            # Filter out invalid character names (pronouns and generic terms)
+            invalid_names = {
+                'he', 'she', 'it', 'they', 'him', 'her', 'his', 'hers', 'its', 'their', 'theirs',
+                'i', 'me', 'my', 'mine', 'we', 'us', 'our', 'ours', 'you', 'your', 'yours',
+                'cat', 'dog', 'baby', 'child', 'man', 'woman', 'boy', 'girl', 'person',
+                'uncle', 'aunt', 'mother', 'father', 'brother', 'sister', 'cousin',
+                'mr', 'mrs', 'ms', 'miss', 'dr', 'professor', 'sir', 'madam'
+            }
+
             # Add extracted named characters if not already present
-            existing_names = {c.get("name", "") for c in characters_data}
+            existing_names = {c.get("name", "").lower() for c in characters_data}
             for name in named_characters:
-                if name and name not in existing_names:
+                if name and name.lower() not in existing_names and name.lower() not in invalid_names and len(name) > 1:
                     characters_data.append({
                         "name": name,
                         "role": "supporting",

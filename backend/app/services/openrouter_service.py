@@ -243,20 +243,28 @@ class OpenRouterService:
         Prepare messages for different script types
         """
         system_prompts = {
-            "cinematic": """You are a professional screenwriter. Convert the provided content into a cinematic screenplay format with:
-                - Proper scene headings (INT./EXT. LOCATION - TIME)
-                - Character names in uppercase when introduced and before dialogue
-                - ONLY character dialogue between speaking characters
-                - Action descriptions in present tense
-                - Visual descriptions for scene generation
-                - Complete character arcs and story development
-                - All key plot points and story elements
-                - NO narrator voice-over or narration elements
-                - Dialogue centered on the page
-                - Parentheticals for actor directions
-                - Action descriptions in present tense
-                - Appropriate screenplay formatting and spacing
-                - Focus on character-to-character interactions only""",
+            "cinematic": """You are a professional screenwriter. Convert the provided content into a cinematic screenplay with proper THREE-ACT STRUCTURE:
+
+**STRUCTURE REQUIREMENTS:**
+- Divide the story into ACT I, ACT II, and ACT III
+- Create 5-10 distinct SCENES per act (15-30 total scenes depending on content length)
+- Each scene must have proper heading: INT./EXT. LOCATION - TIME
+- Label each scene clearly (e.g., "ACT I - SCENE 1:", "ACT II - SCENE 5:")
+
+**FORMATTING:**
+- Character names in UPPERCASE when introduced and before dialogue
+- ONLY character dialogue between speaking characters (NO narrator)
+- Action descriptions in present tense
+- Visual descriptions for each scene
+- Dialogue centered with character names
+- Parentheticals for actor directions
+- NO voice-over or narration elements
+
+**STORY COVERAGE:**
+- Complete character arcs and development
+- All key plot points and story elements
+- Full narrative from beginning to end
+- Focus on character-to-character interactions""",
             "narration": """You are a professional narrator. Convert the content into an engaging narration script with:
                 - Rich, descriptive voice-over text
                 - Scene descriptions for visual context
