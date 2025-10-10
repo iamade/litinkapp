@@ -450,6 +450,14 @@ console.log('[DEBUG ImagesPanel] Component state:', {
     const sourceSceneImages = filteredSceneImages;
     const hasImages = Object.keys(sourceSceneImages).length > 0;
 
+    console.log('[ImagesPanel] renderScenesTab', {
+      sceneImagesKeys: Object.keys(sceneImages || {}),
+      filteredKeys: Object.keys(filteredSceneImages),
+      selectedScriptId,
+      hasImages,
+      scenesCount: scenes.length
+    });
+
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
