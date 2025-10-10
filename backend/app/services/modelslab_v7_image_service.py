@@ -404,8 +404,13 @@ class ModelsLabV7ImageService:
                             character_name=request.get('character_name', f'Character_{index}'),
                             character_description=request.get('description', ''),
                             style=request.get('style', 'realistic'),
-                            aspect_ratio=request.get('aspect_ratio', '3:4')
+                            aspect_ratio=request.get('aspect_ratio', '3:4'),
+                            user_tier=user_tier,
+                            character_id=request.get('character_id')
                         )
+                        # Character consistency check
+                        if request.get('character_id') and result.get('character_id') != request.get('character_id'):
+                            result['consistency_warning'] = "Generated image not linked to requested character_id"
                     elif image_type == 'scene':
                         result = await self.generate_scene_image(
                             scene_description=request.get('description', ''),

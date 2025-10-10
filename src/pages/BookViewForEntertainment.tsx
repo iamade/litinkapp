@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
+import { useScriptSelection } from '../contexts/ScriptSelectionContext';
 import { userService } from "../services/userService";
 import { toast } from "react-hot-toast";
 import {
@@ -11,11 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Play,
-  Pause,
-  Settings,
   Download,
-  Eye,
-  EyeOff,
 } from "lucide-react";
 import { VideoScene } from "../services/videoService";
 import { aiService } from "../services/aiService";
@@ -29,32 +26,17 @@ import ImagesPanel from '../components/Images/ImagesPanel';
 import { usePlotGeneration } from '../hooks/usePlotGeneration';
 import { useScriptGeneration } from '../hooks/useScriptGeneration';
 import AudioPanel from '../components/Audio/AudioPanel';
-import VideoProductionPanel from "../components/Video/VideoProductionPanel";
 import { useImageGeneration } from '../hooks/useImageGeneration';
 import { useAudioGeneration } from '../hooks/useAudioGeneration';
+import VideoProductionPanel from '../components/Video/VideoProductionPanel';
 
-
+ console.log("BookViewForEntertainment starting")
 interface Chapter {
   id: string;
   title: string;
   content: string;
 }
 
-interface VideoGenerationResponse {
-  video_generation_id: string;
-  script_id: string;
-  status: string;
-  audio_task_id?: string;
-  task_status?: string;
-  message: string;
-  script_info: {
-    script_style: string;
-    video_style: string;
-    scenes: number;
-    characters: number;
-    created_at: string;
-  };
-}
 
 interface Book {
   id: string;
@@ -90,31 +72,6 @@ interface AIScriptResult {
   script_id?: string;
 }
 
-// New interfaces for workflow system
-interface PlotOverview {
-  logline: string;
-  themes: string[];
-  storyType: string;
-  genre: string;
-  tone: string;
-  audience: string;
-  setting: string;
-  characters: Character[];
-}
-
-interface Character {
-  name: string;
-  role: string;
-  characterArc: string;
-  physicalDescription: string;
-  personality: string;
-  archetypes: string[];
-  want: string;
-  need: string;
-  lie: string;
-  ghost: string;
-  imageUrl?: string;
-}
 
 interface WorkflowProgress {
   plot: "idle" | "generating" | "completed" | "error";
@@ -127,15 +84,15 @@ interface WorkflowProgress {
 type WorkflowTab = "plot" | "script" | "images" | "audio" | "video";
 
 export default function BookViewForEntertainment() {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams();
+
+  // Wire selectChapter and selectedScriptId from ScriptSelectionContext
+  const { selectChapter, selectedScriptId } = useScriptSelection();
 
   // State declarations - all hooks at the top level
   const [book, setBook] = useState<Book | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
   const [videoUrls, setVideoUrls] = useState<Record<string, string>>({});
-  const [videoScenes, setVideoScenes] = useState<Record<string, VideoScene>>(
-    {}
-  );
   const [videoGenerationId, setVideoGenerationId] = useState<string | null>(
     null
   );
@@ -153,10 +110,8 @@ export default function BookViewForEntertainment() {
 
   const [loadingScript, setLoadingScript] = useState(false);
 
-  const [loadingScripts, setLoadingScripts] = useState(false);
-
   const [pipelineStatus, setPipelineStatus] =
-    useState<PipelineStatusType>(null);
+    useState<PipelineStatusType | null>(null);
   const [showPipelineStatus, setShowPipelineStatus] = useState(false);
 
   // Add new state for task tracking
@@ -177,10 +132,20 @@ export default function BookViewForEntertainment() {
   const [workflowProgress, setWorkflowProgress] = useState<
     Record<string, WorkflowProgress>
   >({});
-  
+
   // State for storing generated images and audio for video production
   const [generatedImageUrls, setGeneratedImageUrls] = useState<string[]>([]);
   const [generatedAudioFiles, setGeneratedAudioFiles] = useState<string[]>([]);
+
+  // Ref to track if component is mounted
+  const mountedRef = useRef(true);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Workflow tabs configuration
   const workflowTabs = [
@@ -388,28 +353,7 @@ export default function BookViewForEntertainment() {
     );
   };
 
-  // Generate plot overview using RAG
-  // const handleGeneratePlot = async () => {
-  //   if (!book) return;
 
-  //   setIsGeneratingPlot(true);
-  //   updateProgress("plot", "generating");
-
-  //   try {
-  //     // This would be a new API call to generate plot overview using book embeddings
-  //     const plotResult = await userService.generatePlotOverview(book.id);
-
-  //     setPlotOverview(plotResult);
-  //     updateProgress("plot", "completed");
-  //     toast.success("Plot overview generated successfully!");
-  //   } catch (error) {
-  //     console.error("Error generating plot:", error);
-  //     toast.error("Failed to generate plot overview");
-  //     updateProgress("plot", "error");
-  //   } finally {
-  //     setIsGeneratingPlot(false);
-  //   }
-  // };
 
   // Add plot generation hook
   const {
@@ -417,7 +361,7 @@ export default function BookViewForEntertainment() {
     isGenerating: isGeneratingPlot,
     generatePlot,
     loadPlot
-  } = usePlotGeneration(id!);
+  } = usePlotGeneration(id || '');
 
   // Load plot on component mount and chapter change
   useEffect(() => {
@@ -438,6 +382,7 @@ export default function BookViewForEntertainment() {
       // Set first chapter as selected by default
       if (bookData.chapters && bookData.chapters.length > 0) {
         setSelectedChapter(bookData.chapters[0]);
+        selectChapter(bookData.chapters[0].id, { reason: 'load' });
       }
     } catch (error) {
       console.error("Error loading book:", error);
@@ -454,16 +399,14 @@ export default function BookViewForEntertainment() {
       updateProgress("video", "generating");
       setVideoStatus("starting");
 
-      if (!selectedScript) {
-        toast.error("Please select a script first!");
-        return;
-      }
+      // Use selected script if available, otherwise let backend use most recent
+      const scriptId = selectedScript?.id;
 
       const result = await userService.generateEntertainmentVideo(
         selectedChapter.id,
         "basic",
         animationStyle,
-        selectedScript.id
+        scriptId
       );
 
       setVideoGenerationId(result.video_generation_id);
@@ -472,10 +415,15 @@ export default function BookViewForEntertainment() {
       setVideoStatus("processing");
 
       toast.success(`Video generation started! ${result.message}`);
+      
+      // Start polling - the function now handles its own lifecycle
       pollVideoStatus(result.video_generation_id);
     } catch (error: any) {
       console.error("Error generating video:", error);
-      toast.error(error?.message || "Failed to start video generation");
+      const errorMessage = error?.response?.data?.detail ||
+                          error?.message ||
+                          "Failed to start video generation";
+      toast.error(errorMessage);
       setVideoStatus("error");
       updateProgress("video", "error");
     }
@@ -504,16 +452,20 @@ export default function BookViewForEntertainment() {
       const generations = response.generations || [];
       console.log("[FETCH] Found generations:", generations.length);
 
-      setExistingGenerations(generations); // ✅ Now using the array
+      if (mountedRef.current) {
+        setExistingGenerations(generations); // ✅ Now using the array
 
-      // If we have generations, show them
-      if (generations.length > 0) {
-        setShowExistingGenerations(true);
+        // If we have generations, show them
+        if (generations.length > 0) {
+          setShowExistingGenerations(true);
+        }
       }
     } catch (error) {
       console.error("Error fetching existing generations:", error);
       // Even on error, show the generation interface
-      setShowExistingGenerations(true);
+      if (mountedRef.current) {
+        setShowExistingGenerations(true);
+      }
     }
   }, [selectedChapter]);
 
@@ -530,51 +482,74 @@ export default function BookViewForEntertainment() {
   }, [videoStatus, selectedChapter]);
 
   // Add status polling
-  // Update the pollVideoStatus function:
+  // Update the pollVideoStatus function with proper lifecycle management:
 
-  const pollVideoStatus = async (videoGenId: string) => {
+  const pollVideoStatus = (videoGenId: string) => {
     const checkStatus = async () => {
+      // Check if component is still mounted
+      if (!mountedRef.current) {
+        console.log("[POLLING] Component unmounted, stopping polling");
+        return;
+      }
+
       try {
         const data = await userService.getVideoGenerationStatus(videoGenId);
         console.log("[POLLING] Status update:", data.generation_status);
 
+        // Check again if component is still mounted before updating state
+        if (!mountedRef.current) {
+          console.log("[POLLING] Component unmounted, skipping setState");
+          return;
+        }
+
         setVideoStatus(data.generation_status);
 
-        try {
-          const pipelineData = await aiService.getPipelineStatus(videoGenId);
-          setPipelineStatus(pipelineData);
-          setLastUpdated(Date.now());
-        } catch (pipelineError) {
-          console.warn("Pipeline status not available:", pipelineError);
+        // Update pipeline status if component is still mounted
+        if (mountedRef.current) {
+          try {
+            const pipelineData = await aiService.getPipelineStatus(videoGenId);
+            if (mountedRef.current) {
+              setPipelineStatus(pipelineData);
+              setLastUpdated(Date.now());
+            }
+          } catch (pipelineError) {
+            console.warn("Pipeline status not available:", pipelineError);
+          }
+
+          if (data.task_metadata?.audio_task_state && mountedRef.current) {
+            setTaskStatus(data.task_metadata.audio_task_state);
+          }
+
+          // Handle completion
+          if (data.generation_status === "completed" && data.video_url && mountedRef.current) {
+            setVideoUrls((prev) => ({
+              ...prev,
+              [selectedChapter!.id]: data.video_url!,
+            }));
+            updateProgress("video", "completed");
+            toast.success("Video generation completed!");
+            setShowPipelineStatus(false);
+            setShowExistingGenerations(true);
+            return; // Stop polling
+          }
+
+          // Handle failure
+          if (data.generation_status === "failed" && mountedRef.current) {
+            toast.error(data.error_message || "Video generation failed");
+            updateProgress("video", "error");
+            setShowExistingGenerations(true);
+            setTimeout(() => {
+              if (mountedRef.current) {
+                fetchExistingGenerations();
+              }
+            }, 1000);
+            return; // Stop polling
+          }
         }
 
-        if (data.task_metadata?.audio_task_state) {
-          setTaskStatus(data.task_metadata.audio_task_state);
-        }
-
-        if (data.generation_status === "completed" && data.video_url) {
-          setVideoUrls((prev) => ({
-            ...prev,
-            [selectedChapter!.id]: data.video_url!,
-          }));
-          updateProgress("video", "completed");
-          toast.success("Video generation completed!");
-          setShowPipelineStatus(false);
-          setShowExistingGenerations(true);
-          return;
-        }
-
-        if (data.generation_status === "failed") {
-          toast.error(data.error_message || "Video generation failed");
-          updateProgress("video", "error");
-          setShowExistingGenerations(true);
-          setTimeout(() => {
-            fetchExistingGenerations();
-          }, 1000);
-          return;
-        }
-
+        // Continue polling for active statuses
         if (
+          mountedRef.current &&
           [
             "pending",
             "generating_audio",
@@ -589,16 +564,19 @@ export default function BookViewForEntertainment() {
           ].includes(data.generation_status)
         ) {
           setTimeout(checkStatus, 2000);
-        } else {
+        } else if (mountedRef.current) {
           setShowExistingGenerations(true);
         }
       } catch (error) {
         console.error("Error checking status:", error);
-        toast.error("Error checking video status");
-        setShowExistingGenerations(true);
+        if (mountedRef.current) {
+          toast.error("Error checking video status");
+          setShowExistingGenerations(true);
+        }
       }
     };
 
+    // Start polling
     checkStatus();
   };
 
@@ -718,7 +696,6 @@ export default function BookViewForEntertainment() {
 
   const {
     generatedScripts,
-    selectedScript,
     isLoading: isLoadingScripts,
     isGeneratingScript,
     loadScripts,
@@ -727,6 +704,11 @@ export default function BookViewForEntertainment() {
     updateScript,
     deleteScript
   } = useScriptGeneration(selectedChapter?.id || '');
+
+  // Derive selectedScript from generatedScripts using context's selectedScriptId
+  const selectedScript = React.useMemo(() => {
+    return generatedScripts.find(script => script.id === selectedScriptId) || null;
+  }, [generatedScripts, selectedScriptId]);
 
   useEffect(() => {
     if (selectedChapter) {
@@ -745,18 +727,23 @@ export default function BookViewForEntertainment() {
 
   // Add audio generation hook
   const {
-    audioAssets,
+    files,
     isLoading: isLoadingAudio,
-    loadAudioAssets,
-  } = useAudioGeneration(selectedChapter?.id || '');
+    loadAudio,
+  } = useAudioGeneration({
+    chapterId: selectedChapter?.id || '',
+    scriptId: selectedScript?.id,
+  });
 
   // Load images and audio when chapter changes
   useEffect(() => {
     if (selectedChapter) {
       loadImages();
-      loadAudioAssets();
+      if (selectedScript?.id) {
+        loadAudio();
+      }
     }
-  }, [selectedChapter, loadImages, loadAudioAssets]);
+  }, [selectedChapter, selectedScript?.id, loadImages, loadAudio]);
 
   // Update generated URLs when images/audio change
   useEffect(() => {
@@ -769,42 +756,17 @@ export default function BookViewForEntertainment() {
   }, [sceneImages]);
 
   useEffect(() => {
-    // Extract audio file URLs from audioAssets
+    // Extract audio file URLs from files
     const audioUrls: string[] = [];
-    if (audioAssets) {
-      // Extract dialogue audio URLs
-      audioAssets.dialogue.forEach((dialogueItem) => {
-        if (dialogueItem.url) {
-          audioUrls.push(dialogueItem.url);
-        }
-      });
-      // Extract music URLs
-      audioAssets.music.forEach((musicItem) => {
-        if (musicItem.url) {
-          audioUrls.push(musicItem.url);
-        }
-      });
-      // Extract sound effects URLs
-      audioAssets.effects.forEach((effectItem) => {
-        if (effectItem.url) {
-          audioUrls.push(effectItem.url);
-        }
-      });
-      // Extract narration URLs
-      audioAssets.narration.forEach((narrationItem) => {
-        if (narrationItem.url) {
-          audioUrls.push(narrationItem.url);
-        }
-      });
-      // Extract ambiance URLs
-      audioAssets.ambiance.forEach((ambianceItem) => {
-        if (ambianceItem.url) {
-          audioUrls.push(ambianceItem.url);
+    if (files) {
+      files.forEach((file) => {
+        if (file.url) {
+          audioUrls.push(file.url);
         }
       });
     }
     setGeneratedAudioFiles(audioUrls);
-  }, [audioAssets]);
+  }, [files]);
 
   // Render workflow tab content
   const renderTabContent = () => {
@@ -898,255 +860,29 @@ if (!selectedChapter) {
           );
         }
 
-        // Use mock data if no real data is available yet
-        const mockImageUrls = generatedImageUrls.length > 0 ? generatedImageUrls : [
-          'https://via.placeholder.com/1920x1080/4F46E5/ffffff?text=Scene+1',
-          'https://via.placeholder.com/1920x1080/7C3AED/ffffff?text=Scene+2',
-          'https://via.placeholder.com/1920x1080/EC4899/ffffff?text=Scene+3',
-          'https://via.placeholder.com/1920x1080/F59E0B/ffffff?text=Scene+4',
-          'https://via.placeholder.com/1920x1080/10B981/ffffff?text=Scene+5',
-        ];
-
-        const mockAudioFiles = generatedAudioFiles.length > 0 ? generatedAudioFiles : [
-          'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-          'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-          'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-        ];
-
         return (
           <VideoProductionPanel
             chapterId={selectedChapter.id}
             chapterTitle={selectedChapter.title}
-            scriptId={selectedScript?.id}
-            imageUrls={mockImageUrls}
-            audioFiles={mockAudioFiles}
+            imageUrls={generatedImageUrls}
+            audioFiles={generatedAudioFiles}
             plotOverview={plotOverview}
+            onGenerateVideo={handleGenerateVideo}
+            videoStatus={videoStatus}
+            canGenerateVideo={!!selectedChapter && videoStatus !== "processing" && videoStatus !== "starting"}
           />
         );
       }
-
-
-        // return (
-        //   <div className="space-y-6">
-        //     <div className="flex items-center justify-between">
-        //       <div>
-        //         <h3 className="text-xl font-semibold text-gray-900">
-        //           Audio Production
-        //         </h3>
-        //         <p className="text-gray-600">
-        //           Generate music, effects, and dialogue for{" "}
-        //           {selectedChapter?.title}
-        //         </p>
-        //       </div>
-        //       <button
-        //         disabled={true}
-        //         className="flex items-center space-x-2 px-4 py-2 bg-gray-400 text-white rounded-lg cursor-not-allowed"
-        //       >
-        //         <Music className="w-4 h-4" />
-        //         <span>Coming Soon</span>
-        //       </button>
-        //     </div>
-
-        //     <div className="text-center py-12 text-gray-500">
-        //       <Music className="mx-auto h-12 w-12 mb-4 opacity-50" />
-        //       <p>Audio production tools will be available soon</p>
-        //       <p className="text-sm">
-        //         Create music, sound effects, and character voices
-        //       </p>
-        //     </div>
-        //   </div>
-        // );
-
-
-
-      // case "video":
-      //   return (
-      //     <div className="space-y-6">
-      //       <div className="flex items-center justify-between">
-      //         <div>
-      //           <h3 className="text-xl font-semibold text-gray-900">
-      //             Video Production
-      //           </h3>
-      //           <p className="text-gray-600">
-      //             Generate and edit videos for {selectedChapter?.title}
-      //           </p>
-      //         </div>
-      //         <div className="flex items-center space-x-4">
-      //           <select
-      //             className="border rounded-lg px-3 py-2 text-sm"
-      //             value={animationStyle}
-      //             onChange={(e) =>
-      //               setAnimationStyle(
-      //                 e.target.value as
-      //                   | "cartoon"
-      //                   | "realistic"
-      //                   | "cinematic"
-      //                   | "fantasy"
-      //               )
-      //             }
-      //           >
-      //             <option value="cartoon">Cartoon Style</option>
-      //             <option value="realistic">Realistic Style</option>
-      //             <option value="cinematic">Cinematic Style</option>
-      //             <option value="fantasy">Fantasy Style</option>
-      //           </select>
-      //           <button
-      //             onClick={handleGenerateVideo}
-      //             disabled={!selectedScript}
-      //             className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
-      //           >
-      //             <Video className="w-4 h-4" />
-      //             <span>Generate Video</span>
-      //           </button>
-      //         </div>
-      //       </div>
-
-      //       {!selectedScript && (
-      //         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-      //           <p className="text-yellow-800">
-      //             <strong>Note:</strong> Please generate and select a script
-      //             first before creating videos.
-      //           </p>
-      //         </div>
-      //       )}
-
-      //       {/* Existing Generations */}
-      //       {selectedChapter && showExistingGenerations && (
-      //         <ExistingGenerations
-      //           chapterId={selectedChapter.id}
-      //           onContinueGeneration={handleContinueGeneration}
-      //           onWatchVideo={handleWatchVideo}
-      //           className="mb-6"
-      //         />
-      //       )}
-
-      //       {/* Video Status Display */}
-      //       {videoStatus !== "idle" &&
-      //         !videoUrls[selectedChapter?.id || ""] && (
-      //           <>
-      //             <div className="bg-gray-50 border rounded-lg p-4">
-      //               <div className="flex items-center gap-3">
-      //                 {videoStatus === "starting" && (
-      //                   <>
-      //                     <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-      //                     <span>Initializing video generation...</span>
-      //                   </>
-      //                 )}
-      //                 {videoStatus === "generating_audio" && (
-      //                   <>
-      //                     <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-      //                     <span>Step 1/5: Generating audio and voices...</span>
-      //                   </>
-      //                 )}
-      //                 {videoStatus === "generating_images" && (
-      //                   <>
-      //                     <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
-      //                     <span>Step 2/5: Creating character images...</span>
-      //                   </>
-      //                 )}
-      //                 {videoStatus === "generating_video" && (
-      //                   <>
-      //                     <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-      //                     <span>Step 3/5: Generating video scenes...</span>
-      //                   </>
-      //                 )}
-      //                 {videoStatus === "merging_audio" && (
-      //                   <>
-      //                     <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
-      //                     <span>Step 4/5: Merging audio and video...</span>
-      //                   </>
-      //                 )}
-      //                 {videoStatus === "applying_lipsync" && (
-      //                   <>
-      //                     <div className="w-4 h-4 border-2 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
-      //                     <span>Step 5/5: Applying lip sync...</span>
-      //                   </>
-      //                 )}
-      //                 {videoStatus === "failed" && (
-      //                   <>
-      //                     <div className="w-4 h-4 bg-red-500 rounded-full"></div>
-      //                     <span className="text-red-600">
-      //                       Generation failed. Please try again.
-      //                     </span>
-      //                   </>
-      //                 )}
-      //               </div>
-
-      //               {audioTaskId && (
-      //                 <div className="mt-2 text-xs text-gray-500">
-      //                   Tracking ID: {audioTaskId.substring(0, 8)}...
-      //                 </div>
-      //               )}
-
-      //               {pipelineStatus && (
-      //                 <div className="mt-3 pt-3 border-t border-gray-200">
-      //                   <button
-      //                     onClick={() =>
-      //                       setShowPipelineStatus(!showPipelineStatus)
-      //                     }
-      //                     className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-      //                   >
-      //                     {showPipelineStatus
-      //                       ? "Hide Detailed Status"
-      //                       : "Show Detailed Status"}
-      //                   </button>
-      //                 </div>
-      //               )}
-      //             </div>
-
-      //             {pipelineStatus && showPipelineStatus && (
-      //               <PipelineStatus
-      //                 pipelineStatus={pipelineStatus}
-      //                 isLoading={isLoading}
-      //                 onRefresh={handleRefreshStatus}
-      //                 onRetry={handleRetry}
-      //                 className="border-t-4 border-t-blue-500"
-      //               />
-      //             )}
-      //           </>
-      //         )}
-
-      //       {/* Generated Video Display */}
-      //       {selectedChapter && videoUrls[selectedChapter.id] && (
-      //         <div className="bg-white border rounded-lg p-6">
-      //           <div className="flex items-center justify-between mb-4">
-      //             <h4 className="text-lg font-semibold text-gray-900">
-      //               Generated Video
-      //             </h4>
-      //             <div className="flex items-center space-x-2">
-      //               <button
-      //                 onClick={() =>
-      //                   handleWatchVideo(videoUrls[selectedChapter.id])
-      //                 }
-      //                 className="flex items-center space-x-2 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-      //               >
-      //                 <Play className="w-3 h-3" />
-      //                 <span>Watch</span>
-      //               </button>
-      //               <a
-      //                 href={videoUrls[selectedChapter.id]}
-      //                 download
-      //                 className="flex items-center space-x-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
-      //               >
-      //                 <Download className="w-3 h-3" />
-      //                 <span>Download</span>
-      //               </a>
-      //             </div>
-      //           </div>
-      //           <video
-      //             src={videoUrls[selectedChapter.id]}
-      //             controls
-      //             className="w-full h-64 object-cover rounded-lg"
-      //           />
-      //         </div>
-      //       )}
-      //     </div>
-      //   );
 
       default:
         return <div>Tab content not implemented</div>;
     }
   };
+
+  // Check for valid id
+  if (!id) {
+    return <div className="p-8 text-center text-red-500">Invalid book id</div>;
+  }
 
   if (isLoading) {
     return (
@@ -1165,28 +901,38 @@ if (!selectedChapter) {
     );
   }
 
+  // DEBUG LOGGING
+  console.log("DEBUG selectedChapter", selectedChapter);
+  console.log("DEBUG videoStatus", videoStatus);
+  console.log("DEBUG book", book);
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center space-x-4">
-            <img
-              src={book.cover_image_url || ""}
-              alt={book.title}
-              className="w-16 h-20 object-cover rounded-lg shadow-md"
-            />
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold text-gray-900">{book.title}</h1>
-              <p className="text-gray-600">by {book.author_name}</p>
-              <div className="flex items-center space-x-2 mt-1">
-                <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
-                  Entertainment Production
-                </span>
-                <span className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
-                  {book.difficulty}
-                </span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <img
+                src={book.cover_image_url || ""}
+                alt={book.title}
+                className="w-16 h-20 object-cover rounded-lg shadow-md"
+              />
+              <div className="flex-1">
+                <h1 className="text-2xl font-bold text-gray-900">{book.title}</h1>
+                <p className="text-gray-600">by {book.author_name}</p>
+                <div className="flex items-center space-x-2 mt-1">
+                  <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
+                    Entertainment Production
+                  </span>
+                  <span className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
+                    {book.difficulty}
+                  </span>
+                </div>
               </div>
+            </div>
+            <div className="flex items-center space-x-3">
+              {/* Generate Video button moved to VideoProductionPanel */}
             </div>
           </div>
         </div>
@@ -1290,7 +1036,10 @@ if (!selectedChapter) {
                 return (
                   <button
                     key={chapter.id}
-                    onClick={() => setSelectedChapter(chapter)}
+                    onClick={() => {
+                      setSelectedChapter(chapter);
+                      selectChapter(chapter.id, { reason: 'user' });
+                    }}
                     className={`w-full text-left p-3 rounded-lg transition-colors mb-2 ${
                       selectedChapter?.id === chapter.id
                         ? "bg-blue-50 border-blue-200 border"
@@ -1390,647 +1139,3 @@ if (!selectedChapter) {
     </div>
   );
 }
-
-// if (isLoading) {
-//   return <div className="p-8 text-center">Loading...</div>;
-// }
-
-// if (!book) {
-//   return <div className="p-8 text-center text-red-500">Book not found.</div>;
-// }
-
-// const currentVideoUrl = selectedChapter
-//   ? videoUrls[selectedChapter.id]
-//   : null;
-
-// return (
-//   <div className="min-h-screen bg-gray-50">
-//     {/* Header */}
-//     <div className="bg-white shadow-sm border-b">
-//       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-//         <div className="flex items-center space-x-4">
-//           <img
-//             src={book.cover_image_url || ""}
-//             alt={book.title}
-//             className="w-16 h-20 object-cover rounded-lg shadow-md"
-//           />
-//           <div>
-//             <h1 className="text-2xl font-bold text-gray-900">{book.title}</h1>
-//             <p className="text-gray-600">by {book.author_name}</p>
-//             <div className="flex items-center space-x-2 mt-1">
-//               <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
-//                 Entertainment
-//               </span>
-//               <span className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
-//                 {book.difficulty}
-//               </span>
-//             </div>
-//           </div>
-//         </div>
-//       </div>
-//     </div>
-
-//     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-//       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-//         {/* Chapter List */}
-//         <div className="lg:col-span-1">
-//           <div className="bg-white rounded-lg shadow-sm border p-6">
-//             <h2 className="text-lg font-semibold text-gray-900 mb-4">
-//               Chapters ({book.total_chapters})
-//             </h2>
-//             <div className="space-y-2">
-//               {book.chapters?.map((chapter, index) => (
-//                 <button
-//                   key={chapter.id}
-//                   onClick={() => setSelectedChapter(chapter)}
-//                   className={`w-full text-left p-3 rounded-lg transition-colors ${
-//                     selectedChapter?.id === chapter.id
-//                       ? "bg-blue-50 border-blue-200 border"
-//                       : "hover:bg-gray-50"
-//                   }`}
-//                 >
-//                   <div className="flex items-center justify-between">
-//                     <div>
-//                       <p className="font-medium text-gray-900">
-//                         {chapter.title}
-//                       </p>
-//                       <p className="text-sm text-gray-500">
-//                         Chapter {index + 1}
-//                       </p>
-//                     </div>
-//                     {videoScenes[chapter.id] && (
-//                       <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-//                     )}
-//                   </div>
-//                 </button>
-//               ))}
-//             </div>
-//           </div>
-//         </div>
-
-//         {/* Main Content */}
-//         <div className="lg:col-span-2">
-//           <div className="bg-white rounded-lg shadow-sm border">
-//             {selectedChapter && (
-//               <div className="p-6">
-//                 <h2 className="text-xl font-bold text-gray-900 mb-4">
-//                   {selectedChapter.title}
-//                 </h2>
-//                 <div className="prose max-w-none text-gray-700 leading-relaxed">
-//                   {renderChapterContent()}
-//                 </div>
-//                 {/* Video Generation Controls */}
-//                 <div className="flex items-center gap-4 mt-6">
-//                   <div className="mb-4">
-//                     <label
-//                       htmlFor="script-style"
-//                       className="block text-sm font-medium text-gray-700 mb-1"
-//                     >
-//                       Script Style:
-//                     </label>
-//                     <select
-//                       id="script-style"
-//                       value={scriptStyle}
-//                       onChange={(e) => setScriptStyle(e.target.value)}
-//                       className="border rounded px-2 py-1"
-//                     >
-//                       <option value="cinematic_movie">
-//                         Cinematic Movie (character dialog)
-//                       </option>
-//                       <option value="cinematic_narration">
-//                         Cinematic Narration (voice-over)
-//                       </option>
-//                     </select>
-//                   </div>
-
-//                   <button
-//                     className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded mb-4"
-//                     onClick={handleGenerateScript}
-//                     disabled={loadingScript}
-//                   >
-//                     {loadingScript
-//                       ? "Generating..."
-//                       : "Generate Script & Scene"}
-//                   </button>
-
-//                   <div className="mb-4">
-//                     <label
-//                       htmlFor="script-style"
-//                       className="block text-sm font-medium text-gray-700 mb-1"
-//                     >
-//                       Video Style:
-//                     </label>
-//                     <select
-//                       className="border rounded-lg px-3 py-2 text-sm"
-//                       value={animationStyle}
-//                       onChange={(e) =>
-//                         setAnimationStyle(
-//                           e.target.value as
-//                             | "cartoon"
-//                             | "realistic"
-//                             | "cinematic"
-//                             | "fantasy"
-//                         )
-//                       }
-//                     >
-//                       <option value="cartoon">Cartoon Style</option>
-//                       <option value="realistic">Realistic Style</option>
-//                       <option value="cinematic">Cinematic Style</option>
-//                       <option value="fantasy">Fantasy Style</option>
-//                     </select>
-//                   </div>
-
-//                   <button
-//                     className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded mb-4"
-//                     onClick={handleGenerateVideo}
-//                   >
-//                     Generate Video
-//                   </button>
-//                 </div>
-//                 {/* Add the Generated Scripts Card to your JSX (place it after your script generation card) */}
-//                 {selectedChapter && (
-//                   <div className="bg-white p-6 rounded-lg shadow-md">
-//                     <h3 className="text-lg font-semibold mb-4 flex items-center">
-//                       <FileText className="mr-2" />
-//                       Generated Scripts
-//                     </h3>
-
-//                     {loadingScripts ? (
-//                       <div className="flex items-center justify-center py-4">
-//                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-//                         <span className="ml-2">Loading scripts...</span>
-//                       </div>
-//                     ) : generatedScripts.length === 0 ? (
-//                       <div className="text-gray-500 text-center py-4">
-//                         <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
-//                         <p>No scripts generated yet.</p>
-//                         <p className="text-sm">
-//                           Use "Generate Script & Scene" above to create your
-//                           first script.
-//                         </p>
-//                       </div>
-//                     ) : (
-//                       <div className="space-y-3">
-//                         {generatedScripts.map((script) => (
-//                           <div
-//                             key={script.id}
-//                             className={`border rounded-lg p-4 cursor-pointer transition-all hover:shadow-md ${
-//                               selectedScript?.id === script.id
-//                                 ? "border-blue-500 bg-blue-50"
-//                                 : "border-gray-200 hover:border-gray-300"
-//                             }`}
-//                             onClick={() => handleSelectScript(script)}
-//                           >
-//                             <div className="flex justify-between items-start mb-2">
-//                               <div>
-//                                 <h4 className="font-medium text-gray-900">
-//                                   {script.script_style === "cinematic_movie"
-//                                     ? "Character Dialog"
-//                                     : "Voice-over Narration"}
-//                                 </h4>
-//                                 <p className="text-sm text-gray-500">
-//                                   Created:{" "}
-//                                   {new Date(
-//                                     script.created_at
-//                                   ).toLocaleDateString()}
-//                                 </p>
-//                               </div>
-//                               {selectedScript?.id === script.id && (
-//                                 <span className="bg-blue-500 text-white text-xs px-2 py-1 rounded-full">
-//                                   Selected
-//                                 </span>
-//                               )}
-//                             </div>
-
-//                             <div className="grid grid-cols-3 gap-4 text-sm text-gray-600">
-//                               <div>
-//                                 <span className="font-medium">Scenes:</span>{" "}
-//                                 {script.scene_descriptions?.length || 0}
-//                               </div>
-//                               <div>
-//                                 <span className="font-medium">
-//                                   Characters:
-//                                 </span>{" "}
-//                                 {script.characters?.length || 0}
-//                               </div>
-//                               <div>
-//                                 <span className="font-medium">Length:</span>{" "}
-//                                 {script.script?.length || 0} chars
-//                               </div>
-//                             </div>
-
-//                             {script.script && (
-//                               <div className="mt-2">
-//                                 <p className="text-sm text-gray-700 line-clamp-2">
-//                                   {script.script.substring(0, 150)}...
-//                                 </p>
-//                               </div>
-//                             )}
-
-//                             {script.scene_descriptions && (
-//                               <div className="mt-2">
-//                                 <span className="text-xs font-medium text-gray-600">
-//                                   Scene Descriptions:
-//                                 </span>
-//                                 <div className="mt-1 space-y-1">
-//                                   {script.scene_descriptions
-//                                     .slice(0, 2)
-//                                     .map((scene: any, idx: number) => (
-//                                       <div
-//                                         key={idx}
-//                                         className="text-xs text-gray-600"
-//                                       >
-//                                         {typeof scene === "object" &&
-//                                         scene !== null
-//                                           ? `${
-//                                               scene.scene_number || idx + 1
-//                                             }. ${
-//                                               scene.location
-//                                             } - ${scene.key_actions?.substring(
-//                                               0,
-//                                               50
-//                                             )}...`
-//                                           : typeof scene === "string"
-//                                           ? `${idx + 1}. ${scene.substring(
-//                                               0,
-//                                               50
-//                                             )}...`
-//                                           : `Scene ${idx + 1}`}
-//                                       </div>
-//                                     ))}
-//                                   {script.scene_descriptions.length > 2 && (
-//                                     <div className="text-xs text-gray-500">
-//                                       +{script.scene_descriptions.length - 2}{" "}
-//                                       more scenes...
-//                                     </div>
-//                                   )}
-//                                 </div>
-//                               </div>
-//                             )}
-
-//                             <div className="mt-2 flex items-center justify-between">
-//                               <span
-//                                 className={`text-xs px-2 py-1 rounded-full ${
-//                                   script.status === "ready"
-//                                     ? "bg-green-100 text-green-800"
-//                                     : "bg-yellow-100 text-yellow-800"
-//                                 }`}
-//                               >
-//                                 {script.status}
-//                               </span>
-
-//                               <button
-//                                 onClick={(e) => {
-//                                   e.stopPropagation();
-//                                   // Preview script in modal or expand
-//                                   setSelectedScript(script);
-//                                 }}
-//                                 className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-//                               >
-//                                 View Details
-//                               </button>
-//                             </div>
-//                           </div>
-//                         ))}
-//                       </div>
-//                     )}
-
-//                     {generatedScripts.length > 0 && (
-//                       <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-//                         <p className="text-sm text-blue-800">
-//                           💡 <strong>Tip:</strong> Click on any script to
-//                           select it for video generation.
-//                           {selectedScript
-//                             ? ` Currently selected: ${selectedScript.script_style}`
-//                             : " No script selected yet."}
-//                         </p>
-//                       </div>
-//                     )}
-//                   </div>
-//                 )}
-//                 {selectedChapter && showExistingGenerations && (
-//                   <div className="mt-6">
-//                     <ExistingGenerations
-//                       chapterId={selectedChapter.id}
-//                       onContinueGeneration={handleContinueGeneration}
-//                       onWatchVideo={handleWatchVideo}
-//                       className="mb-6"
-//                     />
-//                   </div>
-//                 )}
-//                 {/* Generated Video Display */}
-//                 {currentVideoUrl && (
-//                   <div className="mt-6">
-//                     <div className="flex items-center justify-between mb-4">
-//                       <h3 className="text-lg font-semibold text-gray-900">
-//                         Generated Video
-//                       </h3>
-//                       {/* <button
-//                         onClick={handleDeleteVideo}
-//                         className="bg-red-500 text-white px-3 py-1 rounded text-sm hover:bg-red-600 transition-colors"
-//                       >
-//                         Delete Video
-//                       </button> */}
-//                     </div>
-
-//                     <video
-//                       src={currentVideoUrl}
-//                       controls
-//                       className="w-full h-64 object-cover rounded-lg"
-//                     />
-//                   </div>
-//                 )}
-//                 {/* Add Task Status Display after video generation controls */}
-//                 {audioTaskId && (
-//                   <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-//                     <h4 className="font-medium text-blue-900 mb-2">
-//                       Task Information
-//                     </h4>
-//                     <div className="text-sm space-y-1">
-//                       <div className="flex justify-between">
-//                         <span className="text-blue-700">Audio Task ID:</span>
-//                         <code className="text-blue-800 bg-blue-100 px-1 rounded">
-//                           {audioTaskId.substring(0, 12)}...
-//                         </code>
-//                       </div>
-//                       {taskStatus && (
-//                         <div className="flex justify-between">
-//                           <span className="text-blue-700">Task Status:</span>
-//                           <span className="text-blue-800 font-medium">
-//                             {taskStatus}
-//                           </span>
-//                         </div>
-//                       )}
-//                       <div className="flex justify-between">
-//                         <span className="text-blue-700">
-//                           Generation Status:
-//                         </span>
-//                         <span className="text-blue-800 font-medium capitalize">
-//                           {formatStatus(videoStatus)}
-//                         </span>
-//                         {/* <span className="text-blue-800 font-medium capitalize">
-//                           {videoStatus.replace("_", " ")}
-//                         </span> */}
-//                       </div>
-//                     </div>
-//                   </div>
-//                 )}
-//                 {/* Also add a video player modal for watching completed  videos: */}
-
-//                 {currentVideoToWatch && (
-//                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75">
-//                     <div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4">
-//                       <div className="flex justify-between items-center mb-4">
-//                         <h3 className="text-lg font-semibold">
-//                           Generated Video
-//                         </h3>
-//                         <button
-//                           onClick={() => setCurrentVideoToWatch(null)}
-//                           className="text-gray-500 hover:text-gray-700"
-//                         >
-//                           ✕
-//                         </button>
-//                       </div>
-//                       <video
-//                         src={currentVideoToWatch}
-//                         controls
-//                         className="w-full max-h-96 rounded"
-//                       />
-//                       <div className="mt-4 flex justify-end space-x-2">
-//                         <a
-//                           href={currentVideoToWatch}
-//                           download
-//                           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-//                         >
-//                           Download
-//                         </a>
-//                         <button
-//                           onClick={() => setCurrentVideoToWatch(null)}
-//                           className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-//                         >
-//                           Close
-//                         </button>
-//                       </div>
-//                     </div>
-//                   </div>
-//                 )}
-//                 {/* Enhanced Video Status Display - replace your existing video status display */}
-//                 {videoStatus !== "idle" && !currentVideoUrl && (
-//                   <>
-//                     {/* Basic Status Display */}
-//                     <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
-//                       <div className="flex items-center gap-3">
-//                         {videoStatus === "starting" && (
-//                           <>
-//                             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-//                             <span>Initializing video generation...</span>
-//                           </>
-//                         )}
-//                         {videoStatus === "generating_audio" && (
-//                           <>
-//                             <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-//                             <span>
-//                               Step 1/5: Generating audio and voices...
-//                             </span>
-//                           </>
-//                         )}
-//                         {videoStatus === "generating_images" && (
-//                           <>
-//                             <div className="w-4 h-4 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
-//                             <span>
-//                               Step 2/5: Creating character images...
-//                             </span>
-//                           </>
-//                         )}
-//                         {videoStatus === "generating_video" && (
-//                           <>
-//                             <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-//                             <span>Step 3/5: Generating video scenes...</span>
-//                           </>
-//                         )}
-//                         {videoStatus === "merging_audio" && (
-//                           <>
-//                             <div className="w-4 h-4 border-2 border-orange-600 border-t-transparent rounded-full animate-spin"></div>
-//                             <span>Step 4/5: Merging audio and video...</span>
-//                           </>
-//                         )}
-//                         {videoStatus === "applying_lipsync" && (
-//                           <>
-//                             <div className="w-4 h-4 border-2 border-pink-600 border-t-transparent rounded-full animate-spin"></div>
-//                             <span>Step 5/5: Applying lip sync...</span>
-//                           </>
-//                         )}
-//                         {videoStatus === "failed" && (
-//                           <>
-//                             <div className="w-4 h-4 bg-red-500 rounded-full"></div>
-//                             <span className="text-red-600">
-//                               Generation failed. Please try again.
-//                             </span>
-//                           </>
-//                         )}
-//                       </div>
-
-//                       {audioTaskId && (
-//                         <div className="mt-2 text-xs text-gray-500">
-//                           Tracking ID: {audioTaskId.substring(0, 8)}...
-//                         </div>
-//                       )}
-
-//                       {/* Toggle for detailed pipeline view */}
-//                       {pipelineStatus && (
-//                         <div className="mt-3 pt-3 border-t border-gray-200">
-//                           <button
-//                             onClick={() =>
-//                               setShowPipelineStatus(!showPipelineStatus)
-//                             }
-//                             className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-//                           >
-//                             {showPipelineStatus
-//                               ? "Hide Detailed Status"
-//                               : "Show Detailed Status"}
-//                           </button>
-//                         </div>
-//                       )}
-//                     </div>
-
-//                     {/* Detailed Pipeline Status */}
-//                     {pipelineStatus && showPipelineStatus && (
-//                       <div className="mt-4">
-//                         <PipelineStatus
-//                           pipelineStatus={pipelineStatus}
-//                           isLoading={isLoading}
-//                           onRefresh={handleRefreshStatus}
-//                           onRetry={handleRetry}
-//                           className="border-t-4 border-t-blue-500"
-//                         />
-//                       </div>
-//                     )}
-//                   </>
-//                 )}
-
-//                 {/* Scene Descriptions Display - FIXED VERSION */}
-//                 {aiScriptResults[selectedChapter.id] && (
-//                   <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
-//                     <h4 className="font-semibold text-gray-800 mb-2">
-//                       AI-Generated Script
-//                     </h4>
-//                     <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-white p-2 rounded border mb-4 overflow-x-auto">
-//                       {aiScriptResults[selectedChapter.id].script ||
-//                         "No script available."}
-//                     </pre>
-
-//                     <h4 className="font-semibold text-gray-800 mb-2">
-//                       Scene Descriptions
-//                     </h4>
-
-//                     {/* ✅ FIXED: Properly handle scene descriptions objects */}
-//                     {aiScriptResults[selectedChapter.id].scene_descriptions &&
-//                     aiScriptResults[selectedChapter.id].scene_descriptions
-//                       .length > 0 ? (
-//                       <div className="space-y-3">
-//                         {aiScriptResults[
-//                           selectedChapter.id
-//                         ].scene_descriptions.map((scene, idx) => {
-//                           // ✅ Handle both object and string formats
-//                           if (typeof scene === "object" && scene !== null) {
-//                             return (
-//                               <div
-//                                 key={idx}
-//                                 className="bg-white p-3 rounded border"
-//                               >
-//                                 <div className="flex justify-between items-start mb-2">
-//                                   <h5 className="font-medium text-gray-900">
-//                                     Scene {scene.scene_number || idx + 1}:{" "}
-//                                     {scene.location}
-//                                   </h5>
-//                                   <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-//                                     {scene.time_of_day}
-//                                   </span>
-//                                 </div>
-
-//                                 <p className="text-sm text-gray-700 mb-2">
-//                                   {scene.visual_description}
-//                                 </p>
-
-//                                 <div className="text-xs text-gray-600 mb-1">
-//                                   <strong>Key Actions:</strong>{" "}
-//                                   {scene.key_actions}
-//                                 </div>
-
-//                                 {scene.characters &&
-//                                   scene.characters.length > 0 && (
-//                                     <div className="text-xs text-gray-600 mb-1">
-//                                       <strong>Characters:</strong>{" "}
-//                                       {scene.characters.join(", ")}
-//                                     </div>
-//                                   )}
-
-//                                 {scene.estimated_duration && (
-//                                   <div className="text-xs text-gray-600">
-//                                     <strong>Duration:</strong> ~
-//                                     {scene.estimated_duration}s
-//                                   </div>
-//                                 )}
-//                               </div>
-//                             );
-//                           } else {
-//                             // ✅ Handle legacy string format
-//                             return (
-//                               <li key={idx} className="mb-1 text-gray-700">
-//                                 {typeof scene === "string"
-//                                   ? scene
-//                                   : JSON.stringify(scene)}
-//                               </li>
-//                             );
-//                           }
-//                         })}
-//                       </div>
-//                     ) : (
-//                       <p className="text-gray-600">
-//                         No scene descriptions available.
-//                       </p>
-//                     )}
-//                   </div>
-//                 )}
-
-//                 {/* AI Script & Scene Descriptions Display (separate from video) */}
-//                 {/* {selectedChapter && aiScriptResults[selectedChapter.id] && (
-//                   <div className="mt-6 p-4 bg-gray-50 border rounded-lg">
-//                     <h4 className="font-semibold text-gray-800 mb-2">
-//                       AI-Generated Script
-//                     </h4>
-//                     <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-white p-2 rounded border mb-4 overflow-x-auto">
-//                       {aiScriptResults[selectedChapter.id].script ||
-//                         "No script available."}
-//                     </pre>
-//                     <h4 className="font-semibold text-gray-800 mb-2">
-//                       Scene Descriptions
-//                     </h4>
-//                     {aiScriptResults[selectedChapter.id].scene_descriptions &&
-//                     aiScriptResults[selectedChapter.id].scene_descriptions
-//                       .length > 0 ? (
-//                       <ul className="list-decimal list-inside text-gray-700">
-//                         {aiScriptResults[
-//                           selectedChapter.id
-//                         ].scene_descriptions.map((desc, idx) => (
-//                           <li key={idx} className="mb-1">
-//                             {desc}
-//                           </li>
-//                         ))}
-//                       </ul>
-//                     ) : (
-//                       <p className="text-gray-600">
-//                         No scene descriptions available.
-//                       </p>
-//                     )}
-//                   </div>
-//                 )} */}
-//               </div>
-//             )}
-//           </div>
-//         </div>
-//       </div>
-//     </div>
-//   </div>
-// );
-// }

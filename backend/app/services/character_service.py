@@ -47,7 +47,9 @@ class ArchetypeAnalysisError(CharacterServiceError):
 class CharacterService:
     """
     Core character management service that handles character archetype analysis,
-    image generation, and character data management for the plot generation system.
+    image generation, character data management for the plot generation system,
+    and non-fiction persona generation for Phase 1B readiness.
+    Adds support for linking characters to scripts, managing image URLs, retrieving all book characters, and handling character-to-voice mappings.
     """
 
     def __init__(self, supabase_client=None):
@@ -58,6 +60,100 @@ class CharacterService:
 
         # Default archetypes for initial setup
         self._default_archetypes = self._get_default_archetypes()
+
+    async def generate_non_fiction_personas(
+        self,
+        content: str,
+        genre: str = "educational",
+        num_personas: int = 5,
+        user_tier: str = "free"
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate fictional personas based on non-fiction content.
+        Returns structured persona data with appropriate archetypes.
+        """
+        try:
+            logger.info("[CharacterService] Starting fictional persona generation for non-fiction content")
+            # Define fictional archetypes for non-fiction adaptation
+            fictional_archetypes = [
+                {
+                    "name": "Protagonist",
+                    "description": "The central character driving the story forward",
+                    "category": "Fiction",
+                    "traits": {"leadership": 0.9, "determination": 0.8, "charisma": 0.7},
+                    "typical_roles": ["hero", "main character"],
+                    "is_active": True
+                },
+                {
+                    "name": "Mentor",
+                    "description": "A wise figure offering guidance and support",
+                    "category": "Fiction",
+                    "traits": {"wisdom": 0.9, "guidance": 0.8, "experience": 0.7},
+                    "typical_roles": ["teacher", "guide"],
+                    "is_active": True
+                },
+                {
+                    "name": "Antagonist",
+                    "description": "The opposing force creating conflict in the story",
+                    "category": "Fiction",
+                    "traits": {"ambition": 0.9, "opposition": 0.8, "power": 0.7},
+                    "typical_roles": ["villain", "rival"],
+                    "is_active": True
+                },
+                {
+                    "name": "Sidekick",
+                    "description": "A loyal companion supporting the protagonist",
+                    "category": "Fiction",
+                    "traits": {"loyalty": 0.9, "support": 0.8, "friendship": 0.7},
+                    "typical_roles": ["companion", "ally"],
+                    "is_active": True
+                },
+                {
+                    "name": "Comic Relief",
+                    "description": "Provides humor and lightens the mood",
+                    "category": "Fiction",
+                    "traits": {"humor": 0.9, "wit": 0.8, "charm": 0.7},
+                    "typical_roles": ["jester", "funny friend"],
+                    "is_active": True
+                }
+            ]
+            # Compose AI prompt for fictional persona analysis
+            prompt = f"""
+            Analyze the following non-fiction content and generate {num_personas} fictional personas suitable for the genre '{genre}'.
+            Each persona should be one of: Protagonist, Mentor, Antagonist, Sidekick, Comic Relief.
+            For each persona, provide:
+            - Persona type (from the list above)
+            - Name (invented)
+            - Brief description
+            - Key traits
+            - Archetype match (from the fictional archetypes)
+            Return a JSON array of persona objects.
+            Content:
+            {content}
+            """
+            # Use OpenRouterService for AI analysis
+            response = await self.openrouter.analyze_content(
+                content=prompt,
+                user_tier=getattr(ModelTier, user_tier.upper(), ModelTier.FREE),
+                analysis_type="characters"
+            )
+            if response["status"] == "success":
+                try:
+                    personas = json.loads(response["result"])
+                    # Attach archetype details to each persona
+                    for persona in personas:
+                        match = next((a for a in fictional_archetypes if a["name"].lower() == persona.get("persona_type", "").lower()), None)
+                        persona["archetype"] = match if match else {}
+                    return personas
+                except Exception as e:
+                    logger.warning(f"[CharacterService] AI response not valid JSON for fictional personas: {str(e)}")
+                    return []
+            else:
+                logger.warning(f"[CharacterService] Fictional persona generation failed: {response.get('error')}")
+                return []
+        except Exception as e:
+            logger.error(f"[CharacterService] Error generating fictional personas: {str(e)}")
+            return []
 
     async def analyze_character_archetypes(
         self,
@@ -275,6 +371,89 @@ class CharacterService:
         except Exception as e:
             logger.error(f"[CharacterService] Error retrieving characters for plot {plot_overview_id}: {str(e)}")
             return []
+
+    async def link_characters_to_script(self, script_id: str, character_ids: List[str], user_id: str) -> bool:
+        """
+        Link characters to a script using the character_ids column in the scripts table.
+        """
+        try:
+            # Validate all character IDs belong to the user
+            for char_id in character_ids:
+                char = await self.get_character_by_id(char_id, user_id)
+                if not char:
+                    raise CharacterNotFoundError(f"Character {char_id} not found or access denied")
+
+            # Update the script record
+            update_data = {
+                "character_ids": character_ids,
+                "updated_at": datetime.now().isoformat()
+            }
+            result = self.db.table('scripts').update(update_data).eq('id', script_id).execute()
+            return bool(result.data)
+        except Exception as e:
+            logger.error(f"[CharacterService] Error linking characters to script {script_id}: {str(e)}")
+            return False
+
+    async def update_character_image_url(self, character_id: str, image_url: str, user_id: str) -> bool:
+        """
+        Update the image URL for a character.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+            update_data = {
+                "image_url": image_url,
+                "updated_at": datetime.now().isoformat()
+            }
+            result = self.db.table('characters').update(update_data).eq('id', character_id).execute()
+            return bool(result.data)
+        except Exception as e:
+            logger.error(f"[CharacterService] Error updating image URL for character {character_id}: {str(e)}")
+            return False
+
+    async def get_all_characters_for_book(self, book_id: str, user_id: str) -> List[CharacterResponse]:
+        """
+        Retrieve all characters for a given book.
+        """
+        try:
+            # Validate user has access to the book
+            book_result = self.db.table('books').select('user_id').eq('id', book_id).single().execute()
+            if not book_result.data or book_result.data['user_id'] != user_id:
+                raise PermissionDeniedError("Access denied to book")
+            result = self.db.table('characters').select('*').eq('book_id', book_id).execute()
+            return [CharacterResponse(**char_data) for char_data in result.data or []]
+        except Exception as e:
+            logger.error(f"[CharacterService] Error retrieving all characters for book {book_id}: {str(e)}")
+            return []
+
+    async def set_character_voice_mapping(self, character_id: str, voice_id: str, user_id: str) -> bool:
+        """
+        Set the voice mapping for a character.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+            update_data = {
+                "voice_id": voice_id,
+                "updated_at": datetime.now().isoformat()
+            }
+            result = self.db.table('characters').update(update_data).eq('id', character_id).execute()
+            return bool(result.data)
+        except Exception as e:
+            logger.error(f"[CharacterService] Error setting voice mapping for character {character_id}: {str(e)}")
+            return False
+
+    async def get_character_voice_mapping(self, character_id: str, user_id: str) -> Optional[str]:
+        """
+        Get the voice mapping for a character.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+            result = self.db.table('characters').select('voice_id').eq('id', character_id).single().execute()
+            if result.data:
+                return result.data.get("voice_id")
+            return None
+        except Exception as e:
+            logger.error(f"[CharacterService] Error retrieving voice mapping for character {character_id}: {str(e)}")
+            return None
 
     async def delete_character(self, character_id: str, user_id: str) -> bool:
         """
@@ -498,9 +677,51 @@ Return a JSON array of matches sorted by confidence:
 
     def _get_default_archetypes(self) -> List[Dict[str, Any]]:
         """
-        Get the default set of Jungian archetypes.
+        Get the default set of Jungian and non-fiction archetypes.
         """
         return [
+            # Non-fiction archetypes for Phase 1B
+            {
+                "name": "Narrator",
+                "description": "Explains concepts and guides the audience",
+                "category": "NonFiction",
+                "traits": {"clarity": 0.9, "guidance": 0.8, "engagement": 0.7},
+                "typical_roles": ["narrator", "guide"],
+                "is_active": True
+            },
+            {
+                "name": "Expert",
+                "description": "Provides authoritative insights and analysis",
+                "category": "NonFiction",
+                "traits": {"authority": 0.9, "insight": 0.8, "analysis": 0.7},
+                "typical_roles": ["expert", "analyst"],
+                "is_active": True
+            },
+            {
+                "name": "Interviewer",
+                "description": "Asks questions and facilitates discussion",
+                "category": "NonFiction",
+                "traits": {"curiosity": 0.9, "facilitation": 0.8, "communication": 0.7},
+                "typical_roles": ["interviewer", "host"],
+                "is_active": True
+            },
+            {
+                "name": "Subject Matter Expert",
+                "description": "Specialized knowledge in specific topics",
+                "category": "NonFiction",
+                "traits": {"expertise": 0.9, "depth": 0.8, "specialization": 0.7},
+                "typical_roles": ["specialist", "consultant"],
+                "is_active": True
+            },
+            {
+                "name": "Historical Figure",
+                "description": "Represents real people from the content",
+                "category": "NonFiction",
+                "traits": {"authenticity": 0.9, "historical": 0.8, "representation": 0.7},
+                "typical_roles": ["historical figure", "real person"],
+                "is_active": True
+            },
+            # Fiction archetypes (existing)
             {
                 "name": "The Hero",
                 "description": "The brave protagonist who embarks on a journey of growth and transformation",

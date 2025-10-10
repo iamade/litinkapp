@@ -17,6 +17,37 @@ export type {
   StartVideoGenerationResponse,
 } from "../lib/videoGenerationApi";
 
+// Discriminated union for video job status with safe defaults
+export type VideoJobStatus =
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'canceled'
+  | 'retrying'
+  | 'unknown';
+
+// Safe mapper for status labels with default fallback
+export const getStatusLabel = (status: VideoJobStatus | string | null | undefined): string => {
+  switch (status) {
+    case 'queued':
+      return 'Queued';
+    case 'processing':
+      return 'Processing';
+    case 'completed':
+      return 'Completed';
+    case 'failed':
+      return 'Failed';
+    case 'canceled':
+      return 'Canceled';
+    case 'retrying':
+      return 'Retrying';
+    case 'unknown':
+    default:
+      return 'Unknown';
+  }
+};
+
 // Additional frontend-specific types
 export interface StepProgressInfo {
   step: number;

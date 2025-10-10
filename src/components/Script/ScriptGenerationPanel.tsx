@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Play, Edit2, Save, X, Plus, Trash2, Clock, Users, Camera, Mic, ChevronDown, ChevronRight } from 'lucide-react';
-import { toast } from 'react-hot-toast';
+import { FileText, Edit2, Trash2, Clock, Camera, ChevronDown, ChevronRight } from 'lucide-react';
+import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
 interface SceneDescription {
   scene_number: number;
@@ -13,14 +13,6 @@ interface SceneDescription {
   audio_requirements: string;
 }
 
-interface AIScriptResult {
-  script: string;
-  scene_descriptions: (string | SceneDescription)[];
-  characters: string[];
-  character_details: string;
-  script_style: string;
-  script_id?: string;
-}
 
 interface ChapterScript {
   id: string;
@@ -36,6 +28,7 @@ interface ChapterScript {
   scenes: Scene[];
   created_at: string;
   status: 'draft' | 'ready' | 'approved';
+  scriptStoryType?: string; // Added property for story type
 }
 
 interface Act {
@@ -75,11 +68,9 @@ interface ScriptGenerationPanelProps {
   chapterTitle: string;
   chapterContent: string;
   generatedScripts: ChapterScript[];
-  selectedScript: ChapterScript | null;
   isLoading: boolean;
   isGeneratingScript: boolean;
   onGenerateScript: (scriptStyle: string, options: ScriptGenerationOptions) => void;
-  onSelectScript: (script: ChapterScript) => void;
   onUpdateScript: (scriptId: string, updates: Partial<ChapterScript>) => void;
   onDeleteScript: (scriptId: string) => void;
 }
@@ -89,21 +80,41 @@ interface ScriptGenerationOptions {
   targetDuration?: number | "auto";
   sceneCount?: number;
   focusAreas: string[];
+  scriptStoryType?: string; // Added property for script story type
 }
 
 const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
-  chapterId,
   chapterTitle,
   chapterContent,
   generatedScripts,
-  selectedScript,
   isLoading,
   isGeneratingScript,
   onGenerateScript,
-  onSelectScript,
   onUpdateScript,
   onDeleteScript
 }) => {
+  const {
+    selectedScriptId,
+    isSwitching,
+    selectScript,
+  } = useScriptSelection();
+
+  // Derive selected script from context
+  const selectedScript = generatedScripts.find(script => script.id === selectedScriptId) || null;
+
+  // Initialize selection when scripts load and none is selected
+  useEffect(() => {
+    if (!selectedScriptId && generatedScripts && generatedScripts.length > 0) {
+      selectScript(generatedScripts[0].id, { reason: 'load' });
+    }
+  }, [selectedScriptId, generatedScripts?.length]);
+
+  // Handle script selection
+  const onChooseScript = (id: string) => {
+    if (id !== selectedScriptId) {
+      selectScript(id, { reason: 'user' });
+    }
+  };
   const [scriptStyle, setScriptStyle] = useState<'cinematic_movie' | 'cinematic_narration'>('cinematic_movie');
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [generationOptions, setGenerationOptions] = useState<ScriptGenerationOptions>({
@@ -114,11 +125,18 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   });
   const [activeView, setActiveView] = useState<'overview' | 'acts' | 'scenes' | 'dialogue'>('overview');
   const [expandedScenes, setExpandedScenes] = useState<Set<number>>(new Set());
-  const [editMode, setEditMode] = useState(false);
   const [showFullScript, setShowFullScript] = useState(false);
 
   const handleGenerateScript = () => {
-    onGenerateScript(scriptStyle, generationOptions);
+    console.log('[DEBUG] ScriptGenerationPanel - handleGenerateScript called with:', {
+      scriptStyle,
+      generationOptions,
+      scriptStoryType: generationOptions.scriptStoryType || "default"
+    });
+    onGenerateScript(scriptStyle, {
+      ...generationOptions,
+      scriptStoryType: generationOptions.scriptStoryType || "default"
+    });
   };
 
   const toggleSceneExpansion = (sceneNumber: number) => {
@@ -133,18 +151,18 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     });
   };
 
-  const renderChapterContent = () => {
+  const ChapterContent: React.FC<{ content: string }> = ({ content }) => {
     const maxChars = 500;
     const [showFull, setShowFull] = useState(false);
     
-    if (chapterContent.length <= maxChars) {
-      return <p className="text-gray-700 leading-relaxed">{chapterContent}</p>;
+    if (content.length <= maxChars) {
+      return <p className="text-gray-700 leading-relaxed">{content}</p>;
     }
 
     return (
       <div>
         <p className="text-gray-700 leading-relaxed">
-          {showFull ? chapterContent : `${chapterContent.substring(0, maxChars)}...`}
+          {showFull ? content : `${content.substring(0, maxChars)}...`}
         </p>
         <button
           onClick={() => setShowFull(!showFull)}
@@ -186,6 +204,21 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               ? 'Interactive dialogue between characters' 
               : 'Narrative voice-over storytelling'}
           </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Script Story Type</label>
+          <input
+            type="text"
+            value={generationOptions.scriptStoryType || ""}
+            onChange={(e) => setGenerationOptions(prev => ({
+              ...prev,
+              scriptStoryType: e.target.value
+            }))}
+            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="Enter story type"
+          />
+          
+
         </div>
 
         <div>
@@ -319,8 +352,9 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
             <ScriptCard
               key={script.id}
               script={script}
-              isSelected={selectedScript?.id === script.id}
-              onSelect={() => onSelectScript(script)}
+              isSelected={selectedScriptId === script.id}
+              isSwitching={isSwitching}
+              onSelect={() => onChooseScript(script.id)}
               onUpdate={(updates) => onUpdateScript(script.id, updates)}
               onDelete={() => onDeleteScript(script.id)}
             />
@@ -350,7 +384,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                 {selectedScript.script_name || (selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script')}
               </h3>
               <p className="text-gray-600">
-                {selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script'} • {chapterTitle} • {selectedScript.scenes?.length || 0} scenes •
+                {selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script'} • Story Type: {selectedScript.scriptStoryType || 'N/A'} • {chapterTitle} • {selectedScript.scenes?.length || 0} scenes •
                 {selectedScript.characters?.length || 0} characters
               </p>
             </div>
@@ -513,13 +547,6 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                   scene={scene}
                   isExpanded={expandedScenes.has(scene.scene_number)}
                   onToggleExpand={() => toggleSceneExpansion(scene.scene_number)}
-                  onUpdate={(updatedScene) => {
-                    // Update scene in script
-                    const updatedScenes = [...script.scene_descriptions];
-                    updatedScenes[idx] = updatedScene;
-                    onUpdateScript(script.id, { scene_descriptions: updatedScenes });
-                  }}
-                  editMode={editMode}
                 />
               );
             } else {
@@ -576,7 +603,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       <div className="bg-white rounded-lg border p-6">
         <h4 className="text-lg font-semibold text-gray-900 mb-4">{chapterTitle}</h4>
         <div className="prose max-w-none text-gray-700">
-          {renderChapterContent()}
+          <ChapterContent content={chapterContent} />
         </div>
       </div>
 
@@ -596,21 +623,22 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 interface ScriptCardProps {
   script: ChapterScript;
   isSelected: boolean;
+  isSwitching: boolean;
   onSelect: () => void;
   onUpdate: (updates: Partial<ChapterScript>) => void;
   onDelete: () => void;
 }
 
-const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, onSelect, onUpdate, onDelete }) => {
+const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching, onSelect, onDelete }) => {
   const [showActions, setShowActions] = useState(false);
 
   return (
     <div
-      className={`border rounded-lg p-4 cursor-pointer transition-all hover:shadow-md ${
+      className={`border rounded-lg p-4 transition-all hover:shadow-md ${
         isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
-      }`}
-      onClick={onSelect}
-      onMouseEnter={() => setShowActions(true)}
+      } ${isSwitching ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+      onClick={!isSwitching ? onSelect : undefined}
+      onMouseEnter={() => !isSwitching && setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
       <div className="flex justify-between items-start mb-3">
@@ -619,7 +647,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, onSelect, o
             {script.script_name || (script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration')}
           </h4>
           <p className="text-sm text-gray-500">
-            {script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Created: {new Date(script.created_at).toLocaleDateString()}
+            {script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Story Type: {script.scriptStoryType || 'N/A'} • Created: {new Date(script.created_at).toLocaleDateString()}
           </p>
         </div>
         <div className="flex items-center space-x-2">
@@ -689,9 +717,12 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, onSelect, o
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onSelect();
+            if (!isSwitching) onSelect();
           }}
-          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+          className={`text-blue-600 hover:text-blue-800 text-sm font-medium ${
+            isSwitching ? 'cursor-not-allowed opacity-50' : ''
+          }`}
+          disabled={isSwitching}
         >
           View Details →
         </button>
@@ -705,16 +736,12 @@ interface SceneDetailCardProps {
   scene: SceneDescription;
   isExpanded: boolean;
   onToggleExpand: () => void;
-  onUpdate: (scene: SceneDescription) => void;
-  editMode: boolean;
 }
 
 const SceneDetailCard: React.FC<SceneDetailCardProps> = ({
   scene,
   isExpanded,
   onToggleExpand,
-  onUpdate,
-  editMode
 }) => {
   return (
     <div className="border rounded-lg p-4">

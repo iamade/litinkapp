@@ -19,6 +19,7 @@ class VideoGenerationStatus(str, Enum):
     RETRYING = "retrying"
 
 class VideoQualityTier(str, Enum):
+    FREE = "free"
     BASIC = "basic"
     STANDARD = "standard"
     STANDARD_2 = "standard_2"
@@ -33,7 +34,7 @@ class AudioType(str, Enum):
 
 class VideoGenerationRequest(BaseModel):
     chapter_id: str
-    quality_tier: VideoQualityTier = VideoQualityTier.BASIC
+    quality_tier: VideoQualityTier = VideoQualityTier.FREE
     video_style: str = "realistic"
 
 class VideoGenerationResponse(BaseModel):

@@ -195,7 +195,7 @@ def generate_all_images_for_video(self, video_generation_id: str):
             'image_data': image_data,
             'generation_status': 'images_completed'
         }).eq('id', video_generation_id).execute()
-        
+
         # Mark step as completed
         pipeline_manager.mark_step_completed(
             video_generation_id, 
@@ -214,21 +214,15 @@ def generate_all_images_for_video(self, video_generation_id: str):
         print(f"- Scene images generated: {successful_scene_images}/{len(scene_descriptions)}")
         print(f"- Success rate: {success_rate:.1f}%")
         
-        # Only proceed to next step if we have some successful images
-        if total_images > 0:
-            print(f"[PIPELINE] Starting video generation after image completion")
-            from app.tasks.video_tasks import generate_all_videos_for_generation
-            generate_all_videos_for_generation.delay(video_generation_id)
-        else:
-            raise Exception("Cannot proceed to video generation - no images were created")
-        
+        # For split workflow, video generation starts independently
+        # Image generation completion doesn't trigger video generation anymore
+
         return {
             'status': 'success',
-            'message': success_message + " - Starting video generation...",
+            'message': success_message,
             'statistics': image_data['statistics'],
             'character_images': character_images,
-            'scene_images': scene_images,
-            'next_step': 'video_generation'
+            'scene_images': scene_images
         }
         
     except Exception as e:

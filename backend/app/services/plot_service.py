@@ -35,7 +35,65 @@ class PlotService:
     """
     Core plot generation service that orchestrates AI-powered plot overview generation,
     character creation with archetype analysis, and integration with existing services.
+    Includes AI-based genre detection for Phase 1B non-fiction support.
     """
+
+    async def _detect_genre_from_content(
+        self,
+        book_context: Dict[str, Any],
+        model_tier: ModelTier
+    ) -> Dict[str, Any]:
+        """
+        AI-based genre detection using OpenRouterService.
+        Returns: dict with 'genre', 'confidence', 'raw_result', 'method'
+        """
+        try:
+            chapters_summary = book_context.get("chapters_summary", "")
+            book_info = book_context.get("book", {})
+            # Compose content for genre analysis
+            content = f"Title: {book_info.get('title', '')}\nDescription: {book_info.get('description', '')}\n{chapters_summary[:3000]}"
+            response = await self.openrouter.analyze_content(
+                content=content,
+                user_tier=model_tier,
+                analysis_type="genre"
+            )
+            if response.get("status") != "success":
+                logger.warning(f"[PlotService] Genre detection failed: {response.get('error')}")
+                return {
+                    "genre": book_info.get("book_type", "fiction"),
+                    "confidence": 0.0,
+                    "raw_result": response.get("error", ""),
+                    "method": "fallback"
+                }
+            result_text = response.get("result", "")
+            # Simple parsing: look for 'fiction' or 'non-fiction' keywords
+            import re
+            genre_match = re.search(r"(fiction|non[-\s]?fiction)", result_text, re.IGNORECASE)
+            genre = genre_match.group(1).lower() if genre_match else "unknown"
+            # Confidence scoring: crude heuristic based on keyword presence
+            confidence = 0.9 if genre in ["fiction", "non-fiction", "nonfiction"] else 0.5
+            # Normalize genre
+            if genre in ["non-fiction", "nonfiction", "non fiction"]:
+                genre = "non-fiction"
+            elif genre == "fiction":
+                genre = "fiction"
+            else:
+                genre = book_info.get("book_type", "fiction")
+                confidence = 0.3
+            return {
+                "genre": genre,
+                "confidence": confidence,
+                "raw_result": result_text,
+                "method": "ai"
+            }
+        except Exception as e:
+            logger.error(f"[PlotService] Error in genre detection: {str(e)}")
+            return {
+                "genre": book_context.get("book", {}).get("book_type", "fiction"),
+                "confidence": 0.0,
+                "raw_result": str(e),
+                "method": "error"
+            }
 
     def __init__(self, supabase_client=None):
         self.db = supabase_client or get_supabase()
@@ -84,9 +142,18 @@ class PlotService:
             )
             logger.info(f"[PlotService] Characters generated: {len(characters_data)} characters")
 
+            # Data consistency: Remove duplicate character names before storing
+            seen_names = set()
+            unique_characters = []
+            for char in characters_data:
+                name = char.get("name", "")
+                if name and name not in seen_names:
+                    unique_characters.append(char)
+                    seen_names.add(name)
+
             # 6. Store plot overview and characters in database
             stored_data = await self._store_plot_overview(
-                plot_data, characters_data, user_id, book_id, book_context
+                plot_data, unique_characters, user_id, book_id, book_context
             )
 
             # 7. Record usage for billing
@@ -97,7 +164,7 @@ class PlotService:
                 metadata={
                     "book_id": book_id,
                     "model_used": plot_data.get("model_used"),
-                    "characters_generated": len(characters_data)
+                    "characters_generated": len(unique_characters)
                 }
             )
 
@@ -121,6 +188,7 @@ class PlotService:
     async def _get_book_context_for_plot(self, book_id: str) -> Dict[str, Any]:
         """
         RAG integration for book analysis to provide context for plot generation.
+        Enhanced: Adds AI-based genre detection if book_type is missing.
         """
         try:
             # Get basic book information
@@ -144,19 +212,30 @@ class PlotService:
                 content_preview = chapter['content'][:500] if chapter['content'] else ""
                 context_parts.append(f"Chapter {chapter['chapter_number']}: {chapter['title']}\n{content_preview}")
 
-            return {
+            book_context = {
                 "book": {
                     "id": book["id"],
                     "title": book["title"],
                     "author": book.get("author", ""),
                     "genre": book.get("genre", ""),
                     "description": book.get("description", ""),
-                    "book_type": book.get("book_type", "fiction")
+                    "book_type": book.get("book_type", None)  # Allow missing book_type
                 },
                 "chapters_summary": "\n\n".join(context_parts),
                 "total_chapters": len(chapters),
                 "context_length": sum(len(part) for part in context_parts)
             }
+
+            # If book_type is missing, use AI genre detection
+            if not book_context["book"].get("book_type"):
+                # Use standard model tier for detection
+                model_tier = ModelTier.STANDARD
+                genre_result = await self._detect_genre_from_content(book_context, model_tier)
+                detected_genre = genre_result.get("genre", "fiction")
+                book_context["book"]["book_type"] = detected_genre
+                book_context["genre_detection"] = genre_result
+
+            return book_context
 
         except Exception as e:
             logger.error(f"[PlotService] Error getting book context: {str(e)}")
@@ -349,10 +428,39 @@ Return ONLY a valid JSON object with these exact keys:
     ) -> List[Dict[str, Any]]:
         """
         Generate characters with archetype analysis using AI.
+        Uses detected genre for persona generation and supports non-fiction.
         """
         try:
-            # Prepare character generation prompt
+            # Use genre detection if available
+            genre = book_context.get("book", {}).get("book_type", "fiction").lower()
+            genre_detection = book_context.get("genre_detection", {})
+            # Extract named characters from book context (fiction and non-fiction)
+            named_characters = []
+            chapters_summary = book_context.get("chapters_summary", "")
+            import re
+            # Find capitalized names (basic heuristic)
+            named_characters += list(set(re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", chapters_summary)))
+            # For non-fiction, generate fictional personas if genre is non-fiction
+            if genre == "non-fiction":
+                personas_prompt = (
+                    f"Generate 3 fictional personas relevant to this non-fiction book context:\n{chapters_summary[:1000]}"
+                )
+                personas_response = await self.openrouter.analyze_content(
+                    content=personas_prompt,
+                    user_tier=model_tier,
+                    analysis_type="personas"
+                )
+                if personas_response.get("status") == "success":
+                    try:
+                        personas = json.loads(personas_response["result"])
+                        if isinstance(personas, list):
+                            named_characters += [p.get("name", "") for p in personas if p.get("name")]
+                    except Exception:
+                        pass
+
+            # Prepare character generation prompt, include genre info
             prompt = self._build_character_generation_prompt(plot_context, book_context)
+            prompt += f"\n\nGENRE DETECTION: {genre_detection.get('genre', genre)} (confidence: {genre_detection.get('confidence', 1.0)})"
 
             # Generate characters using OpenRouter
             response = await self.openrouter.analyze_content(
@@ -361,12 +469,29 @@ Return ONLY a valid JSON object with these exact keys:
                 analysis_type="characters"
             )
 
-            if response["status"] != "success":
+            characters_data = []
+            if response["status"] == "success":
+                characters_data = self._parse_character_generation_response(response["result"])
+            else:
                 logger.warning(f"[PlotService] Character generation failed, using fallback")
-                return []
 
-            # Parse character data
-            characters_data = self._parse_character_generation_response(response["result"])
+            # Add extracted named characters if not already present
+            existing_names = {c.get("name", "") for c in characters_data}
+            for name in named_characters:
+                if name and name not in existing_names:
+                    characters_data.append({
+                        "name": name,
+                        "role": "supporting",
+                        "character_arc": "",
+                        "physical_description": "",
+                        "personality": "",
+                        "want": "",
+                        "need": "",
+                        "lie": "",
+                        "ghost": "",
+                        "archetypes": [],
+                        "generation_method": "context_extraction"
+                    })
 
             # Analyze archetypes for each character
             for character in characters_data:
@@ -388,12 +513,12 @@ Return ONLY a valid JSON object with these exact keys:
         book_context: Dict[str, Any]
     ) -> str:
         """
-        Build prompt for character generation.
+        Build prompt for character generation with exhaustive extraction.
         """
         book = book_context["book"]
 
         prompt = f"""
-You are a character development expert. Based on the book and plot overview below, create 3-5 main characters.
+You are a character development expert. Based on the book and plot overview below, extract ALL significant characters mentioned.
 
 BOOK: {book['title']}
 PLOT OVERVIEW:
@@ -403,10 +528,10 @@ PLOT OVERVIEW:
 - Themes: {', '.join(plot_context.get('themes', []))}
 
 CHAPTER CONTEXT:
-{book_context.get('chapters_summary', '')[:1000]}
+{book_context.get('chapters_summary', '')[:2000]}
 
 TASK:
-Create 3-5 compelling characters that fit this story. For each character, provide:
+Extract ALL significant characters mentioned in the book context. Include both major and minor characters. For each character, provide:
 
 1. Name: Character's full name
 2. Role: protagonist/antagonist/supporting/minor
@@ -433,6 +558,8 @@ Return ONLY a valid JSON array of character objects:
         "ghost": "Past trauma"
     }}
 ]
+
+Extract ALL characters mentioned, not just 3-5 main ones.
 """
 
         return prompt.strip()
@@ -641,6 +768,7 @@ Return a JSON object with:
                 "logline": plot_data.get("logline") or f"A compelling {plot_data.get('genre', 'fiction')} story about personal growth and discovery.",
                 "themes": themes_value,
                 "story_type": plot_data.get("story_type") or "hero's journey",
+                "script_story_type": plot_data.get("story_type") or "hero's journey",  # Added field
                 "genre": plot_data.get("genre") or book_context.get("book", {}).get("genre", "fiction"),
                 "tone": plot_data.get("tone") or "hopeful",
                 "audience": plot_data.get("audience") or "adult",

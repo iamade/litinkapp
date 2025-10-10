@@ -66,6 +66,7 @@ interface ScriptGenerationOptions {
   targetDuration?: number | "auto";
   sceneCount?: number;
   focusAreas: string[];
+  scriptStoryType?: string;
 }
 
 export const useScriptGeneration = (chapterId: string) => {
@@ -84,28 +85,36 @@ export const useScriptGeneration = (chapterId: string) => {
 
     setIsLoading(true);
     try {
+      console.log('[DEBUG] useScriptGeneration - loadScripts called for chapterId:', chapterId);
       const response = await userService.getChapterScripts(chapterId);
+      console.log('[DEBUG] useScriptGeneration - API response:', response);
       const scripts = response.scripts || [];
-      
-      // Convert legacy scripts to new format
-      const formattedScripts: ChapterScript[] = scripts.map((script: any) => ({
-        id: script.id,
-        chapter_id: script.chapter_id,
-        script_style: script.script_style,
-        script_name: script.script_name || 'Unnamed Script',
-        script: script.script,
-        scene_descriptions: (script.scene_descriptions || []) as unknown as SceneDescription[],
-        characters: script.characters || [],
-        character_details: script.character_details || '',
-        acts: script.acts || [],
-        beats: script.beats || [],
-        scenes: script.scenes || [],
-        created_at: script.created_at,
-        status: script.status || 'draft'
-      }));
+      console.log('[DEBUG] useScriptGeneration - scripts from API:', scripts);
 
+      // Convert legacy scripts to new format
+      const formattedScripts: ChapterScript[] = scripts.map((script: any) => {
+        console.log('[DEBUG] useScriptGeneration - processing script:', script.id, 'scriptStoryType:', script.scriptStoryType);
+        return {
+          id: script.id,
+          chapter_id: script.chapter_id,
+          script_style: script.script_style,
+          script_name: script.script_name || 'Unnamed Script',
+          script: script.script,
+          scene_descriptions: (script.scene_descriptions || []) as unknown as SceneDescription[],
+          characters: script.characters || [],
+          character_details: script.character_details || '',
+          acts: script.acts || [],
+          beats: script.beats || [],
+          scenes: script.scenes || [],
+          created_at: script.created_at,
+          status: script.status || 'draft',
+          scriptStoryType: script.scriptStoryType || script.script_story_type // Handle both camelCase and snake_case
+        };
+      });
+
+      console.log('[DEBUG] useScriptGeneration - formattedScripts:', formattedScripts);
       setGeneratedScripts(formattedScripts);
-      
+
       // Auto-select first script if none selected
       if (!selectedScript && formattedScripts.length > 0) {
         setSelectedScript(formattedScripts[0]);
@@ -124,6 +133,7 @@ export const useScriptGeneration = (chapterId: string) => {
   ) => {
     setIsGeneratingScript(true);
     try {
+      console.log('[DEBUG] useScriptGeneration.generateScript - options:', options);
       const result = await userService.generateScriptAndScenes(
         chapterId,
         scriptStyle,
@@ -131,11 +141,12 @@ export const useScriptGeneration = (chapterId: string) => {
           targetDuration: options.targetDuration,
           includeCharacterProfiles: options.includeCharacterProfiles,
           sceneCount: options.sceneCount,
-          focusAreas: options.focusAreas
+          focusAreas: options.focusAreas,
+          scriptStoryType: options.scriptStoryType
         }
       );
       
-      // Create new script object
+      // Create new script object with all fields from result
       const newScript: ChapterScript = {
         id: result.script_id || Date.now().toString(),
         chapter_id: chapterId,
@@ -149,16 +160,18 @@ export const useScriptGeneration = (chapterId: string) => {
         beats: [],
         scenes: [],
         created_at: new Date().toISOString(),
-        status: 'draft'
+        status: 'ready',
+        scriptStoryType: options.scriptStoryType || result.scriptStoryType
       };
 
+      // Add to the beginning of the list and select it immediately
       setGeneratedScripts(prev => [newScript, ...prev]);
       setSelectedScript(newScript);
-      
+
       toast.success('Script generated successfully!');
-      
-      // Reload to get updated data from server
-      await loadScripts();
+
+      // Reload in background to sync with server (don't await to show immediately)
+      loadScripts().catch(console.error);
     } catch (error) {
       console.error('Error generating script:', error);
       toast.error('Failed to generate script');

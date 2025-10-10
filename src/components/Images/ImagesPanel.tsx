@@ -1,22 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Image, 
-  Users, 
-  Camera, 
-  Download, 
-  Trash2, 
-  RefreshCw, 
-  Settings, 
-  Grid3X3, 
+import {
+  Image,
+  Users,
+  Camera,
+  Download,
+  Trash2,
+  RefreshCw,
+  Settings,
+  Grid3X3,
   List,
-  Play,
   Loader2,
   Eye,
   Plus,
   Wand2
 } from 'lucide-react';
+import { userService } from '../../services/userService';
+import { Tables } from '../../types/supabase';
 import { toast } from 'react-hot-toast';
 import { useImageGeneration } from '../../hooks/useImageGeneration';
+import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
 interface SceneImage {
   sceneNumber: number;
@@ -26,6 +28,7 @@ interface SceneImage {
   generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
   generatedAt?: string;
   id?: string;
+  script_id?: string;
 }
 
 interface CharacterImage {
@@ -47,22 +50,29 @@ interface ImageGenerationOptions {
 }
 
 interface ImagesPanelProps {
-  chapterId: string;
   chapterTitle: string;
-  selectedScript: any;
-  plotOverview: any;
+  selectedScript: unknown;
+  plotOverview: { characters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string }> } | null;
 }
 
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
-  chapterId,
   chapterTitle,
   selectedScript,
   plotOverview
 }) => {
+  const {
+    selectedScriptId,
+    stableSelectedChapterId,
+    versionToken,
+    isSwitching
+  } = useScriptSelection();
+
   const [activeTab, setActiveTab] = useState<'scenes' | 'characters'>('characters');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showSettings, setShowSettings] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'scenes' | 'characters' | null>(null);
   const [generationOptions, setGenerationOptions] = useState<ImageGenerationOptions>({
     style: 'cinematic',
     quality: 'hd',
@@ -75,7 +85,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const {
     sceneImages,
     characterImages,
-    isLoading,
     generatingScenes,
     generatingCharacters,
     loadImages,
@@ -85,26 +94,89 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     deleteImage,
     generateAllSceneImages,
     generateAllCharacterImages
-  } = useImageGeneration(chapterId);
+  } = useImageGeneration(stableSelectedChapterId ?? '', selectedScriptId);
 
+// Debug logging for image loading
+console.log('[DEBUG ImagesPanel] Component state:', {
+  selectedScriptId,
+  stableSelectedChapterId,
+  versionToken,
+  isSwitching,
+  sceneImagesCount: Object.keys(sceneImages || {}).length,
+  characterImagesCount: Object.keys(characterImages || {}).length
+});
+
+  // Trigger refresh on selection/version changes
   useEffect(() => {
+    if (!stableSelectedChapterId) {
+      console.warn('ImagesPanel: stableSelectedChapterId is null, skipping loadImages');
+      return;
+    }
+    console.log('[DEBUG ImagesPanel] useEffect triggered - loading images for chapter:', stableSelectedChapterId);
     loadImages();
-  }, [loadImages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stableSelectedChapterId, versionToken]);
 
-  const scenes = selectedScript?.scene_descriptions || [];
-  const characters = selectedScript?.characters || plotOverview?.characters?.map((c: any) => c.name) || [];
+  // Empty state when no script or chapter is selected
+  if (!selectedScriptId || !stableSelectedChapterId) {
+    return (
+      <div className="flex items-center justify-center h-64 text-gray-500">
+        <div className="text-center">
+          <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
+          <p className="text-lg font-medium">Select a script to view images</p>
+          <p className="text-sm">Choose a script from the sidebar to generate and view scene images</p>
+          {!stableSelectedChapterId && (
+            <p className="text-xs text-orange-500 mt-2">Chapter ID not available</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Disable actions during switching
+  const isDisabled = isSwitching;
+
+
+  // Get scenes from selected script
+  const scenes =
+    typeof selectedScript === "object" && selectedScript !== null && "scene_descriptions" in selectedScript
+      ? (selectedScript as { scene_descriptions?: any[] }).scene_descriptions || []
+      : [];
+
+  // Get characters from selected script (primary source) or fallback to plot overview
+  const characters = React.useMemo(() => {
+    console.log('[DEBUG ImagesPanel] Recalculating characters - selectedScriptId:', selectedScriptId);
+
+    // First priority: characters from the selected script
+    if (typeof selectedScript === "object" && selectedScript !== null && "characters" in selectedScript) {
+      const scriptCharacters = (selectedScript as { characters?: any[] }).characters || [];
+      if (scriptCharacters.length > 0) {
+        console.log('[DEBUG ImagesPanel] Using characters from selected script:', scriptCharacters);
+        // Convert simple string array to object format if needed
+        return scriptCharacters.map(char =>
+          typeof char === 'string' ? { name: char } : char
+        );
+      }
+    }
+
+    // Fallback: use plot overview characters
+    if (plotOverview?.characters && plotOverview.characters.length > 0) {
+      console.log('[DEBUG ImagesPanel] Using characters from plot overview:', plotOverview.characters);
+      return plotOverview.characters;
+    }
+
+    console.log('[DEBUG ImagesPanel] No characters available');
+    return [];
+  }, [selectedScriptId, selectedScript, plotOverview]);
 
   const handleGenerateAllScenes = async () => {
     if (!scenes.length) {
       toast.error('No scenes available to generate images for');
       return;
     }
-    
-    if (!confirm(`Generate images for all ${scenes.length} scenes? This may take several minutes.`)) {
-      return;
-    }
 
-    await generateAllSceneImages(scenes, generationOptions);
+    setConfirmAction('scenes');
+    setShowConfirmModal(true);
   };
 
   const handleGenerateAllCharacters = async () => {
@@ -113,24 +185,41 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       return;
     }
 
-    if (!confirm(`Generate images for all ${characters.length} characters?`)) {
-      return;
+    setConfirmAction('characters');
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmGeneration = async () => {
+    setShowConfirmModal(false);
+
+    if (confirmAction === 'scenes') {
+      await generateAllSceneImages(scenes, generationOptions);
+    } else if (confirmAction === 'characters') {
+      // Build character details from plot overview
+      const characterDetails: Record<string, string> = {};
+      if (plotOverview?.characters) {
+        (plotOverview?.characters ?? []).forEach((char) => {
+          if (typeof char === "object" && char !== null && "name" in char) {
+            characterDetails[(char as { name: string }).name] =
+              `${(char as any).physical_description ?? ""}. ${(char as any).personality ?? ""}. ${(char as any).role ?? ""}`;
+          }
+        });
+      } else {
+        // Fallback to basic descriptions
+        characters.forEach((char) => {
+          const name = typeof char === "string" ? char : (char as { name: string }).name;
+          characterDetails[name] = `Portrait of ${name}, detailed character design`;
+        });
+      }
+
+      await generateAllCharacterImages(
+        characters.map((char) => (typeof char === "string" ? char : (char as { name: string }).name)),
+        characterDetails,
+        generationOptions
+      );
     }
 
-    // Build character details from plot overview
-    const characterDetails: Record<string, string> = {};
-    if (plotOverview?.characters) {
-      plotOverview.characters.forEach((char: any) => {
-        characterDetails[char.name] = `${char.physicalDescription}. ${char.personality}. ${char.role}`;
-      });
-    } else {
-      // Fallback to basic descriptions
-      characters.forEach((char: string) => {
-        characterDetails[char] = `Portrait of ${char}, detailed character design`;
-      });
-    }
-
-    await generateAllCharacterImages(characters, characterDetails, generationOptions);
+    setConfirmAction(null);
   };
 
   const renderHeader = () => (
@@ -138,11 +227,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       <div>
         <h3 className="text-xl font-semibold text-gray-900">Scene Images</h3>
         <p className="text-gray-600">Generate character and scene visualizations for {chapterTitle}</p>
+        {isSwitching && (
+          <div className="flex items-center space-x-2 mt-1 text-sm text-blue-600">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Switching script...</span>
+          </div>
+        )}
       </div>
       <div className="flex items-center space-x-2">
         <button
           onClick={() => setShowSettings(!showSettings)}
-          className="flex items-center space-x-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+          disabled={isDisabled}
+          className="flex items-center space-x-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Settings className="w-4 h-4" />
           <span>Settings</span>
@@ -150,13 +246,15 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         <div className="flex border rounded-md">
           <button
             onClick={() => setViewMode('grid')}
-            className={`p-2 ${viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+            disabled={isDisabled}
+            className={`p-2 ${viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             <Grid3X3 className="w-4 h-4" />
           </button>
           <button
             onClick={() => setViewMode('list')}
-            className={`p-2 ${viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'}`}
+            disabled={isDisabled}
+            className={`p-2 ${viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             <List className="w-4 h-4" />
           </button>
@@ -301,108 +399,157 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     </div>
   );
 
-  const renderScenesTab = () => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-lg font-semibold text-gray-900">Scene Images</h4>
-        <button
-          onClick={handleGenerateAllScenes}
-          disabled={!scenes.length || generatingScenes.size > 0}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
-        >
-          <Wand2 className="w-4 h-4" />
-          <span>Generate All Scenes</span>
-        </button>
+  const renderScenesTab = () => {
+    // Filter images by selected script_id, accepting both script_id and scriptId fields
+    const filteredSceneImages = Object.entries(sceneImages || {}).reduce((acc, [key, image]) => {
+      const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+      if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
+        acc[key] = image;
+      }
+      return acc;
+    }, {} as Record<string | number, SceneImage>);
+    const sourceSceneImages = filteredSceneImages;
+    const hasImages = Object.keys(sourceSceneImages).length > 0;
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="text-lg font-semibold text-gray-900">Scene Images</h4>
+          <button
+            onClick={handleGenerateAllScenes}
+            disabled={!scenes.length || generatingScenes.size > 0}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+          >
+            <Wand2 className="w-4 h-4" />
+            <span>Generate All Scenes</span>
+          </button>
+        </div>
+
+        {!scenes.length ? (
+          <div className="text-center py-12 text-gray-500">
+            <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
+            <p className="text-lg font-medium">No scenes available</p>
+            <p className="text-sm">Generate a script first to create scene images</p>
+          </div>
+        ) : !hasImages ? (
+          <div className="text-center py-8 text-gray-500">
+            <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
+            <p className="text-lg font-medium">No images generated yet</p>
+            <p className="text-sm">Generate images for the current chapter scenes</p>
+          </div>
+        ) : (
+          <div className={`${
+            viewMode === 'grid'
+              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
+              : 'space-y-4'
+          }`}>
+            {scenes.map((scene: any, idx: number) => {
+              const sceneNumber = scene.scene_number || idx + 1;
+              const sceneImage = sourceSceneImages?.[sceneNumber];
+              return (
+                <SceneImageCard
+                  key={sceneNumber}
+                  scene={scene}
+                  sceneImage={sceneImage}
+                  isGenerating={generatingScenes.has(sceneNumber)}
+                  viewMode={viewMode}
+                  onGenerate={() => generateSceneImage(
+                    sceneNumber,
+                    scene.visual_description || scene.description || '',
+                    generationOptions
+                  )}
+                  onRegenerate={() => regenerateImage(
+                    'scene',
+                    sceneNumber,
+                    generationOptions
+                  )}
+                  onDelete={() => deleteImage('scene', sceneNumber)}
+                  onView={() => setSelectedImage(sceneImage?.imageUrl || null)}
+                />
+              );
+            })}
+          </div>
+        )}
       </div>
+    );
+  };
 
-      {!scenes.length ? (
-        <div className="text-center py-12 text-gray-500">
-          <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
-          <p className="text-lg font-medium">No scenes available</p>
-          <p className="text-sm">Generate a script first to create scene images</p>
-        </div>
-      ) : (
-        <div className={`${
-          viewMode === 'grid' 
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
-            : 'space-y-4'
-        }`}>
-          {scenes.map((scene: any, idx: number) => (
-            <SceneImageCard
-              key={scene.scene_number || idx}
-              scene={scene}
-              sceneImage={sceneImages[scene.scene_number || idx + 1]}
-              isGenerating={generatingScenes.has(scene.scene_number || idx + 1)}
-              viewMode={viewMode}
-              onGenerate={() => generateSceneImage(
-                scene.scene_number || idx + 1,
-                scene.visual_description || scene.description || '',
-                generationOptions
-              )}
-              onRegenerate={() => regenerateImage(
-                'scene',
-                scene.scene_number || idx + 1,
-                generationOptions
-              )}
-              onDelete={() => deleteImage('scene', scene.scene_number || idx + 1)}
-              onView={() => setSelectedImage(sceneImages[scene.scene_number || idx + 1]?.imageUrl || null)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  const renderCharactersTab = () => {
+    // Filter character images by selected script_id, accepting both script_id and scriptId fields
+    const filteredCharacterImages = Object.entries(characterImages || {}).reduce((acc, [key, image]) => {
+      const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+      if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
+        acc[key] = image;
+      }
+      return acc;
+    }, {} as Record<string, CharacterImage>);
+    const hasCharacterImages = filteredCharacterImages && Object.keys(filteredCharacterImages).length > 0;
 
-  const renderCharactersTab = () => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-lg font-semibold text-gray-900">Character Images</h4>
-        <button
-          onClick={handleGenerateAllCharacters}
-          disabled={!characters.length || generatingCharacters.size > 0}
-          className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400"
-        >
-          <Wand2 className="w-4 h-4" />
-          <span>Generate All Characters</span>
-        </button>
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="text-lg font-semibold text-gray-900">Character Images</h4>
+          <button
+            onClick={handleGenerateAllCharacters}
+            disabled={!characters.length || generatingCharacters.size > 0}
+            className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400"
+          >
+            <Wand2 className="w-4 h-4" />
+            <span>Generate All Characters</span>
+          </button>
+        </div>
+
+        {!characters.length ? (
+          <div className="text-center py-12 text-gray-500">
+            <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
+            <p className="text-lg font-medium">No characters available</p>
+            <p className="text-sm">Generate a script to see character images</p>
+          </div>
+        ) : (
+          <>
+            {!hasCharacterImages && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <p className="text-sm text-blue-800">
+                  <strong>{characters.length} character{characters.length !== 1 ? 's' : ''}</strong> found in the selected script.
+                  Generate images individually or use "Generate All Characters" button.
+                </p>
+              </div>
+            )}
+            <div className={`${
+              viewMode === 'grid'
+                ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'
+                : 'space-y-4'
+            }`}>
+              {characters.map((character) => {
+                const characterKey = typeof character === "string" ? character : character.name;
+                const characterImage = filteredCharacterImages?.[characterKey];
+                return (
+                  <CharacterImageCard
+                    key={characterKey}
+                    characterName={characterKey}
+                    characterImage={characterImage}
+                    characterDetails={character}
+                    isGenerating={generatingCharacters.has(characterKey)}
+                    viewMode={viewMode}
+                    onGenerate={() => {
+                      const description =
+                        typeof character === "object" && character.physical_description && character.personality && character.role
+                          ? `${character.physical_description}. ${character.personality}. ${character.role}`
+                          : `Portrait of ${characterKey}, detailed character design`;
+                      generateCharacterImage(characterKey, description, generationOptions);
+                    }}
+                    onRegenerate={() => regenerateImage('character', characterKey, generationOptions)}
+                    onDelete={() => deleteImage('character', characterKey)}
+                    onView={() => setSelectedImage(characterImage?.imageUrl || null)}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
-
-      {!characters.length ? (
-        <div className="text-center py-12 text-gray-500">
-          <Users className="mx-auto h-12 w-12 mb-4 opacity-50" />
-          <p className="text-lg font-medium">No characters available</p>
-          <p className="text-sm">Generate a plot overview or script to create character images</p>
-        </div>
-      ) : (
-        <div className={`${
-          viewMode === 'grid'
-            ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'
-            : 'space-y-4'
-        }`}>
-          {characters.map((character: string) => (
-            <CharacterImageCard
-              key={character}
-              characterName={character}
-              characterImage={characterImages[character]}
-              characterDetails={plotOverview?.characters?.find((c: any) => c.name === character)}
-              isGenerating={generatingCharacters.has(character)}
-              viewMode={viewMode}
-              onGenerate={() => {
-                const char = plotOverview?.characters?.find((c: any) => c.name === character);
-                const description = char 
-                  ? `${char.physicalDescription}. ${char.personality}. ${char.role}`
-                  : `Portrait of ${character}, detailed character design`;
-                generateCharacterImage(character, description, generationOptions);
-              }}
-              onRegenerate={() => regenerateImage('character', character, generationOptions)}
-              onDelete={() => deleteImage('character', character)}
-              onView={() => setSelectedImage(characterImages[character]?.imageUrl || null)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -418,6 +565,26 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         <ImageViewerModal
           imageUrl={selectedImage}
           onClose={() => setSelectedImage(null)}
+        />
+      )}
+
+      {/* Confirmation Modal */}
+      {showConfirmModal && (
+        <ConfirmationModal
+          isOpen={showConfirmModal}
+          onClose={() => {
+            setShowConfirmModal(false);
+            setConfirmAction(null);
+          }}
+          onConfirm={handleConfirmGeneration}
+          title={confirmAction === 'scenes' ? 'Generate All Scene Images' : 'Generate All Character Images'}
+          message={
+            confirmAction === 'scenes'
+              ? `Generate images for all ${scenes.length} scene${scenes.length !== 1 ? 's' : ''}? This may take several minutes.`
+              : `Generate images for all ${characters.length} character${characters.length !== 1 ? 's' : ''}? This will create image references for every character in the script.`
+          }
+          confirmText="Generate All"
+          confirmButtonClass="bg-blue-600 hover:bg-blue-700"
         />
       )}
     </div>
@@ -557,7 +724,7 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
 interface CharacterImageCardProps {
   characterName: string;
   characterImage?: CharacterImage;
-  characterDetails?: any;
+  characterDetails?: Tables<'characters'> | string;
   isGenerating: boolean;
   viewMode: 'grid' | 'list';
   onGenerate: () => void;
@@ -592,12 +759,18 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
           
           <div className="flex-1 min-w-0">
             <h5 className="font-medium text-gray-900">{characterName}</h5>
-            <p className="text-sm text-gray-600">{characterDetails?.role}</p>
-            {characterDetails?.physicalDescription && (
-              <p className="text-sm text-gray-500 line-clamp-2 mt-1">
-                {characterDetails.physicalDescription}
-              </p>
-            )}
+            <p className="text-sm text-gray-600">
+              {typeof characterDetails === "object" && characterDetails !== null
+                ? (characterDetails as any).role ?? ""
+                : ""}
+            </p>
+            {typeof characterDetails === "object" &&
+              characterDetails !== null &&
+              (characterDetails as any).physical_description && (
+                <p className="text-sm text-gray-500 line-clamp-2 mt-1">
+                  {(characterDetails as any).physical_description}
+                </p>
+              )}
           </div>
 
           <div className="flex items-center space-x-2">
@@ -640,13 +813,18 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
 
       <div className="p-4">
         <h5 className="font-medium text-gray-900 mb-1">{characterName}</h5>
-        <p className="text-sm text-gray-600 mb-2">{characterDetails?.role}</p>
-        
-        {characterDetails?.physicalDescription && (
-          <p className="text-xs text-gray-500 line-clamp-3">
-            {characterDetails.physicalDescription}
-          </p>
-        )}
+        <p className="text-sm text-gray-600 mb-2">
+          {typeof characterDetails === "object" && characterDetails !== null
+            ? (characterDetails as any).role ?? ""
+            : ""}
+        </p>
+        {typeof characterDetails === "object" &&
+          characterDetails !== null &&
+          (characterDetails as any).physical_description && (
+            <p className="text-xs text-gray-500 line-clamp-3">
+              {(characterDetails as any).physical_description}
+            </p>
+          )}
       </div>
     </div>
   );
@@ -680,6 +858,7 @@ const ImageThumbnail: React.FC<ImageThumbnailProps> = ({
       </div>
     );
   }
+
 
   if (imageUrl) {
     return (
@@ -834,6 +1013,76 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose }
           >
             Close
           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Confirmation Modal Component
+interface ConfirmationModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmText: string;
+  confirmButtonClass?: string;
+}
+
+const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
+  isOpen,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmText,
+  confirmButtonClass = 'bg-blue-600 hover:bg-blue-700'
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+        {/* Background overlay */}
+        <div
+          className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75"
+          onClick={onClose}
+        />
+
+        {/* Modal panel */}
+        <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+          <div className="sm:flex sm:items-start">
+            <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 sm:mx-0 sm:h-10 sm:w-10">
+              <Wand2 className="h-6 w-6 text-blue-600" />
+            </div>
+            <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+              <h3 className="text-lg leading-6 font-medium text-gray-900">
+                {title}
+              </h3>
+              <div className="mt-2">
+                <p className="text-sm text-gray-500">
+                  {message}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
+            <button
+              type="button"
+              onClick={onConfirm}
+              className={`w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm ${confirmButtonClass}`}
+            >
+              {confirmText}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:w-auto sm:text-sm"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     </div>

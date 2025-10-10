@@ -3,6 +3,7 @@ export interface VideoScene {
   id: string;
   sceneNumber: number;
   imageUrl: string;
+  video_url?: string;
   audioFiles: string[];
   duration: number;
   transitions: Transition[];
@@ -34,7 +35,7 @@ export interface VideoProduction {
   id: string;
   chapterId: string;
   scenes: VideoScene[];
-  finalVideoUrl?: string;
+  finalVideoUrl?: string | null;
   renderingProgress: number;
   editorSettings: EditorSettings;
   status: 'idle' | 'rendering' | 'processing' | 'completed' | 'error';
@@ -45,6 +46,7 @@ export interface VideoProduction {
     fileSize?: number;
     exportedAt?: string;
   };
+  scriptId?: string;
 }
 
 export interface OpenShotProject {

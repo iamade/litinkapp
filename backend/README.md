@@ -114,6 +114,13 @@ The API will be available at `http://localhost:8000`
 - `POST /api/v1/ai/generate-voice` - Generate voice audio
 - `POST /api/v1/ai/generate-video-scene` - Generate video scene
 
+### Merge Operations
+- `POST /api/v1/merge/manual` - Start a manual merge operation
+- `POST /api/v1/merge/preview` - Generate a merge preview
+- `GET /api/v1/merge/status/{merge_id}` - Check merge operation status
+- `GET /api/v1/merge/{merge_id}/download` - Download completed merge result
+- `POST /api/v1/merge/upload` - Upload files for merge operations
+
 ### User Progress
 - `GET /api/v1/users/me/progress` - Get reading progress
 - `POST /api/v1/users/me/progress/{book_id}` - Update progress
@@ -225,3 +232,4 @@ Upload a book to trigger the breakpoints
 VS Code should stop at your breakpoints
 4. Debug the 'id' Error Specifically
 Set breakpoints at these critical points: -->
+

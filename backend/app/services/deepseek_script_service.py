@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 class DeepSeekScriptService:
-    """DeepSeek API service for script generation using OpenAI-compatible interface"""
+    """DeepSeek API service for script generation and evaluation using OpenAI-compatible interface"""
     
     def __init__(self):
         if not settings.DEEPSEEK_API_KEY:
@@ -22,12 +22,38 @@ class DeepSeekScriptService:
         
         # ✅ Your specific system prompt
         self.screenplay_system_prompt = """You are a professional screenwriter. Convert the provided content into a cinematic screenplay format with:
-    - Proper scene headings (INT./EXT. LOCATION - TIME)
-    - Character names in uppercase when introduced and before dialogue
-    - Dialogue centered on the page
-    - Parentheticals for actor directions
-    - Action descriptions in present tense
-    - Appropriate screenplay formatting and spacing"""
+            - Proper scene headings (INT./EXT. LOCATION - TIME)
+            - Character names in uppercase when introduced and before dialogue
+            - Dialogue centered on the page
+            - Parentheticals for actor directions
+            - Action descriptions in present tense
+            - Appropriate screenplay formatting and spacing"""
+
+        # Script evaluation system prompt
+        self.evaluation_system_prompt = """You are a professional script evaluator. Assess the provided script for the following criteria:
+        1. Coherence with book/plot
+        2. Storytelling quality
+        3. Character consistency
+        4. Video generation suitability
+
+        For each criterion, provide:
+        - A score from 0 to 100 (higher is better)
+        - 1-2 sentences of feedback
+
+        Return your evaluation as a JSON object:
+        {
+            "coherence_score": int,
+            "coherence_feedback": str,
+            "storytelling_score": int,
+            "storytelling_feedback": str,
+            "character_score": int,
+            "character_feedback": str,
+            "video_score": int,
+            "video_feedback": str,
+            "overall_score": int,
+            "overall_feedback": str
+        }
+        """
     
     async def generate_screenplay(
         self,

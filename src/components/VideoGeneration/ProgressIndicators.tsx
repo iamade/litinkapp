@@ -6,57 +6,91 @@ interface Step {
   number: number;
   title: string;
   description: string;
+  key: string;
 }
 
 interface ProgressIndicatorsProps {
   currentStep: number;
   overallProgress: number;
   status: GenerationStatus | null;
+  stepProgress?: {
+    image_generation: { status: string; progress: number };
+    audio_generation: { status: string; progress: number };
+    video_generation: { status: string; progress: number };
+    audio_video_merge: { status: string; progress: number };
+  };
+  currentStepName?: string;
 }
 
 const steps: Step[] = [
   {
     number: 1,
     title: 'Audio Generation',
-    description: 'Creating narrator voices and character dialogue'
+    description: 'Creating narrator voices and character dialogue',
+    key: 'audio_generation'
   },
   {
     number: 2,
     title: 'Image Generation',
-    description: 'Generating character images and scene visuals'
+    description: 'Generating character images and scene visuals',
+    key: 'image_generation'
   },
   {
     number: 3,
     title: 'Video Generation',
-    description: 'Creating video segments for each scene'
+    description: 'Creating video segments for each scene',
+    key: 'video_generation'
   },
   {
     number: 4,
     title: 'Audio/Video Merge',
-    description: 'Synchronizing audio with video content'
+    description: 'Synchronizing audio with video content',
+    key: 'audio_video_merge'
   },
   {
     number: 5,
     title: 'Lip Sync',
-    description: 'Applying realistic lip movements'
+    description: 'Applying realistic lip movements',
+    key: 'lip_sync'
   },
   {
     number: 6,
     title: 'Complete',
-    description: 'Your video is ready!'
+    description: 'Your video is ready!',
+    key: 'complete'
   }
 ];
 
 export const ProgressIndicators: React.FC<ProgressIndicatorsProps> = ({
   currentStep,
   overallProgress,
-  status
+  status,
+  stepProgress,
+  currentStepName
 }) => {
-  const getStepStatus = (stepNumber: number) => {
+  const getStepStatus = (stepNumber: number, stepKey: string) => {
     if (currentStep === -1) return 'error'; // Failed
+    
+    // Use step progress if available
+    if (stepProgress) {
+      const stepData = stepProgress[stepKey as keyof typeof stepProgress];
+      if (stepData) {
+        if (stepData.status === 'completed') return 'completed';
+        if (stepData.status === 'processing') return 'active';
+        if (stepData.status === 'failed') return 'error';
+      }
+    }
+    
+    // Fallback to step number logic
     if (stepNumber < currentStep) return 'completed';
     if (stepNumber === currentStep) return 'active';
     return 'pending';
+  };
+
+  const getStepProgress = (stepKey: string): number => {
+    if (!stepProgress) return 0;
+    const stepData = stepProgress[stepKey as keyof typeof stepProgress];
+    return stepData?.progress || 0;
   };
 
   const getStepIcon = (stepNumber: number, stepStatus: string) => {
@@ -114,7 +148,9 @@ export const ProgressIndicators: React.FC<ProgressIndicatorsProps> = ({
         {/* Steps */}
         <div className="relative grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
           {steps.map((step) => {
-            const stepStatus = getStepStatus(step.number);
+            const stepStatus = getStepStatus(step.number, step.key);
+            const stepProgressValue = getStepProgress(step.key);
+            
             return (
               <div key={step.number} className="flex flex-col items-center text-center">
                 {/* Step Circle */}
@@ -144,6 +180,25 @@ export const ProgressIndicators: React.FC<ProgressIndicatorsProps> = ({
                   <p className="text-xs text-gray-500 leading-relaxed">
                     {step.description}
                   </p>
+                  
+                  {/* Step Progress Bar */}
+                  {stepProgress && step.key !== 'complete' && step.key !== 'lip_sync' && (
+                    <div className="mt-2">
+                      <div className="w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ease-out ${
+                            stepStatus === 'completed' ? 'bg-green-500' :
+                            stepStatus === 'active' ? 'bg-blue-500' :
+                            stepStatus === 'error' ? 'bg-red-500' : 'bg-gray-300'
+                          }`}
+                          style={{ width: `${stepProgressValue}%` }}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        {stepProgressValue}%
+                      </div>
+                    </div>
+                  )}
                   
                   {/* Status indicator */}
                   {stepStatus === 'active' && (

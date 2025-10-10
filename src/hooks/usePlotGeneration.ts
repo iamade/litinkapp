@@ -11,6 +11,7 @@ interface PlotOverview {
   audience: string;
   setting: string;
   characters: Character[];
+  script_story_type: string;
 }
 
 interface Character {
@@ -33,6 +34,7 @@ export const usePlotGeneration = (bookId: string) => {
   const [isLoading, setIsLoading] = useState(false);
 
   const generatePlot = async () => {
+    if (!bookId) return;
     setIsGenerating(true);
     try {
       const result = await userService.generatePlotOverview(bookId);
@@ -63,6 +65,7 @@ export const usePlotGeneration = (bookId: string) => {
   // };
 
   const loadPlot = useCallback(async () => {
+    if (!bookId) return;
     setIsLoading(true);
     try {
       const result = await userService.getPlotOverview(bookId);

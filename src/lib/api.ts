@@ -66,6 +66,10 @@ async function withLoading<T>(fn: () => Promise<T>): Promise<T> {
 
 export const apiClient = {
   async get<T>(endpoint: string): Promise<T> {
+    // Log image-related API requests for debugging
+    if (endpoint.includes('/chapters/') && endpoint.includes('/image')) {
+      console.log("API Request: GET", endpoint);
+    }
     return withLoading(() => this.request<T>(endpoint, "GET"));
   },
 

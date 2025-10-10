@@ -1,6 +1,34 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause, SkipBack, SkipForward, Volume2, Maximize2 } from 'lucide-react';
 import { VideoScene } from '../../types/videoProduction';
+import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
+
+interface SceneDescription {
+  scene_number: number;
+  location: string;
+  time_of_day: string;
+  characters: string[];
+  key_actions: string;
+  estimated_duration: number;
+  visual_description: string;
+  audio_requirements: string;
+}
+
+interface ChapterScript {
+  id: string;
+  chapter_id: string;
+  script_style: string;
+  script_name: string;
+  script: string;
+  scene_descriptions: SceneDescription[];
+  characters: string[];
+  character_details: string;
+  acts: any[];
+  beats: any[];
+  scenes: any[];
+  created_at: string;
+  status: 'draft' | 'ready' | 'approved';
+}
 
 interface VideoPreviewProps {
   scenes: VideoScene[];
@@ -8,18 +36,177 @@ interface VideoPreviewProps {
   isPlaying: boolean;
   onSceneChange?: (index: number) => void;
   onPlayPause?: () => void;
+  videoUrl?: string; // Final generated video URL
+  selectedScript?: ChapterScript | null; // Script data for synchronization
 }
 
 const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
-  const { scenes, currentSceneIndex = 0, isPlaying, onSceneChange, onPlayPause } = props;
+  const { scenes, currentSceneIndex = 0, isPlaying, onSceneChange, onPlayPause, videoUrl, selectedScript } = props;
+
+  // Script selection context integration
+  const {
+    selectedScriptId,
+    selectedChapterId,
+    selectedSegmentId,
+    versionToken,
+    isSwitching,
+    publish,
+    subscribe,
+  } = useScriptSelection();
+
+  // DEBUG: Log props to diagnose data flow
+  useEffect(() => {
+    console.log('VideoPreview props:', { scenes, currentSceneIndex, isPlaying, videoUrl, selectedScript });
+    if (scenes && scenes.length > 0) {
+      console.log('First scene video_url:', scenes[0]?.video_url);
+    }
+  }, [scenes, currentSceneIndex, isPlaying, videoUrl, selectedScript]);
   const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolume] = useState(1);
   const [showControls, setShowControls] = useState(true);
+  const [videoError, setVideoError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
 
   const currentScene = scenes && scenes[currentSceneIndex];
   const totalDuration = scenes ? scenes.reduce((sum, scene) => sum + scene.duration, 0) : 0;
+
+  // Get current scene's script data
+  const getCurrentSceneScript = () => {
+    if (!selectedScript || !currentScene) return null;
+
+    const sceneNumber = currentScene.sceneNumber;
+    const sceneData = selectedScript.scene_descriptions.find(
+      (scene: SceneDescription) => scene.scene_number === sceneNumber
+    );
+
+    return sceneData;
+  };
+
+  // Extract dialogue segments from script text for current scene
+  const getCurrentSceneDialogue = () => {
+    if (!selectedScript?.script || !currentScene) return null;
+
+    const sceneNumber = currentScene.sceneNumber;
+    const scriptLines = selectedScript.script.split('\n');
+    const dialogueSegments: Array<{character: string, text: string}> = [];
+
+    let currentCharacter = '';
+    let inScene = false;
+
+    for (let i = 0; i < scriptLines.length; i++) {
+      const line = scriptLines[i].trim();
+
+      // Check if we're entering the current scene
+      if (line.toLowerCase().includes(`scene ${sceneNumber}`) ||
+          line.toLowerCase().includes(`scene ${sceneNumber}:`) ||
+          (line.match(/INT\.|EXT\./) && line.includes(`SCENE ${sceneNumber}`))) {
+        inScene = true;
+        continue;
+      }
+
+      // Check if we're entering the next scene (end current scene)
+      if (inScene && (line.match(/INT\.|EXT\./) && !line.includes(`SCENE ${sceneNumber}`))) {
+        break;
+      }
+
+      if (!inScene) continue;
+
+      // Detect character names (uppercase, typically 2-20 chars)
+      if (line === line.toUpperCase() && line.length > 1 && line.length < 20 &&
+          !line.includes('.') && !line.includes('(') && !line.includes(')')) {
+        currentCharacter = line;
+        continue;
+      }
+
+      // Detect dialogue (lines that follow character names)
+      if (currentCharacter && line.length > 0 && !line.startsWith('(') && !line.startsWith('[')) {
+        // Clean up dialogue text
+        let dialogueText = line;
+        if (dialogueText.startsWith('"') && dialogueText.endsWith('"')) {
+          dialogueText = dialogueText.slice(1, -1);
+        }
+
+        dialogueSegments.push({
+          character: currentCharacter,
+          text: dialogueText
+        });
+
+        currentCharacter = ''; // Reset after dialogue
+      }
+    }
+
+    return dialogueSegments.length > 0 ? dialogueSegments : null;
+  };
+
+  const currentSceneScript = getCurrentSceneScript();
+  const currentSceneDialogue = getCurrentSceneDialogue();
+
+  // Clear and re-load overlays on script change
+  useEffect(() => {
+    let cancelled = false;
+    
+    // Clear prior overlays/state when script changes
+    if (!selectedScriptId) {
+      // No script selected - render empty state
+      return;
+    }
+
+    // If we have a selectedScript prop and it matches the selectedScriptId, trigger a re-fetch
+    if (selectedScript && selectedScript.id === selectedScriptId) {
+      console.log('Script changed, updating video preview for script:', selectedScriptId);
+      // Force re-render of script overlay when script changes
+      setCurrentTime(currentTime); // Trigger re-calculation
+      
+      // Publish timeline recalculation when overlays are ready
+      if (!cancelled) {
+        publish('TIMELINE_RECALC_REQUESTED', { reason: 'system' });
+      }
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedScriptId, versionToken, selectedScript, publish, currentTime]);
+
+  // Seek preview on chapter/segment change
+  useEffect(() => {
+    if (!selectedSegmentId || !scenes || scenes.length === 0) return;
+    
+    // Find the scene that corresponds to the selected segment
+    // This is a placeholder - you'll need to implement computeSegmentStart based on your data structure
+    const targetScene = scenes.find(scene =>
+      scene.id === selectedSegmentId ||
+      scene.sceneNumber.toString() === selectedSegmentId
+    );
+    
+    if (targetScene && videoRef.current) {
+      // Calculate the start time of the scene
+      const sceneIndex = scenes.findIndex(s => s.id === targetScene.id);
+      const sceneStartTime = scenes.slice(0, sceneIndex).reduce((sum, s) => sum + s.duration, 0);
+      
+      // Seek to the beginning of the scene
+      videoRef.current.currentTime = sceneStartTime;
+      
+      // Update current scene if needed
+      if (sceneIndex !== currentSceneIndex) {
+        onSceneChange?.(sceneIndex);
+      }
+    }
+  }, [selectedChapterId, selectedSegmentId, scenes, currentSceneIndex, onSceneChange]);
+
+  // Listen for timeline recalculation requests
+  useEffect(() => {
+    const unsub = subscribe((evt) => {
+      if (evt === 'TIMELINE_RECALC_REQUESTED') {
+        // Recompute overlay layout if needed
+        console.log('Timeline recalc requested for video preview');
+        // Force re-render of overlays
+        setCurrentTime(prev => prev); // Trigger re-calculation
+      }
+    });
+    return unsub;
+  }, [subscribe]);
 
   useEffect(() => {
     if (!scenes) return;
@@ -97,6 +284,135 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const handleVideoError = () => {
+    console.error('Video failed to load:', currentScene?.video_url);
+    setVideoError(true);
+  };
+
+  const handleVideoLoad = () => {
+    setVideoError(false);
+  };
+
+  // Reset video error state when scene changes
+  useEffect(() => {
+    setVideoError(false);
+  }, [currentSceneIndex]);
+
+  // If videoUrl is provided, show the final generated video
+  if (videoUrl) {
+    return (
+      <div
+        className="relative bg-black rounded-lg overflow-hidden group"
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setShowControls(false)}
+      >
+        <div className="aspect-video relative">
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            className="w-full h-full object-contain"
+            controls={false}
+            autoPlay={isPlaying}
+            muted={volume === 0}
+            onError={handleVideoError}
+            onLoadedData={handleVideoLoad}
+            onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+          />
+          
+          {/* Final Video Info Overlay */}
+          <div className="absolute top-4 left-4 bg-black/70 text-white px-3 py-1 rounded">
+            Final Generated Video
+          </div>
+
+          {/* Controls Overlay for Final Video */}
+          <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-opacity duration-300 ${
+            showControls ? 'opacity-100' : 'opacity-0'
+          }`}>
+            {/* Progress Bar */}
+            <div className="mb-4">
+              <input
+                type="range"
+                min="0"
+                max={videoRef.current?.duration || 0}
+                value={currentTime}
+                onChange={handleSeek}
+                className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer slider"
+                style={{
+                  background: `linear-gradient(to right, #3B82F6 0%, #3B82F6 ${(currentTime / (videoRef.current?.duration || 1)) * 100}%, #4B5563 ${(currentTime / (videoRef.current?.duration || 1)) * 100}%, #4B5563 100%)`
+                }}
+              />
+              <div className="flex justify-between text-xs text-gray-300 mt-1">
+                <span>{formatTime(currentTime)}</span>
+                <span>{formatTime(videoRef.current?.duration || 0)}</span>
+              </div>
+            </div>
+
+            {/* Control Buttons */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                {/* Play/Pause */}
+                <button
+                  onClick={onPlayPause || (() => {})}
+                  className="text-white hover:text-blue-400 transition-colors"
+                >
+                  {isPlaying ? (
+                    <Pause className="w-8 h-8" />
+                  ) : (
+                    <Play className="w-8 h-8" />
+                  )}
+                </button>
+
+                {/* Volume */}
+                <div className="flex items-center space-x-2">
+                  <Volume2 className="w-5 h-5 text-white" />
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={volume}
+                    onChange={handleVolumeChange}
+                    className="w-20 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+                    style={{
+                      background: `linear-gradient(to right, #3B82F6 0%, #3B82F6 ${volume * 100}%, #4B5563 ${volume * 100}%, #4B5563 100%)`
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Fullscreen */}
+              <button
+                onClick={handleFullscreen}
+                className="text-white hover:text-blue-400 transition-colors"
+              >
+                <Maximize2 className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Video error indicator */}
+        {videoError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+            <div className="text-center text-white">
+              <p className="text-lg font-semibold mb-2">Video Failed to Load</p>
+              <p className="text-sm text-gray-300">Unable to load final video</p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Fallback to scene-by-scene display when no videoUrl is provided
+  if (!selectedScriptId) {
+    return (
+      <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
+        <p className="text-gray-400">Select a script to preview video</p>
+      </div>
+    );
+  }
+
   if (!currentScene) {
     return (
       <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
@@ -105,24 +421,46 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     );
   }
 
+  // Disable interactions during switching
+  const disabled = isSwitching;
+
   return (
-    <div 
-      className="relative bg-black rounded-lg overflow-hidden group"
-      onMouseMove={handleMouseMove}
-      onMouseLeave={() => setShowControls(false)}
+    <div
+      className={`relative bg-black rounded-lg overflow-hidden group ${
+        disabled ? 'opacity-50 pointer-events-none' : ''
+      }`}
+      onMouseMove={disabled ? undefined : handleMouseMove}
+      onMouseLeave={disabled ? undefined : () => setShowControls(false)}
     >
       {/* Video/Image Display */}
       <div className="aspect-video relative">
-        {currentScene.imageUrl ? (
-          <img
-            src={currentScene.imageUrl}
-            alt={`Scene ${currentScene.sceneNumber}`}
+        {/* Priority 1: Video URL (if available and no error) */}
+        {currentScene.video_url && !videoError ? (
+          <video
+            ref={videoRef}
+            src={currentScene.video_url}
             className="w-full h-full object-cover"
+            controls={false}
+            autoPlay={isPlaying}
+            muted={volume === 0}
+            onError={handleVideoError}
+            onLoadedData={handleVideoLoad}
+            onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gray-900">
-            <p className="text-gray-400">Scene {currentScene.sceneNumber}</p>
-          </div>
+          /* Priority 2: Image URL (fallback from video or primary) */
+          currentScene.imageUrl ? (
+            <img
+              src={currentScene.imageUrl}
+              alt={`Scene ${currentScene.sceneNumber}`}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            /* Priority 3: Placeholder (no video or image) */
+            <div className="w-full h-full flex items-center justify-center bg-gray-900">
+              <p className="text-gray-400">Scene {currentScene.sceneNumber}</p>
+            </div>
+          )
         )}
 
         {/* Scene Info Overlay */}
@@ -130,12 +468,64 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
           Scene {currentScene.sceneNumber} of {scenes.length}
         </div>
 
+        {/* Enhanced Script Text Overlay */}
+        {currentSceneScript && (
+          <div className="absolute bottom-20 left-4 right-4 bg-black/80 text-white p-4 rounded max-h-48 overflow-y-auto">
+            <div className="text-sm font-semibold mb-2">
+              Scene {currentSceneScript.scene_number}: {currentSceneScript.location} - {currentSceneScript.time_of_day}
+            </div>
+            <div className="text-sm mb-2">
+              {currentSceneScript.visual_description}
+            </div>
+            {currentSceneScript.key_actions && (
+              <div className="text-sm mb-2 text-blue-200">
+                <strong>Action:</strong> {currentSceneScript.key_actions}
+              </div>
+            )}
+            {currentSceneScript.characters && currentSceneScript.characters.length > 0 && (
+              <div className="text-xs text-gray-300 mb-2">
+                <strong>Characters:</strong> {currentSceneScript.characters.join(', ')}
+              </div>
+            )}
+
+            {/* Dialogue Segments */}
+            {currentSceneDialogue && currentSceneDialogue.length > 0 && (
+              <div className="text-xs mb-2">
+                <strong className="text-yellow-200">Dialogue:</strong>
+                <div className="mt-1 space-y-1">
+                  {currentSceneDialogue.slice(0, 2).map((dialogue, idx) => (
+                    <div key={idx} className="bg-gray-700/50 p-2 rounded">
+                      <span className="font-semibold text-yellow-300">{dialogue.character}:</span>
+                      <span className="ml-1 italic">"{dialogue.text.length > 60 ? dialogue.text.substring(0, 60) + '...' : dialogue.text}"</span>
+                    </div>
+                  ))}
+                  {currentSceneDialogue.length > 2 && (
+                    <div className="text-gray-400 text-xs">
+                      +{currentSceneDialogue.length - 2} more dialogue lines...
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {currentSceneScript.audio_requirements && (
+              <div className="text-xs text-green-200">
+                <strong>Audio:</strong> {currentSceneScript.audio_requirements}
+              </div>
+            )}
+            <div className="text-xs text-gray-400 mt-1">
+              Duration: {currentSceneScript.estimated_duration}s
+            </div>
+          </div>
+        )}
+
         {/* Controls Overlay */}
-        <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-opacity duration-300 ${
-          showControls ? 'opacity-100' : 'opacity-0'
-        }`}>
-          {/* Progress Bar */}
-          <div className="mb-4">
+      <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-opacity duration-300 ${
+        showControls ? 'opacity-100' : 'opacity-0'
+      }`}>
+        {/* Progress Bar with Scene Markers */}
+        <div className="mb-4">
+          <div className="relative">
             <input
               type="range"
               min="0"
@@ -147,19 +537,51 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
                 background: `linear-gradient(to right, #3B82F6 0%, #3B82F6 ${(currentTime / totalDuration) * 100}%, #4B5563 ${(currentTime / totalDuration) * 100}%, #4B5563 100%)`
               }}
             />
-            <div className="flex justify-between text-xs text-gray-300 mt-1">
-              <span>{formatTime(currentTime)}</span>
-              <span>{formatTime(totalDuration)}</span>
-            </div>
+            {/* Scene Markers */}
+            {scenes.map((scene, index) => {
+              const sceneStartTime = scenes.slice(0, index).reduce((sum, s) => sum + s.duration, 0);
+              const markerPosition = (sceneStartTime / totalDuration) * 100;
+              const isCurrentScene = index === currentSceneIndex;
+
+              return (
+                <div
+                  key={scene.id}
+                  className={`absolute top-0 w-0.5 h-3 transform -translate-x-0.5 ${
+                    isCurrentScene ? 'bg-blue-400' : 'bg-gray-400'
+                  }`}
+                  style={{ left: `${markerPosition}%` }}
+                  title={`Scene ${scene.sceneNumber}: ${scene.duration}s`}
+                />
+              );
+            })}
           </div>
+          <div className="flex justify-between text-xs text-gray-300 mt-1">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(totalDuration)}</span>
+          </div>
+          {/* Scene Labels */}
+          <div className="flex justify-between text-xs text-gray-400 mt-1">
+            {scenes.map((scene, index) => (
+              <span
+                key={scene.id}
+                className={index === currentSceneIndex ? 'text-blue-400 font-semibold' : ''}
+              >
+                {scene.sceneNumber}
+              </span>
+            ))}
+          </div>
+        </div>
 
           {/* Control Buttons */}
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               {/* Play/Pause */}
               <button
-                onClick={onPlayPause || (() => {})}
-                className="text-white hover:text-blue-400 transition-colors"
+                onClick={disabled ? undefined : (onPlayPause || (() => {}))}
+                className={`text-white transition-colors ${
+                  disabled ? 'text-gray-500 cursor-not-allowed' : 'hover:text-blue-400'
+                }`}
+                disabled={disabled}
               >
                 {isPlaying ? (
                   <Pause className="w-8 h-8" />
@@ -170,16 +592,24 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
 
               {/* Previous/Next */}
               <button
-                onClick={handlePreviousScene}
-                disabled={currentSceneIndex === 0}
-                className="text-white hover:text-blue-400 disabled:text-gray-600 transition-colors"
+                onClick={disabled ? undefined : handlePreviousScene}
+                disabled={disabled || currentSceneIndex === 0}
+                className={`transition-colors ${
+                  disabled || currentSceneIndex === 0
+                    ? 'text-gray-500 cursor-not-allowed'
+                    : 'text-white hover:text-blue-400'
+                }`}
               >
                 <SkipBack className="w-6 h-6" />
               </button>
               <button
-                onClick={handleNextScene}
-                disabled={currentSceneIndex === scenes.length - 1}
-                className="text-white hover:text-blue-400 disabled:text-gray-600 transition-colors"
+                onClick={disabled ? undefined : handleNextScene}
+                disabled={disabled || currentSceneIndex === scenes.length - 1}
+                className={`transition-colors ${
+                  disabled || currentSceneIndex === scenes.length - 1
+                    ? 'text-gray-500 cursor-not-allowed'
+                    : 'text-white hover:text-blue-400'
+                }`}
               >
                 <SkipForward className="w-6 h-6" />
               </button>
@@ -204,8 +634,11 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
 
             {/* Fullscreen */}
             <button
-              onClick={handleFullscreen}
-              className="text-white hover:text-blue-400 transition-colors"
+              onClick={disabled ? undefined : handleFullscreen}
+              className={`transition-colors ${
+                disabled ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-blue-400'
+              }`}
+              disabled={disabled}
             >
               <Maximize2 className="w-6 h-6" />
             </button>
@@ -213,12 +646,15 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
         </div>
       </div>
 
-      {/* Hidden video element for future video playback */}
-      <video
-        ref={videoRef}
-        className="hidden"
-        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-      />
+      {/* Video error indicator */}
+      {videoError && currentScene.video_url && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+          <div className="text-center text-white">
+            <p className="text-lg font-semibold mb-2">Video Failed to Load</p>
+            <p className="text-sm text-gray-300">Falling back to image preview</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -24,19 +24,111 @@ export interface VideoGeneration {
   scene_videos?: any[];
 }
 
-export type GenerationStatus = 
-  | 'generating_audio' 
-  | 'audio_completed' 
-  | 'generating_images' 
-  | 'images_completed' 
-  | 'generating_video' 
-  | 'video_completed' 
-  | 'merging_audio' 
-  | 'applying_lipsync' 
+export type GenerationStatus =
+  | 'generating_audio'
+  | 'audio_completed'
+  | 'generating_images'
+  | 'images_completed'
+  | 'generating_video'
+  | 'video_completed'
+  | 'merging_audio'
+  | 'applying_lipsync'
   | 'lipsync_completed'
-  | 'completed' 
+  | 'completed'
   | 'failed'
   | 'lipsync_failed';
+
+// Safe mapper to normalize backend status strings to our union
+export const normalizeGenerationStatus = (status: string | null | undefined): GenerationStatus => {
+  if (!status) return 'failed';
+  
+  const normalizedStatus = status.toLowerCase().trim();
+  
+  switch (normalizedStatus) {
+    case 'generating_audio':
+    case 'audio_generation':
+      return 'generating_audio';
+    case 'audio_completed':
+    case 'audio_complete':
+      return 'audio_completed';
+    case 'generating_images':
+    case 'image_generation':
+      return 'generating_images';
+    case 'images_completed':
+    case 'images_complete':
+      return 'images_completed';
+    case 'generating_video':
+    case 'video_generation':
+      return 'generating_video';
+    case 'video_completed':
+    case 'video_complete':
+      return 'video_completed';
+    case 'merging_audio':
+    case 'audio_merge':
+      return 'merging_audio';
+    case 'applying_lipsync':
+    case 'lipsync':
+      return 'applying_lipsync';
+    case 'lipsync_completed':
+    case 'lipsync_complete':
+      return 'lipsync_completed';
+    case 'completed':
+    case 'complete':
+    case 'success':
+      return 'completed';
+    case 'failed':
+    case 'error':
+    case 'lipsync_failed':
+      return 'failed';
+    default:
+      // Unknown values map to 'failed' for safety
+      console.warn(`Unknown generation status: ${status}, mapping to 'failed'`);
+      return 'failed';
+  }
+};
+
+// Safe coalescing for progress data with defaults
+export const safeAudioProgress = (progress: Partial<AudioProgress> | null | undefined): AudioProgress => ({
+  narrator_files: progress?.narrator_files ?? 0,
+  character_files: progress?.character_files ?? 0,
+  sound_effects: progress?.sound_effects ?? 0,
+  background_music: progress?.background_music ?? 0,
+});
+
+export const safeImageProgress = (progress: Partial<ImageProgress> | null | undefined): ImageProgress => ({
+  total_characters: progress?.total_characters ?? 0,
+  characters_completed: progress?.characters_completed ?? 0,
+  total_scenes: progress?.total_scenes ?? 0,
+  scenes_completed: progress?.scenes_completed ?? 0,
+  total_images_generated: progress?.total_images_generated ?? 0,
+  success_rate: progress?.success_rate ?? 0,
+});
+
+export const safeVideoProgress = (progress: Partial<VideoProgress> | null | undefined): VideoProgress => ({
+  total_scenes: progress?.total_scenes ?? 0,
+  scenes_completed: progress?.scenes_completed ?? 0,
+  total_videos_generated: progress?.total_videos_generated ?? 0,
+  successful_videos: progress?.successful_videos ?? 0,
+  failed_videos: progress?.failed_videos ?? 0,
+  success_rate: progress?.success_rate ?? 0,
+});
+
+export const safeMergeProgress = (progress: Partial<MergeProgress> | null | undefined): MergeProgress => ({
+  total_scenes_merged: progress?.total_scenes_merged ?? 0,
+  total_duration: progress?.total_duration ?? 0,
+  audio_tracks_mixed: progress?.audio_tracks_mixed ?? 0,
+  file_size_mb: progress?.file_size_mb ?? 0,
+  processing_time: progress?.processing_time ?? 0,
+  sync_accuracy: progress?.sync_accuracy ?? 'unknown',
+});
+
+export const safeLipSyncProgress = (progress: Partial<LipSyncProgress> | null | undefined): LipSyncProgress => ({
+  characters_lip_synced: progress?.characters_lip_synced ?? 0,
+  scenes_processed: progress?.scenes_processed ?? 0,
+  processing_method: progress?.processing_method ?? 'unknown',
+  total_scenes_processed: progress?.total_scenes_processed ?? 0,
+  scenes_with_lipsync: progress?.scenes_with_lipsync ?? 0,
+});
 
 export interface AudioProgress {
   narrator_files: number;
@@ -119,6 +211,7 @@ export interface LipSyncData {
 
 export interface StartVideoGenerationRequest {
   script_id: string;
+  chapter_id: string;
   quality_tier: 'free' | 'premium' | 'professional';
 }
 
@@ -131,23 +224,69 @@ export interface StartVideoGenerationResponse {
 // Video Generation API class using existing apiClient
 class VideoGenerationAPI {
   /**
-   * Start video generation for a script
+    * Start video generation for a script
+    */
+   async startVideoGeneration(
+     scriptId: string,
+     chapterId: string,
+     qualityTier: 'free' | 'premium' | 'professional'
+   ): Promise<StartVideoGenerationResponse> {
+     return apiClient.post<StartVideoGenerationResponse>('/ai/generate-entertainment-video', {
+       script_id: scriptId,
+       chapter_id: chapterId,
+       quality_tier: qualityTier
+     });
+   }
+
+  /**
+   * Get overall generation status and progress with null-safe normalization
    */
-  async startVideoGeneration(
-    scriptId: string, 
-    qualityTier: 'free' | 'premium' | 'professional'
-  ): Promise<StartVideoGenerationResponse> {
-    return apiClient.post<StartVideoGenerationResponse>('/ai/generate-video', {
-      script_id: scriptId,
-      quality_tier: qualityTier
-    });
+  async getGenerationStatus(videoGenId: string): Promise<VideoGeneration> {
+    try {
+      const response = await apiClient.get<VideoGeneration>(`/ai/video-generation-status/${videoGenId}`);
+      
+      // Handle 204 No Content response
+      if (!response) {
+        throw new Error('No generation data available (204 No Content)');
+      }
+      
+      // Normalize and coalesce the response data
+      const normalized: VideoGeneration = {
+        ...response,
+        generation_status: normalizeGenerationStatus(response.generation_status),
+        audio_progress: response.audio_progress ? safeAudioProgress(response.audio_progress) : undefined,
+        image_progress: response.image_progress ? safeImageProgress(response.image_progress) : undefined,
+        video_progress: response.video_progress ? safeVideoProgress(response.video_progress) : undefined,
+        merge_progress: response.merge_progress ? safeMergeProgress(response.merge_progress) : undefined,
+        lipsync_progress: response.lipsync_progress ? safeLipSyncProgress(response.lipsync_progress) : undefined,
+        error_message: response.error_message ?? undefined,
+        video_url: response.video_url ?? undefined,
+      };
+      
+      return normalized;
+    } catch (error) {
+      console.error('Error fetching generation status:', error);
+      throw error;
+    }
   }
 
   /**
-   * Get overall generation status and progress
+   * Get enhanced generation status with step-by-step progress
    */
-  async getGenerationStatus(videoGenId: string): Promise<VideoGeneration> {
-    return apiClient.get<VideoGeneration>(`/ai/video-generation-status/${videoGenId}`);
+  async getEnhancedGenerationStatus(videoGenId: string): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    current_step: string;
+    progress_percentage: number;
+    steps: {
+      image_generation: { status: string; progress: number };
+      audio_generation: { status: string; progress: number };
+      video_generation: { status: string; progress: number };
+      audio_video_merge: { status: string; progress: number };
+    };
+    error: string | null;
+    video_url: string | null;
+  }> {
+    return apiClient.get(`/ai/video-generation/${videoGenId}/status`);
   }
 
   /**
@@ -162,12 +301,7 @@ class VideoGenerationAPI {
     const response = await this.getGenerationStatus(videoGenId);
     return {
       video_generation_id: videoGenId,
-      audio_progress: response.audio_progress || {
-        narrator_files: 0,
-        character_files: 0,
-        sound_effects: 0,
-        background_music: 0
-      },
+      audio_progress: safeAudioProgress(response.audio_progress),
       audio_files: response.audio_files,
       status: response.generation_status
     };
@@ -185,14 +319,7 @@ class VideoGenerationAPI {
     const response = await this.getGenerationStatus(videoGenId);
     return {
       video_generation_id: videoGenId,
-      image_progress: response.image_progress || {
-        total_characters: 0,
-        characters_completed: 0,
-        total_scenes: 0,
-        scenes_completed: 0,
-        total_images_generated: 0,
-        success_rate: 0
-      },
+      image_progress: safeImageProgress(response.image_progress),
       character_images: response.character_images,
       status: response.generation_status
     };
@@ -210,14 +337,7 @@ class VideoGenerationAPI {
     const response = await this.getGenerationStatus(videoGenId);
     return {
       video_generation_id: videoGenId,
-      video_progress: response.video_progress || {
-        total_scenes: 0,
-        scenes_completed: 0,
-        total_videos_generated: 0,
-        successful_videos: 0,
-        failed_videos: 0,
-        success_rate: 0
-      },
+      video_progress: safeVideoProgress(response.video_progress),
       scene_videos: response.scene_videos,
       status: response.generation_status
     };

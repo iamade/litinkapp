@@ -1,43 +1,81 @@
 // src/components/Video/VideoProductionPanel.tsx
 import React, { useState, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
 import {
   Video,
   Download,
   Settings,
-  Play,
-  Pause,
   Save,
   RefreshCw,
   Film,
   Layers,
-  Sliders,
-  Monitor,
-  Loader2
+  Monitor
 } from 'lucide-react';
 import { useVideoProduction } from '../../hooks/useVideoProduction';
+import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import SceneTimeline from './SceneTimeline';
 import EditorSettingsPanel from './EditorSettingsPanel';
 import VideoPreview from './VideoPreview';
 import RenderingProgress from './RenderingProgress';
-import type { VideoScene, EditorSettings } from '../../types/videoProduction';
+import MergePanel from './MergePanel';
+import type { VideoScene } from '../../types/videoProduction';
+
+interface SceneDescription {
+  scene_number: number;
+  location: string;
+  time_of_day: string;
+  characters: string[];
+  key_actions: string;
+  estimated_duration: number;
+  visual_description: string;
+  audio_requirements: string;
+}
+
+interface ChapterScript {
+  id: string;
+  chapter_id: string;
+  script_style: string;
+  script_name: string;
+  script: string;
+  scene_descriptions: SceneDescription[];
+  characters: string[];
+  character_details: string;
+  acts: unknown[];
+  beats: unknown[];
+  scenes: unknown[];
+  created_at: string;
+  status: 'draft' | 'ready' | 'approved';
+}
 
 interface VideoProductionPanelProps {
   chapterId: string;
   chapterTitle: string;
-  scriptId?: string;
   imageUrls?: string[];
   audioFiles?: string[];
-  plotOverview?: any;
+  onGenerateVideo?: () => void;
+  videoStatus?: string | null;
+  canGenerateVideo?: boolean;
+  videoUrl?: string; // Final generated video URL from API response
+  selectedScript?: ChapterScript | null; // Script data for synchronization
 }
 
 const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   chapterId,
   chapterTitle,
-  scriptId,
   imageUrls = [],
   audioFiles = [],
-  plotOverview
+  onGenerateVideo,
+  videoStatus,
+  canGenerateVideo,
+  videoUrl,
+  selectedScript
 }) => {
+  const {
+    selectedScriptId,
+    isSwitching
+  } = useScriptSelection();
+
+  // Move hooks before any conditional returns
   const {
     videoProduction,
     scenes,
@@ -50,36 +88,59 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     reorderScenes,
     addTransition,
     updateEditorSettings,
-    renderWithOpenShot,
     processWithFFmpeg,
     downloadVideo,
     saveProduction
   } = useVideoProduction({
     chapterId,
-    scriptId,
+    scriptId: selectedScriptId || undefined,
     imageUrls,
     audioFiles
   });
 
-  const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'settings'>('timeline');
+  const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'settings' | 'merge'>('timeline');
   const [selectedScene, setSelectedScene] = useState<VideoScene | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
+  // Disable actions during switching or loading
+  const controlsDisabled = isSwitching || isLoading;
+
+  // Delay scene initialization until script switch completes
   useEffect(() => {
-    if (!scenes.length && imageUrls.length) {
-      initializeScenes();
+    if (selectedScriptId && !scenes.length && imageUrls.length && !isSwitching) {
+      const timeoutId = window.setTimeout(() => {
+        if (!isSwitching) {
+          initializeScenes();
+        }
+      }, 100);
+      return () => window.clearTimeout(timeoutId);
     }
-  }, [imageUrls, scenes.length, initializeScenes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedScriptId, imageUrls, scenes.length, isSwitching]);
+
+  // Guarded empty state for no selected script
+  if (!selectedScriptId) {
+    return (
+      <div className="p-4 text-sm text-gray-500">
+        Select a script to manage video production.
+      </div>
+    );
+  }
+
+  // Guarded empty state for no scenes with selected script
+  if (!scenes.length && selectedScriptId) {
+    return (
+      <div className="p-4 text-sm text-gray-500">
+        No scenes available for the selected script. Generate images and audio first.
+      </div>
+    );
+  }
 
   const handleSceneSelect = (scene: VideoScene) => {
     setSelectedScene(scene);
     setActiveView('preview');
   };
 
-  const handleRender = async () => {
-    await saveProduction();
-    await renderWithOpenShot();
-  };
 
   const handleDownload = (quality?: 'low' | 'medium' | 'high' | 'ultra') => {
     downloadVideo(quality);
@@ -94,9 +155,19 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-xl font-semibold text-gray-900">
-            Video Production Studio
-          </h3>
+          <div className="flex items-center space-x-3">
+            <h3 className="text-xl font-semibold text-gray-900">
+              Video Production Studio
+            </h3>
+            <div className="flex items-center space-x-2">
+              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                Active script: {selectedScriptId.substring(0, 8)}...
+              </span>
+              {isSwitching && (
+                <span className="text-xs text-gray-500">Switching script...</span>
+              )}
+            </div>
+          </div>
           <p className="text-gray-600">
             Create and edit your video for "{chapterTitle}"
           </p>
@@ -104,25 +175,37 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
         <div className="flex items-center space-x-3">
           <button
             onClick={saveProduction}
-            disabled={isLoading || !scenes.length}
+            disabled={controlsDisabled || !scenes.length}
             className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-400"
           >
             <Save className="w-4 h-4" />
             <span>Save</span>
           </button>
+          {/* Repurposed Render Video button (disabled for now) */}
           <button
-            onClick={handleRender}
-            disabled={isLoading || isRendering || !scenes.length}
+            onClick={() => toast('This button will be repurposed for a new function.')}
+            disabled={controlsDisabled}
             className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
           >
-            {isRendering ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Video className="w-4 h-4" />
-            )}
-            <span>{isRendering ? 'Rendering...' : 'Render Video'}</span>
+            <Video className="w-4 h-4" />
+            <span>Render Video</span>
           </button>
         </div>
+      </div>
+      {/* Generate Video Button */}
+      <div className="flex justify-end">
+        <button
+          onClick={onGenerateVideo}
+          disabled={controlsDisabled || !canGenerateVideo}
+          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+        >
+          <Video className="w-4 h-4" />
+          <span>
+            {videoStatus === "processing" || videoStatus === "starting"
+              ? "Generating Video..."
+              : "Generate Video"}
+          </span>
+        </button>
       </div>
 
       {/* View Tabs */}
@@ -168,15 +251,29 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
                 <span>Settings</span>
               </div>
             </button>
+            <button
+              onClick={() => setActiveView('merge')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeView === 'merge'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <Layers className="w-4 h-4" />
+                <span>Merge</span>
+              </div>
+            </button>
           </nav>
         </div>
 
         {/* Content Area */}
         <div className="p-6">
           {isRendering && (
-            <RenderingProgress 
+            <RenderingProgress
               progress={renderingProgress}
-              message="Creating your video masterpiece..."
+              status="rendering"
+              currentStep="Processing video scenes..."
             />
           )}
 
@@ -187,16 +284,19 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               onSceneUpdate={updateScene}
               onReorder={reorderScenes}
               onAddTransition={addTransition}
+              selectedScript={selectedScript}
             />
           )}
 
           {activeView === 'preview' && (
             <VideoPreview
-              scene={selectedScene}
               scenes={scenes}
-              videoUrl={videoProduction?.finalVideoUrl}
+              currentSceneIndex={selectedScene ? scenes.findIndex(s => s.id === selectedScene.id) : 0}
               isPlaying={isPlaying}
               onPlayPause={() => setIsPlaying(!isPlaying)}
+              onSceneChange={(index) => setSelectedScene(scenes[index])}
+              videoUrl={videoUrl}
+              selectedScript={selectedScript}
             />
           )}
 
@@ -205,6 +305,10 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               settings={editorSettings}
               onUpdateSettings={updateEditorSettings}
             />
+          )}
+
+          {activeView === 'merge' && (
+            <MergePanel />
           )}
         </div>
       </div>
@@ -234,13 +338,17 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => processWithFFmpeg()}
-                className="flex items-center space-x-2 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+                disabled={controlsDisabled}
+                className="flex items-center space-x-2 px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:bg-gray-400"
               >
                 <RefreshCw className="w-3 h-3" />
                 <span>Reprocess</span>
               </button>
               <div className="relative group">
-                <button className="flex items-center space-x-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700">
+                <button
+                  disabled={controlsDisabled}
+                  className="flex items-center space-x-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:bg-gray-400"
+                >
                   <Download className="w-3 h-3" />
                   <span>Download</span>
                 </button>
@@ -294,7 +402,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
           </p>
           <button
             onClick={initializeScenes}
-            disabled={!imageUrls.length}
+            disabled={controlsDisabled || !imageUrls.length}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
           >
             Initialize Scenes

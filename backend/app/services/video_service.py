@@ -247,7 +247,7 @@ class VideoService:
         """Extract character dialogues from screenplay script"""
         dialogues = []
         lines = script.split('\n')
-        
+
         for i, line in enumerate(lines):
             line = line.strip()
             # Look for character names in caps (screenplay format)
@@ -260,14 +260,91 @@ class VideoService:
                     if lines[j].strip():
                         dialogue_text += lines[j].strip() + " "
                     j += 1
-                
+
                 if dialogue_text.strip():
                     dialogues.append({
                         'character': character,
                         'text': dialogue_text.strip()
                     })
-        
+
         return dialogues
+
+    async def extract_dialogue_per_scene(self, script: str, scene_descriptions: List[Dict[str, Any]], user_id: str = None) -> Dict[str, Any]:
+        """Extract character dialogue for each scene and generate audio"""
+        try:
+            from app.services.script_parser import ScriptParser
+
+            # Parse script to extract dialogue components
+            script_parser = ScriptParser()
+            parsed_audio = script_parser.parse_script_for_audio(
+                script=script,
+                characters=[],  # Will be extracted from script
+                scene_descriptions=scene_descriptions,
+                script_style="cinematic_movie"
+            )
+
+            # Extract character dialogues with scene information
+            scene_dialogues = {}
+            character_profiles = {}
+
+            # Group dialogues by scene
+            for dialogue in parsed_audio.get("character_dialogues", []):
+                scene_num = dialogue.get("scene", 1)
+                if scene_num not in scene_dialogues:
+                    scene_dialogues[scene_num] = []
+
+                scene_dialogues[scene_num].append({
+                    'character': dialogue['character'],
+                    'text': dialogue['text'],
+                    'line_number': dialogue.get('line_number', 0)
+                })
+
+                # Create character profile if not exists
+                if dialogue['character'] not in character_profiles:
+                    character_profiles[dialogue['character']] = self._create_character_profile(dialogue['character'])
+
+            # Generate audio for each scene's dialogues
+            scene_audio_files = {}
+            for scene_num, dialogues in scene_dialogues.items():
+                scene_audio = []
+                for dialogue in dialogues:
+                    # Generate character voice audio
+                    character_profile = character_profiles[dialogue['character']]
+                    audio_url = await self.elevenlabs_service.generate_character_voice(
+                        text=dialogue['text'],
+                        character_name=dialogue['character'],
+                        character_traits=character_profile.get('personality', ''),
+                        user_id=user_id
+                    )
+
+                    if audio_url:
+                        scene_audio.append({
+                            'character': dialogue['character'],
+                            'text': dialogue['text'],
+                            'audio_url': audio_url,
+                            'scene': scene_num,
+                            'character_profile': character_profile
+                        })
+
+                if scene_audio:
+                    scene_audio_files[scene_num] = scene_audio
+
+            return {
+                'scene_dialogues': scene_dialogues,
+                'scene_audio_files': scene_audio_files,
+                'character_profiles': character_profiles,
+                'total_scenes_with_dialogue': len(scene_dialogues),
+                'total_audio_files': sum(len(audio) for audio in scene_audio_files.values())
+            }
+
+        except Exception as e:
+            print(f"Error extracting dialogue per scene: {e}")
+            return {
+                'scene_dialogues': {},
+                'scene_audio_files': {},
+                'character_profiles': {},
+                'error': str(e)
+            }
     
     def _create_character_profile(self, character_name: str) -> Dict[str, Any]:
         """Create character profile based on character name"""
@@ -386,283 +463,375 @@ class VideoService:
         )
     
 
-    async def generate_entertainment_video(
-        self,
-        chapter_id: str,
-        animation_style: str = "animated",
-        script_style: str = "cinematic_movie",
-        supabase_client = None,
-        user_id: str = None
-    ) -> Optional[Dict[str, Any]]:
-        """Generate entertainment-style video for story content using RAG, OpenAI, ElevenLabs, KlingAI, and FFmpeg. User can choose script_style ('cinematic_movie' or 'cinematic_narration')."""
-        logs = []
-        try:
-            # 1. Get chapter context using RAG
-            chapter_context = await self.rag_service.get_chapter_with_context(
-                chapter_id=chapter_id,
-                include_adjacent=True,
-                use_vector_search=True
-            )
+    # async def generate_entertainment_video(
+    #     self,
+    #     chapter_id: str,
+    #     animation_style: str = "animated",
+    #     script_style: str = "cinematic_movie",
+    #     supabase_client = None,
+    #     user_id: str = None
+    # ) -> Optional[Dict[str, Any]]:
+    #     """Generate entertainment-style video with integrated dialogue audio generation"""
+    #     """Generate entertainment-style video for story content using RAG, OpenAI, ElevenLabs, KlingAI, and FFmpeg. User can choose script_style ('cinematic_movie' or 'cinematic_narration')."""
+    #     logs = []
+    #     try:
+    #         # 1. Get chapter context using RAG
+    #         chapter_context = await self.rag_service.get_chapter_with_context(
+    #             chapter_id=chapter_id,
+    #             include_adjacent=True,
+    #             use_vector_search=True
+    #         )
             
-            # 2. Generate script using RAG with character extraction
-            script_result = await self.rag_service.generate_video_script(chapter_context, animation_style, script_style=script_style)
-            script = script_result.get("script", "")
-            characters = script_result.get("characters", [])
-            character_details = script_result.get("character_details", "")
+    #         # 2. Generate script using RAG with character extraction
+    #         script_result = await self.rag_service.generate_video_script(chapter_context, animation_style, script_style=script_style)
+    #         script = script_result.get("script", "")
+    #         characters = script_result.get("characters", [])
+    #         character_details = script_result.get("character_details", "")
             
-            # Debug script generation
-            logs.append(f"[SCRIPT DEBUG] Script result type: {type(script_result)}")
-            logs.append(f"[SCRIPT DEBUG] Script type: {type(script)}")
-            logs.append(f"[SCRIPT DEBUG] Script length: {len(script) if script else 0}")
-            logs.append(f"[SCRIPT DEBUG] Script preview: {script[:200] if script else 'None'}...")
-            logs.append(f"[CHARACTERS] Extracted characters: {characters}")
-            logs.append(f"[CHARACTER_DETAILS] {character_details}")
+    #         # Debug script generation
+    #         logs.append(f"[SCRIPT DEBUG] Script result type: {type(script_result)}")
+    #         logs.append(f"[SCRIPT DEBUG] Script type: {type(script)}")
+    #         logs.append(f"[SCRIPT DEBUG] Script length: {len(script) if script else 0}")
+    #         logs.append(f"[SCRIPT DEBUG] Script preview: {script[:200] if script else 'None'}...")
+    #         logs.append(f"[CHARACTERS] Extracted characters: {characters}")
+    #         logs.append(f"[CHARACTER_DETAILS] {character_details}")
             
-            # 3. Parse script dynamically for ElevenLabs and KlingAI
-            parsed_content = self._parse_script_for_services(script, script_style)
-            elevenlabs_content = parsed_content["elevenlabs_content"]
-            klingai_content = parsed_content["klingai_content"]
-            elevenlabs_content_type = parsed_content["elevenlabs_content_type"]
-            klingai_content_type = parsed_content["klingai_content_type"]
+    #         # 3. Parse script dynamically for ElevenLabs and KlingAI
+    #         parsed_content = self._parse_script_for_services(script, script_style)
+    #         elevenlabs_content = parsed_content["elevenlabs_content"]
+    #         klingai_content = parsed_content["klingai_content"]
+    #         elevenlabs_content_type = parsed_content["elevenlabs_content_type"]
+    #         klingai_content_type = parsed_content["klingai_content_type"]
             
-            # Fallback if parsing failed or content is empty
-            if not elevenlabs_content or elevenlabs_content.strip() == "":
-                logs.append("[FALLBACK] ElevenLabs content empty, using fallback")
-                elevenlabs_content = "Narrator: This is a cinematic narration of the story content."
-                elevenlabs_content_type = "fallback_narration"
+    #         # Fallback if parsing failed or content is empty
+    #         if not elevenlabs_content or elevenlabs_content.strip() == "":
+    #             logs.append("[FALLBACK] ElevenLabs content empty, using fallback")
+    #             elevenlabs_content = "Narrator: This is a cinematic narration of the story content."
+    #             elevenlabs_content_type = "fallback_narration"
             
-            if not klingai_content or klingai_content.strip() == "":
-                logs.append("[FALLBACK] KlingAI content empty, using fallback")
-                klingai_content = "A cinematic scene with visual elements, camera movements, and dramatic lighting."
-                klingai_content_type = "fallback_scene"
+    #         if not klingai_content or klingai_content.strip() == "":
+    #             logs.append("[FALLBACK] KlingAI content empty, using fallback")
+    #             klingai_content = "A cinematic scene with visual elements, camera movements, and dramatic lighting."
+    #             klingai_content_type = "fallback_scene"
             
-            logs.append(f"[PARSED CONTENT] ElevenLabs ({elevenlabs_content_type}): {elevenlabs_content[:200]}...")
-            logs.append(f"[PARSED CONTENT] KlingAI ({klingai_content_type}): {klingai_content[:200]}...")
+    #         logs.append(f"[PARSED CONTENT] ElevenLabs ({elevenlabs_content_type}): {elevenlabs_content[:200]}...")
+    #         logs.append(f"[PARSED CONTENT] KlingAI ({klingai_content_type}): {klingai_content[:200]}...")
             
-            # 4. Generate enhanced audio with ElevenLabs (parsed dialogue/narration)
-            enhanced_audio = await self._generate_enhanced_audio(elevenlabs_content, chapter_context, animation_style, user_id)
-            if not enhanced_audio or "error" in enhanced_audio:
-                logs.append(f"[AUDIO ERROR] {enhanced_audio}")
-                return {"error": f"Audio generation failed: {enhanced_audio}", "logs": logs}
+    #         # 4. Generate enhanced audio with ElevenLabs (parsed dialogue/narration)
+    #         enhanced_audio = await self._generate_enhanced_audio(elevenlabs_content, chapter_context, animation_style, user_id)
+    #         if not enhanced_audio or "error" in enhanced_audio:
+    #             logs.append(f"[AUDIO ERROR] {enhanced_audio}")
+    #             return {"error": f"Audio generation failed: {enhanced_audio}", "logs": logs}
             
-            mixed_audio_url = enhanced_audio.get("mixed_audio_url", "")
-            logs.append(f"[AUDIO SUCCESS] Enhanced audio URL: {mixed_audio_url}")
+    #         mixed_audio_url = enhanced_audio.get("mixed_audio_url", "")
+    #         logs.append(f"[AUDIO SUCCESS] Enhanced audio URL: {mixed_audio_url}")
             
-            # 5. Generate video with KlingAI (parsed scene descriptions)
-            logs.append(f"[KLINGAI DEBUG] About to generate video with content type: {klingai_content_type}")
-            logs.append(f"[KLINGAI DEBUG] KlingAI content length: {len(klingai_content)}")
-            logs.append(f"[KLINGAI DEBUG] Full KlingAI content:")
-            logs.append(f"[KLINGAI CONTENT] {klingai_content}")
-            logs.append(f"[KLINGAI DEBUG] Animation style: {animation_style}")
-            logs.append(f"[KLINGAI DEBUG] Target duration: 180s")
+    #         # 5. Generate video with KlingAI (parsed scene descriptions)
+    #         logs.append(f"[KLINGAI DEBUG] About to generate video with content type: {klingai_content_type}")
+    #         logs.append(f"[KLINGAI DEBUG] KlingAI content length: {len(klingai_content)}")
+    #         logs.append(f"[KLINGAI DEBUG] Full KlingAI content:")
+    #         logs.append(f"[KLINGAI CONTENT] {klingai_content}")
+    #         logs.append(f"[KLINGAI DEBUG] Animation style: {animation_style}")
+    #         logs.append(f"[KLINGAI DEBUG] Target duration: 180s")
             
-            kling_result = await self._generate_kling_video(klingai_content, animation_style, target_duration=180)  # 3 minutes
-            if "video_url" not in kling_result:
-                logs.append(f"[KLINGAI ERROR] KlingAI generation failed: {kling_result}")
-                raise Exception(f"Kling AI video generation failed: {kling_result.get('error')}")
+    #         # Use multi-scene segmentation for video generation
+    #         logs.append(f"[SCENE GENERATION] Starting multi-scene video generation")
+    #         logs.append(f"[SCENE GENERATION] Characters available: {characters}")
             
-            video_url = kling_result["video_url"]
-            logs.append(f"[VIDEO SUCCESS] KlingAI video URL: {video_url}")
+    #         # Split script into actual scenes
+    #         scenes = self._split_script_by_scenes(script, characters)
+    #         logs.append(f"[SCENE GENERATION] Successfully parsed {len(scenes)} scenes")
             
-            # Check if this is a multi-segment video
-            is_multi_segment = kling_result.get("is_segment", False)
-            segment_urls = kling_result.get("segment_urls", [])
-            total_segments = kling_result.get("total_segments", 1)
+    #         # Generate video for each scene
+    #         scene_results = []
+    #         logs.append(f"[SCENE GENERATION] Processing {len(scenes)} scenes from parsed script")
             
-            logs.append(f"[SEGMENT INFO] Is multi-segment: {is_multi_segment}")
-            logs.append(f"[SEGMENT INFO] Total segments: {total_segments}")
-            logs.append(f"[SEGMENT INFO] Segment URLs: {segment_urls}")
-            
-            # 6. Save KlingAI video metadata to Supabase DB
-            try:
-                kling_metadata = {
-                    "chapter_id": chapter_id,
-                    "video_url": video_url,
-                    "script": script,
-                    "character_details": character_details,
-                    "scene_prompt": klingai_content,
-                    "created_at": int(time.time()),
-                    "source": "klingai",
-                    "is_multi_segment": is_multi_segment,
-                    "total_segments": total_segments,
-                    "segment_urls": segment_urls if is_multi_segment else []
-                }
-                if 'book' in chapter_context and 'id' in chapter_context['book']:
-                    kling_metadata["book_id"] = chapter_context['book']['id']
-                if user_id:
-                    kling_metadata["user_id"] = user_id
-                logs.append(f"[DB INSERT] Saving KlingAI video metadata: {kling_metadata}")
-                db_result_kling = self.supabase_service.table("videos").insert(kling_metadata).execute()
-                logs.append(f"[DB INSERT RESULT] {db_result_kling}")
-            except Exception as db_exc:
-                logs.append(f"[DB INSERT ERROR - KlingAI] {db_exc}")
-            
-            # Validate URLs before downloading
-            def is_valid_url(url):
-                return isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))
-            
-            # Ensure ElevenLabs audio is in Supabase Storage
-            if is_valid_url(mixed_audio_url) and "supabase.co" not in mixed_audio_url:
-                # Download and upload to Supabase
-                import tempfile, httpx, os
-                fd, temp_audio_path = tempfile.mkstemp(suffix=".mp3"); os.close(fd)
-                try:
-                    with httpx.Client() as client:
-                        r = client.get(mixed_audio_url)
-                        if r.status_code == 200:
-                            with open(temp_audio_path, 'wb') as f:
-                                f.write(r.content)
-                            # Upload to Supabase (append user_id if available)
-                            supabase_audio_url = await self._serve_video_from_supabase(temp_audio_path, f"audio_{int(time.time())}.mp3", user_id=user_id)
-                            logs.append(f"[AUDIO UPLOAD] Uploaded ElevenLabs audio to Supabase: {supabase_audio_url}")
-                            mixed_audio_url = supabase_audio_url
-                        else:
-                            logs.append(f"[AUDIO DOWNLOAD ERROR] {mixed_audio_url} status {r.status_code}")
-                except Exception as e:
-                    logs.append(f"[AUDIO DOWNLOAD ERROR] {e}")
-            
-            # Download video and audio files
-            import tempfile, os, subprocess, httpx
-            async def download_file(url, suffix):
-                # Ensure URL has proper protocol
-                if not url.startswith(('http://', 'https://')):
-                    if url.startswith('//'):
-                        url = 'https:' + url
-                    else:
-                        url = 'https://' + url
+    #         for i, scene in enumerate(scenes):
+    #             scene_num = scene['scene_number']
+    #             logs.append(f"[SCENE {scene_num}/{len(scenes)}] Generating video for {scene['character_count']} characters, {scene['dialogue_count']} dialogues, {scene['action_count']} actions")
+    #             logs.append(f"[SCENE {scene_num}] Description: {scene['description'][:100]}...")
+    #             logs.append(f"[SCENE {scene_num}] Prompt length: {len(scene['prompt'])} characters")
                 
-                logs.append(f"[DOWNLOAD] Attempting to download: {url}")
+    #             # Calculate appropriate duration for this scene
+    #             target_duration = max(10, min(60, scene['dialogue_count'] * 5))  # 5 seconds per dialogue
+    #             logs.append(f"[SCENE {scene_num}] Target duration: {target_duration}s")
                 
-                fd, path = tempfile.mkstemp(suffix=suffix)
-                os.close(fd)
-                try:
-                    async with httpx.AsyncClient(timeout=60.0) as client:
-                        r = await client.get(url)
-                        r.raise_for_status()  # Raise exception for bad status codes
-                        with open(path, 'wb') as f:
-                            f.write(r.content)
-                        logs.append(f"[DOWNLOAD SUCCESS] Downloaded to: {path}")
-                        return path
-                except Exception as e:
-                    logs.append(f"[DOWNLOAD ERROR] Failed to download {url}: {e}")
-                    # Clean up the temp file if it was created
-                    if os.path.exists(path):
-                        os.remove(path)
-                    raise
+    #             # Generate video for this scene
+    #             scene_kling_result = await self._generate_kling_video(
+    #                 scene['prompt'],
+    #                 animation_style,
+    #                 target_duration=target_duration
+    #             )
+                
+    #             if "video_url" not in scene_kling_result:
+    #                 logs.append(f"[SCENE {scene_num} ERROR] KlingAI generation failed: {scene_kling_result}")
+    #                 continue
+                
+    #             scene_video_url = scene_kling_result["video_url"]
+    #             logs.append(f"[SCENE {scene_num} SUCCESS] Video URL: {scene_video_url}")
+                
+    #             scene_results.append({
+    #                 "scene_number": scene_num,
+    #                 "description": scene['description'],
+    #                 "video_url": scene_video_url,
+    #                 "dialogues": scene['dialogues'],
+    #                 "actions": scene['actions'],
+    #                 "camera_movements": scene['camera_movements'],
+    #                 "character_count": scene['character_count'],
+    #                 "dialogue_count": scene['dialogue_count'],
+    #                 "action_count": scene['action_count'],
+    #                 "kling_result": scene_kling_result
+    #             })
             
-            try:
-                # For multi-segment videos, download all segments
-                if is_multi_segment and segment_urls:
-                    logs.append(f"[MULTI-SEGMENT] Downloading {len(segment_urls)} video segments")
-                    video_paths = []
-                    for i, segment_url in enumerate(segment_urls):
-                        segment_path = await download_file(segment_url, f"_segment_{i}.mp4")
-                        video_paths.append(segment_path)
-                        logs.append(f"[MULTI-SEGMENT] Downloaded segment {i+1}: {segment_path}")
+    #         if not scene_results:
+    #             logs.append(f"[SCENE GENERATION ERROR] No scenes were successfully generated")
+    #             raise Exception("All scene video generations failed")
+            
+    #         # Use the first scene as the main video for compatibility
+    #         video_url = scene_results[0]["video_url"]
+    #         is_multi_segment = len(scene_results) > 1
+    #         segment_urls = [result["video_url"] for result in scene_results]
+    #         total_segments = len(scene_results)
+            
+    #         logs.append(f"[SCENE GENERATION] Completed: {len(scene_results)}/{len(scenes)} scenes generated successfully")
+    #         logs.append(f"[SCENE GENERATION] Is multi-segment: {is_multi_segment}")
+    #         logs.append(f"[SCENE GENERATION] Total segments: {total_segments}")
+    #         logs.append(f"[SCENE GENERATION] Segment URLs: {segment_urls}")
+            
+    #         # 6. Save KlingAI video metadata to Supabase DB
+    #         try:
+    #             # Save main video metadata
+    #             kling_metadata = {
+    #                 "chapter_id": chapter_id,
+    #                 "video_url": video_url,
+    #                 "script": script,
+    #                 "character_details": character_details,
+    #                 "scene_prompt": klingai_content,
+    #                 "created_at": int(time.time()),
+    #                 "source": "klingai",
+    #                 "is_multi_segment": is_multi_segment,
+    #                 "total_segments": total_segments,
+    #                 "segment_urls": segment_urls if is_multi_segment else []
+    #             }
+    #             if 'book' in chapter_context and 'id' in chapter_context['book']:
+    #                 kling_metadata["book_id"] = chapter_context['book']['id']
+    #             if user_id:
+    #                 kling_metadata["user_id"] = user_id
+    #             logs.append(f"[DB INSERT] Saving KlingAI video metadata: {kling_metadata}")
+    #             db_result_kling = self.supabase_service.table("videos").insert(kling_metadata).execute()
+    #             logs.append(f"[DB INSERT RESULT] {db_result_kling}")
+                
+    #             # Save individual scene segments to video_segments table
+    #             if is_multi_segment and scene_results:
+    #                 logs.append(f"[SCENE DB] Saving {len(scene_results)} individual scene segments")
+    #                 video_generation_id = db_result_kling.data[0]['id'] if db_result_kling.data else None
                     
-                    # Use the first segment as the main video for now
-                    video_path = video_paths[0]
-                    logs.append(f"[MULTI-SEGMENT] Using first segment as main video: {video_path}")
-                else:
-                    # Single video
-                    video_path = await download_file(video_url, ".mp4")
+    #                 for scene_result in scene_results:
+    #                     try:
+    #                         # Extract character names from dialogues
+    #                         character_names = list(set([d.get("character", "Unknown") for d in scene_result['dialogues']]))
+                            
+    #                         scene_metadata = {
+    #                             "video_generation_id": video_generation_id,
+    #                             "scene_id": f"scene_{scene_result['scene_number']}",
+    #                             "scene_number": scene_result['scene_number'],
+    #                             "video_url": scene_result['video_url'],
+    #                             "scene_description": scene_result['description'],
+    #                             "character_count": scene_result['character_count'],
+    #                             "dialogue_count": scene_result['dialogue_count'],
+    #                             "action_count": scene_result['action_count'],
+    #                             "camera_movements": scene_result['camera_movements'],
+    #                             "character_names": character_names,
+    #                             "created_at": int(time.time()),
+    #                             "status": "completed",
+    #                             "prompt_length": len(scene_result.get('kling_result', {}).get('prompt', '')),
+    #                             "target_duration": scene_result.get('kling_result', {}).get('target_duration', 0)
+    #                         }
+    #                         if user_id:
+    #                             scene_metadata["user_id"] = user_id
+                            
+    #                         logs.append(f"[SCENE DB] Saving scene {scene_result['scene_number']}: {scene_metadata['scene_description'][:50]}...")
+    #                         logs.append(f"[SCENE DB] Characters: {character_names}, Dialogues: {scene_result['dialogue_count']}")
+    #                         scene_db_result = self.supabase_service.table("video_segments").insert(scene_metadata).execute()
+    #                         logs.append(f"[SCENE DB RESULT] Scene {scene_result['scene_number']} saved successfully with ID: {scene_db_result.data[0]['id'] if scene_db_result.data else 'unknown'}")
+                            
+    #                     except Exception as scene_db_error:
+    #                         logs.append(f"[SCENE DB ERROR] Failed to save scene {scene_result['scene_number']}: {scene_db_error}")
+    #                         import traceback
+    #                         logs.append(f"[SCENE DB ERROR TRACE] {traceback.format_exc()}")
                 
-                audio_path = await download_file(mixed_audio_url, ".mp3")
-            except Exception as download_error:
-                logs.append(f"[DOWNLOAD FAILED] {download_error}")
-                return {"error": f"Failed to download files: {download_error}", "logs": logs}
+    #         except Exception as db_exc:
+    #             logs.append(f"[DB INSERT ERROR - KlingAI] {db_exc}")
             
-            # Check file existence
-            if not os.path.exists(video_path):
-                logs.append(f"[ERROR] Video file not found at {video_path}")
-                return {"error": "Video file not found", "logs": logs}
-            if not os.path.exists(audio_path):
-                logs.append(f"[ERROR] Audio file not found at {audio_path}")
-                return {"error": "Audio file not found", "logs": logs}
+    #         # Validate URLs before downloading
+    #         def is_valid_url(url):
+    #             return isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))
             
-            # 7. Merge audio and video with FFmpeg
-            merged_path = tempfile.mktemp(suffix="_merged.mp4")
-            ffmpeg_cmd = [
-                "ffmpeg", "-y",
-                "-i", video_path,
-                "-i", audio_path,
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-shortest",
-                merged_path
-            ]
-            logs.append(f"[FFMPEG CMD] {' '.join(ffmpeg_cmd)}")
-            proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-            logs.append(f"[FFMPEG OUT] {proc.stdout}")
-            logs.append(f"[FFMPEG ERR] {proc.stderr}")
-            if not os.path.exists(merged_path):
-                logs.append(f"[ERROR] Merged video not found at {merged_path}")
-                return {"error": "Merged video not found", "logs": logs}
+    #         # Ensure ElevenLabs audio is in Supabase Storage
+    #         if is_valid_url(mixed_audio_url) and "supabase.co" not in mixed_audio_url:
+    #             # Download and upload to Supabase
+    #             import tempfile, httpx, os
+    #             fd, temp_audio_path = tempfile.mkstemp(suffix=".mp3"); os.close(fd)
+    #             try:
+    #                 with httpx.Client() as client:
+    #                     r = client.get(mixed_audio_url)
+    #                     if r.status_code == 200:
+    #                         with open(temp_audio_path, 'wb') as f:
+    #                             f.write(r.content)
+    #                         # Upload to Supabase (append user_id if available)
+    #                         supabase_audio_url = await self._serve_video_from_supabase(temp_audio_path, f"audio_{int(time.time())}.mp3", user_id=user_id)
+    #                         logs.append(f"[AUDIO UPLOAD] Uploaded ElevenLabs audio to Supabase: {supabase_audio_url}")
+    #                         mixed_audio_url = supabase_audio_url
+    #                     else:
+    #                         logs.append(f"[AUDIO DOWNLOAD ERROR] {mixed_audio_url} status {r.status_code}")
+    #             except Exception as e:
+    #                 logs.append(f"[AUDIO DOWNLOAD ERROR] {e}")
             
-            logs.append(f"[FFMPEG SUCCESS] Merged video created at: {merged_path}")
+    #         # Download video and audio files
+    #         import tempfile, os, subprocess, httpx
+    #         async def download_file(url, suffix):
+    #             # Ensure URL has proper protocol
+    #             if not url.startswith(('http://', 'https://')):
+    #                 if url.startswith('//'):
+    #                     url = 'https:' + url
+    #                 else:
+    #                     url = 'https://' + url
+                
+    #             logs.append(f"[DOWNLOAD] Attempting to download: {url}")
+                
+    #             fd, path = tempfile.mkstemp(suffix=suffix)
+    #             os.close(fd)
+    #             try:
+    #                 async with httpx.AsyncClient(timeout=60.0) as client:
+    #                     r = await client.get(url)
+    #                     r.raise_for_status()  # Raise exception for bad status codes
+    #                     with open(path, 'wb') as f:
+    #                         f.write(r.content)
+    #                     logs.append(f"[DOWNLOAD SUCCESS] Downloaded to: {path}")
+    #                     return path
+    #             except Exception as e:
+    #                 logs.append(f"[DOWNLOAD ERROR] Failed to download {url}: {e}")
+    #                 # Clean up the temp file if it was created
+    #                 if os.path.exists(path):
+    #                     os.remove(path)
+    #                 raise
             
-            # 8. Upload merged video to storage and return URL (append user_id if available)
-            merged_video_url = await self._serve_video_from_supabase(merged_path, f"merged_video_{int(time.time())}.mp4", user_id=user_id)
-            logs.append(f"[UPLOAD] Merged video public URL: {merged_video_url}")
+    #         try:
+    #             # For multi-segment videos, download all segments
+    #             if is_multi_segment and segment_urls:
+    #                 logs.append(f"[MULTI-SEGMENT] Downloading {len(segment_urls)} video segments")
+    #                 video_paths = []
+    #                 for i, segment_url in enumerate(segment_urls):
+    #                     segment_path = await download_file(segment_url, f"_segment_{i}.mp4")
+    #                     video_paths.append(segment_path)
+    #                     logs.append(f"[MULTI-SEGMENT] Downloaded segment {i+1}: {segment_path}")
+                    
+    #                 # Use the first segment as the main video for now
+    #                 video_path = video_paths[0]
+    #                 logs.append(f"[MULTI-SEGMENT] Using first segment as main video: {video_path}")
+    #             else:
+    #                 # Single video
+    #                 video_path = await download_file(video_url, ".mp4")
+                
+    #             audio_path = await download_file(mixed_audio_url, ".mp3")
+    #         except Exception as download_error:
+    #             logs.append(f"[DOWNLOAD FAILED] {download_error}")
+    #             return {"error": f"Failed to download files: {download_error}", "logs": logs}
             
-            # 9. Save merged video metadata to Supabase DB
-            try:
-                merged_metadata = {
-                    "chapter_id": chapter_id,
-                    "video_url": merged_video_url,
-                    "script": script,
-                    "character_details": character_details,
-                    "scene_prompt": klingai_content,
-                    "created_at": int(time.time()),
-                    "source": "merged",
-                    "klingai_video_url": video_url,
-                    "is_multi_segment": is_multi_segment,
-                    "total_segments": total_segments,
-                    "segment_urls": segment_urls if is_multi_segment else []
-                }
-                if 'book' in chapter_context and 'id' in chapter_context['book']:
-                    merged_metadata["book_id"] = chapter_context['book']['id']
-                if user_id:
-                    merged_metadata["user_id"] = user_id
-                logs.append(f"[DB INSERT] Saving merged video metadata: {merged_metadata}")
-                db_result_merged = self.supabase_service.table("videos").insert(merged_metadata).execute()
-                logs.append(f"[DB INSERT RESULT] {db_result_merged}")
-            except Exception as db_exc:
-                logs.append(f"[DB INSERT ERROR - Merged] {db_exc}")
+    #         # Check file existence
+    #         if not os.path.exists(video_path):
+    #             logs.append(f"[ERROR] Video file not found at {video_path}")
+    #             return {"error": "Video file not found", "logs": logs}
+    #         if not os.path.exists(audio_path):
+    #             logs.append(f"[ERROR] Audio file not found at {audio_path}")
+    #             return {"error": "Audio file not found", "logs": logs}
             
-            return {
-                "merged_video_url": merged_video_url,
-                "klingai_video_url": video_url,
-                "logs": logs,
-                "script": script,
-                "characters": characters,
-                "character_details": character_details,
-                "scene_prompt": klingai_content,
-                "elevenlabs_content": elevenlabs_content,
-                "klingai_prompt": klingai_content,
-                "video_url": merged_video_url,
-                "enhanced_audio_url": mixed_audio_url,
-                "is_multi_segment": is_multi_segment,
-                "total_segments": total_segments,
-                "segment_urls": segment_urls if is_multi_segment else [],
-                "service_inputs": {
-                    "elevenlabs": {
-                        "content": elevenlabs_content,
-                        "content_type": elevenlabs_content_type,
-                        "character_count": len(elevenlabs_content)
-                    },
-                    "klingai": {
-                        "content": klingai_content,
-                        "content_type": klingai_content_type,
-                        "character_count": len(klingai_content)
-                    }
-                },
-                "parsed_sections": parsed_content.get("parsed_sections", {})
-            }
-        except Exception as e:
-            logs.append(f"[ERROR] {e}")
-            print(f"Error generating entertainment video: {e}")
-            return {"error": str(e), "logs": logs}
+    #         # 7. Merge audio and video with FFmpeg
+    #         merged_path = tempfile.mktemp(suffix="_merged.mp4")
+    #         ffmpeg_cmd = [
+    #             "ffmpeg", "-y",
+    #             "-i", video_path,
+    #             "-i", audio_path,
+    #             "-c:v", "copy",
+    #             "-c:a", "aac",
+    #             "-shortest",
+    #             merged_path
+    #         ]
+    #         logs.append(f"[FFMPEG CMD] {' '.join(ffmpeg_cmd)}")
+    #         proc = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+    #         logs.append(f"[FFMPEG OUT] {proc.stdout}")
+    #         if proc.stderr:
+    #             logs.append(f"[FFMPEG ERR] {proc.stderr}")
+    #         logs.append(f"[FFMPEG EXIT] {proc.returncode}")
+    #         logs.append(f"[FFMPEG ERR] {proc.stderr}")
+    #         if not os.path.exists(merged_path):
+    #             logs.append(f"[ERROR] Merged video not found at {merged_path}")
+    #             return {"error": "Merged video not found", "logs": logs}
+            
+    #         logs.append(f"[FFMPEG SUCCESS] Merged video created at: {merged_path}")
+            
+    #         # 8. Upload merged video to storage and return URL (append user_id if available)
+    #         merged_video_url = await self._serve_video_from_supabase(merged_path, f"merged_video_{int(time.time())}.mp4", user_id=user_id)
+    #         logs.append(f"[UPLOAD] Merged video public URL: {merged_video_url}")
+            
+    #         # 9. Save merged video metadata to Supabase DB
+    #         try:
+    #             merged_metadata = {
+    #                 "chapter_id": chapter_id,
+    #                 "video_url": merged_video_url,
+    #                 "script": script,
+    #                 "character_details": character_details,
+    #                 "scene_prompt": klingai_content,
+    #                 "created_at": int(time.time()),
+    #                 "source": "merged",
+    #                 "klingai_video_url": video_url,
+    #                 "is_multi_segment": is_multi_segment,
+    #                 "total_segments": total_segments,
+    #                 "segment_urls": segment_urls if is_multi_segment else []
+    #             }
+    #             if 'book' in chapter_context and 'id' in chapter_context['book']:
+    #                 merged_metadata["book_id"] = chapter_context['book']['id']
+    #             if user_id:
+    #                 merged_metadata["user_id"] = user_id
+    #             logs.append(f"[DB INSERT] Saving merged video metadata: {merged_metadata}")
+    #             db_result_merged = self.supabase_service.table("videos").insert(merged_metadata).execute()
+    #             logs.append(f"[DB INSERT RESULT] {db_result_merged}")
+    #         except Exception as db_exc:
+    #             logs.append(f"[DB INSERT ERROR - Merged] {db_exc}")
+            
+    #         return {
+    #             "merged_video_url": merged_video_url,
+    #             "klingai_video_url": video_url,
+    #             "logs": logs,
+    #             "script": script,
+    #             "characters": characters,
+    #             "character_details": character_details,
+    #             "scene_prompt": klingai_content,
+    #             "elevenlabs_content": elevenlabs_content,
+    #             "klingai_prompt": klingai_content,
+    #             "video_url": merged_video_url,
+    #             "enhanced_audio_url": mixed_audio_url,
+    #             "is_multi_segment": is_multi_segment,
+    #             "total_segments": total_segments,
+    #             "segment_urls": segment_urls if is_multi_segment else [],
+    #             "service_inputs": {
+    #                 "elevenlabs": {
+    #                     "content": elevenlabs_content,
+    #                     "content_type": elevenlabs_content_type,
+    #                     "character_count": len(elevenlabs_content)
+    #                 },
+    #                 "klingai": {
+    #                     "content": klingai_content,
+    #                     "content_type": klingai_content_type,
+    #                     "character_count": len(klingai_content)
+    #                 }
+    #             },
+    #             "parsed_sections": parsed_content.get("parsed_sections", {})
+    #         }
+    #     except Exception as e:
+    #         logs.append(f"[ERROR] {e}")
+    #         print(f"Error generating entertainment video: {e}")
+    #         return {"error": str(e), "logs": logs}
 
     
     async def get_available_avatars(self) -> List[Dict[str, Any]]:
@@ -987,6 +1156,86 @@ class VideoService:
             print(f"Error merging video and audio: {e}")
             return False
 
+    async def extract_last_frame_from_video(self, video_url: str, output_filename: str, user_id: str = None) -> Optional[str]:
+        """Extract the last frame from a video using FFmpeg and upload to Supabase Storage"""
+        try:
+            print(f"[FRAME EXTRACTION] Extracting last frame from video: {video_url}")
+
+            # Check if FFmpeg is available
+            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
+            if result.returncode != 0:
+                print("[FRAME EXTRACTION] FFmpeg not found, cannot extract frame")
+                return None
+
+            # Download video to temporary file
+            import tempfile
+            import httpx
+
+            fd, video_temp_path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+
+            try:
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    response = await client.get(video_url)
+                    response.raise_for_status()
+                    with open(video_temp_path, 'wb') as f:
+                        f.write(response.content)
+
+                print(f"[FRAME EXTRACTION] Video downloaded to: {video_temp_path}")
+
+                # Create temporary output path for the frame
+                fd, frame_temp_path = tempfile.mkstemp(suffix=".jpg")
+                os.close(fd)
+
+                # Use FFmpeg to extract the last frame
+                # -sseof -1 means seek to 1 second before end, then extract frame
+                ffmpeg_cmd = [
+                    'ffmpeg',
+                    '-i', video_temp_path,  # Input video
+                    '-vf', 'select=eq(n\\,0)',  # Select only the last frame
+                    '-q:v', '2',  # High quality JPEG
+                    '-f', 'image2',  # Output format
+                    '-update', '1',  # Only output one frame
+                    '-y',  # Overwrite output
+                    frame_temp_path
+                ]
+
+                print(f"[FRAME EXTRACTION] Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+                result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=60)
+
+                if result.returncode != 0:
+                    print(f"[FRAME EXTRACTION] FFmpeg failed: {result.stderr}")
+                    return None
+
+                if not os.path.exists(frame_temp_path):
+                    print("[FRAME EXTRACTION] Frame extraction failed - no output file")
+                    return None
+
+                print(f"[FRAME EXTRACTION] Frame extracted to: {frame_temp_path}")
+
+                # Upload frame to Supabase Storage
+                frame_url = await self._serve_video_from_supabase(frame_temp_path, output_filename, user_id)
+
+                if frame_url:
+                    print(f"[FRAME EXTRACTION] Frame uploaded to: {frame_url}")
+                else:
+                    print("[FRAME EXTRACTION] Failed to upload frame to Supabase")
+
+                return frame_url
+
+            finally:
+                # Clean up temporary files
+                try:
+                    if os.path.exists(video_temp_path):
+                        os.unlink(video_temp_path)
+                    if os.path.exists(frame_temp_path):
+                        os.unlink(frame_temp_path)
+                except:
+                    pass
+
+        except Exception as e:
+            print(f"[FRAME EXTRACTION] Error extracting last frame: {e}")
+            return None
     async def _create_mock_video(self, duration: int = 180) -> str:
         """Create a mock video using FFmpeg for development"""
         try:
@@ -1937,6 +2186,192 @@ Return as JSON with: script, character_details, scene_prompt
             segments = [script]
         
         return segments
+
+    def _split_script_by_scenes(self, script: str, characters: List[str]) -> List[Dict[str, Any]]:
+        """Split script into actual scenes based on scene headers and character dialogues"""
+        print(f"[SCENE SEGMENTATION] Starting scene segmentation for script with {len(script)} characters")
+        print(f"[SCENE SEGMENTATION] Characters: {characters}")
+        
+        from app.services.script_parser import ScriptParser
+        
+        # Use the script parser to extract scene components
+        script_parser = ScriptParser()
+        parsed_components = script_parser.parse_script_for_video_prompt(script, characters)
+        
+        scenes = []
+        
+        # Group dialogues and actions by scene
+        scene_dialogues = {}
+        scene_actions = {}
+        
+        # Group dialogues by scene
+        for dialogue in parsed_components.get("character_dialogues", []):
+            scene_num = dialogue.get("scene", 1)
+            if scene_num not in scene_dialogues:
+                scene_dialogues[scene_num] = []
+            scene_dialogues[scene_num].append(dialogue)
+        
+        # Group actions by scene
+        for action in parsed_components.get("character_actions", []):
+            scene_num = action.get("scene", 1)
+            if scene_num not in scene_actions:
+                scene_actions[scene_num] = []
+            scene_actions[scene_num].append(action)
+        
+        # Create scene objects from scene descriptions
+        for scene_desc in parsed_components.get("scene_descriptions", []):
+            scene_num = scene_desc.get("scene_number", 1)
+            scene_description = scene_desc.get("description", "")
+            
+            # Get dialogues and actions for this scene
+            scene_dialogue_list = scene_dialogues.get(scene_num, [])
+            scene_action_list = scene_actions.get(scene_num, [])
+            
+            # Create scene prompt
+            scene_prompt = self._create_scene_prompt(
+                scene_description,
+                scene_dialogue_list,
+                scene_action_list,
+                scene_desc.get("camera_movements", [])
+            )
+            
+            scenes.append({
+                "scene_number": scene_num,
+                "description": scene_description,
+                "dialogues": scene_dialogue_list,
+                "actions": scene_action_list,
+                "camera_movements": scene_desc.get("camera_movements", []),
+                "prompt": scene_prompt,
+                "character_count": len(set([d.get("character") for d in scene_dialogue_list])),
+                "dialogue_count": len(scene_dialogue_list),
+                "action_count": len(scene_action_list)
+            })
+        
+        # If no scenes were detected by scene headers, create scenes based on character dialogue changes
+        if not scenes:
+            print(f"[SCENE SEGMENTATION] No scene headers detected, creating scenes based on character dialogue changes")
+            scenes = self._create_scenes_from_dialogue_changes(script, characters, parsed_components)
+        
+        print(f"[SCENE SEGMENTATION] Successfully split into {len(scenes)} scenes")
+        for i, scene in enumerate(scenes):
+            print(f"[SCENE {i+1}/{len(scenes)}] Dialogues: {scene['dialogue_count']}, Actions: {scene['action_count']}, Characters: {scene['character_count']}")
+            print(f"[SCENE {i+1}] Description: {scene['description'][:100]}...")
+            print(f"[SCENE {i+1}] Prompt preview: {scene['prompt'][:100]}...")
+        
+        return scenes
+
+    def _create_scene_prompt(self, scene_description: str, dialogues: List[Dict], actions: List[Dict], camera_movements: List[str]) -> str:
+        """Create a comprehensive prompt for a single scene"""
+        prompt_parts = [f"Scene: {scene_description}"]
+        
+        # Add camera movements
+        if camera_movements:
+            prompt_parts.append(f"Camera movements: {', '.join(camera_movements)}")
+        
+        # Add character actions
+        if actions:
+            action_texts = []
+            for action in actions:
+                character = action.get("character", "Unknown")
+                action_desc = action.get("action", "")
+                action_texts.append(f"{character} {action_desc}")
+            prompt_parts.append(f"Character actions: {', '.join(action_texts)}")
+        
+        # Add character dialogues
+        if dialogues:
+            dialogue_texts = []
+            for dialogue in dialogues:
+                character = dialogue.get("character", "Unknown")
+                text = dialogue.get("text", "")
+                dialogue_texts.append(f"{character}: \"{text}\"")
+            prompt_parts.append(f"Dialogues: {' | '.join(dialogue_texts)}")
+        
+        # Add cinematic quality instructions
+        prompt_parts.extend([
+            "Cinematic quality, professional videography",
+            "Smooth camera movements, natural character expressions",
+            "High resolution, realistic lighting and composition"
+        ])
+        
+        return ". ".join(prompt_parts)
+
+    def _create_scenes_from_dialogue_changes(self, script: str, characters: List[str], parsed_components: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Create scenes based on character dialogue changes when no scene headers are detected"""
+        print(f"[DIALOGUE SCENE DETECTION] Creating scenes from dialogue changes")
+        
+        scenes = []
+        current_scene = 1
+        current_character = None
+        scene_dialogues = []
+        scene_actions = []
+        
+        # Process all dialogues and group by character changes
+        dialogues = parsed_components.get("character_dialogues", [])
+        actions = parsed_components.get("character_actions", [])
+        
+        for i, dialogue in enumerate(dialogues):
+            character = dialogue.get("character", "Unknown")
+            
+            # Start new scene when character changes or every 3 dialogues
+            if (current_character and character != current_character) or len(scene_dialogues) >= 3:
+                # Create scene from accumulated dialogues
+                scene_description = f"Scene {current_scene}: {current_character or character} speaks"
+                scene_prompt = self._create_scene_prompt(
+                    scene_description,
+                    scene_dialogues,
+                    scene_actions,
+                    []
+                )
+                
+                scenes.append({
+                    "scene_number": current_scene,
+                    "description": scene_description,
+                    "dialogues": scene_dialogues.copy(),
+                    "actions": scene_actions.copy(),
+                    "camera_movements": [],
+                    "prompt": scene_prompt,
+                    "character_count": len(set([d.get("character") for d in scene_dialogues])),
+                    "dialogue_count": len(scene_dialogues),
+                    "action_count": len(scene_actions)
+                })
+                
+                # Reset for next scene
+                current_scene += 1
+                scene_dialogues.clear()
+                scene_actions.clear()
+            
+            current_character = character
+            scene_dialogues.append(dialogue)
+            
+            # Add relevant actions for this dialogue
+            for action in actions:
+                if action.get("character") == character:
+                    scene_actions.append(action)
+        
+        # Add final scene if there are remaining dialogues
+        if scene_dialogues:
+            scene_description = f"Scene {current_scene}: {current_character or 'Character'} speaks"
+            scene_prompt = self._create_scene_prompt(
+                scene_description,
+                scene_dialogues,
+                scene_actions,
+                []
+            )
+            
+            scenes.append({
+                "scene_number": current_scene,
+                "description": scene_description,
+                "dialogues": scene_dialogues,
+                "actions": scene_actions,
+                "camera_movements": [],
+                "prompt": scene_prompt,
+                "character_count": len(set([d.get("character") for d in scene_dialogues])),
+                "dialogue_count": len(scene_dialogues),
+                "action_count": len(scene_actions)
+            })
+        
+        print(f"[DIALOGUE SCENE DETECTION] Created {len(scenes)} scenes from dialogue changes")
+        return scenes
 
     def _format_dialogues_for_elevenlabs(self, character_dialogues: List[Dict[str, str]]) -> str:
         """Format character dialogues for ElevenLabs audio generation"""

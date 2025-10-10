@@ -387,6 +387,7 @@ async def generate_entertainment_video(
         script_data = script_response.data[0]
 
         # Step 2: Create video generation record
+        print(f"[VIDEO GEN DEBUG] Creating video generation with chapter_id: {chapter_id}, script_id: {script_data['id']}, user_id: {current_user['id']}")
         video_generation = supabase_client.table('video_generations').insert({
             'chapter_id': chapter_id,
             'script_id': script_data['id'],
@@ -407,23 +408,176 @@ async def generate_entertainment_video(
         video_gen_id = video_generation.data[0]['id']
         
         try:
-            # Step 3: Start audio generation (first step in pipeline)
-            from app.tasks.audio_tasks import generate_all_audio_for_video
-            print(f"✅ Starting audio generation for video: {video_gen_id}")
-    
-            task = generate_all_audio_for_video.delay(video_gen_id)
-            print(f"✅ Audio task queued successfully: {task.id}")
-            
-            # Store task ID and update status in database
-            supabase_client.table('video_generations').update({
-                'audio_task_id': task.id,
-                'generation_status': 'generating_audio',
-                'task_metadata': {
-                    'audio_task_id': task.id,
-                    'audio_task_state': task.state,
-                    'started_at': datetime.now().isoformat()
+            # Step 3: Check for pre-generated audio first
+            print(f"🔍 Checking for pre-generated audio for chapter: {chapter_id}")
+
+            # Check for existing audio in audio_generations table
+            print(f"[AUDIO QUERY DEBUG] Querying audio_generations with:")
+            print(f"  chapter_id: {chapter_id}")
+            print(f"  user_id: {current_user['id']}")
+            print(f"  generation_status: completed (using 'generation_status' column)")
+
+            audio_response = supabase_client.table('audio_generations')\
+                .select('*')\
+                .eq('chapter_id', chapter_id)\
+                .eq('user_id', current_user['id'])\
+                .eq('generation_status', 'completed')\
+                .execute()
+
+            print(f"[AUDIO QUERY DEBUG] Raw response: {audio_response.data}")
+            if audio_response.data:
+                for idx, record in enumerate(audio_response.data):
+                    print(f"[AUDIO QUERY DEBUG] Record {idx}: keys={list(record.keys())}")
+                    print(f"[AUDIO QUERY DEBUG] Record {idx}: status={record.get('status')}, generation_status={record.get('generation_status')}")
+            else:
+                print("[AUDIO QUERY DEBUG] No records found.")
+
+            existing_audio = []
+            audio_by_type = {
+                'narrator': [],
+                'characters': [],
+                'sound_effects': [],
+                'background_music': []
+            }
+
+            if audio_response.data:
+                for audio_record in audio_response.data:
+                    audio_type = audio_record.get('audio_type', 'narrator')
+                    # Map database fields to expected format
+                    audio_data = {
+                        'id': audio_record['id'],
+                        'url': audio_record['audio_url'],
+                        'audio_url': audio_record['audio_url'],
+                        'duration': audio_record.get('duration', 0),
+                        'file_name': audio_record.get('text_content', ''),
+                        'scene_number': audio_record.get('sequence_order', 0),
+                        'character_name': audio_record.get('metadata', {}).get('character_name'),
+                        'volume': 1.0
+                    }
+
+                    # Categorize by type
+                    if audio_type == 'narrator':
+                        audio_by_type['narrator'].append(audio_data)
+                    elif audio_type == 'character':
+                        audio_by_type['characters'].append(audio_data)
+                    elif audio_type in ['sfx', 'sound_effect']:
+                        audio_by_type['sound_effects'].append(audio_data)
+                    elif audio_type == 'music':
+                        audio_by_type['background_music'].append(audio_data)
+
+                    existing_audio.append(audio_data)
+
+            print(f"📊 Found {len(existing_audio)} pre-generated audio files")
+
+            if existing_audio:
+                # Use pre-generated audio - skip audio generation
+                print(f"✅ Using pre-generated audio, skipping audio generation step")
+
+                # Organize audio by type for storage
+                audio_by_type = {
+                    'narrator': [],
+                    'characters': [],
+                    'sound_effects': [],
+                    'background_music': []
                 }
-            }).eq('id', video_gen_id).execute()
+
+                for audio_file in existing_audio:
+                    audio_type = audio_file.get('audio_type', 'narrator')
+                    audio_by_type[audio_type].append({
+                        'id': audio_file['id'],
+                        'url': audio_file['audio_url'],
+                        'duration': audio_file.get('duration', 0),
+                        'name': audio_file.get('file_name', ''),
+                        'scene_number': audio_file.get('scene_number', 0),
+                        'character': audio_file.get('character_name'),
+                        'volume': audio_file.get('volume', 1.0)
+                    })
+
+                # Check for pre-generated images from image_generations table
+                existing_images = []
+                image_by_type = {
+                    'character_images': [],
+                    'scene_images': []
+                }
+
+                # Query image_generations table for images associated with this chapter
+                images_response = supabase_client.table('image_generations')\
+                    .select('*')\
+                    .eq('user_id', current_user['id'])\
+                    .eq('status', 'completed')\
+                    .execute()
+
+                if images_response.data:
+                    for img in images_response.data:
+                        metadata = img.get('metadata', {})
+                        # Check if image is associated with this chapter
+                        if metadata.get('chapter_id') == chapter_id:
+                            image_type = metadata.get('image_type', 'scene')
+                            image_data = {
+                                'id': img['id'],
+                                'url': img['image_url'],
+                                'image_url': img['image_url'],
+                                'prompt': img.get('image_prompt', ''),
+                                'created_at': img['created_at']
+                            }
+
+                            if image_type == 'character':
+                                image_data['character_name'] = metadata.get('character_name', '')
+                                image_by_type['character_images'].append(image_data)
+                            elif image_type == 'scene':
+                                image_data['scene_number'] = metadata.get('scene_number', 0)
+                                image_by_type['scene_images'].append(image_data)
+
+                            existing_images.append(image_data)
+
+                print(f"📊 Found {len(existing_images)} pre-generated images")
+
+                # Store pre-generated audio and images in video generation record
+                supabase_client.table('video_generations').update({
+                    'audio_files': audio_by_type,
+                    'image_data': {
+                        'images': image_by_type,
+                        'statistics': {
+                            'total_images': len(existing_images),
+                            'character_images': len(image_by_type['character_images']),
+                            'scene_images': len(image_by_type['scene_images'])
+                        }
+                    },
+                    'generation_status': 'images_completed',  # Skip to next step assuming images are pre-generated
+                    'task_metadata': {
+                        'audio_source': 'pre_generated',
+                        'image_source': 'pre_generated',
+                        'audio_files_count': len(existing_audio),
+                        'image_files_count': len(existing_images),
+                        'started_at': datetime.now().isoformat()
+                    }
+                }).eq('id', video_gen_id).execute()
+
+                # ✅ FIXED: Queue video generation task since we have pre-generated assets
+                print(f"🎬 Queuing video generation task for video: {video_gen_id}")
+                from app.tasks.video_tasks import generate_all_videos_for_generation
+                task = generate_all_videos_for_generation.delay(video_gen_id)
+                print(f"✅ Video generation task queued successfully: {task.id}")
+
+            else:
+                raise HTTPException(status_code=400, detail="Can't find pre-generated audio and stop the video generation")
+                # print(f"🎵 No pre-generated audio found, starting audio generation for video: {video_gen_id}")
+
+                # from app.tasks.audio_tasks import generate_all_audio_for_video
+                # task = generate_all_audio_for_video.delay(video_gen_id)
+                # print(f"✅ Audio task queued successfully: {task.id}")
+
+                # # Store task ID and update status in database
+                # supabase_client.table('video_generations').update({
+                #     'audio_task_id': task.id,
+                #     'generation_status': 'generating_audio',
+                #     'task_metadata': {
+                #         'audio_source': 'generated',
+                #         'audio_task_id': task.id,
+                #         'audio_task_state': task.state,
+                #         'started_at': datetime.now().isoformat()
+                #     }
+                # }).eq('id', video_gen_id).execute()
 
         
         except Exception as e:
@@ -436,13 +590,25 @@ async def generate_entertainment_video(
             
             raise e
         
+        # Handle response based on whether a task was queued
+        if task:
+            audio_task_id = task.id
+            task_status = task.state
+            status = "queued"
+            message = "Video generation started using saved script"
+        else:
+            audio_task_id = None
+            task_status = "completed"
+            status = "ready"
+            message = "Video generation ready using pre-generated assets"
+
         return VideoGenerationResponse(
             video_generation_id=video_gen_id,
             script_id=script_data['id'],
-            status="queued",
-            audio_task_id=task.id,
-            task_status=task.state,
-            message="Video generation started using saved script",
+            status=status,
+            audio_task_id=audio_task_id,
+            task_status=task_status,
+            message=message,
             script_info={
                 "script_style": script_data['script_style'],
                 "video_style": video_style,  # ✅ Now this works
@@ -971,6 +1137,7 @@ async def list_chapter_scripts(
 ):
     """List all scripts for a chapter by current user"""
     try:
+        print(f"[DEBUG] list_chapter_scripts called for chapter_id: {chapter_id}, user_id: {current_user['id']}")
         scripts = supabase_client.table('scripts')\
             .select('*')\
             .eq('chapter_id', chapter_id)\
@@ -978,9 +1145,14 @@ async def list_chapter_scripts(
             .order('created_at', desc=True)\
             .execute()
 
+        print(f"[DEBUG] list_chapter_scripts - raw scripts data: {scripts.data}")
+        scripts_data = scripts.data or []
+        for script in scripts_data:
+            print(f"[DEBUG] list_chapter_scripts - script {script.get('id')}: script_story_type = {script.get('script_story_type')}")
+
         return {
             'chapter_id': chapter_id,
-            'scripts': scripts.data or []
+            'scripts': scripts_data
         }
 
     except Exception as e:
@@ -1008,6 +1180,112 @@ async def get_script_details(
         
     except Exception as e:
         print(f"Error getting script details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Script Evaluation Endpoint ---
+@router.post("/evaluate-script/{script_id}")
+async def evaluate_script(
+    script_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Evaluate a script using DeepSeekScriptService (LLM) for coherence, storytelling, character consistency, video suitability.
+    Returns scores and feedback.
+    """
+    try:
+        # Fetch script and chapter context
+        script_record = supabase_client.table('scripts').select('*').eq('id', script_id).eq('user_id', current_user['id']).single().execute()
+        if not script_record.data:
+            raise HTTPException(status_code=404, detail="Script not found")
+        script = script_record.data['script']
+        chapter_id = script_record.data.get('chapter_id')
+        plot_context = None
+        if chapter_id:
+            chapter = supabase_client.table('chapters').select('content').eq('id', chapter_id).single().execute()
+            plot_context = chapter.data['content'] if chapter.data else None
+
+        # Evaluate using DeepSeekScriptService
+        from app.services.deepseek_script_service import DeepSeekScriptService
+        deepseek = DeepSeekScriptService()
+        result = await deepseek.evaluate_script(script, plot_context=plot_context)
+
+        # Optionally update script status and store evaluation
+        if result.get("status") == "success" and result.get("scores"):
+            supabase_client.table('scripts').update({
+                "evaluation": result["scores"],
+                "status": "evaluated"
+            }).eq('id', script_id).execute()
+
+        return result
+    except Exception as e:
+        print(f"Error evaluating script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- Script Status Management Endpoints ---
+@router.post("/script-status/{script_id}")
+async def update_script_status(
+    script_id: str,
+    status: str = Body(...),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Update the status of a script (draft, evaluated, approved, rejected, active).
+    """
+    try:
+        allowed_statuses = ["draft", "evaluated", "approved", "rejected", "active", "ready"]
+        if status not in allowed_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+        script_record = supabase_client.table('scripts').select('id', 'user_id').eq('id', script_id).single().execute()
+        if not script_record.data or script_record.data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to update this script")
+        supabase_client.table('scripts').update({"status": status}).eq('id', script_id).execute()
+        return {"message": "Status updated", "script_id": script_id, "status": status}
+    except Exception as e:
+        print(f"Error updating script status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/activate-script/{script_id}")
+async def activate_script(
+    script_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Set a script as active for its chapter (deactivate others).
+    """
+    try:
+        script_record = supabase_client.table('scripts').select('id', 'chapter_id', 'user_id').eq('id', script_id).single().execute()
+        if not script_record.data or script_record.data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to activate this script")
+        chapter_id = script_record.data['chapter_id']
+        # Deactivate other scripts for this chapter/user
+        supabase_client.table('scripts').update({"status": "ready"}).eq('chapter_id', chapter_id).eq('user_id', current_user['id']).neq('id', script_id).execute()
+        # Activate selected script
+        supabase_client.table('scripts').update({"status": "active"}).eq('id', script_id).execute()
+        return {"message": "Script activated", "script_id": script_id}
+    except Exception as e:
+        print(f"Error activating script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/deactivate-script/{script_id}")
+async def deactivate_script(
+    script_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Deactivate a script (set status to ready).
+    """
+    try:
+        script_record = supabase_client.table('scripts').select('id', 'user_id').eq('id', script_id).single().execute()
+        if not script_record.data or script_record.data['user_id'] != current_user['id']:
+            raise HTTPException(status_code=403, detail="Not authorized to deactivate this script")
+        supabase_client.table('scripts').update({"status": "ready"}).eq('id', script_id).execute()
+        return {"message": "Script deactivated", "script_id": script_id}
+    except Exception as e:
+        print(f"Error deactivating script: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # get_character_images endpoint:
@@ -1324,29 +1602,6 @@ async def generate_enhanced_speech(
         print(f"Error generating enhanced speech: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/generate-character-voice")
-async def generate_character_voice(
-    text: str,
-    character_name: str,
-    character_traits: str = "",
-    supabase_client: Client = Depends(get_supabase),
-    current_user: dict = Depends(get_current_active_user)
-):
-    """Generate character-specific voice"""
-    try:
-        elevenlabs_service = ElevenLabsService()
-        audio_url = await elevenlabs_service.generate_character_voice(
-            text=text,
-            character_name=character_name,
-            character_traits=character_traits,
-            user_id=current_user['id']
-        )
-        
-        return {"audio_url": audio_url}
-        
-    except Exception as e:
-        print(f"Error generating character voice: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/generate-sound-effects")
 async def generate_sound_effects(
@@ -1929,6 +2184,10 @@ async def generate_script_and_scenes(
         script_style = validate_script_style(request.get('script_style', 'cinematic'))
         script_name = request.get('script_name')  # Optional custom name for the script
         plot_context = request.get('plot_context')  # Optional plot context for enhanced generation
+        script_story_type = request.get('scriptStoryType')  # Extract script story type
+
+        print(f"[DEBUG] generate_script_and_scenes - received request: {request}")
+        print(f"[DEBUG] generate_script_and_scenes - scriptStoryType: {script_story_type}")
 
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
@@ -2105,12 +2364,15 @@ async def generate_script_and_scenes(
             "character_details": character_details,
             "metadata": script_data["metadata"],
             "status": "ready",
-            "service_used": "openrouter"
+            "service_used": "openrouter",
+            "script_story_type": script_story_type  # Store the script story type
         }
 
+        print(f"[DEBUG] generate_script_and_scenes - storing script_record with script_story_type: {script_story_type}")
+
         # Always insert new script (allow multiple scripts per chapter)
-        script_result = supabase_client.table('scripts').insert(script_record).execute()
-        script_id = script_result.data[0]['id']
+        script_insert_result = supabase_client.table('scripts').insert(script_record).execute()
+        script_id = script_insert_result.data[0]['id']
 
         # ✅ Record usage for billing/limits
         await subscription_manager.record_usage(
@@ -2119,7 +2381,7 @@ async def generate_script_and_scenes(
             cost_usd=usage.get('estimated_cost', 0.0),
             metadata={
                 'script_style': script_style,
-                'model_used': script_result.get('model_used'),
+                'model_used': script_data["metadata"].get('model_used', 'unknown'),
                 'tokens_used': usage.get('total_tokens', 0)
             }
         )
@@ -2860,3 +3122,268 @@ async def trigger_task_for_step(step: PipelineStep, video_gen_id: str, supabase_
         
         raise HTTPException(status_code=500, detail=f"Failed to start retry task: {str(task_error)}")
 
+@router.get("/video-generation/{video_generation_id}/status")
+async def get_video_generation_polling_status(
+    video_generation_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Comprehensive polling endpoint for video generation status with step-by-step progress"""
+    try:
+        # Verify access to video generation
+        video_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', video_generation_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not video_response.data:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+        
+        video_data = video_response.data
+        overall_status = video_data.get('generation_status', 'pending')
+        
+        # Get pipeline steps for detailed progress
+        steps_response = supabase_client.table('pipeline_steps')\
+            .select('*').eq('video_generation_id', video_generation_id)\
+            .order('step_order').execute()
+        
+        pipeline_steps = steps_response.data or []
+        
+        # Initialize step progress tracking
+        step_progress = {
+            "image_generation": {"status": "pending", "progress": 0},
+            "audio_generation": {"status": "pending", "progress": 0},
+            "video_generation": {"status": "pending", "progress": 0},
+            "audio_video_merge": {"status": "pending", "progress": 0}
+        }
+        
+        # Map pipeline steps to progress tracking
+        for step in pipeline_steps:
+            step_name = step.get('step_name', '').lower()
+            step_status = step.get('status', 'pending')
+            
+            if 'image' in step_name:
+                step_progress["image_generation"]["status"] = step_status
+                step_progress["image_generation"]["progress"] = 100 if step_status == 'completed' else 50
+            elif 'audio' in step_name:
+                step_progress["audio_generation"]["status"] = step_status
+                step_progress["audio_generation"]["progress"] = 100 if step_status == 'completed' else 50
+            elif 'video' in step_name and 'merge' not in step_name:
+                step_progress["video_generation"]["status"] = step_status
+                step_progress["video_generation"]["progress"] = 100 if step_status == 'completed' else 50
+            elif 'merge' in step_name:
+                step_progress["audio_video_merge"]["status"] = step_status
+                step_progress["audio_video_merge"]["progress"] = 100 if step_status == 'completed' else 50
+        
+        # Determine current step based on overall status
+        current_step = "pending"
+        if overall_status == 'generating_audio':
+            current_step = "audio_generation"
+        elif overall_status == 'generating_images':
+            current_step = "image_generation"
+        elif overall_status == 'generating_video':
+            current_step = "video_generation"
+        elif overall_status == 'merging_audio':
+            current_step = "audio_video_merge"
+        elif overall_status == 'completed':
+            current_step = "completed"
+        elif overall_status == 'failed':
+            current_step = "failed"
+        
+        # Calculate overall progress percentage
+        completed_steps = sum(1 for step in step_progress.values() if step["status"] == "completed")
+        total_steps = len(step_progress)
+        progress_percentage = int((completed_steps / total_steps) * 100) if total_steps > 0 else 0
+        
+        # Check for active Celery tasks
+        celery_task_info = await get_celery_task_status(video_data, supabase_client)
+        
+        # Build comprehensive response
+        response_data = {
+            "status": overall_status,
+            "current_step": current_step,
+            "progress_percentage": progress_percentage,
+            "steps": step_progress,
+            "error": video_data.get('error_message'),
+            "video_url": video_data.get('video_url'),
+            "created_at": video_data.get('created_at'),
+            "updated_at": video_data.get('updated_at'),
+            "celery_task": celery_task_info
+        }
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting video generation polling status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def get_celery_task_status(video_data: dict, supabase_client: Client) -> dict:
+    """Get Celery task status information"""
+    try:
+        task_info = {
+            "task_id": None,
+            "task_state": None,
+            "eta": None,
+            "result": None
+        }
+        
+        # Check for task IDs in metadata or direct fields
+        task_metadata = video_data.get('task_metadata', {})
+        audio_task_id = task_metadata.get('audio_task_id') or video_data.get('audio_task_id')
+        image_task_id = task_metadata.get('image_task_id')
+        video_task_id = task_metadata.get('video_task_id')
+        merge_task_id = task_metadata.get('merge_task_id')
+        
+        # Use the most relevant task ID based on current status
+        current_status = video_data.get('generation_status', 'pending')
+        task_id = None
+        
+        if current_status == 'generating_audio' and audio_task_id:
+            task_id = audio_task_id
+        elif current_status == 'generating_images' and image_task_id:
+            task_id = image_task_id
+        elif current_status == 'generating_video' and video_task_id:
+            task_id = video_task_id
+        elif current_status == 'merging_audio' and merge_task_id:
+            task_id = merge_task_id
+        
+        if task_id:
+            try:
+                from app.tasks.celery_app import celery_app
+                task_result = celery_app.AsyncResult(task_id)
+                
+                task_info.update({
+                    "task_id": task_id,
+                    "task_state": task_result.state,
+                    "eta": getattr(task_result, 'eta', None),
+                    "result": str(task_result.result) if task_result.result else None
+                })
+                
+                # If task failed, update error information
+                if task_result.state == 'FAILURE':
+                    task_info["error"] = str(task_result.result)
+                    
+            except Exception as task_error:
+                print(f"Error checking Celery task status: {task_error}")
+                task_info["error"] = f"Failed to check task status: {str(task_error)}"
+        
+        return task_info
+        
+    except Exception as e:
+        print(f"Error in get_celery_task_status: {e}")
+        return {"error": str(e)}
+
+
+@router.post("/video/retry/{task_id}")
+async def retry_video_retrieval(
+    task_id: str,
+    video_url: str = Body(None),
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Retry video retrieval for a failed video generation task"""
+    try:
+        print(f"🔄 Starting video retrieval retry for task: {task_id}")
+        
+        # Verify task access
+        task_response = supabase_client.table('video_generations')\
+            .select('*').eq('id', task_id).eq('user_id', current_user['id']).single().execute()
+        
+        if not task_response.data:
+            raise HTTPException(status_code=404, detail="Video generation task not found")
+        
+        task_data = task_response.data
+        current_status = task_data.get('generation_status')
+        
+        # Check if this task is eligible for retry
+        if current_status not in ['video_completed', 'failed', 'retrieval_failed']:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot retry video retrieval. Current status: {current_status}"
+            )
+        
+        # Check retry count
+        retry_count = task_data.get('retry_count', 0)
+        max_retries = 3
+        
+        if retry_count >= max_retries:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum retry attempts ({max_retries}) exceeded"
+            )
+        
+        # Get video URL from request or task data
+        if not video_url:
+            # Try to get video URL from task metadata
+            task_metadata = task_data.get('task_metadata', {})
+            video_url = task_metadata.get('future_links_url') or task_metadata.get('video_url')
+            
+            if not video_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No video URL available for retry. Please provide a video_url parameter."
+                )
+        
+        print(f"🔄 Attempting video retrieval from URL: {video_url}")
+        
+        # Import and use the video service for retry
+        from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
+        video_service = ModelsLabV7VideoService()
+        
+        # Attempt video retrieval
+        retry_result = await video_service.retry_video_retrieval(video_url)
+        
+        if not retry_result.get('success'):
+            # Update retry count and status
+            new_retry_count = retry_count + 1
+            supabase_client.table('video_generations').update({
+                'retry_count': new_retry_count,
+                'last_retry_at': datetime.now().isoformat(),
+                'generation_status': 'retrieval_failed' if new_retry_count < max_retries else 'failed',
+                'error_message': retry_result.get('error', 'Video retrieval failed'),
+                'can_resume': new_retry_count < max_retries
+            }).eq('id', task_id).execute()
+            
+            raise HTTPException(
+                status_code=500,
+                detail=f"Video retrieval failed: {retry_result.get('error', 'Unknown error')}"
+            )
+        
+        # Success - update task with video URL and mark as completed
+        video_url = retry_result.get('video_url')
+        video_duration = retry_result.get('duration', 0)
+        
+        supabase_client.table('video_generations').update({
+            'generation_status': 'completed',
+            'video_url': video_url,
+            'retry_count': retry_count + 1,
+            'last_retry_at': datetime.now().isoformat(),
+            'error_message': None,
+            'can_resume': False,
+            'task_metadata': {
+                **task_data.get('task_metadata', {}),
+                'retry_success': True,
+                'retry_video_url': video_url,
+                'video_duration': video_duration,
+                'final_retrieval_time': datetime.now().isoformat()
+            }
+        }).eq('id', task_id).execute()
+        
+        print(f"✅ Video retrieval retry successful for task: {task_id}")
+        
+        return {
+            'success': True,
+            'message': 'Video retrieval successful',
+            'video_url': video_url,
+            'duration': video_duration,
+            'retry_count': retry_count + 1,
+            'task_id': task_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error in video retrieval retry: {e}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
