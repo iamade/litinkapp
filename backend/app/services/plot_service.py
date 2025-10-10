@@ -136,6 +136,22 @@ class PlotService:
                 book_context, request, model_tier
             )
 
+            # 4.5. Generate script_story_type based on genre
+            book_type = book_context.get("book", {}).get("book_type", "fiction").lower()
+            genre = plot_data.get("genre", "fiction").lower()
+
+            if "non-fiction" in book_type or "non-fiction" in genre or "nonfiction" in book_type or "nonfiction" in genre:
+                # For non-fiction, generate a fictional story type using AI
+                script_story_type = await self._generate_fictional_story_type_for_nonfiction(
+                    book_context, plot_data, model_tier
+                )
+                plot_data["script_story_type"] = script_story_type
+                logger.info(f"[PlotService] Generated fictional story type for non-fiction: {script_story_type}")
+            else:
+                # For fiction, use the story_type as script_story_type
+                plot_data["script_story_type"] = plot_data.get("story_type", "hero's journey")
+                logger.info(f"[PlotService] Using fiction story type as script story type: {plot_data['script_story_type']}")
+
             # 5. Generate characters with archetype analysis
             characters_data = await self._generate_characters_with_archetypes(
                 plot_data, book_context, model_tier
@@ -673,6 +689,56 @@ Extract ALL characters mentioned, not just 3-5 main ones.
 
         return None
 
+    async def _generate_fictional_story_type_for_nonfiction(
+        self,
+        book_context: Dict[str, Any],
+        plot_data: Dict[str, Any],
+        model_tier: ModelTier
+    ) -> str:
+        """
+        Generate an interesting fictional story type for non-fiction content.
+        Uses AI to create a compelling narrative framework.
+        """
+        try:
+            book = book_context.get("book", {})
+            chapters_summary = book_context.get("chapters_summary", "")[:1000]
+
+            prompt = f"""Based on this non-fiction content, suggest ONE interesting fictional story type that would make an engaging video narrative.
+
+BOOK INFORMATION:
+Title: {book.get('title', '')}
+Genre: Non-fiction
+Description: {book.get('description', '')}
+
+CONTENT PREVIEW:
+{chapters_summary}
+
+TASK:
+Suggest a single compelling fictional story type that could frame this non-fiction content (e.g., "detective investigation", "hero's journey", "underdog story", "mystery thriller", "exploration adventure", "transformation story", "conflict and resolution", "quest narrative").
+
+Return ONLY the story type name (2-4 words maximum), no explanation."""
+
+            response = await self.openrouter.analyze_content(
+                content=prompt,
+                user_tier=model_tier,
+                analysis_type="summary"
+            )
+
+            if response.get("status") == "success":
+                story_type = response.get("result", "documentary narrative").strip()
+                # Clean up any extra text, keep only first line
+                story_type = story_type.split('\n')[0].strip('"\'').strip()
+                # Limit length
+                if len(story_type) > 50:
+                    story_type = "documentary narrative"
+                return story_type.lower()
+            else:
+                return "documentary narrative"
+
+        except Exception as e:
+            logger.error(f"[PlotService] Error generating fictional story type: {str(e)}")
+            return "documentary narrative"
+
     async def _analyze_character_archetypes(
         self,
         character: Dict[str, Any],
@@ -777,7 +843,7 @@ Return a JSON object with:
                 "logline": plot_data.get("logline") or f"A compelling {plot_data.get('genre', 'fiction')} story about personal growth and discovery.",
                 "themes": themes_value,
                 "story_type": plot_data.get("story_type") or "hero's journey",
-                "script_story_type": plot_data.get("story_type") or "hero's journey",  # Added field
+                "script_story_type": plot_data.get("script_story_type") or plot_data.get("story_type") or "hero's journey",
                 "genre": plot_data.get("genre") or book_context.get("book", {}).get("genre", "fiction"),
                 "tone": plot_data.get("tone") or "hopeful",
                 "audience": plot_data.get("audience") or "adult",
