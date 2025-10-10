@@ -71,6 +71,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [showSettings, setShowSettings] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'scenes' | 'characters' | null>(null);
   const [generationOptions, setGenerationOptions] = useState<ImageGenerationOptions>({
     style: 'cinematic',
     quality: 'hd',
@@ -172,12 +174,9 @@ console.log('[DEBUG ImagesPanel] Component state:', {
       toast.error('No scenes available to generate images for');
       return;
     }
-    
-    if (!confirm(`Generate images for all ${scenes.length} scenes? This may take several minutes.`)) {
-      return;
-    }
 
-    await generateAllSceneImages(scenes, generationOptions);
+    setConfirmAction('scenes');
+    setShowConfirmModal(true);
   };
 
   const handleGenerateAllCharacters = async () => {
@@ -186,32 +185,41 @@ console.log('[DEBUG ImagesPanel] Component state:', {
       return;
     }
 
-    if (!confirm(`Generate images for all ${characters.length} characters?`)) {
-      return;
+    setConfirmAction('characters');
+    setShowConfirmModal(true);
+  };
+
+  const handleConfirmGeneration = async () => {
+    setShowConfirmModal(false);
+
+    if (confirmAction === 'scenes') {
+      await generateAllSceneImages(scenes, generationOptions);
+    } else if (confirmAction === 'characters') {
+      // Build character details from plot overview
+      const characterDetails: Record<string, string> = {};
+      if (plotOverview?.characters) {
+        (plotOverview?.characters ?? []).forEach((char) => {
+          if (typeof char === "object" && char !== null && "name" in char) {
+            characterDetails[(char as { name: string }).name] =
+              `${(char as any).physical_description ?? ""}. ${(char as any).personality ?? ""}. ${(char as any).role ?? ""}`;
+          }
+        });
+      } else {
+        // Fallback to basic descriptions
+        characters.forEach((char) => {
+          const name = typeof char === "string" ? char : (char as { name: string }).name;
+          characterDetails[name] = `Portrait of ${name}, detailed character design`;
+        });
+      }
+
+      await generateAllCharacterImages(
+        characters.map((char) => (typeof char === "string" ? char : (char as { name: string }).name)),
+        characterDetails,
+        generationOptions
+      );
     }
 
-    // Build character details from plot overview
-    const characterDetails: Record<string, string> = {};
-    if (plotOverview?.characters) {
-      (plotOverview?.characters ?? []).forEach((char) => {
-        if (typeof char === "object" && char !== null && "name" in char) {
-          characterDetails[(char as { name: string }).name] =
-            `${(char as any).physical_description ?? ""}. ${(char as any).personality ?? ""}. ${(char as any).role ?? ""}`;
-        }
-      });
-    } else {
-      // Fallback to basic descriptions
-      characters.forEach((char) => {
-        const name = typeof char === "string" ? char : (char as { name: string }).name;
-        characterDetails[name] = `Portrait of ${name}, detailed character design`;
-      });
-    }
-
-    await generateAllCharacterImages(
-      characters.map((char) => (typeof char === "string" ? char : (char as { name: string }).name)),
-      characterDetails,
-      generationOptions
-    );
+    setConfirmAction(null);
   };
 
   const renderHeader = () => (
@@ -557,6 +565,26 @@ console.log('[DEBUG ImagesPanel] Component state:', {
         <ImageViewerModal
           imageUrl={selectedImage}
           onClose={() => setSelectedImage(null)}
+        />
+      )}
+
+      {/* Confirmation Modal */}
+      {showConfirmModal && (
+        <ConfirmationModal
+          isOpen={showConfirmModal}
+          onClose={() => {
+            setShowConfirmModal(false);
+            setConfirmAction(null);
+          }}
+          onConfirm={handleConfirmGeneration}
+          title={confirmAction === 'scenes' ? 'Generate All Scene Images' : 'Generate All Character Images'}
+          message={
+            confirmAction === 'scenes'
+              ? `Generate images for all ${scenes.length} scene${scenes.length !== 1 ? 's' : ''}? This may take several minutes.`
+              : `Generate images for all ${characters.length} character${characters.length !== 1 ? 's' : ''}? This will create image references for every character in the script.`
+          }
+          confirmText="Generate All"
+          confirmButtonClass="bg-blue-600 hover:bg-blue-700"
         />
       )}
     </div>
@@ -985,6 +1013,76 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose }
           >
             Close
           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Confirmation Modal Component
+interface ConfirmationModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title: string;
+  message: string;
+  confirmText: string;
+  confirmButtonClass?: string;
+}
+
+const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
+  isOpen,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmText,
+  confirmButtonClass = 'bg-blue-600 hover:bg-blue-700'
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+        {/* Background overlay */}
+        <div
+          className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75"
+          onClick={onClose}
+        />
+
+        {/* Modal panel */}
+        <div className="inline-block align-bottom bg-white rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+          <div className="sm:flex sm:items-start">
+            <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-blue-100 sm:mx-0 sm:h-10 sm:w-10">
+              <Wand2 className="h-6 w-6 text-blue-600" />
+            </div>
+            <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+              <h3 className="text-lg leading-6 font-medium text-gray-900">
+                {title}
+              </h3>
+              <div className="mt-2">
+                <p className="text-sm text-gray-500">
+                  {message}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
+            <button
+              type="button"
+              onClick={onConfirm}
+              className={`w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm ${confirmButtonClass}`}
+            >
+              {confirmText}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:w-auto sm:text-sm"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     </div>
