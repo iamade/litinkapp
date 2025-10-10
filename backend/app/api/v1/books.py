@@ -150,11 +150,11 @@ async def get_learning_books_with_progress(
 @router.get("", response_model=List[BookSchema])
 async def get_books(
     supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     """Get books uploaded by the current user"""
     try:
-        response = supabase_client.table('books').select('*').eq('user_id', current_user.id).execute()
+        response = supabase_client.table('books').select('*').eq('user_id', current_user["id"]).execute()
         return response.data
     except APIError as e:
         raise HTTPException(status_code=400, detail=e.message)
@@ -163,11 +163,11 @@ async def get_books(
 @router.get("/my-books", response_model=List[BookSchema], tags=["Authors"])
 async def get_my_books(
     supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_author)
+    current_user: dict = Depends(get_current_author)
 ):
     """Get books by current user"""
     try:
-        response = supabase_client.table('books').select('*').eq('user_id', current_user.id).execute()
+        response = supabase_client.table('books').select('*').eq('user_id', current_user["id"]).execute()
         return response.data
     except APIError as e:
         raise HTTPException(status_code=400, detail=e.message)
@@ -177,7 +177,7 @@ async def get_my_books(
 async def get_book(
     book_id: str,
     supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     """Get book by ID with its chapters"""
     try:
@@ -189,7 +189,7 @@ async def get_book(
         raise HTTPException(status_code=404, detail="Book not found")
     
     # Check if user can access this book
-    if book['status'] != BookStatus.PUBLISHED and book['user_id'] != current_user.id:
+    if book['status'] != BookStatus.PUBLISHED and book['user_id'] != current_user["id"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -306,7 +306,7 @@ async def create_chapter(
 async def get_chapters(
     book_id: str,
     supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     """Get chapters for a book"""
     try:
@@ -318,7 +318,7 @@ async def get_chapters(
         raise HTTPException(status_code=404, detail="Book not found")
     
     # Check access permissions
-    if book['status'] != BookStatus.PUBLISHED and book['user_id'] != current_user.id:
+    if book['status'] != BookStatus.PUBLISHED and book['user_id'] != current_user["id"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
@@ -434,7 +434,7 @@ async def upload_book(
     description: Optional[str] = Form(None),
     book_type: str = Form(...),
     supabase_client: Client = Depends(get_supabase),
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     """Upload book file - PREVIEW MODE (doesn't save chapters yet)"""
     if not file and not text_content:
@@ -457,7 +457,7 @@ async def upload_book(
             "title": title,
             "description": description,
             "book_type": book_type.lower().strip(),
-            "user_id": str(current_user.id),
+            "user_id": str(current_user["id"]),
             "status": "PROCESSING",  # Initial status
         }
         
@@ -471,7 +471,7 @@ async def upload_book(
             # Upload file to storage
             file_content = await file.read()
             original_filename = file.filename
-            storage_path = f"users/{current_user.id}/{original_filename}"
+            storage_path = f"users/{current_user["id"]}/{original_filename}"
             
             supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
                 path=storage_path,
@@ -491,7 +491,7 @@ async def upload_book(
             original_filename=original_filename,
             text_content=text_content,
             book_type=book_type,
-            user_id=str(current_user.id),
+            user_id=str(current_user["id"]),
             book_id_to_update=book["id"]
         )
         
@@ -938,7 +938,7 @@ async def save_book_structure(
     book_id: str,
     structure_data: dict,  # Contains confirmed_chapters array
     supabase_client: Client = Depends(get_supabase), 
-    current_user: User = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user)
 ):
     """Save confirmed book structure to database"""
     try:
@@ -957,7 +957,7 @@ async def save_book_structure(
         await file_service.confirm_book_structure(
             book_id=book_id,
             confirmed_chapters=confirmed_chapters,
-            user_id=str(current_user.id)
+            user_id=str(current_user["id"])
         )
         
         # Return updated book
