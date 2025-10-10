@@ -159,6 +159,7 @@ interface ImageStatusResponse {
   record_id: string;
   status: string; // 'pending', 'processing', 'completed', 'failed'
   image_url?: string;
+  prompt?: string;
   error_message?: string;
   generation_time_seconds?: number;
   created_at: string;

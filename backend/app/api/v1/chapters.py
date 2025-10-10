@@ -526,6 +526,7 @@ async def get_image_generation_status(
             record_id=record_id,
             status=status,
             image_url=image_record.get('image_url'),
+            prompt=image_record.get('prompt') or image_record.get('image_prompt'),
             error_message=image_record.get('error_message'),
             generation_time_seconds=image_record.get('generation_time_seconds'),
             created_at=image_record.get('created_at'),

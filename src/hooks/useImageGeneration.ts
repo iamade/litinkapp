@@ -38,6 +38,7 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
   const [isLoading, setIsLoading] = useState(false);
   const [generatingScenes, setGeneratingScenes] = useState<Set<number>>(new Set());
   const [generatingCharacters, setGeneratingCharacters] = useState<Set<string>>(new Set());
+  const [pollingIntervals, setPollingIntervals] = useState<Map<string, NodeJS.Timeout>>(new Map());
 
   const inflightRef = useRef<string | null>(null);
   const isMountedRef = useRef(true);
@@ -45,8 +46,10 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
+      // Clear all polling intervals on unmount
+      pollingIntervals.forEach(interval => clearInterval(interval));
     };
-  }, []);
+  }, [pollingIntervals]);
 
   const loadImages = useCallback(async () => {
     if (!chapterId) {
@@ -221,8 +224,8 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       const result = await userService.generateCharacterImage(chapterId!, request);
 
       if (result.record_id) {
-        // Commenting out pollCharacterImageStatus as it is undefined
-        // pollCharacterImageStatus(characterName, result.record_id);
+        // Start polling for this character's image status
+        startPollingCharacterImage(characterName, result.record_id);
       } else {
         setCharacterImages((prev) => ({
           ...prev,
@@ -309,10 +312,120 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     characterDetails: Record<string, string>,
     options: ImageGenerationOptions
   ) => {
-    for (const character of characters) {
+    // Queue all character image generations without awaiting
+    const promises = characters.map(async (character) => {
       const description = characterDetails[character] || `Portrait of ${character}, detailed character design`;
       await generateCharacterImage(character, description, options);
-    }
+    });
+
+    // Don't await - let them generate in parallel and poll individually
+    Promise.all(promises).catch(err => {
+      console.error('Error in batch character generation:', err);
+    });
+  };
+
+  const startPollingCharacterImage = (characterName: string, recordId: string) => {
+    if (!chapterId) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await userService.getImageGenerationStatus(chapterId, recordId);
+
+        if (status.status === 'completed' && status.image_url) {
+          // Update character image with completed data
+          setCharacterImages((prev) => ({
+            ...prev,
+            [characterName]: {
+              name: characterName,
+              imageUrl: status.image_url!,
+              prompt: status.prompt || '',
+              generationStatus: 'completed',
+              generatedAt: new Date().toISOString(),
+              id: recordId,
+              script_id: selectedScriptId ?? undefined
+            }
+          }));
+
+          // Remove from generating set
+          setGeneratingCharacters((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(characterName);
+            return newSet;
+          });
+
+          // Clear this interval
+          clearInterval(pollInterval);
+          setPollingIntervals(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(recordId);
+            return newMap;
+          });
+
+          toast.success(`Generated image for ${characterName}`);
+        } else if (status.status === 'failed') {
+          // Update as failed
+          setCharacterImages((prev) => ({
+            ...prev,
+            [characterName]: {
+              ...prev[characterName],
+              generationStatus: 'failed'
+            }
+          }));
+
+          // Remove from generating set
+          setGeneratingCharacters((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(characterName);
+            return newSet;
+          });
+
+          // Clear this interval
+          clearInterval(pollInterval);
+          setPollingIntervals(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(recordId);
+            return newMap;
+          });
+
+          toast.error(`Failed to generate image for ${characterName}`);
+        }
+        // If status is still 'pending' or 'processing', keep polling
+      } catch (error) {
+        console.error(`Error polling status for ${characterName}:`, error);
+      }
+    }, 3000); // Poll every 3 seconds
+
+    // Store the interval so we can clear it later
+    setPollingIntervals(prev => new Map(prev).set(recordId, pollInterval));
+
+    // Set a timeout to stop polling after 5 minutes
+    setTimeout(() => {
+      clearInterval(pollInterval);
+      setPollingIntervals(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(recordId);
+        return newMap;
+      });
+
+      // Check if still generating and mark as failed
+      setGeneratingCharacters((prev) => {
+        if (prev.has(characterName)) {
+          setCharacterImages((prevImages) => ({
+            ...prevImages,
+            [characterName]: {
+              ...prevImages[characterName],
+              generationStatus: 'failed'
+            }
+          }));
+          toast.error(`Image generation timeout for ${characterName}`);
+
+          const newSet = new Set(prev);
+          newSet.delete(characterName);
+          return newSet;
+        }
+        return prev;
+      });
+    }, 300000); // 5 minutes timeout
   };
 
   return {
