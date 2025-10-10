@@ -44,7 +44,11 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
   const isMountedRef = useRef(true);
 
   useEffect(() => {
+    console.log('[DEBUG useImageGeneration] Component mounted, setting isMountedRef to true');
+    isMountedRef.current = true;
+
     return () => {
+      console.log('[DEBUG useImageGeneration] Component unmounting, setting isMountedRef to false');
       isMountedRef.current = false;
       // Clear all polling intervals on unmount
       pollingIntervals.forEach(interval => clearInterval(interval));
