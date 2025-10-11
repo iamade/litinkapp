@@ -804,6 +804,7 @@ if (!selectedChapter) {
             onSelectScript={selectScript}
             onUpdateScript={updateScript}
             onDeleteScript={deleteScript}
+            plotOverview={plotOverview}
           />
         );
      

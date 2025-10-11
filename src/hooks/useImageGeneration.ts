@@ -201,16 +201,33 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
 
       const result = await userService.generateSceneImage(chapterId!, sceneNumber, request);
 
-      setSceneImages((prev) => ({
-        ...prev,
-        [sceneNumber]: {
-          ...tempImage,
-          imageUrl: result.image_url,
-          generationStatus: 'completed',
-          generatedAt: new Date().toISOString(),
-          id: result.record_id
-        }
-      }));
+      console.log('[useImageGeneration] Scene image generated successfully', {
+        sceneNumber,
+        imageUrl: result.image_url,
+        recordId: result.record_id
+      });
+
+      const updatedImage = {
+        ...tempImage,
+        imageUrl: result.image_url,
+        generationStatus: 'completed' as const,
+        generatedAt: new Date().toISOString(),
+        id: result.record_id,
+        script_id: selectedScriptId ?? undefined
+      };
+
+      setSceneImages((prev) => {
+        const updated = {
+          ...prev,
+          [sceneNumber]: updatedImage
+        };
+        console.log('[useImageGeneration] Updated sceneImages state', {
+          sceneNumber,
+          keys: Object.keys(updated),
+          image: updated[sceneNumber]
+        });
+        return updated;
+      });
 
       toast.success(`Generated image for Scene ${sceneNumber}`);
     } catch (error: unknown) {
@@ -337,13 +354,36 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     scenes: Array<{ scene_number?: number; visual_description?: string; description?: string }>,
     options: ImageGenerationOptions
   ) => {
+    console.log('[useImageGeneration] generateAllSceneImages called', {
+      scenesCount: scenes.length,
+      chapterId,
+      options
+    });
+
+    if (!chapterId) {
+      console.error('[useImageGeneration] No chapterId available, cannot generate images');
+      toast.error('Chapter ID is required to generate images');
+      return;
+    }
+
     for (const [idx, scene] of scenes.entries()) {
       const sceneNumber = scene.scene_number || idx + 1;
       const description = scene.visual_description || scene.description || '';
+      console.log(`[useImageGeneration] Processing scene ${sceneNumber}/${scenes.length}`, {
+        sceneNumber,
+        hasDescription: !!description
+      });
+
       if (description) {
         await generateSceneImage(sceneNumber, description, options);
+      } else {
+        console.warn(`[useImageGeneration] Scene ${sceneNumber} has no description, skipping`);
       }
     }
+    console.log('[useImageGeneration] All scenes processed, reloading images...');
+
+    // Reload images from database to ensure everything is in sync
+    await loadImages();
   };
 
   const generateAllCharacterImages = async (

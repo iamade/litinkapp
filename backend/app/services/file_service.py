@@ -373,14 +373,29 @@ class BookStructureDetector:
     
     
     
-    def _extract_chapter_content(self, full_content: str, chapter_info: Dict, lines: List[str]) -> str:
-        """Extract content starting after the chapter title"""
+    def _extract_chapter_content(self, full_content: str, chapter_info_or_title, lines: List[str], line_num: int = None) -> str:
+        """Extract content starting after the chapter title
+
+        Args:
+            full_content: The full text content
+            chapter_info_or_title: Either a dict with 'title_line_num' or a string chapter title
+            lines: List of lines in the content
+            line_num: Optional line number when chapter_info_or_title is a string
+        """
         content_lines = []
-        
-        # Start extraction from after the title line
-        start_line = chapter_info['title_line_num'] + 1
-        
-        print(f"[CONTENT EXTRACTION] Extracting content for: {chapter_info['title']}")
+
+        # Handle both dict and individual argument formats for backward compatibility
+        if isinstance(chapter_info_or_title, dict):
+            chapter_title = chapter_info_or_title.get('title', 'Unknown')
+            start_line = chapter_info_or_title['title_line_num'] + 1
+        else:
+            # chapter_info_or_title is a string (chapter_title), line_num is provided
+            if line_num is None:
+                raise ValueError("line_num must be provided when chapter_info_or_title is a string")
+            chapter_title = chapter_info_or_title
+            start_line = line_num + 1
+
+        print(f"[CONTENT EXTRACTION] Extracting content for: {chapter_title}")
         print(f"[CONTENT EXTRACTION] Starting from line {start_line}")
         
         for i in range(start_line, len(lines)):

@@ -73,6 +73,11 @@ interface ScriptGenerationPanelProps {
   onGenerateScript: (scriptStyle: string, options: ScriptGenerationOptions) => void;
   onUpdateScript: (scriptId: string, updates: Partial<ChapterScript>) => void;
   onDeleteScript: (scriptId: string) => void;
+  plotOverview?: {
+    script_story_type?: string;
+    story_type?: string;
+    genre?: string;
+  } | null;
 }
 
 interface ScriptGenerationOptions {
@@ -91,7 +96,8 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   isGeneratingScript,
   onGenerateScript,
   onUpdateScript,
-  onDeleteScript
+  onDeleteScript,
+  plotOverview
 }) => {
   const {
     selectedScriptId,
@@ -117,12 +123,28 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   };
   const [scriptStyle, setScriptStyle] = useState<'cinematic_movie' | 'cinematic_narration'>('cinematic_movie');
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [scriptStoryType, setScriptStoryType] = useState<string>(
+    plotOverview?.script_story_type || plotOverview?.story_type || "hero's journey"
+  );
   const [generationOptions, setGenerationOptions] = useState<ScriptGenerationOptions>({
     includeCharacterProfiles: true,
     targetDuration: "auto",
     sceneCount: 5,
-    focusAreas: []
+    focusAreas: [],
+    scriptStoryType: plotOverview?.script_story_type || plotOverview?.story_type || "hero's journey"
   });
+
+  // Update scriptStoryType when plotOverview changes
+  useEffect(() => {
+    if (plotOverview?.script_story_type || plotOverview?.story_type) {
+      const storyType = plotOverview.script_story_type || plotOverview.story_type || "hero's journey";
+      setScriptStoryType(storyType);
+      setGenerationOptions(prev => ({
+        ...prev,
+        scriptStoryType: storyType
+      }));
+    }
+  }, [plotOverview?.script_story_type, plotOverview?.story_type]);
   const [activeView, setActiveView] = useState<'overview' | 'acts' | 'scenes' | 'dialogue'>('overview');
   const [expandedScenes, setExpandedScenes] = useState<Set<number>>(new Set());
   const [showFullScript, setShowFullScript] = useState(false);
@@ -131,11 +153,11 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     console.log('[DEBUG] ScriptGenerationPanel - handleGenerateScript called with:', {
       scriptStyle,
       generationOptions,
-      scriptStoryType: generationOptions.scriptStoryType || "default"
+      scriptStoryType: scriptStoryType
     });
     onGenerateScript(scriptStyle, {
       ...generationOptions,
-      scriptStoryType: generationOptions.scriptStoryType || "default"
+      scriptStoryType: scriptStoryType
     });
   };
 
@@ -206,17 +228,28 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           </p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Script Story Type</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Script Story Type
+            {plotOverview && (
+              <span className="text-xs text-gray-500 ml-2">(from plot overview)</span>
+            )}
+          </label>
           <input
             type="text"
-            value={generationOptions.scriptStoryType || ""}
-            onChange={(e) => setGenerationOptions(prev => ({
-              ...prev,
-              scriptStoryType: e.target.value
-            }))}
+            value={scriptStoryType}
+            onChange={(e) => {
+              setScriptStoryType(e.target.value);
+              setGenerationOptions(prev => ({
+                ...prev,
+                scriptStoryType: e.target.value
+              }));
+            }}
+            placeholder="e.g., hero's journey, mystery thriller, underdog story"
             className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            placeholder="Enter story type"
           />
+          <p className="text-xs text-gray-500 mt-1">
+            Narrative framework for the script
+          </p>
           
 
         </div>
