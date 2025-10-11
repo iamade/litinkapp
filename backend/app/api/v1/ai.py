@@ -34,17 +34,22 @@ def parse_scene_descriptions(analysis_result: str) -> list:
     for line in lines:
         line = line.strip()
 
-        # Look for scene markers (Scene 1:, Scene One:, SCENE 1:, etc.)
-        scene_match = re.match(r'^(?:Scene\s+|SCENE\s+|scene\s+)(\d+|[A-Za-z]+)\s*:\s*(.+)$', line, re.IGNORECASE)
+        # Look for scene markers (Scene 1:, SCENE 1:, ACT I - SCENE 1, etc.)
+        # Match patterns like: "Scene 1:", "SCENE 1:", "ACT I - SCENE 1", "**ACT I - SCENE 1**"
+        scene_match = re.match(r'^(?:\*\*)?(?:ACT\s+[IVX]+\s*-\s*)?(?:Scene\s+|SCENE\s+|scene\s+)(\d+|[A-Za-z]+)\s*(?:\*\*)?:?\s*(.*)$', line, re.IGNORECASE)
 
         if scene_match:
             # Save previous scene if it exists
             if current_scene and len(current_scene) > 20:
                 scene_descriptions.append(current_scene[:300])  # Limit length
-            # Start new scene
-            current_scene = scene_match.group(2) + ": " + scene_match.group(3)
+            # Start new scene with description if available
+            scene_desc = scene_match.group(2).strip()
+            if scene_desc:
+                current_scene = scene_desc
+            else:
+                current_scene = ""
         elif line and len(line) > 10:
-            # Continue building current scene
+            # Continue building current scene description
             if current_scene:
                 current_scene += " " + line
             else:

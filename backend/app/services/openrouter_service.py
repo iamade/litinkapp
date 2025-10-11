@@ -251,20 +251,46 @@ class OpenRouterService:
 - Each scene must have proper heading: INT./EXT. LOCATION - TIME
 - Label each scene clearly (e.g., "ACT I - SCENE 1:", "ACT II - SCENE 5:")
 
-**FORMATTING:**
-- Character names in UPPERCASE when introduced and before dialogue
-- ONLY character dialogue between speaking characters (NO narrator)
-- Action descriptions in present tense
-- Visual descriptions for each scene
-- Dialogue centered with character names
-- Parentheticals for actor directions
-- NO voice-over or narration elements
+**CRITICAL DIALOGUE FORMATTING:**
+Show conversations between characters in proper screenplay format:
+
+CHARACTER NAME
+(optional direction)
+What the character says directly.
+
+ANOTHER CHARACTER
+Their direct response.
+
+**EXAMPLE:**
+**ACT I - SCENE 1**
+INT. DURSLEY HOUSE - DAY
+A lonely boy sits on the curb.
+
+DUDLEY
+(mocking)
+Look at the freak! No one wants you here.
+
+HARRY
+(quietly, looking down)
+I just want to be left alone.
+
+AUNT PETUNIA
+(shouting from doorway)
+Get inside this instant! And stop bothering Dudley.
+
+**FORMATTING RULES:**
+- Character names in UPPERCASE before their dialogue
+- Write actual spoken words, not narrative descriptions
+- NO voice-over or narrator commentary
+- NO phrases like "The narrator says" or "Voice-over explains"
+- Action descriptions in present tense between dialogue
+- Parentheticals for actor directions only
 
 **STORY COVERAGE:**
 - Complete character arcs and development
-- All key plot points and story elements
+- All key plot points through dialogue and action
 - Full narrative from beginning to end
-- Focus on character-to-character interactions""",
+- Focus on character-to-character interactions and conversations""",
             "narration": """You are a professional narrator. Convert the content into an engaging narration script with:
                 - Rich, descriptive voice-over text
                 - Scene descriptions for visual context
