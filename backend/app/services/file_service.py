@@ -19,6 +19,9 @@ import time
 from app.services.text_utils import TextSanitizer
 import itertools
 import traceback
+import ebooklib
+from ebooklib import epub
+from bs4 import BeautifulSoup
 
 
 
@@ -1495,6 +1498,8 @@ class FileService:
                 return self.process_docx(file_path, user_id)
             elif filename.lower().endswith('.txt'):
                 return self.process_txt(file_path, user_id)
+            elif filename.lower().endswith('.epub'):
+                return self.process_epub(file_path, user_id)
             else:
                 raise ValueError(f"Unsupported file type: {filename}")
         except Exception as e:
@@ -1655,7 +1660,7 @@ class FileService:
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 text = file.read()
-            
+
             return {
                 "text": text,
                 "author": None,
@@ -1663,6 +1668,64 @@ class FileService:
             }
         except Exception as e:
             print(f"Error processing TXT: {e}")
+            raise
+
+    def process_epub(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
+        """Extract text from EPUB file"""
+        try:
+            book = epub.read_epub(file_path)
+
+            # Extract metadata
+            author = None
+            try:
+                author = book.get_metadata('DC', 'creator')
+                if author and len(author) > 0:
+                    author = author[0][0]  # Get first author
+            except:
+                pass
+
+            # Extract text from all document items
+            text_content = []
+
+            for item in book.get_items():
+                if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                    # Parse HTML content
+                    soup = BeautifulSoup(item.get_content(), 'html.parser')
+
+                    # Remove script and style elements
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+
+                    # Get text and clean it
+                    text = soup.get_text()
+
+                    # Break into lines and remove leading/trailing space on each
+                    lines = (line.strip() for line in text.splitlines())
+
+                    # Break multi-headlines into a line each
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+
+                    # Drop blank lines
+                    text = '\n'.join(chunk for chunk in chunks if chunk)
+
+                    if text:
+                        text_content.append(text)
+
+            # Combine all text
+            full_text = '\n\n'.join(text_content)
+
+            # Try to extract cover image (optional)
+            cover_image_url = None
+            # Cover image extraction is complex and optional for now
+
+            return {
+                "text": full_text,
+                "author": author,
+                "cover_image_url": cover_image_url
+            }
+        except Exception as e:
+            print(f"Error processing EPUB: {e}")
+            traceback.print_exc()
             raise
 
     def extract_chapters(self, content: str, book_type: str) -> List[Dict[str, Any]]:
