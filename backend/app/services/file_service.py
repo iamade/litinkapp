@@ -1678,11 +1678,24 @@ class FileService:
             # Extract metadata
             author = None
             try:
-                author = book.get_metadata('DC', 'creator')
-                if author and len(author) > 0:
-                    author = author[0][0]  # Get first author
-            except:
-                pass
+                author_metadata = book.get_metadata('DC', 'creator')
+                if author_metadata and isinstance(author_metadata, list) and len(author_metadata) > 0:
+                    # ebooklib returns tuples like: [('Author Name', {})]
+                    if isinstance(author_metadata[0], tuple) and len(author_metadata[0]) > 0:
+                        author = author_metadata[0][0]
+                    elif isinstance(author_metadata[0], str):
+                        author = author_metadata[0]
+
+                # Ensure author is a string or None, never a list
+                if author and not isinstance(author, str):
+                    author = str(author)
+
+                # If still empty or invalid, set to None
+                if not author or author.strip() == '':
+                    author = None
+            except Exception as e:
+                print(f"[DEBUG] Error extracting author metadata: {e}")
+                author = None
 
             # Extract text from all document items
             text_content = []

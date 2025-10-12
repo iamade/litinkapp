@@ -497,11 +497,21 @@ async def upload_book(
         
         # ✅ FIX: Handle both sectioned and flat structures properly
         preview_data = {k: v for k, v in preview_result.items() if k != 'status'}
-        
+
+        # ✅ Ensure author_name is always a string or None (never a list)
+        author_name = preview_data.get("author_name")
+        if isinstance(author_name, list):
+            # If it's a list, try to get the first element or set to None
+            author_name = author_name[0] if author_name and len(author_name) > 0 else None
+        if author_name and not isinstance(author_name, str):
+            author_name = str(author_name)
+        if not author_name or (isinstance(author_name, str) and author_name.strip() == ''):
+            author_name = None
+
         # Return updated book from database
         updated_book_response = supabase_client.table("books").select("*").eq("id", book["id"]).single().execute()
         updated_book = updated_book_response.data
-        
+
         # ✅ FIX: Check if we have sectioned structure
         if preview_result.get("structure_data", {}).get("has_sections"):
             # For sectioned books, preview_chapters should be the sections with their chapters
@@ -509,7 +519,7 @@ async def upload_book(
                 **updated_book,
                 "preview_chapters": preview_data.get("chapters", []),  # These are sections with chapters
                 "total_preview_chapters": preview_data.get("total_chapters", 0),
-                "author_name": preview_data.get("author_name"),
+                "author_name": author_name,
                 "cover_image_url": preview_data.get("cover_image_url"),
                 "structure_data": preview_data.get("structure_data")  # ✅ Include structure data
             }
@@ -519,7 +529,7 @@ async def upload_book(
                 **updated_book,
                 "preview_chapters": preview_data.get("chapters", []),
                 "total_preview_chapters": preview_data.get("total_chapters", 0),
-                "author_name": preview_data.get("author_name"),
+                "author_name": author_name,
                 "cover_image_url": preview_data.get("cover_image_url"),
                 "structure_data": preview_data.get("structure_data")  # ✅ Include structure data
             }
