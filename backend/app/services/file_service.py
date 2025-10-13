@@ -80,30 +80,37 @@ class BookStructureDetector:
         }
         
            # COMPREHENSIVE CHAPTER PATTERNS - handles multiple book formats
+        # Ordered by specificity (most specific first)
         self.CHAPTER_PATTERNS = [
-            # Standalone numbers and Roman numerals (for books like yours)
-            r'^(\d+)$',  # Just "1", "2", "3"
-            r'^([IVX]+)$',  # Just "I", "II", "III"
-            
-            # Traditional chapter headers
-            r'^CHAPTER\s+(\d+)[\.\s]*(.*)$',  # CHAPTER 1, CHAPTER 1. Title
-            r'^CHAPTER\s+([IVX]+)[\.\s]*(.*)$',  # CHAPTER I, CHAPTER I. Title  
-            r'^Chapter\s+(\d+)[\.\s]*(.*)$',   # Chapter 1, Chapter 1. Title
-            r'^Chapter\s+([IVX]+)[\.\s]*(.*)$', # Chapter I, Chapter I. Title
-            
-            # More flexible variations
-            r'^CHAPTER\s+(\d+)[\s\-:]*(.*)$',  # CHAPTER 1: Title, CHAPTER 1 - Title
-            r'^CHAPTER\s+([IVX]+)[\s\-:]*(.*)$', # CHAPTER I: Title
-            r'^Chapter\s+(\d+)[\s\-:]*(.*)$',   # Chapter 1: Title
-            r'^Chapter\s+([IVX]+)[\s\-:]*(.*)$', # Chapter I: Title
-            
-            # Alternative formats
-            r'^(\d+)\.\s*(.*)$',  # "1. Chapter Title"
-            r'^([IVX]+)\.\s*(.*)$', # "I. Chapter Title"
-            
+            # Roman numerals with CHAPTER keyword (like "CHAPTER XIX.")
+            r'^\s*CHAPTER\s+([IVXLCDM]+)\.?\s*$',  # CHAPTER XIX. or CHAPTER XIX
+            r'^\s*CHAPTER\s+([IVXLCDM]+)[\.\s]*(.+)$',  # CHAPTER I. Title or CHAPTER I Title
+            r'^\s*Chapter\s+([IVXLCDM]+)\.?\s*$',  # Chapter XIX. or Chapter XIX
+            r'^\s*Chapter\s+([IVXLCDM]+)[\.\s]*(.+)$',  # Chapter I. Title
+
+            # Numeric chapters with CHAPTER keyword
+            r'^\s*CHAPTER\s+(\d+)\.?\s*$',  # CHAPTER 19. or CHAPTER 19
+            r'^\s*CHAPTER\s+(\d+)[\.\s]*(.+)$',  # CHAPTER 1. Title or CHAPTER 1 Title
+            r'^\s*Chapter\s+(\d+)\.?\s*$',   # Chapter 19. or Chapter 19
+            r'^\s*Chapter\s+(\d+)[\.\s]*(.+)$',   # Chapter 1. Title
+
+            # Standalone Roman numerals or numbers (for minimalist books)
+            r'^\s*([IVXLCDM]+)\.?\s*$',  # Just "XIX." or "I."
+            r'^\s*(\d+)\.?\s*$',  # Just "19." or "1."
+
+            # With separators (colon, dash)
+            r'^\s*CHAPTER\s+(\d+)[\s\-:]+(.+)$',  # CHAPTER 1: Title, CHAPTER 1 - Title
+            r'^\s*CHAPTER\s+([IVXLCDM]+)[\s\-:]+(.+)$', # CHAPTER I: Title
+            r'^\s*Chapter\s+(\d+)[\s\-:]+(.+)$',   # Chapter 1: Title
+            r'^\s*Chapter\s+([IVXLCDM]+)[\s\-:]+(.+)$', # Chapter I: Title
+
+            # Number/Roman with period and title
+            r'^\s*(\d+)\.\s+(.+)$',  # "1. Chapter Title"
+            r'^\s*([IVXLCDM]+)\.\s+(.+)$', # "I. Chapter Title"
+
             # Word-based chapters
-            r'^CHAPTER\s+([A-Z][a-z]+)\s*(.*)$', # CHAPTER One, CHAPTER Two
-            r'^Chapter\s+([A-Z][a-z]+)\s*(.*)$', # Chapter One, Chapter Two
+            r'^\s*CHAPTER\s+([A-Z][a-z]+)\s*(.*)$', # CHAPTER One, CHAPTER Two
+            r'^\s*Chapter\s+([A-Z][a-z]+)\s*(.*)$', # Chapter One, Chapter Two
         ]
         
         # FLEXIBLE TITLE PATTERNS - matches various title formats
@@ -257,15 +264,49 @@ class BookStructureDetector:
             if current_section:
                 chapter_match = self._match_chapter_patterns(line)
                 if chapter_match and self._has_substantial_following_content(lines, line_num):
-                    chapter_content = self._extract_chapter_content(content, line, lines, line_num)
+                    # Build a proper title
+                    chapter_number = chapter_match['number']
+                    chapter_subtitle = chapter_match.get('title', '').strip()
+
+                    # Create a readable title
+                    if chapter_subtitle:
+                        chapter_title = f"Chapter {chapter_number}: {chapter_subtitle}"
+                    else:
+                        # No subtitle, look for title in next few lines
+                        title_found = None
+                        for i in range(line_num + 1, min(line_num + 5, len(lines))):
+                            next_line = lines[i].strip()
+                            if not next_line:
+                                continue
+                            if 10 < len(next_line) < 100:
+                                if not self._match_chapter_patterns(next_line):
+                                    title_found = next_line
+                                    break
+
+                        if title_found:
+                            chapter_title = f"Chapter {chapter_number}: {title_found}"
+                        else:
+                            chapter_title = f"Chapter {chapter_number}"
+
+                    # Create chapter_info for extraction
+                    chapter_info = {
+                        'title': chapter_title,
+                        'title_line_num': line_num,
+                        'line_num': line_num,
+                        'number': chapter_number,
+                        'raw_title': line
+                    }
+                    chapter_content = self._extract_chapter_content(content, chapter_info, lines)
+
                     # Only add if content is substantial
                     if len(chapter_content.strip()) > 500:  # Minimum content length
                         chapter_data = {
-                            "title": line,
-                            "number": chapter_match["number"],
-                            "content": self._extract_chapter_content(content, line, lines, line_num)
+                            "title": chapter_title,
+                            "number": chapter_number,
+                            "content": chapter_content
                         }
                         current_section["chapters"].append(chapter_data)
+                        print(f"[HIERARCHICAL] Added chapter {chapter_number} to section '{current_section['title']}'")
         
         # Add last section
         if current_section:
@@ -616,13 +657,44 @@ class BookStructureDetector:
 
 
 
+    def _roman_to_int(self, roman: str) -> int:
+        """Convert Roman numeral to integer"""
+        roman_values = {
+            'I': 1, 'V': 5, 'X': 10, 'L': 50,
+            'C': 100, 'D': 500, 'M': 1000
+        }
+        total = 0
+        prev_value = 0
+
+        for char in reversed(roman.upper()):
+            value = roman_values.get(char, 0)
+            if value < prev_value:
+                total -= value
+            else:
+                total += value
+            prev_value = value
+
+        return total
+
+    def _normalize_chapter_number(self, number_str: str) -> str:
+        """Normalize chapter number to a consistent format"""
+        # Check if it's a Roman numeral
+        if re.match(r'^[IVXLCDM]+$', number_str.upper()):
+            # Convert to integer
+            decimal = self._roman_to_int(number_str)
+            return str(decimal)
+        return number_str
+
     def _match_chapter_patterns(self, line: str) -> Optional[Dict]:
         """Match line against chapter patterns"""
         for pattern in self.CHAPTER_PATTERNS:
             match = re.match(pattern, line)
             if match:
+                raw_number = match.group(1)
+                normalized_number = self._normalize_chapter_number(raw_number)
                 return {
-                    "number": match.group(1),
+                    "number": normalized_number,
+                    "raw_number": raw_number,
                     "title": match.group(2).strip() if len(match.groups()) > 1 else ""
                 }
         return None
@@ -676,37 +748,65 @@ class BookStructureDetector:
         """Extract chapters when no hierarchical structure is detected"""
         lines = content.split('\n')
         chapters = []
-        
+
         for line_num, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue
-                
+
             chapter_match = self._match_chapter_patterns(line)
             if chapter_match:
-                 # FIX: Create chapter_info dict for the new method
+                # Build a proper title
+                chapter_number = chapter_match['number']
+                chapter_subtitle = chapter_match.get('title', '').strip()
+
+                # Create a readable title
+                if chapter_subtitle:
+                    # Has a subtitle: "Chapter 19: The Adventure"
+                    chapter_title = f"Chapter {chapter_number}: {chapter_subtitle}"
+                else:
+                    # No subtitle, look for title in next few lines
+                    title_found = None
+                    for i in range(line_num + 1, min(line_num + 5, len(lines))):
+                        next_line = lines[i].strip()
+                        # Skip empty lines
+                        if not next_line:
+                            continue
+                        # Check if this looks like a title (short, not all caps unless reasonable length)
+                        if 10 < len(next_line) < 100:
+                            # Not another chapter marker
+                            if not self._match_chapter_patterns(next_line):
+                                title_found = next_line
+                                break
+
+                    if title_found:
+                        chapter_title = f"Chapter {chapter_number}: {title_found}"
+                    else:
+                        chapter_title = f"Chapter {chapter_number}"
+
+                # FIX: Create chapter_info dict for the new method
                 chapter_info = {
-                    'title': line,
+                    'title': chapter_title,
                     'title_line_num': line_num,
                     'line_num': line_num,
-                    'number': chapter_match['number'],
+                    'number': chapter_number,
                     'raw_title': line
                 }
                 extracted_content = self._extract_chapter_content(content, chapter_info, lines)
-                
+
                 # Add content validation before adding chapters
                 if len(extracted_content.strip()) > 200:  # Only add chapters with substantial content
                     chapter_data = {
-                        "title": line,
-                        "number": chapter_match["number"],
+                        "title": chapter_title,
+                        "number": chapter_number,
                         "content": extracted_content
                     }
                     chapters.append(chapter_data)
-                    print(f"DEBUG: Added flat chapter with {len(extracted_content)} characters: {line}")
+                    print(f"[FLAT CHAPTERS] Added chapter {chapter_number} ({len(extracted_content)} chars): {chapter_title}")
                 else:
-                    print(f"DEBUG: Skipped short chapter ({len(extracted_content)} chars): {line}")
-        
-        
+                    print(f"[FLAT CHAPTERS] Skipped short content ({len(extracted_content)} chars) for: {chapter_title}")
+
+
         return chapters
     
     def _analyze_content_for_structure(self, sections: List[Dict], structure_type: str) -> int:
