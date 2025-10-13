@@ -45,7 +45,6 @@ async function refreshToken(): Promise<string | null> {
     }
     return null;
   } catch (error) {
-    console.error("Error refreshing token:", error);
     return null;
   }
 }
@@ -68,7 +67,6 @@ export const apiClient = {
   async get<T>(endpoint: string): Promise<T> {
     // Log image-related API requests for debugging
     if (endpoint.includes('/chapters/') && endpoint.includes('/image')) {
-      console.log("API Request: GET", endpoint);
     }
     return withLoading(() => this.request<T>(endpoint, "GET"));
   },

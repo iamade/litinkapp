@@ -78,7 +78,6 @@ export default function VoiceStoryComponent({ storyContent, onChoiceMade }: Voic
       const availableVoices = await voiceService.getAvailableVoices();
       setVoices(availableVoices);
     } catch (error) {
-      console.error('Error loading voices:', error);
     }
   };
 
@@ -92,7 +91,6 @@ export default function VoiceStoryComponent({ storyContent, onChoiceMade }: Voic
         await voiceService.playCharacterDialogue(dialogue, character, emotion);
       }
     } catch (error) {
-      console.error('Error playing dialogue:', error);
     } finally {
       setIsPlaying(false);
     }
@@ -117,7 +115,6 @@ export default function VoiceStoryComponent({ storyContent, onChoiceMade }: Voic
         });
       }
     } catch (error) {
-      console.error('Error generating video scene:', error);
     } finally {
       setGeneratingVideo(false);
     }
@@ -232,7 +229,6 @@ export default function VoiceStoryComponent({ storyContent, onChoiceMade }: Voic
       const nft = await blockchainService.simulateEarnNFT(storyMoment);
       setEarnedNFT(nft);
     } catch (error) {
-      console.error('Error awarding NFT:', error);
     } finally {
       setGeneratingNFT(false);
     }

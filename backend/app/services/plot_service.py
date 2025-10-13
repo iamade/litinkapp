@@ -922,6 +922,7 @@ Return a JSON object with:
                 logline=plot_overview_data["logline"],
                 themes=plot_overview_data["themes"],
                 story_type=plot_overview_data["story_type"],
+                script_story_type=plot_overview_data.get("script_story_type"),
                 genre=plot_overview_data["genre"],
                 tone=plot_overview_data["tone"],
                 audience=plot_overview_data["audience"],
@@ -1137,6 +1138,7 @@ Return the enhanced script.
                 logline=plot_data['logline'],
                 themes=plot_data['themes'],
                 story_type=plot_data['story_type'],
+                script_story_type=plot_data.get('script_story_type'),
                 genre=plot_data['genre'],
                 tone=plot_data['tone'],
                 audience=plot_data['audience'],
@@ -1179,10 +1181,39 @@ Return the enhanced script.
 
             # Prepare update data
             update_data = {}
-            for field in ['logline', 'themes', 'story_type', 'genre', 'tone', 'audience', 'setting',
+            for field in ['logline', 'themes', 'story_type', 'script_story_type', 'genre', 'tone', 'audience', 'setting',
                          'generation_method', 'model_used', 'generation_cost', 'status', 'version']:
                 if hasattr(updates, field) and getattr(updates, field) is not None:
                     update_data[field] = getattr(updates, field)
+
+            # Get associated characters
+            characters_response = self.db.table('characters').select('*').eq(
+                'plot_overview_id', plot_id
+            ).execute()
+
+            characters = []
+            for char_data in characters_response.data or []:
+                char_response = CharacterResponse(
+                    id=char_data['id'],
+                    plot_overview_id=char_data['plot_overview_id'],
+                    book_id=char_data['book_id'],
+                    user_id=char_data['user_id'],
+                    name=char_data['name'],
+                    role=char_data['role'],
+                    character_arc=char_data['character_arc'],
+                    physical_description=char_data['physical_description'],
+                    personality=char_data['personality'],
+                    archetypes=char_data['archetypes'],
+                    want=char_data['want'],
+                    need=char_data['need'],
+                    lie=char_data['lie'],
+                    ghost=char_data['ghost'],
+                    generation_method=char_data['generation_method'],
+                    model_used=char_data['model_used'],
+                    created_at=char_data['created_at'],
+                    updated_at=char_data['updated_at']
+                )
+                characters.append(char_response)
 
             if update_data:
                 update_data['updated_at'] = datetime.now().isoformat()
@@ -1200,6 +1231,7 @@ Return the enhanced script.
                     logline=updated_data['logline'],
                     themes=updated_data['themes'],
                     story_type=updated_data['story_type'],
+                    script_story_type=updated_data.get('script_story_type'),
                     genre=updated_data['genre'],
                     tone=updated_data['tone'],
                     audience=updated_data['audience'],
@@ -1209,12 +1241,16 @@ Return the enhanced script.
                     generation_cost=updated_data['generation_cost'],
                     status=updated_data['status'],
                     version=updated_data['version'],
+                    characters=characters,
                     created_at=updated_data['created_at'],
                     updated_at=updated_data['updated_at']
                 )
             else:
-                # No updates provided, return current data
-                return PlotOverviewResponse(**current_data)
+                # No updates provided, return current data with characters
+                return PlotOverviewResponse(
+                    **current_data,
+                    characters=characters
+                )
 
         except Exception as e:
             logger.error(f"[PlotService] Error updating plot overview: {str(e)}")

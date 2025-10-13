@@ -85,15 +85,11 @@ export const useScriptGeneration = (chapterId: string) => {
 
     setIsLoading(true);
     try {
-      console.log('[DEBUG] useScriptGeneration - loadScripts called for chapterId:', chapterId);
       const response = await userService.getChapterScripts(chapterId);
-      console.log('[DEBUG] useScriptGeneration - API response:', response);
       const scripts = response.scripts || [];
-      console.log('[DEBUG] useScriptGeneration - scripts from API:', scripts);
 
       // Convert legacy scripts to new format
       const formattedScripts: ChapterScript[] = scripts.map((script: any) => {
-        console.log('[DEBUG] useScriptGeneration - processing script:', script.id, 'scriptStoryType:', script.scriptStoryType);
         return {
           id: script.id,
           chapter_id: script.chapter_id,
@@ -112,7 +108,6 @@ export const useScriptGeneration = (chapterId: string) => {
         };
       });
 
-      console.log('[DEBUG] useScriptGeneration - formattedScripts:', formattedScripts);
       setGeneratedScripts(formattedScripts);
 
       // Auto-select first script if none selected
@@ -120,7 +115,6 @@ export const useScriptGeneration = (chapterId: string) => {
         setSelectedScript(formattedScripts[0]);
       }
     } catch (error) {
-      console.error('Error loading scripts:', error);
       toast.error('Failed to load scripts');
     } finally {
       setIsLoading(false);
@@ -133,7 +127,6 @@ export const useScriptGeneration = (chapterId: string) => {
   ) => {
     setIsGeneratingScript(true);
     try {
-      console.log('[DEBUG] useScriptGeneration.generateScript - options:', options);
       const result = await userService.generateScriptAndScenes(
         chapterId,
         scriptStyle,
@@ -171,9 +164,8 @@ export const useScriptGeneration = (chapterId: string) => {
       toast.success('Script generated successfully!');
 
       // Reload in background to sync with server (don't await to show immediately)
-      loadScripts().catch(console.error);
+      loadScripts().catch(() => {});
     } catch (error) {
-      console.error('Error generating script:', error);
       toast.error('Failed to generate script');
     } finally {
       setIsGeneratingScript(false);
@@ -203,7 +195,6 @@ export const useScriptGeneration = (chapterId: string) => {
       
       toast.success('Script updated successfully!');
     } catch (error) {
-      console.error('Error updating script:', error);
       toast.error('Failed to update script');
       // Reload on error
       await loadScripts();
@@ -225,7 +216,6 @@ export const useScriptGeneration = (chapterId: string) => {
       await userService.deleteScript(scriptId);
       toast.success('Script deleted successfully!');
     } catch (error) {
-      console.error('Error deleting script:', error);
       toast.error('Failed to delete script');
       // Reload on error
       await loadScripts();

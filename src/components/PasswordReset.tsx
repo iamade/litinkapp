@@ -25,7 +25,6 @@ export default function PasswordReset({ onBack }: PasswordResetProps) {
       toast.success("Password reset email sent! Check your inbox.");
       setStep("confirm");
     } catch (error) {
-      console.error("Password reset request error:", error);
       if (error instanceof Error) {
         toast.error(error.message);
       } else {
@@ -56,7 +55,6 @@ export default function PasswordReset({ onBack }: PasswordResetProps) {
       toast.success("Password reset successfully!");
       onBack(); // Go back to login
     } catch (error) {
-      console.error("Password reset confirmation error:", error);
       if (error instanceof Error) {
         toast.error(error.message);
       } else {

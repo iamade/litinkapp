@@ -43,7 +43,6 @@ export default function BookView() {
       const bookData = await userService.getBook(bookId);
       setBook(bookData);
     } catch (error) {
-      console.error("Error loading book:", error);
       toast.error("Failed to load book");
     } finally {
       setIsLoading(false);

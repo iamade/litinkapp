@@ -29,7 +29,6 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
       const generatedQuestions = await aiService.generateQuiz(content, difficulty);
       setQuestions(generatedQuestions);
     } catch (error) {
-      console.error('Error generating quiz:', error);
       // Use fallback questions
       setQuestions([
         {
@@ -102,7 +101,6 @@ export default function AIQuizComponent({ content, onComplete, difficulty = 'med
       const badge = await blockchainService.simulateEarnBadge(badgeName);
       setEarnedBadge(badge);
     } catch (error) {
-      console.error('Error awarding badge:', error);
     } finally {
       setGeneratingBadge(false);
     }

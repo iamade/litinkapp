@@ -56,9 +56,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
 
   // DEBUG: Log props to diagnose data flow
   useEffect(() => {
-    console.log('VideoPreview props:', { scenes, currentSceneIndex, isPlaying, videoUrl, selectedScript });
     if (scenes && scenes.length > 0) {
-      console.log('First scene video_url:', scenes[0]?.video_url);
     }
   }, [scenes, currentSceneIndex, isPlaying, videoUrl, selectedScript]);
   const [currentTime, setCurrentTime] = useState(0);
@@ -154,7 +152,6 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
 
     // If we have a selectedScript prop and it matches the selectedScriptId, trigger a re-fetch
     if (selectedScript && selectedScript.id === selectedScriptId) {
-      console.log('Script changed, updating video preview for script:', selectedScriptId);
       // Force re-render of script overlay when script changes
       setCurrentTime(currentTime); // Trigger re-calculation
       
@@ -200,7 +197,6 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     const unsub = subscribe((evt) => {
       if (evt === 'TIMELINE_RECALC_REQUESTED') {
         // Recompute overlay layout if needed
-        console.log('Timeline recalc requested for video preview');
         // Force re-render of overlays
         setCurrentTime(prev => prev); // Trigger re-calculation
       }
@@ -285,7 +281,6 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   };
 
   const handleVideoError = () => {
-    console.error('Video failed to load:', currentScene?.video_url);
     setVideoError(true);
   };
 

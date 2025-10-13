@@ -78,7 +78,6 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken }: UseAud
       setState({ files: normalizedFiles, isLoading: false, error: null });
     } catch (e: unknown) {
       if (!isMountedRef.current || inflightRef.current !== key) return;
-      console.warn("useAudioGeneration: loadAudio failed", e);
       setState(prev => ({ ...prev, isLoading: false, error: (e as Error)?.message ?? "Failed to load audio" }));
     } finally {
       if (inflightRef.current === key) inflightRef.current = null;

@@ -96,23 +96,11 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     generateAllCharacterImages
   } = useImageGeneration(stableSelectedChapterId ?? '', selectedScriptId);
 
-// Debug logging for image loading
-console.log('[DEBUG ImagesPanel] Component state:', {
-  selectedScriptId,
-  stableSelectedChapterId,
-  versionToken,
-  isSwitching,
-  sceneImagesCount: Object.keys(sceneImages || {}).length,
-  characterImagesCount: Object.keys(characterImages || {}).length
-});
-
   // Trigger refresh on selection/version changes
   useEffect(() => {
     if (!stableSelectedChapterId) {
-      console.warn('ImagesPanel: stableSelectedChapterId is null, skipping loadImages');
       return;
     }
-    console.log('[DEBUG ImagesPanel] useEffect triggered - loading images for chapter:', stableSelectedChapterId);
     loadImages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stableSelectedChapterId, versionToken]);
@@ -175,13 +163,11 @@ console.log('[DEBUG ImagesPanel] Component state:', {
 
   // Get characters from selected script (primary source) or fallback to plot overview
   const characters = React.useMemo(() => {
-    console.log('[DEBUG ImagesPanel] Recalculating characters - selectedScriptId:', selectedScriptId);
 
     // First priority: characters from the selected script
     if (typeof selectedScript === "object" && selectedScript !== null && "characters" in selectedScript) {
       const scriptCharacters = (selectedScript as { characters?: any[] }).characters || [];
       if (scriptCharacters.length > 0) {
-        console.log('[DEBUG ImagesPanel] Using characters from selected script:', scriptCharacters);
         // Convert simple string array to object format if needed
         return scriptCharacters.map(char =>
           typeof char === 'string' ? { name: char } : char
@@ -191,11 +177,9 @@ console.log('[DEBUG ImagesPanel] Component state:', {
 
     // Fallback: use plot overview characters
     if (plotOverview?.characters && plotOverview.characters.length > 0) {
-      console.log('[DEBUG ImagesPanel] Using characters from plot overview:', plotOverview.characters);
       return plotOverview.characters;
     }
 
-    console.log('[DEBUG ImagesPanel] No characters available');
     return [];
   }, [selectedScriptId, selectedScript, plotOverview]);
 
@@ -220,19 +204,10 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   };
 
   const handleConfirmGeneration = async () => {
-    console.log('[ImagesPanel] handleConfirmGeneration called', {
-      confirmAction,
-      scenesCount: scenes.length,
-      charactersCount: characters.length,
-      generationOptions
-    });
-
     setShowConfirmModal(false);
 
     if (confirmAction === 'scenes') {
-      console.log('[ImagesPanel] Generating all scene images...');
       await generateAllSceneImages(scenes, generationOptions);
-      console.log('[ImagesPanel] Scene image generation complete');
     } else if (confirmAction === 'characters') {
       // Build character details from plot overview
       const characterDetails: Record<string, string> = {};
@@ -450,14 +425,6 @@ console.log('[DEBUG ImagesPanel] Component state:', {
     const sourceSceneImages = filteredSceneImages;
     const hasImages = Object.keys(sourceSceneImages).length > 0;
 
-    console.log('[ImagesPanel] renderScenesTab', {
-      sceneImagesKeys: Object.keys(sceneImages || {}),
-      filteredKeys: Object.keys(filteredSceneImages),
-      selectedScriptId,
-      hasImages,
-      scenesCount: scenes.length
-    });
-
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -522,38 +489,17 @@ console.log('[DEBUG ImagesPanel] Component state:', {
   };
 
   const renderCharactersTab = () => {
-    console.log('[DEBUG ImagesPanel] renderCharactersTab called:', {
-      characterImagesKeys: Object.keys(characterImages || {}),
-      characterImagesCount: Object.keys(characterImages || {}).length,
-      selectedScriptId,
-      charactersFromScript: characters.map(c => typeof c === 'string' ? c : c.name)
-    });
-
     // Filter character images by selected script_id, accepting both script_id and scriptId fields
     // Include images that match the selected script OR have no script_id (legacy images)
     const filteredCharacterImages = Object.entries(characterImages || {}).reduce((acc, [key, image]) => {
       const normalizedScriptId = image.script_id ?? (image as any).scriptId;
       const shouldInclude = !selectedScriptId || !normalizedScriptId || normalizedScriptId === selectedScriptId;
-      console.log('[DEBUG ImagesPanel] Character filtering:', {
-        characterName: key,
-        imageUrl: image.imageUrl,
-        imageScriptId: normalizedScriptId,
-        selectedScriptId,
-        willInclude: shouldInclude
-      });
       if (shouldInclude) {
         acc[key] = image;
       }
       return acc;
     }, {} as Record<string, CharacterImage>);
     const hasCharacterImages = filteredCharacterImages && Object.keys(filteredCharacterImages).length > 0;
-
-    console.log('[DEBUG ImagesPanel] Filtered results:', {
-      totalCharacterImages: Object.keys(characterImages || {}).length,
-      filteredCount: Object.keys(filteredCharacterImages).length,
-      filteredKeys: Object.keys(filteredCharacterImages),
-      selectedScriptId
-    });
 
     return (
       <div className="space-y-4">

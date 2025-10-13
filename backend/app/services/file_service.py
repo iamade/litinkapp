@@ -19,6 +19,9 @@ import time
 from app.services.text_utils import TextSanitizer
 import itertools
 import traceback
+import ebooklib
+from ebooklib import epub
+from bs4 import BeautifulSoup
 
 
 
@@ -77,30 +80,37 @@ class BookStructureDetector:
         }
         
            # COMPREHENSIVE CHAPTER PATTERNS - handles multiple book formats
+        # Ordered by specificity (most specific first)
         self.CHAPTER_PATTERNS = [
-            # Standalone numbers and Roman numerals (for books like yours)
-            r'^(\d+)$',  # Just "1", "2", "3"
-            r'^([IVX]+)$',  # Just "I", "II", "III"
-            
-            # Traditional chapter headers
-            r'^CHAPTER\s+(\d+)[\.\s]*(.*)$',  # CHAPTER 1, CHAPTER 1. Title
-            r'^CHAPTER\s+([IVX]+)[\.\s]*(.*)$',  # CHAPTER I, CHAPTER I. Title  
-            r'^Chapter\s+(\d+)[\.\s]*(.*)$',   # Chapter 1, Chapter 1. Title
-            r'^Chapter\s+([IVX]+)[\.\s]*(.*)$', # Chapter I, Chapter I. Title
-            
-            # More flexible variations
-            r'^CHAPTER\s+(\d+)[\s\-:]*(.*)$',  # CHAPTER 1: Title, CHAPTER 1 - Title
-            r'^CHAPTER\s+([IVX]+)[\s\-:]*(.*)$', # CHAPTER I: Title
-            r'^Chapter\s+(\d+)[\s\-:]*(.*)$',   # Chapter 1: Title
-            r'^Chapter\s+([IVX]+)[\s\-:]*(.*)$', # Chapter I: Title
-            
-            # Alternative formats
-            r'^(\d+)\.\s*(.*)$',  # "1. Chapter Title"
-            r'^([IVX]+)\.\s*(.*)$', # "I. Chapter Title"
-            
+            # Roman numerals with CHAPTER keyword (like "CHAPTER XIX.")
+            r'^\s*CHAPTER\s+([IVXLCDM]+)\.?\s*$',  # CHAPTER XIX. or CHAPTER XIX
+            r'^\s*CHAPTER\s+([IVXLCDM]+)[\.\s]*(.+)$',  # CHAPTER I. Title or CHAPTER I Title
+            r'^\s*Chapter\s+([IVXLCDM]+)\.?\s*$',  # Chapter XIX. or Chapter XIX
+            r'^\s*Chapter\s+([IVXLCDM]+)[\.\s]*(.+)$',  # Chapter I. Title
+
+            # Numeric chapters with CHAPTER keyword
+            r'^\s*CHAPTER\s+(\d+)\.?\s*$',  # CHAPTER 19. or CHAPTER 19
+            r'^\s*CHAPTER\s+(\d+)[\.\s]*(.+)$',  # CHAPTER 1. Title or CHAPTER 1 Title
+            r'^\s*Chapter\s+(\d+)\.?\s*$',   # Chapter 19. or Chapter 19
+            r'^\s*Chapter\s+(\d+)[\.\s]*(.+)$',   # Chapter 1. Title
+
+            # Standalone Roman numerals or numbers (for minimalist books)
+            r'^\s*([IVXLCDM]+)\.?\s*$',  # Just "XIX." or "I."
+            r'^\s*(\d+)\.?\s*$',  # Just "19." or "1."
+
+            # With separators (colon, dash)
+            r'^\s*CHAPTER\s+(\d+)[\s\-:]+(.+)$',  # CHAPTER 1: Title, CHAPTER 1 - Title
+            r'^\s*CHAPTER\s+([IVXLCDM]+)[\s\-:]+(.+)$', # CHAPTER I: Title
+            r'^\s*Chapter\s+(\d+)[\s\-:]+(.+)$',   # Chapter 1: Title
+            r'^\s*Chapter\s+([IVXLCDM]+)[\s\-:]+(.+)$', # Chapter I: Title
+
+            # Number/Roman with period and title
+            r'^\s*(\d+)\.\s+(.+)$',  # "1. Chapter Title"
+            r'^\s*([IVXLCDM]+)\.\s+(.+)$', # "I. Chapter Title"
+
             # Word-based chapters
-            r'^CHAPTER\s+([A-Z][a-z]+)\s*(.*)$', # CHAPTER One, CHAPTER Two
-            r'^Chapter\s+([A-Z][a-z]+)\s*(.*)$', # Chapter One, Chapter Two
+            r'^\s*CHAPTER\s+([A-Z][a-z]+)\s*(.*)$', # CHAPTER One, CHAPTER Two
+            r'^\s*Chapter\s+([A-Z][a-z]+)\s*(.*)$', # Chapter One, Chapter Two
         ]
         
         # FLEXIBLE TITLE PATTERNS - matches various title formats
@@ -254,15 +264,49 @@ class BookStructureDetector:
             if current_section:
                 chapter_match = self._match_chapter_patterns(line)
                 if chapter_match and self._has_substantial_following_content(lines, line_num):
-                    chapter_content = self._extract_chapter_content(content, line, lines, line_num)
+                    # Build a proper title
+                    chapter_number = chapter_match['number']
+                    chapter_subtitle = chapter_match.get('title', '').strip()
+
+                    # Create a readable title
+                    if chapter_subtitle:
+                        chapter_title = f"Chapter {chapter_number}: {chapter_subtitle}"
+                    else:
+                        # No subtitle, look for title in next few lines
+                        title_found = None
+                        for i in range(line_num + 1, min(line_num + 5, len(lines))):
+                            next_line = lines[i].strip()
+                            if not next_line:
+                                continue
+                            if 10 < len(next_line) < 100:
+                                if not self._match_chapter_patterns(next_line):
+                                    title_found = next_line
+                                    break
+
+                        if title_found:
+                            chapter_title = f"Chapter {chapter_number}: {title_found}"
+                        else:
+                            chapter_title = f"Chapter {chapter_number}"
+
+                    # Create chapter_info for extraction
+                    chapter_info = {
+                        'title': chapter_title,
+                        'title_line_num': line_num,
+                        'line_num': line_num,
+                        'number': chapter_number,
+                        'raw_title': line
+                    }
+                    chapter_content = self._extract_chapter_content(content, chapter_info, lines)
+
                     # Only add if content is substantial
                     if len(chapter_content.strip()) > 500:  # Minimum content length
                         chapter_data = {
-                            "title": line,
-                            "number": chapter_match["number"],
-                            "content": self._extract_chapter_content(content, line, lines, line_num)
+                            "title": chapter_title,
+                            "number": chapter_number,
+                            "content": chapter_content
                         }
                         current_section["chapters"].append(chapter_data)
+                        print(f"[HIERARCHICAL] Added chapter {chapter_number} to section '{current_section['title']}'")
         
         # Add last section
         if current_section:
@@ -613,13 +657,44 @@ class BookStructureDetector:
 
 
 
+    def _roman_to_int(self, roman: str) -> int:
+        """Convert Roman numeral to integer"""
+        roman_values = {
+            'I': 1, 'V': 5, 'X': 10, 'L': 50,
+            'C': 100, 'D': 500, 'M': 1000
+        }
+        total = 0
+        prev_value = 0
+
+        for char in reversed(roman.upper()):
+            value = roman_values.get(char, 0)
+            if value < prev_value:
+                total -= value
+            else:
+                total += value
+            prev_value = value
+
+        return total
+
+    def _normalize_chapter_number(self, number_str: str) -> str:
+        """Normalize chapter number to a consistent format"""
+        # Check if it's a Roman numeral
+        if re.match(r'^[IVXLCDM]+$', number_str.upper()):
+            # Convert to integer
+            decimal = self._roman_to_int(number_str)
+            return str(decimal)
+        return number_str
+
     def _match_chapter_patterns(self, line: str) -> Optional[Dict]:
         """Match line against chapter patterns"""
         for pattern in self.CHAPTER_PATTERNS:
             match = re.match(pattern, line)
             if match:
+                raw_number = match.group(1)
+                normalized_number = self._normalize_chapter_number(raw_number)
                 return {
-                    "number": match.group(1),
+                    "number": normalized_number,
+                    "raw_number": raw_number,
                     "title": match.group(2).strip() if len(match.groups()) > 1 else ""
                 }
         return None
@@ -673,37 +748,65 @@ class BookStructureDetector:
         """Extract chapters when no hierarchical structure is detected"""
         lines = content.split('\n')
         chapters = []
-        
+
         for line_num, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue
-                
+
             chapter_match = self._match_chapter_patterns(line)
             if chapter_match:
-                 # FIX: Create chapter_info dict for the new method
+                # Build a proper title
+                chapter_number = chapter_match['number']
+                chapter_subtitle = chapter_match.get('title', '').strip()
+
+                # Create a readable title
+                if chapter_subtitle:
+                    # Has a subtitle: "Chapter 19: The Adventure"
+                    chapter_title = f"Chapter {chapter_number}: {chapter_subtitle}"
+                else:
+                    # No subtitle, look for title in next few lines
+                    title_found = None
+                    for i in range(line_num + 1, min(line_num + 5, len(lines))):
+                        next_line = lines[i].strip()
+                        # Skip empty lines
+                        if not next_line:
+                            continue
+                        # Check if this looks like a title (short, not all caps unless reasonable length)
+                        if 10 < len(next_line) < 100:
+                            # Not another chapter marker
+                            if not self._match_chapter_patterns(next_line):
+                                title_found = next_line
+                                break
+
+                    if title_found:
+                        chapter_title = f"Chapter {chapter_number}: {title_found}"
+                    else:
+                        chapter_title = f"Chapter {chapter_number}"
+
+                # FIX: Create chapter_info dict for the new method
                 chapter_info = {
-                    'title': line,
+                    'title': chapter_title,
                     'title_line_num': line_num,
                     'line_num': line_num,
-                    'number': chapter_match['number'],
+                    'number': chapter_number,
                     'raw_title': line
                 }
                 extracted_content = self._extract_chapter_content(content, chapter_info, lines)
-                
+
                 # Add content validation before adding chapters
                 if len(extracted_content.strip()) > 200:  # Only add chapters with substantial content
                     chapter_data = {
-                        "title": line,
-                        "number": chapter_match["number"],
+                        "title": chapter_title,
+                        "number": chapter_number,
                         "content": extracted_content
                     }
                     chapters.append(chapter_data)
-                    print(f"DEBUG: Added flat chapter with {len(extracted_content)} characters: {line}")
+                    print(f"[FLAT CHAPTERS] Added chapter {chapter_number} ({len(extracted_content)} chars): {chapter_title}")
                 else:
-                    print(f"DEBUG: Skipped short chapter ({len(extracted_content)} chars): {line}")
-        
-        
+                    print(f"[FLAT CHAPTERS] Skipped short content ({len(extracted_content)} chars) for: {chapter_title}")
+
+
         return chapters
     
     def _analyze_content_for_structure(self, sections: List[Dict], structure_type: str) -> int:
@@ -1495,6 +1598,8 @@ class FileService:
                 return self.process_docx(file_path, user_id)
             elif filename.lower().endswith('.txt'):
                 return self.process_txt(file_path, user_id)
+            elif filename.lower().endswith('.epub'):
+                return self.process_epub(file_path, user_id)
             else:
                 raise ValueError(f"Unsupported file type: {filename}")
         except Exception as e:
@@ -1655,7 +1760,7 @@ class FileService:
         try:
             with open(file_path, 'r', encoding='utf-8') as file:
                 text = file.read()
-            
+
             return {
                 "text": text,
                 "author": None,
@@ -1663,6 +1768,179 @@ class FileService:
             }
         except Exception as e:
             print(f"Error processing TXT: {e}")
+            raise
+
+    def extract_epub_chapters(self, file_path: str) -> List[Dict[str, Any]]:
+        """Extract chapters from EPUB file using its built-in structure"""
+        try:
+            book = epub.read_epub(file_path)
+            chapters = []
+
+            # Get the spine (reading order)
+            spine = book.spine
+            print(f"[EPUB] Spine contains {len(spine)} items")
+
+            chapter_number = 0
+            skipped_count = 0
+
+            for idx, (item_id, _) in enumerate(spine):
+                item = book.get_item_with_id(item_id)
+
+                if not item:
+                    print(f"[EPUB] Item {idx}: Could not get item with id '{item_id}'")
+                    continue
+
+                item_type = item.get_type()
+                print(f"[EPUB] Item {idx} (id: {item_id}): type = {item_type}")
+
+                if item_type == ebooklib.ITEM_DOCUMENT:
+                    # Parse HTML content
+                    soup = BeautifulSoup(item.get_content(), 'html.parser')
+
+                    # Remove script and style elements
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+
+                    # Get text content
+                    text = soup.get_text()
+
+                    # Clean the text
+                    lines = (line.strip() for line in text.splitlines())
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                    clean_text = '\n'.join(chunk for chunk in chunks if chunk)
+
+                    content_length = len(clean_text.strip())
+                    print(f"[EPUB] Item {idx}: content length = {content_length}")
+
+                    # Skip if content is too short (likely not a real chapter)
+                    # Lowered threshold from 200 to 100 to catch more chapters
+                    if content_length < 100:
+                        skipped_count += 1
+                        print(f"[EPUB] Skipping item {idx}: content too short ({content_length} chars)")
+                        continue
+
+                    # Try to find chapter title from first heading or first line
+                    title = None
+                    for heading in soup.find_all(['h1', 'h2', 'h3', 'h4']):
+                        title_text = heading.get_text().strip()
+                        if title_text:
+                            title = title_text
+                            print(f"[EPUB] Found heading title: {title}")
+                            break
+
+                    # If no heading found, use first line as title or try to detect chapter pattern
+                    if not title:
+                        first_lines = clean_text.split('\n')[:5]
+                        for line in first_lines:
+                            line_stripped = line.strip()
+                            # Check if it matches chapter pattern
+                            chapter_match = self._match_chapter_patterns(line_stripped)
+                            if chapter_match:
+                                # Use the chapter pattern as title
+                                if chapter_match.get('title'):
+                                    title = f"Chapter {chapter_match['number']}: {chapter_match['title']}"
+                                else:
+                                    title = f"Chapter {chapter_match['number']}"
+                                print(f"[EPUB] Found chapter pattern: {title}")
+                                break
+                            # Otherwise check if it looks like a title
+                            elif 5 < len(line_stripped) < 100 and not line_stripped.endswith('.'):
+                                title = line_stripped
+                                print(f"[EPUB] Using first line as title: {title}")
+                                break
+
+                    # Generate title if still none
+                    if not title:
+                        chapter_number += 1
+                        title = f"Chapter {chapter_number}"
+                    else:
+                        chapter_number += 1
+
+                    chapters.append({
+                        "number": str(chapter_number),
+                        "title": title,
+                        "content": clean_text,
+                        "type": "chapter"
+                    })
+                    print(f"[EPUB] ✓ Added chapter {chapter_number}: {title}")
+
+            print(f"[EPUB] Extracted {len(chapters)} chapters from spine (skipped {skipped_count} short items)")
+            return chapters
+
+        except Exception as e:
+            print(f"[EPUB] Error extracting chapters: {e}")
+            traceback.print_exc()
+            return []
+
+    def process_epub(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
+        """Extract text from EPUB file"""
+        try:
+            book = epub.read_epub(file_path)
+
+            # Extract metadata
+            author = None
+            try:
+                author_metadata = book.get_metadata('DC', 'creator')
+                if author_metadata and isinstance(author_metadata, list) and len(author_metadata) > 0:
+                    # ebooklib returns tuples like: [('Author Name', {})]
+                    if isinstance(author_metadata[0], tuple) and len(author_metadata[0]) > 0:
+                        author = author_metadata[0][0]
+                    elif isinstance(author_metadata[0], str):
+                        author = author_metadata[0]
+
+                # Ensure author is a string or None, never a list
+                if author and not isinstance(author, str):
+                    author = str(author)
+
+                # If still empty or invalid, set to None
+                if not author or author.strip() == '':
+                    author = None
+            except Exception as e:
+                print(f"[DEBUG] Error extracting author metadata: {e}")
+                author = None
+
+            # Extract text from all document items
+            text_content = []
+
+            for item in book.get_items():
+                if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                    # Parse HTML content
+                    soup = BeautifulSoup(item.get_content(), 'html.parser')
+
+                    # Remove script and style elements
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+
+                    # Get text and clean it
+                    text = soup.get_text()
+
+                    # Break into lines and remove leading/trailing space on each
+                    lines = (line.strip() for line in text.splitlines())
+
+                    # Break multi-headlines into a line each
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+
+                    # Drop blank lines
+                    text = '\n'.join(chunk for chunk in chunks if chunk)
+
+                    if text:
+                        text_content.append(text)
+
+            # Combine all text
+            full_text = '\n\n'.join(text_content)
+
+            # Try to extract cover image (optional)
+            cover_image_url = None
+            # Cover image extraction is complex and optional for now
+
+            return {
+                "text": full_text,
+                "author": author,
+                "cover_image_url": cover_image_url
+            }
+        except Exception as e:
+            print(f"Error processing EPUB: {e}")
+            traceback.print_exc()
             raise
 
     def extract_chapters(self, content: str, book_type: str) -> List[Dict[str, Any]]:
@@ -5371,32 +5649,70 @@ Chapters:
         safe_filename = original_filename or "unknown_file.txt"
         if not isinstance(safe_filename, str):
             safe_filename = str(safe_filename) if safe_filename else "unknown_file.txt"
-            
+
         print(f"[CHAPTER EXTRACTION] Starting extraction for {safe_filename}")
         print(f"[CHAPTER EXTRACTION] Storage path: {storage_path or 'None'}")
-        
-        # Step 1: Try TOC extraction first (most reliable for PDFs)
-        if (safe_filename.lower().endswith('.pdf') and 
-            storage_path and 
+
+        # Step 1: Try EPUB-specific extraction for EPUB files
+        if (safe_filename.lower().endswith('.epub') and
+            storage_path and
             isinstance(storage_path, str)):
-            
+
+            print("[EPUB EXTRACTION] Attempting EPUB chapter extraction...")
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as temp_file:
+                    file_content = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(path=storage_path)
+                    temp_file.write(file_content)
+                    temp_file_path = temp_file.name
+
+                epub_chapters = self.extract_epub_chapters(temp_file_path)
+
+                # FIX: Ensure epub_chapters is a valid list
+                if not isinstance(epub_chapters, list):
+                    epub_chapters = []
+
+                os.unlink(temp_file_path)
+                print(f"[EPUB EXTRACTION] Cleaned up temporary file: {temp_file_path}")
+
+                if len(epub_chapters) > 0:
+                    print(f"[EPUB EXTRACTION] SUCCESS: Found {len(epub_chapters)} chapters from EPUB structure")
+                    return epub_chapters  # Return the chapters directly
+                else:
+                    print("[EPUB EXTRACTION] No chapters found in EPUB structure, falling back to text parsing")
+
+            except Exception as e:
+                print(f"[EPUB EXTRACTION] Failed: {e}")
+                print(f"[EPUB EXTRACTION] Full error: {traceback.format_exc()}")
+                # Clean up temp file even if there's an error
+                if 'temp_file_path' in locals():
+                    try:
+                        os.unlink(temp_file_path)
+                    except:
+                        pass
+
+        # Step 2: Try TOC extraction for PDFs
+        toc_chapters = []
+        if (safe_filename.lower().endswith('.pdf') and
+            storage_path and
+            isinstance(storage_path, str)):
+
             print("[TOC EXTRACTION] Attempting PDF TOC extraction...")
             try:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=safe_filename) as temp_file:
                     file_content = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(path=storage_path)
                     temp_file.write(file_content)
                     temp_file_path = temp_file.name
-                
+
                 toc_chapters = await self.extract_chapters_from_pdf_with_toc(temp_file_path)
-                
+
                 # FIX: Ensure toc_chapters is a valid list
                 if not isinstance(toc_chapters, list):
                     toc_chapters = []
-                    
+
                 os.unlink(temp_file_path)
                 print(f"[TOC EXTRACTION] Cleaned up temporary file: {temp_file_path}")
-            
-                
+
+
             except Exception as e:
                 print(f"[TOC EXTRACTION] Failed: {e}")
                 print(f"[TOC EXTRACTION] Full error: {traceback.format_exc()}")
@@ -5406,8 +5722,6 @@ Chapters:
                         os.unlink(temp_file_path)
                     except:
                         pass
-        else:
-            toc_chapters = []
 
         # FIX: Use TOC chapters if we found ANY reasonable number (lowered threshold)
         if len(toc_chapters) >= 3:  # Reduced from >= 2

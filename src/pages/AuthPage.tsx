@@ -45,7 +45,6 @@ export default function AuthPage() {
       }
       navigate("/dashboard");
     } catch (error) {
-      console.error("Auth error:", error);
       if (error instanceof Error) {
         toast.error(error.message);
       } else {
@@ -66,7 +65,6 @@ export default function AuthPage() {
       await resendVerificationEmail(email);
       toast.success("Verification email sent! Check your inbox.");
     } catch (error) {
-      console.error("Resend verification error:", error);
       if (error instanceof Error) {
         toast.error(error.message);
       } else {

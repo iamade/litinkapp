@@ -60,7 +60,6 @@ export const VideoGenerationModal: React.FC<VideoGenerationModalProps> = ({
       await startGeneration(scriptId, chapterId, selectedQualityTier);
       setHasStarted(true);
     } catch (error) {
-      console.error("Failed to start generation:", error);
     }
   };
 

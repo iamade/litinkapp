@@ -55,7 +55,6 @@ export default function SubscriptionPage() {
       setCurrentSubscription(subscriptionData);
       setUsage(usageData);
     } catch (error) {
-      console.error("Error loading subscription data:", error);
       toast.error("Failed to load subscription information");
     } finally {
       setLoading(false);
@@ -81,7 +80,6 @@ export default function SubscriptionPage() {
       // Redirect to Stripe checkout
       window.location.href = session.url;
     } catch (error) {
-      console.error("Error creating checkout session:", error);
       toast.error("Failed to start checkout process");
       setUpgrading(null);
     }
@@ -101,7 +99,6 @@ export default function SubscriptionPage() {
       toast.success("Subscription cancelled. You'll retain access until the end of your billing period.");
       loadData(); // Reload to show updated status
     } catch (error) {
-      console.error("Error cancelling subscription:", error);
       toast.error("Failed to cancel subscription");
     }
   };
@@ -112,7 +109,6 @@ export default function SubscriptionPage() {
       toast.success("Subscription reactivated successfully!");
       loadData(); // Reload to show updated status
     } catch (error) {
-      console.error("Error reactivating subscription:", error);
       toast.error("Failed to reactivate subscription");
     }
   };

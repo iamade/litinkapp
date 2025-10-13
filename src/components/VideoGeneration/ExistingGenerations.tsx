@@ -42,7 +42,6 @@ export const ExistingGenerations: React.FC<ExistingGenerationsProps> = ({
       );
       setGenerations(data.generations);
     } catch (error) {
-      console.error("Failed to load generations:", error);
       toast.error("Failed to load video generations");
     } finally {
       setLoading(false);

@@ -9,6 +9,7 @@ class PlotOverviewBase(BaseModel):
     logline: Optional[str] = Field(None, max_length=1000, description="One-sentence summary of the plot")
     themes: Optional[List[str]] = Field(None, description="Key themes in the story")
     story_type: Optional[str] = Field(None, max_length=100, description="Type of story (e.g., adventure, mystery)")
+    script_story_type: Optional[str] = Field(None, max_length=100, description="Script story type (e.g., fiction, non-fiction, documentary)")
     genre: Optional[str] = Field(None, max_length=100, description="Primary genre")
     tone: Optional[str] = Field(None, max_length=100, description="Overall tone of the story")
     audience: Optional[str] = Field(None, max_length=100, description="Target audience")
@@ -29,6 +30,7 @@ class PlotOverviewUpdate(BaseModel):
     logline: Optional[str] = Field(None, max_length=1000)
     themes: Optional[List[str]] = None
     story_type: Optional[str] = Field(None, max_length=100)
+    script_story_type: Optional[str] = Field(None, max_length=100)
     genre: Optional[str] = Field(None, max_length=100)
     tone: Optional[str] = Field(None, max_length=100)
     audience: Optional[str] = Field(None, max_length=100)

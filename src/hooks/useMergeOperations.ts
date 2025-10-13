@@ -90,7 +90,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
       return response.merge_id;
 
     } catch (error) {
-      console.error('Failed to start merge:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to start merge operation';
       toast.error(errorMessage);
       setIsMerging(false);
@@ -136,7 +135,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
       return previewOperation.id;
 
     } catch (error) {
-      console.error('Failed to generate preview:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to generate preview';
       toast.error(errorMessage);
       setIsGeneratingPreview(false);
@@ -198,7 +196,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
         }
 
       } catch (error) {
-        console.error('Error polling merge status:', error);
 
         // Implement exponential backoff for retries
         const maxRetries = 5;
@@ -223,7 +220,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
 
   // Poll preview status
   const startPreviewPolling = useCallback((previewId: string) => {
-    console.log(`[PREVIEW POLLING] Starting polling for preview: ${previewId}`);
     cleanup(); // Clear any existing polling
 
     let pollCount = 0;
@@ -244,7 +240,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
         }>(`/merge/preview/status/${previewId}`);
 
         if (response.preview_url && response.status === 'completed') {
-          console.log(`[PREVIEW POLLING] Preview completed: ${response.preview_url}`);
           const updatedPreview: MergePreviewOperation = {
             ...currentPreview!,
             status: MergeStatus.COMPLETED,
@@ -258,7 +253,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
           toast.success('Preview generated successfully');
           return;
         } else if (response.status === 'failed') {
-          console.error(`[PREVIEW POLLING] Preview failed: ${response.error_message}`);
           const updatedPreview: MergePreviewOperation = {
             ...currentPreview!,
             status: MergeStatus.FAILED,
@@ -276,7 +270,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
         if (pollCount < maxPolls) {
           setTimeout(pollStatus, 10000); // Poll every 10 seconds for previews
         } else {
-          console.error('[PREVIEW POLLING] Preview polling timed out');
           const updatedPreview: MergePreviewOperation = {
             ...currentPreview!,
             status: MergeStatus.FAILED,
@@ -290,14 +283,11 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
         }
 
       } catch (error: unknown) {
-        console.error('Error polling preview status:', error);
 
         // If endpoint doesn't exist, fall back to simulation for now
         if (error instanceof Error && error.message.includes('404')) {
-          console.log('[PREVIEW POLLING] Preview status endpoint not available, using fallback simulation');
           setTimeout(() => {
             if (currentPreview) {
-              console.log(`[PREVIEW POLLING] Fallback simulation complete`);
               const updatedPreview: MergePreviewOperation = {
                 ...currentPreview,
                 status: MergeStatus.COMPLETED,
@@ -336,7 +326,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
       toast('Merge operation cancelled');
 
     } catch (error) {
-      console.error('Failed to cancel merge:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to cancel merge operation';
       toast.error(errorMessage);
     }
@@ -374,7 +363,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
       toast.success(`Download started: ${response.filename || 'merge file'}`, { id: 'download' });
 
     } catch (error) {
-      console.error('Failed to download merge result:', error);
 
       let errorMessage = 'Failed to download merge result';
       if (error instanceof Error) {
@@ -430,7 +418,6 @@ export const useMergeOperations = (): UseMergeOperationsReturn => {
         return false;
       }
     } catch (error: unknown) {
-      console.error('Failed to retry merge:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to retry merge operation';
       toast.error(errorMessage);
       return false;

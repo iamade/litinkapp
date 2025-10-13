@@ -57,7 +57,6 @@ export const voiceService = {
         personality: voice.labels?.accent || "neutral",
       }));
     } catch (error) {
-      console.error("Error fetching voices:", error);
       return this.getFallbackVoices();
     }
   },

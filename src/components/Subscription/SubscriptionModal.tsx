@@ -31,7 +31,6 @@ export default function SubscriptionModal({
       const availableTiers = await subscriptionService.getSubscriptionTiers();
       setTiers(availableTiers);
     } catch (error) {
-      console.error("Error loading subscription tiers:", error);
       toast.error("Failed to load subscription options");
     } finally {
       setLoading(false);
@@ -56,7 +55,6 @@ export default function SubscriptionModal({
       // Redirect to Stripe checkout
       window.location.href = session.url;
     } catch (error) {
-      console.error("Error creating checkout session:", error);
       toast.error("Failed to start checkout process");
     } finally {
       setUpgrading(null);

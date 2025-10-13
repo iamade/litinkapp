@@ -132,11 +132,22 @@ def extract_characters(character_details: str, script_style: str = "cinematic_mo
 
 def validate_script_style(script_style: str) -> str:
     """Validate and normalize script style"""
-    valid_styles = ["cinematic", "narration", "educational", "marketing"]
-    if script_style not in valid_styles:
+    # Map frontend values to backend values
+    style_mapping = {
+        "cinematic_movie": "cinematic",  # Character dialogue
+        "cinematic_narration": "narration",  # Voice-over narration
+        "cinematic": "cinematic",
+        "narration": "narration",
+        "educational": "educational",
+        "marketing": "marketing"
+    }
+
+    # Normalize the script style
+    normalized = style_mapping.get(script_style)
+    if not normalized:
         # Default to cinematic if invalid
         return "cinematic"
-    return script_style
+    return normalized
 
 
 def get_available_script_styles() -> dict:
@@ -2298,9 +2309,59 @@ async def generate_script_and_scenes(
         script = script_result.get('content', '')
         usage = script_result.get('usage', {})
 
-        # ✅ Generate scene breakdown using OpenRouter with better structure detection
-        scene_breakdown_result = await openrouter_service.analyze_content(
-            content=f"""Extract ALL scenes from this script. Identify acts and scenes properly.
+        # ✅ First, try to parse scenes directly from the script
+        scene_descriptions = []
+
+        # Parse scenes directly from script by looking for scene headers
+        script_lines = script.split('\n')
+        current_scene = ""
+        scene_number = 0
+
+        for i, line in enumerate(script_lines):
+            line_stripped = line.strip()
+
+            # Look for scene markers in the script itself
+            # Match: "ACT I - SCENE 1", "**ACT I - SCENE 1**", "SCENE 1:", "INT./EXT." etc.
+            scene_header_patterns = [
+                r'^\*?\*?(?:ACT\s+[IVX]+\s*-\s*)?(?:SCENE\s+\d+)',  # ACT I - SCENE 1 or SCENE 1
+                r'^(?:INT\.|EXT\.)\s+.+\s+-\s+(?:DAY|NIGHT|MORNING|EVENING|AFTERNOON)',  # INT./EXT. LOCATION - TIME
+            ]
+
+            is_scene_header = any(re.match(pattern, line_stripped, re.IGNORECASE) for pattern in scene_header_patterns)
+
+            if is_scene_header:
+                # Save previous scene if it exists
+                if current_scene and len(current_scene) > 20:
+                    scene_descriptions.append(current_scene[:400])
+
+                # Start new scene
+                scene_number += 1
+                current_scene = line_stripped
+
+                # Add next few lines as context (action description)
+                context_lines = []
+                for j in range(i + 1, min(i + 6, len(script_lines))):
+                    next_line = script_lines[j].strip()
+                    if next_line and not next_line.isupper() and len(next_line) > 10:
+                        context_lines.append(next_line)
+                    if len(context_lines) >= 3:
+                        break
+
+                if context_lines:
+                    current_scene += " " + " ".join(context_lines)
+
+        # Add the last scene
+        if current_scene and len(current_scene) > 20:
+            scene_descriptions.append(current_scene[:400])
+
+        # If direct parsing found scenes, use those
+        if scene_descriptions and len(scene_descriptions) > 1:
+            print(f"[DEBUG] Parsed {len(scene_descriptions)} scenes directly from script")
+        else:
+            # Fallback: Use AI to analyze and extract scenes
+            print(f"[DEBUG] Direct parsing found {len(scene_descriptions)} scenes, using AI analysis fallback")
+            scene_breakdown_result = await openrouter_service.analyze_content(
+                content=f"""Extract ALL scenes from this script. Identify acts and scenes properly.
 
 For each scene, provide:
 - Act number (I, II, or III)
@@ -2316,18 +2377,20 @@ Characters: [list of characters]
 
 Script to analyze:
 {script}""",
-            user_tier=user_model_tier,
-            analysis_type="summary"  # Use summary type but with scene-specific prompt
-        )
+                user_tier=user_model_tier,
+                analysis_type="summary"
+            )
 
-        scene_descriptions = []
-        if scene_breakdown_result.get('status') == 'success':
-            # Parse scene descriptions from the analysis result with improved logic
-            analysis_result = scene_breakdown_result.get('result', '')
-            scene_descriptions = parse_scene_descriptions(analysis_result)
+            if scene_breakdown_result.get('status') == 'success':
+                analysis_result = scene_breakdown_result.get('result', '')
+                ai_scenes = parse_scene_descriptions(analysis_result)
+                if len(ai_scenes) > len(scene_descriptions):
+                    scene_descriptions = ai_scenes
+                    print(f"[DEBUG] AI analysis found {len(ai_scenes)} scenes")
 
         # Allow more scenes (up to 30 for complete story coverage)
         scene_descriptions = scene_descriptions[:30]
+        print(f"[DEBUG] Final scene count: {len(scene_descriptions)}")
 
         # ✅ Generate character analysis using OpenRouter
         character_analysis_result = await openrouter_service.analyze_content(

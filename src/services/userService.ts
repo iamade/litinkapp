@@ -261,7 +261,6 @@ export const userService = {
       focus_areas: options?.focusAreas,
       scriptStoryType: options?.scriptStoryType,
     };
-    console.log('[DEBUG] userService.generateScriptAndScenes - sending payload:', requestPayload);
     return apiClient.post<ScriptResult>(`/ai/generate-script-and-scenes`, requestPayload);
   },
 
@@ -372,16 +371,13 @@ export const userService = {
     sceneNumber: number,
     data: any
   ) {
-    console.log("[DEBUG] generateSceneDialogue called:", { chapterId, sceneNumber, data });
     try {
       const response = await apiClient.post<any>(
         `/chapters/${chapterId}/audio/dialogue/${sceneNumber}`,
         data
       );
-      console.log("[DEBUG] generateSceneDialogue response:", response);
       return response;
     } catch (error) {
-      console.error("[DEBUG] generateSceneDialogue error:", error);
       throw error;
     }
   },
@@ -391,31 +387,25 @@ export const userService = {
     sceneNumber: number,
     data: any
   ) {
-    console.log("[DEBUG] generateSceneNarration called:", { chapterId, sceneNumber, data });
     try {
       const response = await apiClient.post<any>(
         `/chapters/${chapterId}/audio/narrator/${sceneNumber}`,
         data
       );
-      console.log("[DEBUG] generateSceneNarration response:", response);
       return response;
     } catch (error) {
-      console.error("[DEBUG] generateSceneNarration error:", error);
       throw error;
     }
   },
 
   async generateSceneMusic(chapterId: string, sceneNumber: number, data: any) {
-    console.log("[DEBUG] generateSceneMusic called:", { chapterId, sceneNumber, data });
     try {
       const response = await apiClient.post<any>(
         `/chapters/${chapterId}/audio/music/${sceneNumber}`,
         data
       );
-      console.log("[DEBUG] generateSceneMusic response:", response);
       return response;
     } catch (error) {
-      console.error("[DEBUG] generateSceneMusic error:", error);
       throw error;
     }
   },
@@ -425,16 +415,13 @@ export const userService = {
     sceneNumber: number,
     data: any
   ) {
-    console.log("[DEBUG] generateSceneEffects called:", { chapterId, sceneNumber, data });
     try {
       const response = await apiClient.post<any>(
         `/chapters/${chapterId}/audio/sound_effect/${sceneNumber}`,
         data
       );
-      console.log("[DEBUG] generateSceneEffects response:", response);
       return response;
     } catch (error) {
-      console.error("[DEBUG] generateSceneEffects error:", error);
       throw error;
     }
   },
@@ -444,16 +431,13 @@ export const userService = {
     sceneNumber: number,
     data: any
   ) {
-    console.log("[DEBUG] generateSceneAmbiance called:", { chapterId, sceneNumber, data });
     try {
       const response = await apiClient.post<any>(
         `/chapters/${chapterId}/audio/background_music/${sceneNumber}`,
         data
       );
-      console.log("[DEBUG] generateSceneAmbiance response:", response);
       return response;
     } catch (error) {
-      console.error("[DEBUG] generateSceneAmbiance error:", error);
       throw error;
     }
   },
@@ -497,7 +481,6 @@ export const userService = {
     const response = await apiClient.get<any>(
       `/plots/books/${bookId}/overview`
     );
-    console.log("[DEBUG] getPlotOverview: ", response);
     return response;
   },
 

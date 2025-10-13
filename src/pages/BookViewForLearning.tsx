@@ -82,7 +82,6 @@ export default function BookViewForLearning() {
         }
       }
     } catch (error) {
-      console.error("Error loading book:", error);
       toast.error("Failed to load book");
     } finally {
       setIsLoading(false);
@@ -130,7 +129,6 @@ export default function BookViewForLearning() {
         ...newLearningContent,
       }));
     } catch (error) {
-      console.error("Error loading learning content:", error);
     }
   };
 
@@ -176,7 +174,6 @@ export default function BookViewForLearning() {
         toast.error("Failed to generate realistic video");
       }
     } catch (error: unknown) {
-      console.error("Error generating realistic video:", error);
       const errorMessage =
         error instanceof Error ? error.message : "Failed to generate video";
       setVideoError(errorMessage);
@@ -243,7 +240,6 @@ export default function BookViewForLearning() {
           toast.error("Video generation is taking longer than expected");
         }
       } catch (error: unknown) {
-        console.error("Error polling video status:", error);
         const errorMessage =
           error instanceof Error
             ? error.message
@@ -286,7 +282,6 @@ export default function BookViewForLearning() {
         toast.error("Failed to generate audio narration");
       }
     } catch (error: unknown) {
-      console.error("Error generating audio narration:", error);
       const errorMessage =
         error instanceof Error ? error.message : "Failed to generate audio";
       setAudioError(errorMessage);

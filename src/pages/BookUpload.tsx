@@ -190,6 +190,8 @@ export default function BookUpload() {
   const [structureLoadingTimeout, setStructureLoadingTimeout] = useState<NodeJS.Timeout | null>(null);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [currentSubscriptionTier, setCurrentSubscriptionTier] = useState<string | undefined>();
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
 
 
   // Add timeout effect when reaching step 4
@@ -198,7 +200,6 @@ export default function BookUpload() {
       // Set a 10-second timeout for structure loading
       const timeout = setTimeout(() => {
         if (!bookStructure) {
-          console.log("⚠️ Structure loading timeout, creating fallback");
           
           // Create fallback structure from editableChapters
           const fallbackStructure: BookStructure = {
@@ -243,12 +244,6 @@ export default function BookUpload() {
 
   // ADD THE DEBUG EFFECT RIGHT HERE (after the timeout effect)
   useEffect(() => {
-    console.log("=== STATE DEBUG ===");
-    console.log("Current step:", step);
-    console.log("bookStructure:", bookStructure);
-    console.log("editableChapters count:", editableChapters.length);
-    console.log("aiBook:", aiBook);
-    console.log("===================");
   }, [step, bookStructure, editableChapters, aiBook]);
 
 
@@ -367,7 +362,6 @@ export default function BookUpload() {
         setShowSubscriptionModal(true);
       }
     } catch (error) {
-      console.error("Error loading user book count:", error);
     }
   };
 
@@ -726,7 +720,6 @@ export default function BookUpload() {
   // };
 
   const handleUploadBookClick = async () => {
-      console.log("🚀 handleUpload called with bookMode:", bookMode);
     
       if (!user) return;
     
@@ -759,16 +752,6 @@ export default function BookUpload() {
     
         const uploadResponse = (await apiClient.upload("/books/upload", formData)) as any;
     
-        console.log("=== UPLOAD RESPONSE DEBUG ===");
-        console.log("Full response:", uploadResponse);
-        console.log("Status:", uploadResponse.status);
-        console.log("Has chapters:", !!uploadResponse.chapters);
-        console.log("Has preview_chapters:", !!uploadResponse.preview_chapters);
-        console.log("Has structure_data:", !!uploadResponse.structure_data);
-        console.log("Structure has_sections:", uploadResponse.structure_data?.has_sections);
-        console.log("Preview chapters type:", Array.isArray(uploadResponse.preview_chapters) ? 'array' : typeof uploadResponse.preview_chapters);
-        console.log("First preview item:", uploadResponse.preview_chapters?.[0]);
-        console.log("============================");
     
         // Check if response is valid
         if (!uploadResponse || typeof uploadResponse !== "object") {
@@ -777,7 +760,6 @@ export default function BookUpload() {
     
         // ✅ FIX: Check for preview_chapters instead of chapters
         if (uploadResponse.status === "READY" && uploadResponse.preview_chapters) {
-          console.log("✅ NEW PREVIEW FLOW DETECTED");
         
           setIsProcessing(false);
           setProcessingStatus("");
@@ -789,49 +771,21 @@ export default function BookUpload() {
           // ✅ FIX: Better structure detection using the backend's data
           const isHierarchical = uploadResponse.total_preview_chapters > sectionsData.length;
           
-          console.log("📊 Structure Analysis:");
-          console.log("- Total chapters:", uploadResponse.total_preview_chapters);
-          console.log("- Section count:", sectionsData.length); 
-          console.log("- Final isHierarchical:", isHierarchical);
-          console.log("- First item:", sectionsData?.[0]);
         
           if (isHierarchical) {
-            console.log("📚 HIERARCHICAL BOOK - Setting up sectioned structure");
             
             // ✅ FIX: Validate that we have sections with chapters
-            const hasValidSections = Array.isArray(sectionsData) && 
+            const hasValidSections = Array.isArray(sectionsData) &&
                                     sectionsData.length > 0 &&
-                                    sectionsData.every(section => 
-                                      section && 
-                                      typeof section === 'object' && 
+                                    sectionsData.every(section =>
+                                      section &&
+                                      typeof section === 'object' &&
                                       'title' in section &&
                                       'chapters' in section &&
                                       Array.isArray(section.chapters)
                                     );
-        
-            console.log("📚 Section validation:", {
-              isArray: Array.isArray(sectionsData),
-              length: sectionsData?.length,
-              hasValidSections,
-              sampleSection: sectionsData?.[0]
-            });
-        
+
             if (hasValidSections) {
-              console.log("📚 Valid sectioned structure found");
-              
-              // Log the sections and their chapters for debugging
-              sectionsData.forEach((section, idx) => {
-                console.log(`📚 Section ${idx + 1}: "${section.title}" with ${section.chapters?.length || 0} chapters`);
-                if (section.chapters && section.chapters.length > 0) {
-                  section.chapters.slice(0, 3).forEach((chapter, chIdx) => {
-                    console.log(`📚   Chapter ${chIdx + 1}: "${chapter.title}"`);
-                  });
-                  if (section.chapters.length > 3) {
-                    console.log(`📚   ... and ${section.chapters.length - 3} more chapters`);
-                  }
-                }
-              });
-              
               // Set the complete structure
               setBookStructure({
                 id: uploadResponse.id,
@@ -853,7 +807,6 @@ export default function BookUpload() {
               setEditableChapters([]);
               
             } else {
-              console.log("⚠️ Invalid section structure, treating as flat chapters");
               
               // If the structure is invalid, treat items as individual chapters
               const chapters = Array.isArray(sectionsData) ? sectionsData : [];
@@ -884,7 +837,6 @@ export default function BookUpload() {
             }
             
           } else {
-            console.log("📖 FLAT BOOK - Setting up flat structure");
             
             // For flat books, sectionsData contains individual chapters
             const chapters = sectionsData || [];
@@ -936,15 +888,12 @@ export default function BookUpload() {
         
         // OLD FLOW: Process normally if we have an id
         if (uploadResponse.id) {
-          console.log("✅ OLD FLOW: Found ID, starting polling");
           setAiBook(uploadResponse);
           startPollingForBookStatus(uploadResponse.id);
         } else {
-          console.log("❌ NO ID AND NOT PREVIEW MODE");
           throw new Error("No book ID returned from server and not in preview mode");
         }
       } catch (error: any) {
-        console.error("Upload error:", error);
         setIsProcessing(false);
         setProcessingStatus("");
     
@@ -968,7 +917,6 @@ export default function BookUpload() {
       const checkoutSession =
         await stripeService.createBookUploadCheckoutSession(aiBook.id);
 
-      console.log("Stripe checkout session response:", checkoutSession);
       if (
         checkoutSession &&
         typeof checkoutSession === "object" &&
@@ -980,16 +928,13 @@ export default function BookUpload() {
           return;
         } else {
           toast.error("Stripe did not return a checkout URL.");
-          console.error("No checkout_url in Stripe response:", checkoutSession);
         }
       } else {
         toast.error("Failed to create Stripe checkout session.");
-        console.error("Unexpected Stripe session response:", checkoutSession);
       }
     } catch (e) {
       const error = e as Error;
       toast.error(error.message || "Error creating Stripe checkout session.");
-      console.error("Stripe checkout session error:", error);
     }
   };
 
@@ -1064,7 +1009,6 @@ export default function BookUpload() {
             toast.success("Book processing completed successfully!");
           }
         } catch (error) {
-          console.error("Error polling book status:", error);
           clearInterval(pollInterval);
           setIsProcessing(false);
           setProcessingStatus("");
@@ -1151,7 +1095,6 @@ export default function BookUpload() {
     
         // ✅ FIX: Handle both hierarchical and flat structures properly
         if (bookStructure?.has_sections && bookStructure.sections?.length > 0) {
-          console.log("Saving hierarchical structure");
           
           // For hierarchical books, flatten sections into chapters with section info
           structureData = {
@@ -1168,7 +1111,6 @@ export default function BookUpload() {
             ),
           };
         } else {
-          console.log("Saving flat structure");
           
           // For flat books, use editableChapters or structure.chapters
           const chaptersToSave = editableChapters.length > 0 
@@ -1185,7 +1127,6 @@ export default function BookUpload() {
           };
         }
     
-        console.log("Saving structure:", structureData);
     
         // Call the save-structure endpoint
         await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
@@ -1194,7 +1135,6 @@ export default function BookUpload() {
         setStep(5); // Move to book details step
         
       } catch (error: any) {
-        console.error("Error saving book structure:", error);
         const errorMessage =
           error?.response?.data?.detail ||
           error?.message ||
@@ -1204,6 +1144,35 @@ export default function BookUpload() {
         setSavingChapters(false);
       }
     };
+
+  // Handle reject structure - delete book and files
+  const handleRejectStructure = async () => {
+    if (!aiBook) {
+      toast.error("No book to reject");
+      return;
+    }
+
+    setIsRejecting(true);
+
+    try {
+      // Delete the book (backend should handle file deletion from storage)
+      await apiClient.delete(`/books/${aiBook.id}`);
+
+      toast.success("Book rejected and deleted successfully");
+      setShowRejectModal(false);
+
+      // Navigate back to dashboard
+      navigate("/dashboard");
+    } catch (error: any) {
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Failed to reject book";
+      toast.error(`Failed to reject book: ${errorMessage}`);
+    } finally {
+      setIsRejecting(false);
+    }
+  };
 
 
   // Step 4: Save/Update Book Details
@@ -1478,7 +1447,6 @@ export default function BookUpload() {
           setProcessingStatus("");
         }
       } catch (error) {
-        console.error("Error polling book status:", error);
         clearInterval(pollInterval);
         setIsProcessing(false);
         setProcessingStatus("");
@@ -1998,13 +1966,22 @@ export default function BookUpload() {
                 >
                   Back
                 </button>
-                <button
-                  onClick={handleSaveStructure}
-                  disabled={savingChapters || !bookStructure} // Also disable button when bookStructure is null
-                  className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
-                >
-                  {savingChapters ? "Saving..." : "Confirm Structure"}
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowRejectModal(true)}
+                    disabled={savingChapters || !bookStructure}
+                    className="px-6 py-4 bg-red-100 text-red-700 rounded-xl font-semibold hover:bg-red-200 transition-all text-lg disabled:opacity-50"
+                  >
+                    Reject Structure
+                  </button>
+                  <button
+                    onClick={handleSaveStructure}
+                    disabled={savingChapters || !bookStructure}
+                    className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
+                  >
+                    {savingChapters ? "Saving..." : "Confirm Structure"}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -2284,6 +2261,41 @@ export default function BookUpload() {
         onClose={() => setShowSubscriptionModal(false)}
         currentTier={currentSubscriptionTier}
       />
+
+      {/* Reject Structure Modal */}
+      {showRejectModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">Reject Book Structure?</h3>
+            </div>
+
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to reject this book structure? This will permanently delete the book and all extracted data from the database and storage. This action cannot be undone.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowRejectModal(false)}
+                disabled={isRejecting}
+                className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRejectStructure}
+                disabled={isRejecting}
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50"
+              >
+                {isRejecting ? "Deleting..." : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2644,11 +2656,6 @@ const DynamicStructureReview: React.FC<{
   const metadata = structure?.structure_metadata || {};
   const chapterLabel = metadata.chapter_label || "Chapter";
 
-  console.log("DynamicStructureReview - structure:", structure);
-  console.log("DynamicStructureReview - has_sections:", structure.has_sections);
-  console.log("DynamicStructureReview - sections count:", structure.sections?.length);
-  console.log("DynamicStructureReview - chapters count:", structure.chapters?.length);
-  console.log("DynamicStructureReview - editableChapters count:", editableChapters.length);
 
   return (
     <div className="space-y-6">
