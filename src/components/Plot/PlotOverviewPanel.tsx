@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { BookOpen, Loader2 } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { BookOpen, Loader2, Trash2, AlertCircle } from "lucide-react";
 import { usePlotGeneration } from "../../hooks/usePlotGeneration";
 
 interface PlotOverviewPanelProps {
@@ -7,12 +7,36 @@ interface PlotOverviewPanelProps {
 }
 
 const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
-  const { plotOverview, isGenerating, isLoading, generatePlot, loadPlot } =
+  const { plotOverview, isGenerating, isLoading, generatePlot, loadPlot, deleteCharacter } =
     usePlotGeneration(bookId);
+
+  const [deletingCharacterId, setDeletingCharacterId] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [characterToDelete, setCharacterToDelete] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     loadPlot();
   }, [bookId, loadPlot]);
+
+  const handleDeleteClick = (characterId: string, characterName: string) => {
+    setCharacterToDelete({ id: characterId, name: characterName });
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!characterToDelete) return;
+
+    setDeletingCharacterId(characterToDelete.id);
+    try {
+      await deleteCharacter(characterToDelete.id);
+      setShowDeleteModal(false);
+      setCharacterToDelete(null);
+    } catch (error) {
+      // Error is already handled in the hook
+    } finally {
+      setDeletingCharacterId(null);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -162,12 +186,32 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
             <div className="bg-white p-4 rounded-lg border">
               <h4 className="font-semibold text-gray-900 mb-3">Characters</h4>
               <div className="space-y-4">
-                {plotOverview.characters.map((character, idx) => (
-                  <div
-                    key={idx}
-                    className="border-b border-gray-200 pb-4 last:border-b-0 last:pb-0"
-                  >
-                    <h5 className="font-medium text-gray-900 mb-2">{character.name}</h5>
+                {plotOverview.characters.map((character, idx) => {
+                  const charId = (character as any).id;
+                  const isDeleting = deletingCharacterId === charId;
+
+                  return (
+                    <div
+                      key={idx}
+                      className="border-b border-gray-200 pb-4 last:border-b-0 last:pb-0 relative"
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <h5 className="font-medium text-gray-900">{character.name}</h5>
+                        {charId && (
+                          <button
+                            onClick={() => handleDeleteClick(charId, character.name)}
+                            disabled={isDeleting}
+                            className="text-red-600 hover:text-red-700 disabled:opacity-50 p-1 rounded-md hover:bg-red-50 transition-colors"
+                            title="Delete character"
+                          >
+                            {isDeleting ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                       <div>
                         <span className="font-medium text-gray-700">Role:</span>{" "}
@@ -204,12 +248,51 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && characterToDelete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">Delete Character?</h3>
+            </div>
+
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to delete <strong>{characterToDelete.name}</strong>? This will permanently remove the character from the plot overview. This action cannot be undone.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setCharacterToDelete(null);
+                }}
+                disabled={deletingCharacterId !== null}
+                className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                disabled={deletingCharacterId !== null}
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50"
+              >
+                {deletingCharacterId ? "Deleting..." : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

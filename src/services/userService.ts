@@ -484,6 +484,10 @@ export const userService = {
     return response;
   },
 
+  async deleteCharacter(characterId: string) {
+    return apiClient.delete(`/characters/${characterId}`);
+  },
+
   // Add these methods to userService.ts
 
   async getVideoProduction(chapterId: string) {
