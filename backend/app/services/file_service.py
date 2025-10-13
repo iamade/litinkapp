@@ -1670,6 +1670,77 @@ class FileService:
             print(f"Error processing TXT: {e}")
             raise
 
+    def extract_epub_chapters(self, file_path: str) -> List[Dict[str, Any]]:
+        """Extract chapters from EPUB file using its built-in structure"""
+        try:
+            book = epub.read_epub(file_path)
+            chapters = []
+
+            # Get the spine (reading order)
+            spine = book.spine
+            chapter_number = 0
+
+            for item_id, _ in spine:
+                item = book.get_item_with_id(item_id)
+
+                if item and item.get_type() == ebooklib.ITEM_DOCUMENT:
+                    # Parse HTML content
+                    soup = BeautifulSoup(item.get_content(), 'html.parser')
+
+                    # Remove script and style elements
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+
+                    # Get text content
+                    text = soup.get_text()
+
+                    # Clean the text
+                    lines = (line.strip() for line in text.splitlines())
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                    clean_text = '\n'.join(chunk for chunk in chunks if chunk)
+
+                    # Skip if content is too short (likely not a real chapter)
+                    if len(clean_text.strip()) < 200:
+                        continue
+
+                    # Try to find chapter title from first heading or first line
+                    title = None
+                    for heading in soup.find_all(['h1', 'h2', 'h3', 'h4']):
+                        title_text = heading.get_text().strip()
+                        if title_text:
+                            title = title_text
+                            break
+
+                    # If no heading found, use first line as title
+                    if not title:
+                        first_lines = clean_text.split('\n')[:3]
+                        for line in first_lines:
+                            if len(line) > 10 and len(line) < 100:
+                                title = line
+                                break
+
+                    # Generate title if still none
+                    if not title:
+                        chapter_number += 1
+                        title = f"Chapter {chapter_number}"
+                    else:
+                        chapter_number += 1
+
+                    chapters.append({
+                        "number": str(chapter_number),
+                        "title": title,
+                        "content": clean_text,
+                        "type": "chapter"
+                    })
+
+            print(f"[EPUB] Extracted {len(chapters)} chapters from spine")
+            return chapters
+
+        except Exception as e:
+            print(f"[EPUB] Error extracting chapters: {e}")
+            traceback.print_exc()
+            return []
+
     def process_epub(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
         """Extract text from EPUB file"""
         try:
@@ -5447,32 +5518,70 @@ Chapters:
         safe_filename = original_filename or "unknown_file.txt"
         if not isinstance(safe_filename, str):
             safe_filename = str(safe_filename) if safe_filename else "unknown_file.txt"
-            
+
         print(f"[CHAPTER EXTRACTION] Starting extraction for {safe_filename}")
         print(f"[CHAPTER EXTRACTION] Storage path: {storage_path or 'None'}")
-        
-        # Step 1: Try TOC extraction first (most reliable for PDFs)
-        if (safe_filename.lower().endswith('.pdf') and 
-            storage_path and 
+
+        # Step 1: Try EPUB-specific extraction for EPUB files
+        if (safe_filename.lower().endswith('.epub') and
+            storage_path and
             isinstance(storage_path, str)):
-            
+
+            print("[EPUB EXTRACTION] Attempting EPUB chapter extraction...")
+            try:
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.epub') as temp_file:
+                    file_content = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(path=storage_path)
+                    temp_file.write(file_content)
+                    temp_file_path = temp_file.name
+
+                epub_chapters = self.extract_epub_chapters(temp_file_path)
+
+                # FIX: Ensure epub_chapters is a valid list
+                if not isinstance(epub_chapters, list):
+                    epub_chapters = []
+
+                os.unlink(temp_file_path)
+                print(f"[EPUB EXTRACTION] Cleaned up temporary file: {temp_file_path}")
+
+                if len(epub_chapters) > 0:
+                    print(f"[EPUB EXTRACTION] SUCCESS: Found {len(epub_chapters)} chapters from EPUB structure")
+                    return epub_chapters  # Return the chapters directly
+                else:
+                    print("[EPUB EXTRACTION] No chapters found in EPUB structure, falling back to text parsing")
+
+            except Exception as e:
+                print(f"[EPUB EXTRACTION] Failed: {e}")
+                print(f"[EPUB EXTRACTION] Full error: {traceback.format_exc()}")
+                # Clean up temp file even if there's an error
+                if 'temp_file_path' in locals():
+                    try:
+                        os.unlink(temp_file_path)
+                    except:
+                        pass
+
+        # Step 2: Try TOC extraction for PDFs
+        toc_chapters = []
+        if (safe_filename.lower().endswith('.pdf') and
+            storage_path and
+            isinstance(storage_path, str)):
+
             print("[TOC EXTRACTION] Attempting PDF TOC extraction...")
             try:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=safe_filename) as temp_file:
                     file_content = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(path=storage_path)
                     temp_file.write(file_content)
                     temp_file_path = temp_file.name
-                
+
                 toc_chapters = await self.extract_chapters_from_pdf_with_toc(temp_file_path)
-                
+
                 # FIX: Ensure toc_chapters is a valid list
                 if not isinstance(toc_chapters, list):
                     toc_chapters = []
-                    
+
                 os.unlink(temp_file_path)
                 print(f"[TOC EXTRACTION] Cleaned up temporary file: {temp_file_path}")
-            
-                
+
+
             except Exception as e:
                 print(f"[TOC EXTRACTION] Failed: {e}")
                 print(f"[TOC EXTRACTION] Full error: {traceback.format_exc()}")
@@ -5482,8 +5591,6 @@ Chapters:
                         os.unlink(temp_file_path)
                     except:
                         pass
-        else:
-            toc_chapters = []
 
         # FIX: Use TOC chapters if we found ANY reasonable number (lowered threshold)
         if len(toc_chapters) >= 3:  # Reduced from >= 2
