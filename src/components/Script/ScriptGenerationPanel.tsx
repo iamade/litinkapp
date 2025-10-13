@@ -672,10 +672,10 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1">
           <h4 className="font-semibold text-gray-900">
-            {script.script_name || (script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration')}
+            {script.script_name || (script.script_style === 'cinematic' ||script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration')}
           </h4>
           <p className="text-sm text-gray-500">
-            {script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Story Type: {script.scriptStoryType || 'N/A'} • Created: {new Date(script.created_at).toLocaleDateString()}
+            {script.script_style === 'cinematic' || script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Story Type: {(script as any).script_story_type || 'N/A'} • Created: {new Date(script.created_at).toLocaleDateString()}
           </p>
         </div>
         <div className="flex items-center space-x-2">
