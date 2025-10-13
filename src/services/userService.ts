@@ -230,9 +230,21 @@ export const userService = {
       }
     );
   },
+  // Get user's own learning books (not superadmin books)
+  getMyLearningBooks: async () => {
+    return apiClient.get("/books?book_type=learning");
+  },
+
+  // Get user's own entertainment books (not superadmin books)
+  getMyEntertainmentBooks: async () => {
+    return apiClient.get("/books?book_type=entertainment");
+  },
+
   getLearningBooksWithProgress: async () => {
     return apiClient.get("/books/learning-progress");
   },
+
+  // These are for the Explore page - superadmin curated content
   getSuperadminLearningBooks: async () => {
     return apiClient.get("/books/superadmin-learning-books");
   },
