@@ -729,10 +729,15 @@ async def delete_book(
     current_user: dict = Depends(get_current_active_user)
 ):
     # 1. Get the book record to find the storage path and verify ownership
-    book_response = supabase_client.table("books").select("*").eq("id", book_id).single().execute()
-    if not book_response.data:
-        raise HTTPException(status_code=404, detail="Book not found")
-    book = book_response.data
+    try:
+        book_response = supabase_client.table("books").select("*").eq("id", book_id).execute()
+        if not book_response.data or len(book_response.data) == 0:
+            raise HTTPException(status_code=404, detail="Book not found")
+        book = book_response.data[0]
+    except APIError as e:
+        if "PGRST116" in str(e):
+            raise HTTPException(status_code=404, detail="Book not found")
+        raise
 
     # 2. Only allow the owner to delete
     if book["user_id"] != current_user["id"]:
