@@ -1095,20 +1095,25 @@ export default function BookUpload() {
     
         // ✅ FIX: Handle both hierarchical and flat structures properly
         if (bookStructure?.has_sections && bookStructure.sections?.length > 0) {
-          
+
           // For hierarchical books, flatten sections into chapters with section info
+          // ✅ FIX: Remove chapter_number to let backend assign sequential numbers
+          const flattenedChapters = bookStructure.sections.flatMap((section) =>
+            (section.chapters || []).map((ch) => ({
+              title: ch.title,
+              content: ch.content,
+              summary: ch.summary || "",
+              section_title: section.title,
+              section_type: section.section_type,
+              section_number: section.section_number,
+            }))
+          );
+
           structureData = {
-            chapters: bookStructure.sections.flatMap((section) =>
-              (section.chapters || []).map((ch) => ({
-                title: ch.title,
-                content: ch.content,
-                summary: ch.summary || "",
-                chapter_number: ch.chapter_number,
-                section_title: section.title,
-                section_type: section.section_type,
-                section_number: section.section_number,
-              }))
-            ),
+            chapters: flattenedChapters.map((ch, index) => ({
+              ...ch,
+              chapter_number: index + 1, // Sequential chapter numbers
+            })),
           };
         } else {
           
