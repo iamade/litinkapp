@@ -504,7 +504,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h4 className="text-lg font-semibold text-gray-900">Character Images</h4>
+          <div>
+            <h4 className="text-lg font-semibold text-gray-900">Character Images for Current Script</h4>
+            <p className="text-xs text-gray-500 mt-1">
+              Scene-specific character images. Global character images are managed in Plot Overview.
+            </p>
+          </div>
           <button
             onClick={handleGenerateAllCharacters}
             disabled={!characters.length || generatingCharacters.size > 0}

@@ -488,6 +488,25 @@ export const userService = {
     return apiClient.delete(`/characters/${characterId}`);
   },
 
+  async updateCharacter(characterId: string, updates: {
+    name?: string;
+    role?: string;
+    physical_description?: string;
+    personality?: string;
+    character_arc?: string;
+    archetypes?: string[];
+  }) {
+    return apiClient.put(`/characters/${characterId}`, updates);
+  },
+
+  async generateCharacterImageGlobal(characterId: string, customPrompt?: string) {
+    return apiClient.post(`/characters/${characterId}/generate-image`, {
+      prompt: customPrompt,
+      character_id: characterId,
+      user_id: '' // Will be set by backend from auth token
+    });
+  },
+
   // Add these methods to userService.ts
 
   async getVideoProduction(chapterId: string) {
