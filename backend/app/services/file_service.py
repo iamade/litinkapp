@@ -1778,12 +1778,22 @@ class FileService:
 
             # Get the spine (reading order)
             spine = book.spine
-            chapter_number = 0
+            print(f"[EPUB] Spine contains {len(spine)} items")
 
-            for item_id, _ in spine:
+            chapter_number = 0
+            skipped_count = 0
+
+            for idx, (item_id, _) in enumerate(spine):
                 item = book.get_item_with_id(item_id)
 
-                if item and item.get_type() == ebooklib.ITEM_DOCUMENT:
+                if not item:
+                    print(f"[EPUB] Item {idx}: Could not get item with id '{item_id}'")
+                    continue
+
+                item_type = item.get_type()
+                print(f"[EPUB] Item {idx} (id: {item_id}): type = {item_type}")
+
+                if item_type == ebooklib.ITEM_DOCUMENT:
                     # Parse HTML content
                     soup = BeautifulSoup(item.get_content(), 'html.parser')
 
@@ -1799,8 +1809,14 @@ class FileService:
                     chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
                     clean_text = '\n'.join(chunk for chunk in chunks if chunk)
 
+                    content_length = len(clean_text.strip())
+                    print(f"[EPUB] Item {idx}: content length = {content_length}")
+
                     # Skip if content is too short (likely not a real chapter)
-                    if len(clean_text.strip()) < 200:
+                    # Lowered threshold from 200 to 100 to catch more chapters
+                    if content_length < 100:
+                        skipped_count += 1
+                        print(f"[EPUB] Skipping item {idx}: content too short ({content_length} chars)")
                         continue
 
                     # Try to find chapter title from first heading or first line
@@ -1809,14 +1825,28 @@ class FileService:
                         title_text = heading.get_text().strip()
                         if title_text:
                             title = title_text
+                            print(f"[EPUB] Found heading title: {title}")
                             break
 
-                    # If no heading found, use first line as title
+                    # If no heading found, use first line as title or try to detect chapter pattern
                     if not title:
-                        first_lines = clean_text.split('\n')[:3]
+                        first_lines = clean_text.split('\n')[:5]
                         for line in first_lines:
-                            if len(line) > 10 and len(line) < 100:
-                                title = line
+                            line_stripped = line.strip()
+                            # Check if it matches chapter pattern
+                            chapter_match = self._match_chapter_patterns(line_stripped)
+                            if chapter_match:
+                                # Use the chapter pattern as title
+                                if chapter_match.get('title'):
+                                    title = f"Chapter {chapter_match['number']}: {chapter_match['title']}"
+                                else:
+                                    title = f"Chapter {chapter_match['number']}"
+                                print(f"[EPUB] Found chapter pattern: {title}")
+                                break
+                            # Otherwise check if it looks like a title
+                            elif 5 < len(line_stripped) < 100 and not line_stripped.endswith('.'):
+                                title = line_stripped
+                                print(f"[EPUB] Using first line as title: {title}")
                                 break
 
                     # Generate title if still none
@@ -1832,8 +1862,9 @@ class FileService:
                         "content": clean_text,
                         "type": "chapter"
                     })
+                    print(f"[EPUB] ✓ Added chapter {chapter_number}: {title}")
 
-            print(f"[EPUB] Extracted {len(chapters)} chapters from spine")
+            print(f"[EPUB] Extracted {len(chapters)} chapters from spine (skipped {skipped_count} short items)")
             return chapters
 
         except Exception as e:
