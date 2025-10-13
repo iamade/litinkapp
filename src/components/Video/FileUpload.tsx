@@ -132,7 +132,6 @@ const FileUpload: React.FC<FileUploadProps> = ({
       ));
 
     } catch (error) {
-      console.error('Upload failed:', error);
       setFiles(prev => prev.map(f =>
         f.id === fileData.id
           ? { ...f, status: 'failed', error: error instanceof Error ? error.message : 'Upload failed' }

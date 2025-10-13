@@ -150,11 +150,6 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [showFullScript, setShowFullScript] = useState(false);
 
   const handleGenerateScript = () => {
-    console.log('[DEBUG] ScriptGenerationPanel - handleGenerateScript called with:', {
-      scriptStyle,
-      generationOptions,
-      scriptStoryType: scriptStoryType
-    });
     onGenerateScript(scriptStyle, {
       ...generationOptions,
       scriptStoryType: scriptStoryType

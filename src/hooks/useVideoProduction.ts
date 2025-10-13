@@ -82,7 +82,6 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
       }
     } catch (error) {
       if (!controller.signal.aborted) {
-        console.error('Error loading video production:', error);
       }
     } finally {
       if (!controller.signal.aborted) {
@@ -194,7 +193,6 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
 
       toast.success('Download started');
     } catch (error) {
-      console.error('Error downloading video:', error);
       toast.error('Failed to download video');
     }
   }, [videoProduction, chapterId, editorSettings]);
@@ -219,7 +217,6 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
       setVideoProduction(result as any);
       toast.success('Video production saved');
     } catch (error) {
-      console.error('Error saving production:', error);
       toast.error('Failed to save video production');
     } finally {
       setIsLoading(false);
@@ -240,7 +237,6 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
       toast.success(`Starting video pipeline for script: ${scriptId}`);
       // TODO: Implement actual pipeline start
     } catch (error) {
-      console.error('Error starting video pipeline:', error);
       toast.error('Failed to start video pipeline');
     } finally {
       setIsRendering(false);
@@ -261,7 +257,6 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
       toast.success(`Rendering video for script: ${scriptId}`);
       // TODO: Implement actual video rendering
     } catch (error) {
-      console.error('Error rendering video:', error);
       toast.error('Failed to render video');
     } finally {
       setIsRendering(false);

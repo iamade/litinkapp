@@ -239,24 +239,9 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
 
   // Recompute markers on selection changes
   useEffect(() => {
-    // Log script and scene mapping for debugging
-    console.log('SceneTimeline: Script/Scene mapping', {
-      selectedScriptId,
-      selectedChapterId,
-      selectedSegmentId,
-      versionToken,
-      scriptScenes: selectedScript?.scene_descriptions?.length || 0,
-      currentScenes: scenes.length,
-      scriptCharacters: selectedScript?.characters?.length || 0
-    });
-    
     // Validate scene-scene_description mapping
     if (selectedScript?.scene_descriptions && scenes.length > 0) {
-      console.log('SceneTimeline: Scene mapping validation', {
-        scriptScenes: selectedScript.scene_descriptions.length,
-        videoScenes: scenes.length,
-        match: selectedScript.scene_descriptions.length === scenes.length
-      });
+      // Scene validation logic
     }
   }, [selectedScriptId, selectedChapterId, versionToken, selectedScript, scenes]);
 
@@ -265,7 +250,6 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
     if (selectedSegmentId) {
       // Scroll active marker into view if needed
       // This could be implemented with refs to scroll to the selected scene card
-      console.log('Active segment changed to:', selectedSegmentId);
     }
   }, [selectedSegmentId]);
 
@@ -274,7 +258,6 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
     const unsub = subscribe((evt) => {
       if (evt === 'TIMELINE_RECALC_REQUESTED' || evt === 'SEGMENT_CHANGED') {
         // Recompute sizes/positions if needed
-        console.log('SceneTimeline: Recomputing layout due to', evt);
         // Force re-render or recalculate layout
       }
     });

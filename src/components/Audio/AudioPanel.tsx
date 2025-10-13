@@ -44,7 +44,6 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
 }) => {
   // Safe fallback for exportAudioMix to prevent ReferenceError
   const exportAudioMix = React.useCallback(() => {
-    console.warn('exportAudioMix is not implemented yet');
   }, []);
   // Use script selection context for global state management
   const {
@@ -140,7 +139,6 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
 
   useEffect(() => {
     if (selectedScript) {
-      console.log("selectedScript: ", selectedScript);
 
       setGenerationOptions(prev => ({
         ...prev,
@@ -149,19 +147,13 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
       }));
 
       // Auto-regenerate audio when script changes
-      console.log('[DEBUG] Script changed, checking if audio regeneration needed');
       // Note: Audio regeneration logic will be handled by the hook when script changes
     }
   }, [selectedScript]);
 
   // Show all chapter audio files regardless of script association
   // Backend returns chapter-level audio files, not script-specific
-  console.log('[DEBUG AudioPanel] Chapter audio files:', {
-    selectedScriptId,
-    totalFiles: files?.length || 0,
-    files: files?.map(f => ({ id: f.id, script_id: f.script_id, scriptId: f.scriptId, url: f.url, type: f.type })) || []
-  });
-  
+
   // Filter audio files by selected script_id, accepting both script_id and scriptId fields
   const filteredAudioFiles = (files ?? []).filter((file) => {
     const normalizedScriptId = file.script_id ?? file.scriptId;
@@ -213,21 +205,15 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   }
 
   const handleConfirmGeneration = async () => {
-    console.log('[DEBUG] handleConfirmGeneration called');
-    console.log('[DEBUG] scenes:', scenes);
-    console.log('[DEBUG] generationOptions:', generationOptions);
     // TODO: Implement audio generation logic
-    console.warn('Audio generation not implemented yet');
   };
 
   const handlePlayPause = () => {
     if (isPlaying) {
       // TODO: Implement stop audio logic
-      console.warn('Stop audio not implemented yet');
       setIsPlaying(false);
     } else {
       // TODO: Implement play audio logic
-      console.warn('Play audio not implemented yet');
       setIsPlaying(true);
     }
   };
@@ -607,16 +593,6 @@ const AudioFileCard: React.FC<{
   const [isPlaying, setIsPlaying] = useState(false);
   const isGenerating = file.status === 'generating';
   const isFailed = file.status === 'failed';
-
-  console.log('[DEBUG AudioFileCard] Rendering audio card:', {
-    fileId: file.id,
-    hasUrl: !!file.url,
-    url: file.url,
-    status: file.status,
-    name: file.name,
-    scriptId: file.scriptId,
-    script_id: file.script_id
-  });
 
   return (
     <div className={`bg-white border rounded-lg p-4 ${isSelected ? 'border-purple-500' : ''} ${isGenerating ? 'border-blue-300 bg-blue-50' : ''} ${isFailed ? 'border-red-300 bg-red-50' : ''}`}>

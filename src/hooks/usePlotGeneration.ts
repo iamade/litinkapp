@@ -43,7 +43,6 @@ export const usePlotGeneration = (bookId: string) => {
       // Refetch plot overview to ensure data is up to date
       await loadPlot();
     } catch (error) {
-      console.error('Error generating plot:', error);
       toast.error('Failed to generate plot overview');
     } finally {
       setIsGenerating(false);
@@ -69,7 +68,6 @@ export const usePlotGeneration = (bookId: string) => {
     setIsLoading(true);
     try {
       const result = await userService.getPlotOverview(bookId);
-      console.log("[DEBUG] PlotData: ", result);
 
       setPlotOverview(result);
     } catch (error: any) {
@@ -79,7 +77,6 @@ export const usePlotGeneration = (bookId: string) => {
         setPlotOverview(null);
       } else {
         // Real error - show toast
-        console.error('Error loading plot:', error);
         toast.error('Failed to load plot');
       }
     } finally {

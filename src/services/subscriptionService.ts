@@ -107,7 +107,6 @@ export const subscriptionService = {
       const usage = await subscriptionService.getUsageStats();
       return usage.can_generate_video;
     } catch (error) {
-      console.error("Error checking video generation limits:", error);
       return false;
     }
   },
@@ -118,7 +117,6 @@ export const subscriptionService = {
       const usage = await subscriptionService.getUsageStats();
       return usage.remaining_videos;
     } catch (error) {
-      console.error("Error getting remaining videos:", error);
       return 0;
     }
   }

@@ -32,7 +32,6 @@ export const stripeService = {
       );
       return response;
     } catch (error) {
-      console.error("Error creating checkout session:", error);
       throw error;
     }
   },
@@ -47,7 +46,6 @@ export const stripeService = {
       );
       return response;
     } catch (error) {
-      console.error("Error checking payment status:", error);
       throw error;
     }
   },
@@ -62,7 +60,6 @@ export const stripeService = {
       );
       return response;
     } catch (error) {
-      console.error("Error getting user book count:", error);
       throw error;
     }
   },

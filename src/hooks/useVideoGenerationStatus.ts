@@ -85,7 +85,6 @@ export const useVideoGenerationStatus = (
   // Debug logging with safe types
   const logDebug = (message: string, data?: unknown) => {
     if (DEBUG) {
-      console.log(`[useVideoGenerationStatus] ${message}`, data);
     }
   };
 

@@ -30,7 +30,6 @@ import { useImageGeneration } from '../hooks/useImageGeneration';
 import { useAudioGeneration } from '../hooks/useAudioGeneration';
 import VideoProductionPanel from '../components/Video/VideoProductionPanel';
 
- console.log("BookViewForEntertainment starting")
 interface Chapter {
   id: string;
   title: string;
@@ -267,7 +266,6 @@ export default function BookViewForEntertainment() {
       // Call retry endpoint to continue generation
       const response = await aiService.retryVideoGeneration(videoGenId);
 
-      console.log("✅ Retry response:", response);
 
       // Show more detailed success message with safe property access
       const progressInfo = response?.existing_progress;
@@ -307,7 +305,6 @@ export default function BookViewForEntertainment() {
       // Hide existing generations during active generation
       setShowExistingGenerations(false);
     } catch (error: any) {
-      console.error("Error continuing generation:", error);
 
       let errorMessage = "Failed to continue video generation";
 
@@ -385,7 +382,6 @@ export default function BookViewForEntertainment() {
         selectChapter(bookData.chapters[0].id, { reason: 'load' });
       }
     } catch (error) {
-      console.error("Error loading book:", error);
       toast.error("Failed to load book");
     } finally {
       setIsLoading(false);
@@ -419,7 +415,6 @@ export default function BookViewForEntertainment() {
       // Start polling - the function now handles its own lifecycle
       pollVideoStatus(result.video_generation_id);
     } catch (error: any) {
-      console.error("Error generating video:", error);
       const errorMessage = error?.response?.data?.detail ||
                           error?.message ||
                           "Failed to start video generation";
@@ -442,15 +437,10 @@ export default function BookViewForEntertainment() {
     if (!selectedChapter) return;
 
     try {
-      console.log(
-        "[FETCH] Getting existing generations for chapter:",
-        selectedChapter.id
-      );
       const response = await videoGenerationAPI.getChapterVideoGenerations(
         selectedChapter.id
       );
       const generations = response.generations || [];
-      console.log("[FETCH] Found generations:", generations.length);
 
       if (mountedRef.current) {
         setExistingGenerations(generations); // ✅ Now using the array
@@ -461,7 +451,6 @@ export default function BookViewForEntertainment() {
         }
       }
     } catch (error) {
-      console.error("Error fetching existing generations:", error);
       // Even on error, show the generation interface
       if (mountedRef.current) {
         setShowExistingGenerations(true);
@@ -488,17 +477,14 @@ export default function BookViewForEntertainment() {
     const checkStatus = async () => {
       // Check if component is still mounted
       if (!mountedRef.current) {
-        console.log("[POLLING] Component unmounted, stopping polling");
         return;
       }
 
       try {
         const data = await userService.getVideoGenerationStatus(videoGenId);
-        console.log("[POLLING] Status update:", data.generation_status);
 
         // Check again if component is still mounted before updating state
         if (!mountedRef.current) {
-          console.log("[POLLING] Component unmounted, skipping setState");
           return;
         }
 
@@ -513,7 +499,6 @@ export default function BookViewForEntertainment() {
               setLastUpdated(Date.now());
             }
           } catch (pipelineError) {
-            console.warn("Pipeline status not available:", pipelineError);
           }
 
           if (data.task_metadata?.audio_task_state && mountedRef.current) {
@@ -568,7 +553,6 @@ export default function BookViewForEntertainment() {
           setShowExistingGenerations(true);
         }
       } catch (error) {
-        console.error("Error checking status:", error);
         if (mountedRef.current) {
           toast.error("Error checking video status");
           setShowExistingGenerations(true);
@@ -604,7 +588,6 @@ export default function BookViewForEntertainment() {
       updateProgress("script", "completed");
       toast.success("AI Script & Scene Descriptions generated!");
     } catch (error) {
-      console.error("Error generating script:", error);
       toast.error("Failed to generate script/scene descriptions");
       updateProgress("script", "error");
     } finally {
@@ -622,7 +605,6 @@ export default function BookViewForEntertainment() {
       toast.success("Retrying video generation...");
       pollVideoStatus(videoGenerationId);
     } catch (error) {
-      console.error("Retry failed:", error);
       toast.error("Failed to retry video generation. Please try again.");
     } finally {
       setIsLoading(false);
@@ -638,7 +620,6 @@ export default function BookViewForEntertainment() {
       const status = await aiService.getPipelineStatus(videoGenerationId);
       setPipelineStatus(status);
     } catch (error) {
-      console.error("Failed to refresh status:", error);
       toast.error("Failed to refresh status");
     } finally {
       setIsLoading(false);
@@ -903,9 +884,6 @@ if (!selectedChapter) {
   }
 
   // DEBUG LOGGING
-  console.log("DEBUG selectedChapter", selectedChapter);
-  console.log("DEBUG videoStatus", videoStatus);
-  console.log("DEBUG book", book);
 
   return (
     <div className="min-h-screen bg-gray-50">

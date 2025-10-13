@@ -44,11 +44,9 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
   const isMountedRef = useRef(true);
 
   useEffect(() => {
-    console.log('[DEBUG useImageGeneration] Component mounted, setting isMountedRef to true');
     isMountedRef.current = true;
 
     return () => {
-      console.log('[DEBUG useImageGeneration] Component unmounting, setting isMountedRef to false');
       isMountedRef.current = false;
       // Clear all polling intervals on unmount
       pollingIntervals.forEach(interval => clearInterval(interval));
@@ -56,21 +54,17 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
   }, [pollingIntervals]);
 
   const loadImages = useCallback(async () => {
-    console.log('[DEBUG useImageGeneration] loadImages ENTRY - chapterId:', chapterId);
 
     if (!chapterId) {
-      console.warn("useImageGeneration: No chapterId; clearing images and skipping fetch");
       setSceneImages({});
       setCharacterImages({});
       setIsLoading(false);
       return;
     }
 
-    console.log('[DEBUG useImageGeneration] loadImages proceeding for chapterId:', chapterId);
     const requestKey = chapterId;
 
     if (inflightRef.current === requestKey) {
-      console.log('[DEBUG useImageGeneration] Duplicate request detected, skipping');
       return; // prevent duplicate fetch
     }
 
@@ -78,17 +72,8 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
 
     setIsLoading(true);
     try {
-      console.log('[DEBUG useImageGeneration] Calling userService.getChapterImages...');
       const response = await userService.getChapterImages(chapterId);
-      console.log('[DEBUG useImageGeneration] Got response:', response);
-      console.log('[DEBUG useImageGeneration] Checking staleness:', {
-        isMounted: isMountedRef.current,
-        inflightRef: inflightRef.current,
-        requestKey,
-        isStale: !isMountedRef.current || inflightRef.current !== requestKey
-      });
       if (!isMountedRef.current || inflightRef.current !== requestKey) {
-        console.warn('[DEBUG useImageGeneration] STALE REQUEST - aborting image processing');
         return; // stale
       }
       const sceneImagesMap: Record<string | number, SceneImage> = {};
@@ -103,15 +88,6 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
 
           // Normalize script_id from either field
           const normalizedScriptId = img.script_id ?? img.scriptId;
-
-          console.log('[DEBUG useImageGeneration] Processing image:', {
-            id: img.id,
-            imageType,
-            characterName,
-            hasUrl: !!url,
-            scriptId: normalizedScriptId,
-            selectedScriptId
-          });
 
           // Scene images: accept explicit scene or fallback when image_type missing but URL exists
           if (
@@ -156,18 +132,14 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       setSceneImages(sceneImagesMap);
       setCharacterImages(characterImagesMap);
     } catch (error: unknown) {
-      console.error('[DEBUG useImageGeneration] Error in loadImages:', error);
       if (!isMountedRef.current || inflightRef.current !== requestKey) return;
       if ((error as Error).message?.includes('404') || (error as Error).message?.includes('Not found')) {
-        console.log('[DEBUG useImageGeneration] 404 error, clearing images');
         setSceneImages({});
         setCharacterImages({});
       } else {
-        console.error('[DEBUG useImageGeneration] Unexpected error loading images:', error);
         toast.error('Failed to load images');
       }
     } finally {
-      console.log('[DEBUG useImageGeneration] loadImages FINALLY block');
       if (inflightRef.current === requestKey) inflightRef.current = null;
       if (isMountedRef.current) setIsLoading(false);
     }
@@ -201,12 +173,6 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
 
       const result = await userService.generateSceneImage(chapterId!, sceneNumber, request);
 
-      console.log('[useImageGeneration] Scene image generated successfully', {
-        sceneNumber,
-        imageUrl: result.image_url,
-        recordId: result.record_id
-      });
-
       const updatedImage = {
         ...tempImage,
         imageUrl: result.image_url,
@@ -221,17 +187,11 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
           ...prev,
           [sceneNumber]: updatedImage
         };
-        console.log('[useImageGeneration] Updated sceneImages state', {
-          sceneNumber,
-          keys: Object.keys(updated),
-          image: updated[sceneNumber]
-        });
         return updated;
       });
 
       toast.success(`Generated image for Scene ${sceneNumber}`);
     } catch (error: unknown) {
-      console.error('Error generating scene image:', error);
 
       setSceneImages((prev) => ({
         ...prev,
@@ -295,7 +255,6 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
         toast.success(`Generated image for ${characterName}`);
       }
     } catch (error: unknown) {
-      console.error('Error generating character image:', error);
 
       setCharacterImages((prev) => ({
         ...prev,
@@ -354,14 +313,7 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     scenes: Array<{ scene_number?: number; visual_description?: string; description?: string }>,
     options: ImageGenerationOptions
   ) => {
-    console.log('[useImageGeneration] generateAllSceneImages called', {
-      scenesCount: scenes.length,
-      chapterId,
-      options
-    });
-
     if (!chapterId) {
-      console.error('[useImageGeneration] No chapterId available, cannot generate images');
       toast.error('Chapter ID is required to generate images');
       return;
     }
@@ -369,18 +321,12 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     for (const [idx, scene] of scenes.entries()) {
       const sceneNumber = scene.scene_number || idx + 1;
       const description = scene.visual_description || scene.description || '';
-      console.log(`[useImageGeneration] Processing scene ${sceneNumber}/${scenes.length}`, {
-        sceneNumber,
-        hasDescription: !!description
-      });
 
       if (description) {
         await generateSceneImage(sceneNumber, description, options);
       } else {
-        console.warn(`[useImageGeneration] Scene ${sceneNumber} has no description, skipping`);
       }
     }
-    console.log('[useImageGeneration] All scenes processed, reloading images...');
 
     // Reload images from database to ensure everything is in sync
     await loadImages();
@@ -399,7 +345,6 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
 
     // Don't await - let them generate in parallel and poll individually
     Promise.all(promises).catch(err => {
-      console.error('Error in batch character generation:', err);
     });
   };
 
@@ -473,7 +418,6 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
         }
         // If status is still 'pending' or 'processing', keep polling
       } catch (error) {
-        console.error(`Error polling status for ${characterName}:`, error);
       }
     }, 3000); // Poll every 3 seconds
 

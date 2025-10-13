@@ -82,7 +82,6 @@ export const normalizeGenerationStatus = (status: string | null | undefined): Ge
       return 'failed';
     default:
       // Unknown values map to 'failed' for safety
-      console.warn(`Unknown generation status: ${status}, mapping to 'failed'`);
       return 'failed';
   }
 };
@@ -265,7 +264,6 @@ class VideoGenerationAPI {
       
       return normalized;
     } catch (error) {
-      console.error('Error fetching generation status:', error);
       throw error;
     }
   }

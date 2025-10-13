@@ -179,7 +179,6 @@ export const videoService = {
       );
       return response;
     } catch (error) {
-      console.error("Error generating realistic video:", error);
       throw error;
     }
   },
@@ -191,7 +190,6 @@ export const videoService = {
       );
       return response;
     } catch (error) {
-      console.error("Error checking video status:", error);
       throw error;
     }
   },
@@ -206,7 +204,6 @@ export const videoService = {
       );
       return response;
     } catch (error) {
-      console.error("Error combining videos:", error);
       throw error;
     }
   },
@@ -220,7 +217,6 @@ export const videoService = {
       );
       return response;
     } catch (error) {
-      console.error("Error getting learning content:", error);
       throw error;
     }
   },
@@ -237,7 +233,6 @@ export const videoService = {
       );
       return response;
     } catch (error) {
-      console.error("Error generating audio narration:", error);
       throw error;
     }
   },

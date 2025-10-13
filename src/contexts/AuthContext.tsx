@@ -50,7 +50,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const profile = await apiClient.get<User>("/users/me");
           setUser(profile);
         } catch (error) {
-          console.error("Failed to fetch user profile", error);
           localStorage.removeItem("authToken");
           localStorage.removeItem("refreshToken");
         }

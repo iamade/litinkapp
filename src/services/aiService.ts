@@ -34,7 +34,6 @@ export const aiService = {
       });
       return response.data;
     } catch (error) {
-      console.error("Error analyzing chapter safety:", error);
       throw error;
     }
   },
@@ -44,7 +43,6 @@ export const aiService = {
       const response = await apiClient.get<PipelineStatus>(`/ai/pipeline-status/${videoGenId}`);
       return response;
     } catch (error) {
-      console.error("Error getting pipeline status:", error);
       throw error;
     }
   },
@@ -62,7 +60,6 @@ export const aiService = {
       );
       return response;
     } catch (error) {
-      console.error("Error retrying video generation:", error);
       throw error;
     }
   },
@@ -76,7 +73,6 @@ export const aiService = {
       );
       return response;
     } catch (error) {
-      console.error("Error initializing pipeline:", error);
       throw error;
     }
   },

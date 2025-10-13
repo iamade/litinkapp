@@ -200,7 +200,6 @@ export default function BookUpload() {
       // Set a 10-second timeout for structure loading
       const timeout = setTimeout(() => {
         if (!bookStructure) {
-          console.log("⚠️ Structure loading timeout, creating fallback");
           
           // Create fallback structure from editableChapters
           const fallbackStructure: BookStructure = {
@@ -245,12 +244,6 @@ export default function BookUpload() {
 
   // ADD THE DEBUG EFFECT RIGHT HERE (after the timeout effect)
   useEffect(() => {
-    console.log("=== STATE DEBUG ===");
-    console.log("Current step:", step);
-    console.log("bookStructure:", bookStructure);
-    console.log("editableChapters count:", editableChapters.length);
-    console.log("aiBook:", aiBook);
-    console.log("===================");
   }, [step, bookStructure, editableChapters, aiBook]);
 
 
@@ -369,7 +362,6 @@ export default function BookUpload() {
         setShowSubscriptionModal(true);
       }
     } catch (error) {
-      console.error("Error loading user book count:", error);
     }
   };
 
@@ -728,7 +720,6 @@ export default function BookUpload() {
   // };
 
   const handleUploadBookClick = async () => {
-      console.log("🚀 handleUpload called with bookMode:", bookMode);
     
       if (!user) return;
     
@@ -761,16 +752,6 @@ export default function BookUpload() {
     
         const uploadResponse = (await apiClient.upload("/books/upload", formData)) as any;
     
-        console.log("=== UPLOAD RESPONSE DEBUG ===");
-        console.log("Full response:", uploadResponse);
-        console.log("Status:", uploadResponse.status);
-        console.log("Has chapters:", !!uploadResponse.chapters);
-        console.log("Has preview_chapters:", !!uploadResponse.preview_chapters);
-        console.log("Has structure_data:", !!uploadResponse.structure_data);
-        console.log("Structure has_sections:", uploadResponse.structure_data?.has_sections);
-        console.log("Preview chapters type:", Array.isArray(uploadResponse.preview_chapters) ? 'array' : typeof uploadResponse.preview_chapters);
-        console.log("First preview item:", uploadResponse.preview_chapters?.[0]);
-        console.log("============================");
     
         // Check if response is valid
         if (!uploadResponse || typeof uploadResponse !== "object") {
@@ -779,7 +760,6 @@ export default function BookUpload() {
     
         // ✅ FIX: Check for preview_chapters instead of chapters
         if (uploadResponse.status === "READY" && uploadResponse.preview_chapters) {
-          console.log("✅ NEW PREVIEW FLOW DETECTED");
         
           setIsProcessing(false);
           setProcessingStatus("");
@@ -791,49 +771,21 @@ export default function BookUpload() {
           // ✅ FIX: Better structure detection using the backend's data
           const isHierarchical = uploadResponse.total_preview_chapters > sectionsData.length;
           
-          console.log("📊 Structure Analysis:");
-          console.log("- Total chapters:", uploadResponse.total_preview_chapters);
-          console.log("- Section count:", sectionsData.length); 
-          console.log("- Final isHierarchical:", isHierarchical);
-          console.log("- First item:", sectionsData?.[0]);
         
           if (isHierarchical) {
-            console.log("📚 HIERARCHICAL BOOK - Setting up sectioned structure");
             
             // ✅ FIX: Validate that we have sections with chapters
-            const hasValidSections = Array.isArray(sectionsData) && 
+            const hasValidSections = Array.isArray(sectionsData) &&
                                     sectionsData.length > 0 &&
-                                    sectionsData.every(section => 
-                                      section && 
-                                      typeof section === 'object' && 
+                                    sectionsData.every(section =>
+                                      section &&
+                                      typeof section === 'object' &&
                                       'title' in section &&
                                       'chapters' in section &&
                                       Array.isArray(section.chapters)
                                     );
-        
-            console.log("📚 Section validation:", {
-              isArray: Array.isArray(sectionsData),
-              length: sectionsData?.length,
-              hasValidSections,
-              sampleSection: sectionsData?.[0]
-            });
-        
+
             if (hasValidSections) {
-              console.log("📚 Valid sectioned structure found");
-              
-              // Log the sections and their chapters for debugging
-              sectionsData.forEach((section, idx) => {
-                console.log(`📚 Section ${idx + 1}: "${section.title}" with ${section.chapters?.length || 0} chapters`);
-                if (section.chapters && section.chapters.length > 0) {
-                  section.chapters.slice(0, 3).forEach((chapter, chIdx) => {
-                    console.log(`📚   Chapter ${chIdx + 1}: "${chapter.title}"`);
-                  });
-                  if (section.chapters.length > 3) {
-                    console.log(`📚   ... and ${section.chapters.length - 3} more chapters`);
-                  }
-                }
-              });
-              
               // Set the complete structure
               setBookStructure({
                 id: uploadResponse.id,
@@ -855,7 +807,6 @@ export default function BookUpload() {
               setEditableChapters([]);
               
             } else {
-              console.log("⚠️ Invalid section structure, treating as flat chapters");
               
               // If the structure is invalid, treat items as individual chapters
               const chapters = Array.isArray(sectionsData) ? sectionsData : [];
@@ -886,7 +837,6 @@ export default function BookUpload() {
             }
             
           } else {
-            console.log("📖 FLAT BOOK - Setting up flat structure");
             
             // For flat books, sectionsData contains individual chapters
             const chapters = sectionsData || [];
@@ -938,15 +888,12 @@ export default function BookUpload() {
         
         // OLD FLOW: Process normally if we have an id
         if (uploadResponse.id) {
-          console.log("✅ OLD FLOW: Found ID, starting polling");
           setAiBook(uploadResponse);
           startPollingForBookStatus(uploadResponse.id);
         } else {
-          console.log("❌ NO ID AND NOT PREVIEW MODE");
           throw new Error("No book ID returned from server and not in preview mode");
         }
       } catch (error: any) {
-        console.error("Upload error:", error);
         setIsProcessing(false);
         setProcessingStatus("");
     
@@ -970,7 +917,6 @@ export default function BookUpload() {
       const checkoutSession =
         await stripeService.createBookUploadCheckoutSession(aiBook.id);
 
-      console.log("Stripe checkout session response:", checkoutSession);
       if (
         checkoutSession &&
         typeof checkoutSession === "object" &&
@@ -982,16 +928,13 @@ export default function BookUpload() {
           return;
         } else {
           toast.error("Stripe did not return a checkout URL.");
-          console.error("No checkout_url in Stripe response:", checkoutSession);
         }
       } else {
         toast.error("Failed to create Stripe checkout session.");
-        console.error("Unexpected Stripe session response:", checkoutSession);
       }
     } catch (e) {
       const error = e as Error;
       toast.error(error.message || "Error creating Stripe checkout session.");
-      console.error("Stripe checkout session error:", error);
     }
   };
 
@@ -1066,7 +1009,6 @@ export default function BookUpload() {
             toast.success("Book processing completed successfully!");
           }
         } catch (error) {
-          console.error("Error polling book status:", error);
           clearInterval(pollInterval);
           setIsProcessing(false);
           setProcessingStatus("");
@@ -1153,7 +1095,6 @@ export default function BookUpload() {
     
         // ✅ FIX: Handle both hierarchical and flat structures properly
         if (bookStructure?.has_sections && bookStructure.sections?.length > 0) {
-          console.log("Saving hierarchical structure");
           
           // For hierarchical books, flatten sections into chapters with section info
           structureData = {
@@ -1170,7 +1111,6 @@ export default function BookUpload() {
             ),
           };
         } else {
-          console.log("Saving flat structure");
           
           // For flat books, use editableChapters or structure.chapters
           const chaptersToSave = editableChapters.length > 0 
@@ -1187,7 +1127,6 @@ export default function BookUpload() {
           };
         }
     
-        console.log("Saving structure:", structureData);
     
         // Call the save-structure endpoint
         await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
@@ -1196,7 +1135,6 @@ export default function BookUpload() {
         setStep(5); // Move to book details step
         
       } catch (error: any) {
-        console.error("Error saving book structure:", error);
         const errorMessage =
           error?.response?.data?.detail ||
           error?.message ||
@@ -1226,7 +1164,6 @@ export default function BookUpload() {
       // Navigate back to dashboard
       navigate("/dashboard");
     } catch (error: any) {
-      console.error("Error rejecting book:", error);
       const errorMessage =
         error?.response?.data?.detail ||
         error?.message ||
@@ -1510,7 +1447,6 @@ export default function BookUpload() {
           setProcessingStatus("");
         }
       } catch (error) {
-        console.error("Error polling book status:", error);
         clearInterval(pollInterval);
         setIsProcessing(false);
         setProcessingStatus("");
@@ -2720,11 +2656,6 @@ const DynamicStructureReview: React.FC<{
   const metadata = structure?.structure_metadata || {};
   const chapterLabel = metadata.chapter_label || "Chapter";
 
-  console.log("DynamicStructureReview - structure:", structure);
-  console.log("DynamicStructureReview - has_sections:", structure.has_sections);
-  console.log("DynamicStructureReview - sections count:", structure.sections?.length);
-  console.log("DynamicStructureReview - chapters count:", structure.chapters?.length);
-  console.log("DynamicStructureReview - editableChapters count:", editableChapters.length);
 
   return (
     <div className="space-y-6">
