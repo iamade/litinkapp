@@ -190,6 +190,8 @@ export default function BookUpload() {
   const [structureLoadingTimeout, setStructureLoadingTimeout] = useState<NodeJS.Timeout | null>(null);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [currentSubscriptionTier, setCurrentSubscriptionTier] = useState<string | undefined>();
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
 
 
   // Add timeout effect when reaching step 4
@@ -1205,6 +1207,36 @@ export default function BookUpload() {
       }
     };
 
+  // Handle reject structure - delete book and files
+  const handleRejectStructure = async () => {
+    if (!aiBook) {
+      toast.error("No book to reject");
+      return;
+    }
+
+    setIsRejecting(true);
+
+    try {
+      // Delete the book (backend should handle file deletion from storage)
+      await apiClient.delete(`/books/${aiBook.id}`);
+
+      toast.success("Book rejected and deleted successfully");
+      setShowRejectModal(false);
+
+      // Navigate back to dashboard
+      navigate("/dashboard");
+    } catch (error: any) {
+      console.error("Error rejecting book:", error);
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Failed to reject book";
+      toast.error(`Failed to reject book: ${errorMessage}`);
+    } finally {
+      setIsRejecting(false);
+    }
+  };
+
 
   // Step 4: Save/Update Book Details
   const handleDetailsChange = (
@@ -1998,13 +2030,22 @@ export default function BookUpload() {
                 >
                   Back
                 </button>
-                <button
-                  onClick={handleSaveStructure}
-                  disabled={savingChapters || !bookStructure} // Also disable button when bookStructure is null
-                  className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
-                >
-                  {savingChapters ? "Saving..." : "Confirm Structure"}
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowRejectModal(true)}
+                    disabled={savingChapters || !bookStructure}
+                    className="px-6 py-4 bg-red-100 text-red-700 rounded-xl font-semibold hover:bg-red-200 transition-all text-lg disabled:opacity-50"
+                  >
+                    Reject Structure
+                  </button>
+                  <button
+                    onClick={handleSaveStructure}
+                    disabled={savingChapters || !bookStructure}
+                    className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
+                  >
+                    {savingChapters ? "Saving..." : "Confirm Structure"}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -2284,6 +2325,41 @@ export default function BookUpload() {
         onClose={() => setShowSubscriptionModal(false)}
         currentTier={currentSubscriptionTier}
       />
+
+      {/* Reject Structure Modal */}
+      {showRejectModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">Reject Book Structure?</h3>
+            </div>
+
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to reject this book structure? This will permanently delete the book and all extracted data from the database and storage. This action cannot be undone.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowRejectModal(false)}
+                disabled={isRejecting}
+                className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRejectStructure}
+                disabled={isRejecting}
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50"
+              >
+                {isRejecting ? "Deleting..." : "Yes, Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
