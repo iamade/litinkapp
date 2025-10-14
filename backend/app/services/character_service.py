@@ -645,17 +645,38 @@ Return a JSON array of matches sorted by confidence:
         Update character record with image metadata.
         """
         try:
+            # Extract and validate image_url
+            image_url = image_data.get('image_url')
+            if not image_url:
+                logger.error(f"[CharacterService] No image_url provided in image_data: {image_data}")
+                raise CharacterServiceError("image_url is required")
+
             update_data = {
-                'image_url': image_data.get('image_url'),
+                'image_url': image_url,
                 'image_generation_prompt': image_data.get('image_generation_prompt'),
                 'image_metadata': image_data.get('image_metadata', {}),
                 'updated_at': datetime.now().isoformat()
             }
 
-            self.db.table('characters').update(update_data).eq('id', character_id).execute()
+            logger.info(f"[CharacterService] Updating character {character_id}")
+            logger.info(f"[CharacterService] Update data: {update_data}")
+
+            result = self.db.table('characters').update(update_data).eq('id', character_id).execute()
+
+            logger.info(f"[CharacterService] Update result: {result}")
+
+            if not result.data:
+                logger.error(f"[CharacterService] No character found to update with ID: {character_id}")
+                raise CharacterServiceError(f"Character {character_id} not found for image update")
+
+            logger.info(f"[CharacterService] Successfully updated character {character_id} with image_url: {image_url}")
+            logger.info(f"[CharacterService] Updated character data: {result.data[0]}")
 
         except Exception as e:
             logger.error(f"[CharacterService] Error updating character image metadata: {str(e)}")
+            logger.error(f"[CharacterService] Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"[CharacterService] Traceback: {traceback.format_exc()}")
             raise CharacterServiceError(f"Failed to update image metadata: {str(e)}")
 
     async def _get_all_archetypes(self) -> List[Dict[str, Any]]:
