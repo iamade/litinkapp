@@ -652,7 +652,15 @@ Return a JSON array of matches sorted by confidence:
                 'updated_at': datetime.now().isoformat()
             }
 
-            self.db.table('characters').update(update_data).eq('id', character_id).execute()
+            logger.info(f"[CharacterService] Updating character {character_id} with image_url: {update_data.get('image_url')}")
+
+            result = self.db.table('characters').update(update_data).eq('id', character_id).execute()
+
+            if not result.data:
+                logger.error(f"[CharacterService] No character found to update with ID: {character_id}")
+                raise CharacterServiceError(f"Character {character_id} not found for image update")
+
+            logger.info(f"[CharacterService] Successfully updated character {character_id} with image data")
 
         except Exception as e:
             logger.error(f"[CharacterService] Error updating character image metadata: {str(e)}")
