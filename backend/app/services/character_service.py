@@ -257,16 +257,19 @@ class CharacterService:
                     }
                 )
 
-                # Record usage
-                await self.subscription_manager.record_usage(
-                    user_id=user_id,
-                    resource_type="image",
-                    cost_usd=0.0,  # Could be calculated based on service
-                    metadata={
-                        "character_id": character_id,
-                        "image_type": "character_portrait"
-                    }
-                )
+                # Record usage (don't let this block the image save)
+                try:
+                    await self.subscription_manager.record_usage(
+                        user_id=user_id,
+                        resource_type="image",
+                        cost_usd=0.0,  # Could be calculated based on service
+                        metadata={
+                            "character_id": character_id,
+                            "image_type": "character_portrait"
+                        }
+                    )
+                except Exception as usage_error:
+                    logger.warning(f"[CharacterService] Failed to record usage, but image was saved: {str(usage_error)}")
 
                 return {
                     "character_id": character_id,
