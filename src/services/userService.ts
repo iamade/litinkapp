@@ -569,6 +569,34 @@ export const userService = {
     return apiClient.get(`/characters/${characterId}/image-status`);
   },
 
+  async generateCharacterDetailsWithAI(
+    characterName: string,
+    bookId: string,
+    role?: string
+  ): Promise<{
+    success: boolean;
+    character_details: {
+      name: string;
+      role: string;
+      physical_description: string;
+      personality: string;
+      character_arc: string;
+      want: string;
+      need: string;
+      lie: string;
+      ghost: string;
+    };
+    message: string;
+  }> {
+    return apiClient.post('/characters/generate-details', null, {
+      params: {
+        character_name: characterName,
+        book_id: bookId,
+        role: role || undefined
+      }
+    });
+  },
+
   // Add these methods to userService.ts
 
   async getVideoProduction(chapterId: string) {

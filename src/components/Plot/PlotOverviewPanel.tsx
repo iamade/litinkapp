@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { BookOpen, Loader2, AlertCircle, Wand2, Users, Plus, Trash2, Search, X } from "lucide-react";
+import { BookOpen, Loader2, AlertCircle, Wand2, Users, Plus, Trash2, Search, X, Sparkles } from "lucide-react";
 import { usePlotGeneration } from "../../hooks/usePlotGeneration";
 import CharacterCard from "./CharacterCard";
 import { userService } from "../../services/userService";
@@ -43,6 +43,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
   // Create character modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [isCreatingCharacter, setIsCreatingCharacter] = useState(false);
+  const [isGeneratingWithAI, setIsGeneratingWithAI] = useState(false);
   const [newCharacter, setNewCharacter] = useState({
     name: '',
     role: '',
@@ -292,6 +293,57 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
       toast.error("Failed to delete characters");
     } finally {
       setIsBulkDeleting(false);
+    }
+  };
+
+  // AI Assist handler
+  const handleAIAssist = async () => {
+    if (!newCharacter.name.trim()) {
+      toast.error("Please enter a character name first");
+      return;
+    }
+
+    if (!plotOverview?.book_id) {
+      toast.error("Book information not available");
+      return;
+    }
+
+    setIsGeneratingWithAI(true);
+    const loadingToast = toast.loading("AI is analyzing the book to generate character details...");
+
+    try {
+      const response = await userService.generateCharacterDetailsWithAI(
+        newCharacter.name,
+        plotOverview.book_id,
+        newCharacter.role || undefined
+      );
+
+      if (response.success && response.character_details) {
+        setNewCharacter(prev => ({
+          ...prev,
+          physical_description: response.character_details.physical_description || prev.physical_description,
+          personality: response.character_details.personality || prev.personality,
+          character_arc: response.character_details.character_arc || prev.character_arc,
+          want: response.character_details.want || prev.want,
+          need: response.character_details.need || prev.need,
+          lie: response.character_details.lie || prev.lie,
+          ghost: response.character_details.ghost || prev.ghost,
+        }));
+
+        toast.success("Character details generated successfully! Review and edit as needed.", {
+          id: loadingToast,
+          duration: 4000
+        });
+      } else {
+        throw new Error("Invalid response from AI service");
+      }
+    } catch (error: any) {
+      console.error("AI generation error:", error);
+      toast.error(error?.message || "Failed to generate character details with AI", {
+        id: loadingToast
+      });
+    } finally {
+      setIsGeneratingWithAI(false);
     }
   };
 
@@ -622,14 +674,37 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Character Name *
                 </label>
-                <input
-                  type="text"
-                  value={newCharacter.name}
-                  onChange={(e) => setNewCharacter(prev => ({ ...prev, name: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Enter character name"
-                  disabled={isCreatingCharacter}
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCharacter.name}
+                    onChange={(e) => setNewCharacter(prev => ({ ...prev, name: e.target.value }))}
+                    className="flex-1 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter character name"
+                    disabled={isCreatingCharacter || isGeneratingWithAI}
+                  />
+                  <button
+                    onClick={handleAIAssist}
+                    disabled={isCreatingCharacter || isGeneratingWithAI || !newCharacter.name.trim()}
+                    className="px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-md hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 font-medium transition-all"
+                    title="Use AI to generate character details based on the book"
+                  >
+                    {isGeneratingWithAI ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span className="hidden sm:inline">AI Generating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        <span className="hidden sm:inline">AI Assist</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Enter a character name, then click AI Assist to generate details from the book
+                </p>
               </div>
 
               <div>
@@ -640,7 +715,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                   value={newCharacter.role}
                   onChange={(e) => setNewCharacter(prev => ({ ...prev, role: e.target.value }))}
                   className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={isCreatingCharacter}
+                  disabled={isCreatingCharacter || isGeneratingWithAI}
                 >
                   <option value="">Select role</option>
                   <option value="protagonist">Protagonist</option>
@@ -661,7 +736,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                   className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={3}
                   placeholder="Describe the character's appearance"
-                  disabled={isCreatingCharacter}
+                  disabled={isCreatingCharacter || isGeneratingWithAI}
                 />
               </div>
 
@@ -675,7 +750,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                   className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={3}
                   placeholder="Describe the character's personality traits"
-                  disabled={isCreatingCharacter}
+                  disabled={isCreatingCharacter || isGeneratingWithAI}
                 />
               </div>
 
@@ -689,7 +764,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                   className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={2}
                   placeholder="How does this character change throughout the story?"
-                  disabled={isCreatingCharacter}
+                  disabled={isCreatingCharacter || isGeneratingWithAI}
                 />
               </div>
 
@@ -704,7 +779,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                     onChange={(e) => setNewCharacter(prev => ({ ...prev, want: e.target.value }))}
                     className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="What they want"
-                    disabled={isCreatingCharacter}
+                    disabled={isCreatingCharacter || isGeneratingWithAI}
                   />
                 </div>
                 <div>
@@ -717,7 +792,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                     onChange={(e) => setNewCharacter(prev => ({ ...prev, need: e.target.value }))}
                     className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="What they need"
-                    disabled={isCreatingCharacter}
+                    disabled={isCreatingCharacter || isGeneratingWithAI}
                   />
                 </div>
               </div>
@@ -733,7 +808,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                     onChange={(e) => setNewCharacter(prev => ({ ...prev, lie: e.target.value }))}
                     className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Their false belief"
-                    disabled={isCreatingCharacter}
+                    disabled={isCreatingCharacter || isGeneratingWithAI}
                   />
                 </div>
                 <div>
@@ -746,7 +821,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                     onChange={(e) => setNewCharacter(prev => ({ ...prev, ghost: e.target.value }))}
                     className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Their past trauma"
-                    disabled={isCreatingCharacter}
+                    disabled={isCreatingCharacter || isGeneratingWithAI}
                   />
                 </div>
               </div>
@@ -755,14 +830,14 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setShowCreateModal(false)}
-                disabled={isCreatingCharacter}
+                disabled={isCreatingCharacter || isGeneratingWithAI}
                 className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreateCharacter}
-                disabled={isCreatingCharacter || !newCharacter.name.trim()}
+                disabled={isCreatingCharacter || isGeneratingWithAI || !newCharacter.name.trim()}
                 className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all disabled:opacity-50"
               >
                 {isCreatingCharacter ? (

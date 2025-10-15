@@ -139,6 +139,50 @@ async def bulk_delete_characters(
         raise HTTPException(status_code=500, detail=f"Failed to bulk delete characters: {str(e)}")
 
 
+@router.post("/generate-details")
+async def generate_character_details_with_ai(
+    character_name: str,
+    book_id: str,
+    role: Optional[str] = None,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Generate character details using AI by analyzing book content.
+    Uses tier-appropriate AI models based on user subscription.
+
+    - **character_name**: Name of the character to generate details for
+    - **book_id**: ID of the book to analyze
+    - **role**: Optional character role (protagonist, antagonist, supporting, etc.)
+
+    Returns detailed character information including physical description, personality,
+    character arc, want, need, lie, and ghost.
+    """
+    try:
+        if not character_name or not character_name.strip():
+            raise HTTPException(status_code=400, detail="Character name is required")
+
+        character_service = CharacterService(supabase_client)
+
+        character_details = await character_service.generate_character_details_from_book(
+            character_name=character_name.strip(),
+            book_id=book_id,
+            user_id=current_user['id'],
+            role=role
+        )
+
+        return {
+            "success": True,
+            "character_details": character_details,
+            "message": "Character details generated successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate character details: {str(e)}")
+
+
 @router.post("/plot/{plot_overview_id}", response_model=CharacterResponse)
 async def create_character(
     plot_overview_id: str,

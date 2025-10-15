@@ -61,6 +61,60 @@ class CharacterService:
         # Default archetypes for initial setup
         self._default_archetypes = self._get_default_archetypes()
 
+    async def generate_character_details_from_book(
+        self,
+        character_name: str,
+        book_id: str,
+        user_id: str,
+        role: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Generate detailed character information by analyzing book content.
+        Uses AI to extract or infer character details based on the character name and book context.
+        Respects user tier for AI model selection.
+        """
+        try:
+            logger.info(f"[CharacterService] Generating AI-assisted details for character: {character_name}")
+
+            # Get user tier for AI model selection
+            user_tier = await self.subscription_manager.get_user_tier(user_id)
+            model_tier = self._map_subscription_to_model_tier(user_tier)
+
+            logger.info(f"[CharacterService] Using model tier: {model_tier.value} for user tier: {user_tier.value}")
+
+            # Get book context
+            book_context = await self._get_book_context_for_character(book_id)
+            if not book_context:
+                raise CharacterServiceError("Unable to retrieve book context")
+
+            # Build AI prompt for character detail generation
+            prompt = self._build_character_detail_prompt(
+                character_name=character_name,
+                book_context=book_context,
+                role=role
+            )
+
+            # Use OpenRouter to generate character details
+            response = await self.openrouter.analyze_content(
+                content=prompt,
+                user_tier=model_tier,
+                analysis_type="character_details"
+            )
+
+            if response["status"] != "success":
+                raise CharacterServiceError(f"AI character generation failed: {response.get('error', 'Unknown error')}")
+
+            # Parse the AI response
+            character_details = self._parse_character_details_response(response["result"], character_name, role)
+
+            logger.info(f"[CharacterService] Successfully generated details for character: {character_name}")
+
+            return character_details
+
+        except Exception as e:
+            logger.error(f"[CharacterService] Error generating character details: {str(e)}")
+            raise CharacterServiceError(f"Failed to generate character details: {str(e)}")
+
     async def generate_non_fiction_personas(
         self,
         content: str,
@@ -1000,3 +1054,188 @@ Return a JSON array of matches sorted by confidence:
                 "is_active": True
             }
         ]
+
+    async def _get_book_context_for_character(self, book_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get book context including chapters for character detail generation.
+        """
+        try:
+            # Get book information
+            book_response = self.db.table('books').select('*').eq('id', book_id).single().execute()
+            if not book_response.data:
+                return None
+
+            book = book_response.data
+
+            # Get chapter summaries (limit to first 5 chapters for context)
+            chapters_response = self.db.table('chapters').select(
+                'id, title, chapter_number, content'
+            ).eq('book_id', book_id).order('chapter_number').limit(5).execute()
+
+            chapters = chapters_response.data or []
+
+            # Extract key content snippets
+            context_parts = []
+            for chapter in chapters:
+                content_preview = chapter['content'][:800] if chapter['content'] else ""
+                context_parts.append(f"Chapter {chapter['chapter_number']}: {chapter['title']}\n{content_preview}")
+
+            return {
+                "book": {
+                    "id": book["id"],
+                    "title": book["title"],
+                    "author": book.get("author", ""),
+                    "genre": book.get("genre", ""),
+                    "description": book.get("description", ""),
+                    "book_type": book.get("book_type", "fiction")
+                },
+                "chapters_summary": "\n\n".join(context_parts),
+                "total_chapters": len(chapters)
+            }
+
+        except Exception as e:
+            logger.error(f"[CharacterService] Error getting book context: {str(e)}")
+            return None
+
+    def _build_character_detail_prompt(
+        self,
+        character_name: str,
+        book_context: Dict[str, Any],
+        role: Optional[str] = None
+    ) -> str:
+        """
+        Build AI prompt for generating detailed character information.
+        """
+        book = book_context["book"]
+        chapters_summary = book_context.get("chapters_summary", "")
+
+        role_context = f"\nRole: {role}" if role else ""
+
+        prompt = f"""You are an expert character development analyst. Based on the book content below, generate detailed character information for "{character_name}".
+
+BOOK INFORMATION:
+Title: {book['title']}
+Author: {book.get('author', 'Unknown')}
+Genre: {book.get('genre', 'Unknown')}
+Description: {book.get('description', '')}
+
+CHAPTER CONTENT:
+{chapters_summary}
+
+CHARACTER TO ANALYZE:
+Name: {character_name}{role_context}
+
+TASK:
+Analyze the book content and generate comprehensive character details for "{character_name}". If the character appears in the book, extract their details. If not mentioned, infer appropriate details that would fit the book's world and tone.
+
+Provide the following information:
+1. Physical Description: Appearance, age, distinctive features (2-3 sentences)
+2. Personality: Core personality traits, behavior patterns, temperament (2-3 sentences)
+3. Character Arc: How they grow or change throughout the story (1-2 sentences)
+4. Want: External goal or desire (1 sentence)
+5. Need: Internal emotional need (1 sentence)
+6. Lie They Believe: False belief holding them back (1 sentence)
+7. Ghost (Past Trauma): Past wound or trauma affecting them (1 sentence)
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON object with these exact keys:
+{{
+    "physical_description": "string",
+    "personality": "string",
+    "character_arc": "string",
+    "want": "string",
+    "need": "string",
+    "lie": "string",
+    "ghost": "string"
+}}
+
+IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make the character unique and interesting."""
+
+        return prompt.strip()
+
+    def _parse_character_details_response(
+        self,
+        ai_response: str,
+        character_name: str,
+        role: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Parse AI response and extract character details.
+        """
+        try:
+            # Try to parse as JSON first
+            character_data = json.loads(ai_response.strip())
+
+            # Validate and provide defaults
+            result = {
+                "name": character_name,
+                "role": role or "supporting",
+                "physical_description": character_data.get("physical_description", ""),
+                "personality": character_data.get("personality", ""),
+                "character_arc": character_data.get("character_arc", ""),
+                "want": character_data.get("want", ""),
+                "need": character_data.get("need", ""),
+                "lie": character_data.get("lie", ""),
+                "ghost": character_data.get("ghost", "")
+            }
+
+            return result
+
+        except json.JSONDecodeError:
+            logger.warning("[CharacterService] AI response not valid JSON, attempting text parsing")
+
+            # Fallback: extract information from text
+            return {
+                "name": character_name,
+                "role": role or "supporting",
+                "physical_description": self._extract_field_from_ai_text(ai_response, "physical_description") or "",
+                "personality": self._extract_field_from_ai_text(ai_response, "personality") or "",
+                "character_arc": self._extract_field_from_ai_text(ai_response, "character_arc") or "",
+                "want": self._extract_field_from_ai_text(ai_response, "want") or "",
+                "need": self._extract_field_from_ai_text(ai_response, "need") or "",
+                "lie": self._extract_field_from_ai_text(ai_response, "lie") or "",
+                "ghost": self._extract_field_from_ai_text(ai_response, "ghost") or ""
+            }
+
+    def _extract_field_from_ai_text(self, text: str, field_name: str) -> Optional[str]:
+        """
+        Extract a specific field value from AI text response.
+        """
+        import re
+
+        # Try various patterns
+        patterns = [
+            rf"{field_name}:\s*([^\n]+)",
+            rf"{field_name.replace('_', ' ')}:\s*([^\n]+)",
+            rf"{field_name.replace('_', ' ').title()}:\s*([^\n]+)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                value = match.group(1).strip()
+                # Clean up common artifacts
+                value = re.sub(r'^["\']\s*', '', value)
+                value = re.sub(r'\s*["\']$', '', value)
+                return value if value else None
+
+        return None
+
+    def _map_subscription_to_model_tier(self, subscription_tier) -> ModelTier:
+        """
+        Map subscription tier to OpenRouter model tier.
+        """
+        tier_mapping = {
+            "free": ModelTier.FREE,
+            "basic": ModelTier.BASIC,
+            "standard": ModelTier.STANDARD,
+            "premium": ModelTier.PREMIUM,
+            "professional": ModelTier.PROFESSIONAL,
+            "pro": ModelTier.PREMIUM,
+            "enterprise": ModelTier.PROFESSIONAL
+        }
+
+        # Handle both enum and string inputs
+        tier_key = subscription_tier.value if hasattr(subscription_tier, 'value') else str(subscription_tier).lower()
+
+        return tier_mapping.get(tier_key, ModelTier.FREE)
