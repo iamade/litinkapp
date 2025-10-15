@@ -924,8 +924,16 @@ def generate_scene_image_task(
             raise
         
         # Generate the scene image using ModelsLab service
-        # Note: custom_prompt is incorporated into scene_description if provided
-        final_description = custom_prompt or scene_description
+        # ✅ FIX: Combine scene_description with custom_prompt instead of replacing it
+        # custom_prompt should enhance the description (e.g., "Lighting mood: natural")
+        # NOT replace the actual scene content from the book
+        if custom_prompt:
+            final_description = f"{scene_description}. {custom_prompt}"
+        else:
+            final_description = scene_description
+
+        logger.info(f"[SceneImageTask] Final prompt: {final_description[:100]}...")
+
         result = asyncio.run(ModelsLabV7ImageService().generate_scene_image(
             scene_description=final_description,
             style=style or "cinematic",
