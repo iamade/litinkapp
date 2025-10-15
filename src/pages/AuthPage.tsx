@@ -11,13 +11,23 @@ export default function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
-  const [role, setRole] = useState<"author" | "explorer">("explorer");
+  const [selectedRoles, setSelectedRoles] = useState<("author" | "explorer")[]>(["explorer"]);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState("");
   const { login, register, resendVerificationEmail } = useAuth();
   const navigate = useNavigate();
+
+  const toggleRole = (role: "author" | "explorer") => {
+    setSelectedRoles(prev => {
+      if (prev.includes(role)) {
+        return prev.length > 1 ? prev.filter(r => r !== role) : prev;
+      } else {
+        return [...prev, role];
+      }
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +48,12 @@ export default function AuthPage() {
           setLoading(false);
           return;
         }
-        await register(username, email, password, role);
+        if (selectedRoles.length === 0) {
+          toast.error("Please select at least one profile type.");
+          setLoading(false);
+          return;
+        }
+        await register(username, email, password, selectedRoles);
         toast.success(
           "Account created successfully! Please check your email for verification."
         );
@@ -103,16 +118,16 @@ export default function AuthPage() {
             {!isLogin && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  I want to...
+                  I want to... (select one or both)
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => setRole("explorer")}
+                    onClick={() => toggleRole("explorer")}
                     className={`flex items-center justify-center px-4 py-3 rounded-xl border-2 transition-all ${
-                      role === "explorer"
-                        ? "border-purple-500 bg-purple-50 text-purple-700"
-                        : "border-gray-300 hover:border-purple-300 text-gray-600"
+                      selectedRoles.includes("explorer")
+                        ? "border-green-500 bg-green-50 text-green-700"
+                        : "border-gray-300 hover:border-green-300 text-gray-600"
                     }`}
                   >
                     <User className="h-5 w-5 mr-2" />
@@ -120,17 +135,20 @@ export default function AuthPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setRole("author")}
+                    onClick={() => toggleRole("author")}
                     className={`flex items-center justify-center px-4 py-3 rounded-xl border-2 transition-all ${
-                      role === "author"
-                        ? "border-purple-500 bg-purple-50 text-purple-700"
-                        : "border-gray-300 hover:border-purple-300 text-gray-600"
+                      selectedRoles.includes("author")
+                        ? "border-blue-500 bg-blue-50 text-blue-700"
+                        : "border-gray-300 hover:border-blue-300 text-gray-600"
                     }`}
                   >
                     <UserCheck className="h-5 w-5 mr-2" />
                     <span className="text-sm font-medium">Create Content</span>
                   </button>
                 </div>
+                <p className="text-xs text-gray-500 mt-2">
+                  You can always add or remove profiles later from your dashboard
+                </p>
               </div>
             )}
 

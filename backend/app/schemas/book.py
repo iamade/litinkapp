@@ -151,6 +151,9 @@ class BookBase(BaseModel):
     difficulty: Optional[str] = "medium"
     tags: Optional[List[str]] = None
     language: Optional[str] = "en"
+    uploaded_by_user_id: Optional[str] = None
+    is_author: Optional[bool] = False
+    created_with_platform: Optional[bool] = False
 
 
 

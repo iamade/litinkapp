@@ -1,5 +1,5 @@
 import React from "react";
-import { useAuth } from "../contexts/AuthContext";
+import { useAuth, hasRole } from "../contexts/AuthContext";
 import {
   User,
   Award,
@@ -150,12 +150,19 @@ export default function Profile() {
               <User className="h-12 w-12 text-white" />
             </div>
             <div className="text-center md:text-left flex-1">
-              <h1 className="text-3xl font-bold mb-2">{user.displayName}</h1>
+              <h1 className="text-3xl font-bold mb-2">{user.display_name}</h1>
               <p className="text-white/90 mb-4">{user.email}</p>
-              <div className="flex flex-wrap justify-center md:justify-start gap-4">
-                <span className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium">
-                  {user.role === "author" ? "Content Creator" : "Explorer"}
-                </span>
+              <div className="flex flex-wrap justify-center md:justify-start gap-2">
+                {hasRole(user, "explorer") && (
+                  <span className="bg-green-500/30 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium border border-green-300/50">
+                    Explorer
+                  </span>
+                )}
+                {hasRole(user, "author") && (
+                  <span className="bg-blue-500/30 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium border border-blue-300/50">
+                    Content Creator
+                  </span>
+                )}
                 <span className="bg-white/20 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium flex items-center">
                   <Zap className="h-4 w-4 mr-1" />
                   {stats.streakDays} day streak

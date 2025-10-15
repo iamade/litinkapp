@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
+import { useAuth, hasRole } from "../contexts/AuthContext";
 import { userService } from "../services/userService";
 import { subscriptionService, SubscriptionUsageStats } from "../services/subscriptionService";
 import UsageIndicator from "../components/Subscription/UsageIndicator";
@@ -11,6 +11,7 @@ import {
   Award,
   TrendingUp,
   Clock,
+  Wand2,
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { apiClient } from "../lib/api";
@@ -19,7 +20,7 @@ interface UserProfile {
   id: string;
   email: string;
   display_name: string;
-  role: "author" | "explorer";
+  roles: ("author" | "explorer")[];
   avatar_url?: string;
   bio?: string;
 }
@@ -219,18 +220,14 @@ export default function Dashboard() {
               Welcome back, {profile?.display_name || user.display_name}!
             </h1>
             <p className="text-gray-600">
-              {user.role === "author"
+              {hasRole(user, "author") && hasRole(user, "explorer")
+                ? "Create, explore, and learn amazing content!"
+                : hasRole(user, "author")
                 ? "Ready to create amazing interactive content?"
                 : "Continue your learning and exploration journey."}
             </p>
           </div>
           <div className="mt-4 md:mt-0 flex space-x-2">
-            <Link
-              to="/creator"
-              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-medium hover:from-blue-700 hover:to-purple-700 transition-all transform hover:scale-105"
-            >
-              Creator Mode
-            </Link>
             <button
               onClick={handleEdit}
               className="px-4 py-2 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition-all"
@@ -322,6 +319,19 @@ export default function Dashboard() {
             </p>
           </Link>
 
+          {hasRole(user, "author") && (
+            <Link
+              to="/creator"
+              className="group bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-2xl border border-blue-100 hover:border-blue-200 transition-all transform hover:scale-105 hover:shadow-lg"
+            >
+              <Wand2 className="h-12 w-12 text-blue-600 mb-4 group-hover:scale-110 transition-transform" />
+              <h3 className="font-semibold text-gray-900 mb-2">Creator Mode</h3>
+              <p className="text-sm text-gray-600">
+                Generate books, scripts & videos
+              </p>
+            </Link>
+          )}
+
           <Link
             to="/upload"
             className="group bg-gradient-to-br from-yellow-50 to-orange-50 p-6 rounded-2xl border border-yellow-100 hover:border-yellow-200 transition-all transform hover:scale-105 hover:shadow-lg"
@@ -329,9 +339,9 @@ export default function Dashboard() {
             <Upload className="h-12 w-12 text-orange-600 mb-4 group-hover:scale-110 transition-transform" />
             <h3 className="font-semibold text-gray-900 mb-2">Upload Book</h3>
             <p className="text-sm text-gray-600">
-              {user.role === "author"
-                ? "Create AI-powered content as the book owner"
-                : "Upload a book (ownership will not be assigned to you)"}
+              {hasRole(user, "author")
+                ? "Upload and claim authorship"
+                : "Upload a book to the platform"}
             </p>
           </Link>
 

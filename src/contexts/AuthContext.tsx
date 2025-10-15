@@ -12,9 +12,24 @@ interface User {
   id: string;
   email: string;
   display_name: string;
-  role: "author" | "explorer";
-  // Add other user properties from your backend's User schema
+  roles: ("author" | "explorer")[];
+  role?: "author" | "explorer";
 }
+
+export const hasRole = (user: User | null, role: "author" | "explorer"): boolean => {
+  if (!user) return false;
+  return user.roles?.includes(role) ?? false;
+};
+
+export const hasAllRoles = (user: User | null, roles: ("author" | "explorer")[]): boolean => {
+  if (!user) return false;
+  return roles.every(role => user.roles?.includes(role));
+};
+
+export const hasAnyRole = (user: User | null, roles: ("author" | "explorer")[]): boolean => {
+  if (!user) return false;
+  return roles.some(role => user.roles?.includes(role));
+};
 
 interface AuthContextType {
   user: User | null;
@@ -23,7 +38,7 @@ interface AuthContextType {
     username: string,
     email: string,
     password: string,
-    role: "author" | "explorer"
+    roles: ("author" | "explorer")[]
   ) => Promise<void>;
   logout: () => void;
   loading: boolean;
@@ -34,6 +49,8 @@ interface AuthContextType {
     newPassword: string
   ) => Promise<void>;
   resendVerificationEmail: (email: string) => Promise<void>;
+  addRole: (role: "author" | "explorer") => Promise<void>;
+  removeRole: (role: "author" | "explorer") => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -85,16 +102,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     username: string,
     email: string,
     password: string,
-    role: "author" | "explorer"
+    roles: ("author" | "explorer")[]
   ) => {
     await apiClient.post("/auth/register", {
       display_name: username,
       email,
       password,
-      role,
+      roles,
     });
-    // After successful registration, log the user in
     await login(email, password);
+  };
+
+  const addRole = async (role: "author" | "explorer") => {
+    await apiClient.post("/users/me/roles", { role });
+    const profile = await apiClient.get<User>("/users/me");
+    setUser(profile);
+  };
+
+  const removeRole = async (role: "author" | "explorer") => {
+    await apiClient.delete(`/users/me/roles/${role}`);
+    const profile = await apiClient.get<User>("/users/me");
+    setUser(profile);
   };
 
   const requestPasswordReset = async (email: string) => {
@@ -134,6 +162,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         requestPasswordReset,
         confirmPasswordReset,
         resendVerificationEmail,
+        addRole,
+        removeRole,
       }}
     >
       {children}

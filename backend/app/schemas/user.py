@@ -1,12 +1,12 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List
 from datetime import datetime
 
 
 class UserBase(BaseModel):
     email: EmailStr
     display_name: str
-    role: str = "explorer"
+    roles: List[str] = Field(default=["explorer"])
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
 
@@ -30,3 +30,11 @@ class User(UserBase):
 
     class Config:
         from_attributes = True
+
+
+class AddRoleRequest(BaseModel):
+    role: str = Field(..., description="Role to add: 'author' or 'explorer'")
+
+
+class RemoveRoleRequest(BaseModel):
+    role: str = Field(..., description="Role to remove: 'author' or 'explorer'")

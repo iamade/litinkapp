@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
+import { useAuth, hasRole } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { Menu, X, User, LogOut, Moon, Sun } from "lucide-react";
 import { toast } from "react-hot-toast";
@@ -47,7 +47,7 @@ export default function Navbar() {
       showWhenLoggedIn: false,
       onClick: handleExploreClick,
     },
-    ...(user?.role === "author"
+    ...(user && hasRole(user, "author")
       ? [{ path: "/author", label: "Create", showWhenLoggedIn: true }]
       : []),
     { path: "/subscription", label: "Subscription", showWhenLoggedIn: true },
@@ -107,7 +107,7 @@ export default function Navbar() {
                   )}
                 </button>
 
-                {user.role === "author" && (
+                {hasRole(user, "author") && (
                   <Link
                     to="/author"
                     className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-2 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 transition-all transform hover:scale-105"
@@ -217,7 +217,7 @@ export default function Navbar() {
                   >
                     Dashboard
                   </Link>
-                  {user.role === "author" && (
+                  {hasRole(user, "author") && (
                     <Link
                       to="/author"
                       onClick={() => setIsMenuOpen(false)}
