@@ -588,13 +588,16 @@ export const userService = {
     };
     message: string;
   }> {
-    return apiClient.post('/characters/generate-details', null, {
-      params: {
-        character_name: characterName,
-        book_id: bookId,
-        role: role || undefined
-      }
+    const params = new URLSearchParams({
+      character_name: characterName,
+      book_id: bookId,
     });
+
+    if (role) {
+      params.append('role', role);
+    }
+
+    return apiClient.post(`/characters/generate-details?${params.toString()}`, null);
   },
 
   // Add these methods to userService.ts
