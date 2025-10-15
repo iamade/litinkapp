@@ -102,7 +102,7 @@ class DeleteImageResponse(BaseModel):
     """Response model for image deletion"""
     success: bool
     message: str
-    record_id: str
+    record_id: Optional[str] = None
 
 
 class ImageStatusResponse(BaseModel):
