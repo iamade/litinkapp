@@ -93,12 +93,12 @@ class ModelsLabV7ImageService:
             logger.info(f"[DEBUG] API payload model_id: {payload.get('model_id')}")
             
             async with aiohttp.ClientSession() as session:
-                # Submit generation request
+                # Submit generation request with extended timeout
                 async with session.post(
                     self.image_endpoint,
                     json=payload,
                     headers=self.headers,
-                    timeout=aiohttp.ClientTimeout(total=30)
+                    timeout=aiohttp.ClientTimeout(total=60)
                 ) as response:
                     
                     if response.status != 200:
@@ -135,9 +135,14 @@ class ModelsLabV7ImageService:
                     # Handle immediate response (if synchronous)
                     return self._process_image_response(result)
                     
+        except asyncio.TimeoutError as e:
+            error_msg = f"Request timeout after 60s waiting for ModelsLab API response"
+            logger.error(f"[MODELSLAB V7 IMAGE TIMEOUT]: {error_msg}")
+            raise Exception(error_msg) from e
         except Exception as e:
-            logger.error(f"[MODELSLAB V7 IMAGE ERROR]: {str(e)}")
-            raise e
+            error_msg = str(e) if str(e) else repr(e)
+            logger.error(f"[MODELSLAB V7 IMAGE ERROR]: {error_msg}")
+            raise Exception(error_msg) from e
         
     async def _wait_for_completion(
         self, 
@@ -254,8 +259,9 @@ class ModelsLabV7ImageService:
             return result
             
         except Exception as e:
-            logger.error(f"[CHARACTER IMAGE ERROR] {character_name}: {str(e)}")
-            raise e
+            error_msg = str(e) if str(e) else repr(e)
+            logger.error(f"[CHARACTER IMAGE ERROR] {character_name}: {error_msg}")
+            raise Exception(f"Character image generation failed for {character_name}: {error_msg}") from e
     
     async def generate_scene_image(
         self,

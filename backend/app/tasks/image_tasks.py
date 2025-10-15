@@ -806,7 +806,8 @@ def generate_character_image_task(
         }
 
     except Exception as e:
-        error_message = f"Character image generation failed: {str(e)}"
+        error_details = str(e) if str(e) else repr(e)
+        error_message = f"Character image generation failed: {error_details}"
         logger.error(f"[CharacterImageTask] {error_message}")
 
         # Update image_generations record with error

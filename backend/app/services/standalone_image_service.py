@@ -197,11 +197,12 @@ class StandaloneImageService:
                 raise ImageGenerationError(f"Character image generation failed: {error_msg}")
 
         except Exception as e:
-            logger.error(f"[StandaloneImageService] Error generating character image: {str(e)}")
+            error_msg = str(e) if str(e) else repr(e)
+            logger.error(f"[StandaloneImageService] Error generating character image: {error_msg}")
             # Update record with error if record was created
             if 'record_id' in locals():
-                await self._update_image_record_error(record_id, str(e))
-            raise ImageGenerationError(f"Character image generation failed: {str(e)}")
+                await self._update_image_record_error(record_id, error_msg)
+            raise ImageGenerationError(f"Character image generation failed: {error_msg}")
 
     async def get_canonical_character_image(
         self,
