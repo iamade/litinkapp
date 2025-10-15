@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { BookOpen, Loader2, AlertCircle, Wand2, Users } from "lucide-react";
+import { BookOpen, Loader2, AlertCircle, Wand2, Users, Plus, Trash2 } from "lucide-react";
 import { usePlotGeneration } from "../../hooks/usePlotGeneration";
 import CharacterCard from "./CharacterCard";
 import { userService } from "../../services/userService";
@@ -34,6 +34,26 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
   const [generatingImages, setGeneratingImages] = useState<Set<string>>(new Set());
   const [showImageModal, setShowImageModal] = useState<string | null>(null);
   const [showGenerateAllModal, setShowGenerateAllModal] = useState(false);
+
+  // Bulk selection state
+  const [selectedCharacters, setSelectedCharacters] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
+  // Create character modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isCreatingCharacter, setIsCreatingCharacter] = useState(false);
+  const [newCharacter, setNewCharacter] = useState({
+    name: '',
+    role: '',
+    physical_description: '',
+    personality: '',
+    character_arc: '',
+    want: '',
+    need: '',
+    lie: '',
+    ghost: '',
+  });
 
   useEffect(() => {
     loadPlot();
@@ -139,6 +159,88 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
     }
   };
 
+  // Bulk selection handlers
+  const handleToggleSelect = (characterId: string) => {
+    setSelectedCharacters(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(characterId)) {
+        newSet.delete(characterId);
+      } else {
+        newSet.add(characterId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedCharacters.size === plotOverview?.characters.length) {
+      setSelectedCharacters(new Set());
+    } else {
+      const allIds = plotOverview?.characters.map((c: Character) => c.id) || [];
+      setSelectedCharacters(new Set(allIds));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedCharacters.size === 0) return;
+
+    setIsBulkDeleting(true);
+    try {
+      const ids = Array.from(selectedCharacters);
+      await userService.bulkDeleteCharacters(ids);
+
+      toast.success(`Deleted ${ids.length} character${ids.length > 1 ? 's' : ''}`);
+      setSelectedCharacters(new Set());
+      setShowBulkDeleteModal(false);
+
+      // Reload plot data
+      await loadPlot();
+    } catch (error) {
+      toast.error("Failed to delete characters");
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  // Create character handlers
+  const handleCreateCharacter = async () => {
+    if (!newCharacter.name.trim()) {
+      toast.error("Character name is required");
+      return;
+    }
+
+    if (!plotOverview?.id) {
+      toast.error("Plot overview not found");
+      return;
+    }
+
+    setIsCreatingCharacter(true);
+    try {
+      await userService.createCharacter(plotOverview.id, newCharacter);
+
+      toast.success(`Character "${newCharacter.name}" created successfully`);
+      setShowCreateModal(false);
+      setNewCharacter({
+        name: '',
+        role: '',
+        physical_description: '',
+        personality: '',
+        character_arc: '',
+        want: '',
+        need: '',
+        lie: '',
+        ghost: '',
+      });
+
+      // Reload plot data
+      await loadPlot();
+    } catch (error) {
+      toast.error("Failed to create character");
+    } finally {
+      setIsCreatingCharacter(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -187,6 +289,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
 
   const normalizedGenre = plotOverview.genre?.toLowerCase() || "";
   const charactersWithoutImages = plotOverview.characters?.filter((char: Character) => !char.image_url).length || 0;
+  const hasCharacters = plotOverview.characters && plotOverview.characters.length > 0;
 
   return (
     <div className="space-y-8">
@@ -277,38 +380,68 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
       </div>
 
       {/* Characters Section */}
-      {plotOverview.characters && plotOverview.characters.length > 0 && (
-        <div className="space-y-4">
-          {/* Characters Header */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Users className="w-6 h-6 text-gray-700" />
-              <div>
-                <h4 className="text-lg font-semibold text-gray-900">Characters</h4>
-                <p className="text-sm text-gray-600">
-                  {plotOverview.characters.length} character{plotOverview.characters.length !== 1 ? 's' : ''} • {charactersWithoutImages} without images
-                </p>
-              </div>
+      <div className="space-y-4">
+        {/* Characters Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <Users className="w-6 h-6 text-gray-700" />
+            <div>
+              <h4 className="text-lg font-semibold text-gray-900">Characters</h4>
+              <p className="text-sm text-gray-600">
+                {hasCharacters ? `${plotOverview.characters.length} character${plotOverview.characters.length !== 1 ? 's' : ''}` : 'No characters yet'}
+                {hasCharacters && charactersWithoutImages > 0 && ` • ${charactersWithoutImages} without images`}
+                {selectedCharacters.size > 0 && ` • ${selectedCharacters.size} selected`}
+              </p>
             </div>
-            {charactersWithoutImages > 0 && (
+          </div>
+          <div className="flex items-center space-x-2">
+            {selectedCharacters.size > 0 && (
+              <button
+                onClick={() => setShowBulkDeleteModal(true)}
+                className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete Selected ({selectedCharacters.size})</span>
+              </button>
+            )}
+            {hasCharacters && (
+              <button
+                onClick={handleSelectAll}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm"
+              >
+                {selectedCharacters.size === plotOverview.characters.length ? 'Deselect All' : 'Select All'}
+              </button>
+            )}
+            {hasCharacters && charactersWithoutImages > 0 && (
               <button
                 onClick={() => setShowGenerateAllModal(true)}
                 disabled={generatingImages.size > 0}
                 className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 text-sm"
               >
                 <Wand2 className="w-4 h-4" />
-                <span>Generate All Character Images</span>
+                <span>Generate All Images</span>
               </button>
             )}
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create Character</span>
+            </button>
           </div>
+        </div>
 
-          {/* Characters Grid */}
+        {/* Characters Grid */}
+        {hasCharacters ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {plotOverview.characters.map((character: Character) => (
               <CharacterCard
                 key={character.id}
                 character={character}
                 isGeneratingImage={generatingImages.has(character.id)}
+                isSelected={selectedCharacters.has(character.id)}
+                onToggleSelect={handleToggleSelect}
                 onUpdate={handleUpdateCharacter}
                 onDelete={handleDeleteClick}
                 onGenerateImage={handleGenerateImage}
@@ -316,6 +449,230 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                 onViewImage={(url) => setShowImageModal(url)}
               />
             ))}
+          </div>
+        ) : (
+          <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed">
+            <Users className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+            <p className="text-gray-600 mb-4">No characters yet</p>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create Your First Character</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Create Character Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900">Create New Character</h3>
+              <button
+                onClick={() => setShowCreateModal(false)}
+                disabled={isCreatingCharacter}
+                className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Character Name *
+                </label>
+                <input
+                  type="text"
+                  value={newCharacter.name}
+                  onChange={(e) => setNewCharacter(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Enter character name"
+                  disabled={isCreatingCharacter}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Role
+                </label>
+                <select
+                  value={newCharacter.role}
+                  onChange={(e) => setNewCharacter(prev => ({ ...prev, role: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={isCreatingCharacter}
+                >
+                  <option value="">Select role</option>
+                  <option value="protagonist">Protagonist</option>
+                  <option value="antagonist">Antagonist</option>
+                  <option value="supporting">Supporting</option>
+                  <option value="mentor">Mentor</option>
+                  <option value="sidekick">Sidekick</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Physical Description
+                </label>
+                <textarea
+                  value={newCharacter.physical_description}
+                  onChange={(e) => setNewCharacter(prev => ({ ...prev, physical_description: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                  placeholder="Describe the character's appearance"
+                  disabled={isCreatingCharacter}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Personality
+                </label>
+                <textarea
+                  value={newCharacter.personality}
+                  onChange={(e) => setNewCharacter(prev => ({ ...prev, personality: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                  placeholder="Describe the character's personality traits"
+                  disabled={isCreatingCharacter}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Character Arc
+                </label>
+                <textarea
+                  value={newCharacter.character_arc}
+                  onChange={(e) => setNewCharacter(prev => ({ ...prev, character_arc: e.target.value }))}
+                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={2}
+                  placeholder="How does this character change throughout the story?"
+                  disabled={isCreatingCharacter}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Want
+                  </label>
+                  <input
+                    type="text"
+                    value={newCharacter.want}
+                    onChange={(e) => setNewCharacter(prev => ({ ...prev, want: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="What they want"
+                    disabled={isCreatingCharacter}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Need
+                  </label>
+                  <input
+                    type="text"
+                    value={newCharacter.need}
+                    onChange={(e) => setNewCharacter(prev => ({ ...prev, need: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="What they need"
+                    disabled={isCreatingCharacter}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Lie They Believe
+                  </label>
+                  <input
+                    type="text"
+                    value={newCharacter.lie}
+                    onChange={(e) => setNewCharacter(prev => ({ ...prev, lie: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Their false belief"
+                    disabled={isCreatingCharacter}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Ghost (Past Trauma)
+                  </label>
+                  <input
+                    type="text"
+                    value={newCharacter.ghost}
+                    onChange={(e) => setNewCharacter(prev => ({ ...prev, ghost: e.target.value }))}
+                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Their past trauma"
+                    disabled={isCreatingCharacter}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowCreateModal(false)}
+                disabled={isCreatingCharacter}
+                className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateCharacter}
+                disabled={isCreatingCharacter || !newCharacter.name.trim()}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all disabled:opacity-50"
+              >
+                {isCreatingCharacter ? (
+                  <span className="flex items-center justify-center">
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Creating...
+                  </span>
+                ) : (
+                  'Create Character'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showBulkDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900">Delete Multiple Characters?</h3>
+            </div>
+
+            <p className="text-gray-600 mb-6">
+              Are you sure you want to delete <strong>{selectedCharacters.size} character{selectedCharacters.size > 1 ? 's' : ''}</strong>? This action cannot be undone.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowBulkDeleteModal(false)}
+                disabled={isBulkDeleting}
+                className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={isBulkDeleting}
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50"
+              >
+                {isBulkDeleting ? "Deleting..." : `Yes, Delete ${selectedCharacters.size}`}
+              </button>
+            </div>
           </div>
         </div>
       )}

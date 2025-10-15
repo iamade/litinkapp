@@ -31,6 +31,8 @@ interface Character {
 interface CharacterCardProps {
   character: Character;
   isGeneratingImage: boolean;
+  isSelected: boolean;
+  onToggleSelect: (characterId: string) => void;
   onUpdate: (characterId: string, updates: Partial<Character>) => Promise<void>;
   onDelete: (characterId: string, characterName: string) => void;
   onGenerateImage: (characterId: string) => void;
@@ -41,6 +43,8 @@ interface CharacterCardProps {
 const CharacterCard: React.FC<CharacterCardProps> = ({
   character,
   isGeneratingImage,
+  isSelected,
+  onToggleSelect,
   onUpdate,
   onDelete,
   onGenerateImage,
@@ -133,10 +137,21 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
 
   return (
     <div className={`bg-white rounded-lg shadow-sm border transition-all ${
-      isEditing ? 'ring-2 ring-blue-500' : 'hover:shadow-md'
+      isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : isEditing ? 'ring-2 ring-blue-500' : 'hover:shadow-md'
     }`}>
       {/* Image Section */}
       <div className="aspect-[3/4] relative bg-gray-100 rounded-t-lg overflow-hidden">
+        {/* Selection Checkbox */}
+        <div className="absolute top-2 left-2 z-10">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelect(character.id)}
+            className="w-5 h-5 rounded border-2 border-white shadow-lg cursor-pointer accent-blue-600"
+            title="Select for bulk action"
+          />
+        </div>
+
         {isGeneratingImage ? (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
             <div className="text-center">

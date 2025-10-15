@@ -5,6 +5,7 @@ from typing import List, Optional
 from app.schemas.plot import (
     CharacterResponse,
     CharacterUpdate,
+    CharacterCreate,
     CharacterArchetypeResponse,
     ImageGenerationRequest
 )
@@ -94,6 +95,77 @@ async def delete_character(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete character: {str(e)}")
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_characters(
+    character_ids: List[str],
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Delete multiple characters at once.
+
+    - **character_ids**: List of character IDs to delete
+    """
+    try:
+        if not character_ids:
+            raise HTTPException(status_code=400, detail="No character IDs provided")
+
+        character_service = CharacterService(supabase_client)
+        deleted_count = 0
+        failed_count = 0
+
+        for character_id in character_ids:
+            try:
+                success = await character_service.delete_character(character_id, current_user['id'])
+                if success:
+                    deleted_count += 1
+                else:
+                    failed_count += 1
+            except Exception:
+                failed_count += 1
+
+        return {
+            "message": f"Bulk delete completed",
+            "deleted_count": deleted_count,
+            "failed_count": failed_count,
+            "total_requested": len(character_ids)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to bulk delete characters: {str(e)}")
+
+
+@router.post("/plot/{plot_overview_id}", response_model=CharacterResponse)
+async def create_character(
+    plot_overview_id: str,
+    character_data: CharacterCreate,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Create a new character manually.
+
+    - **plot_overview_id**: ID of the plot overview to add character to
+    - **character_data**: Character information
+    """
+    try:
+        character_service = CharacterService(supabase_client)
+        character = await character_service.create_character(
+            plot_overview_id=plot_overview_id,
+            user_id=current_user['id'],
+            character_data=character_data
+        )
+
+        return character
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create character: {str(e)}")
 
 
 @router.get("/plot/{plot_overview_id}", response_model=List[CharacterResponse])

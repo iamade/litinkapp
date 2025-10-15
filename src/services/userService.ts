@@ -500,6 +500,30 @@ export const userService = {
     return apiClient.delete(`/characters/${characterId}`);
   },
 
+  async bulkDeleteCharacters(characterIds: string[]) {
+    return apiClient.post(`/characters/bulk-delete`, characterIds);
+  },
+
+  async createCharacter(plotOverviewId: string, characterData: {
+    name: string;
+    role?: string;
+    physical_description?: string;
+    personality?: string;
+    character_arc?: string;
+    archetypes?: string[];
+    want?: string;
+    need?: string;
+    lie?: string;
+    ghost?: string;
+  }) {
+    return apiClient.post(`/characters/plot/${plotOverviewId}`, {
+      ...characterData,
+      plot_overview_id: plotOverviewId,
+      book_id: '', // Will be filled by backend
+      user_id: '', // Will be filled by backend
+    });
+  },
+
   async updateCharacter(characterId: string, updates: {
     name?: string;
     role?: string;

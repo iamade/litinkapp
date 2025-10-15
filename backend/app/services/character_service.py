@@ -543,6 +543,66 @@ class CharacterService:
             logger.error(f"[CharacterService] Error deleting character {character_id}: {str(e)}")
             return False
 
+    async def create_character(
+        self,
+        plot_overview_id: str,
+        user_id: str,
+        character_data: CharacterCreate
+    ) -> CharacterResponse:
+        """
+        Create a new character manually.
+        """
+        try:
+            # Validate plot overview exists and user owns it
+            plot_response = self.db.table('plot_overviews').select('id, book_id').eq(
+                'id', plot_overview_id
+            ).eq('user_id', user_id).execute()
+
+            if not plot_response.data:
+                raise PermissionDeniedError("Plot overview not found or access denied")
+
+            plot_data = plot_response.data[0]
+            book_id = plot_data['book_id']
+
+            # Create character record
+            character_id = str(uuid.uuid4())
+            character_dict = {
+                'id': character_id,
+                'plot_overview_id': plot_overview_id,
+                'book_id': book_id,
+                'user_id': user_id,
+                'name': character_data.name,
+                'role': character_data.role or '',
+                'character_arc': character_data.character_arc or '',
+                'physical_description': character_data.physical_description or '',
+                'personality': character_data.personality or '',
+                'archetypes': character_data.archetypes or [],
+                'want': character_data.want or '',
+                'need': character_data.need or '',
+                'lie': character_data.lie or '',
+                'ghost': character_data.ghost or '',
+                'image_url': character_data.image_url,
+                'image_generation_prompt': character_data.image_generation_prompt,
+                'image_metadata': character_data.image_metadata or {},
+                'generation_method': 'manual',
+                'model_used': None,
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+
+            result = self.db.table('characters').insert(character_dict).execute()
+
+            if not result.data:
+                raise CharacterServiceError("Failed to create character")
+
+            return CharacterResponse(**result.data[0])
+
+        except PermissionDeniedError:
+            raise
+        except Exception as e:
+            logger.error(f"[CharacterService] Error creating character: {str(e)}")
+            raise CharacterServiceError(f"Failed to create character: {str(e)}")
+
     async def get_all_archetypes(self) -> List[CharacterArchetypeResponse]:
         """
         Get all available character archetypes.
