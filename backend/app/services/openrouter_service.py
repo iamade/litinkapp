@@ -178,8 +178,10 @@ class OpenRouterService:
             # Clean narrator elements from cinematic scripts
             if script_type == "cinematic_movie":
                 # delegate cleaning to CostTracker which defines the helper
-                generated_content = self.cost_tracker._clean_narrator_from_cinematic_script(
-                    generated_content
+                generated_content = (
+                    self.cost_tracker._clean_narrator_from_cinematic_script(
+                        generated_content
+                    )
                 )
 
             # Calculate cost
@@ -357,7 +359,12 @@ Get inside this instant! And stop bothering Dudley.
         model = config["primary"]
 
         # Special handling for plot generation and character creation
-        if analysis_type in ["plot_overview", "characters", "archetype_analysis"]:
+        if analysis_type in [
+            "plot_overview",
+            "characters",
+            "archetype_analysis",
+            "character_details",
+        ]:
             system_prompt = self._get_special_system_prompt(analysis_type)
             user_message = content
             max_tokens = config["max_tokens"]  # Use full token limit for generation
@@ -433,6 +440,7 @@ Get inside this instant! And stop bothering Dudley.
             "plot_overview": """You are a professional literary analyst and story consultant with extensive experience in narrative structure, character development, and thematic analysis. You excel at creating compelling plot overviews that capture the essence of stories.""",
             "characters": """You are an expert character developer and psychologist specializing in creating deep, multidimensional characters with clear motivations, arcs, and personality traits. You understand Jungian archetypes and narrative character functions.""",
             "archetype_analysis": """You are a Jungian psychology expert specializing in archetypal analysis of characters in literature. You can identify and explain how characters embody classic archetypes and their narrative functions.""",
+            "character_details": """You are an expert character development analyst. Analyze the provided book content and generate comprehensive character details in valid JSON format. Always respond with properly formatted JSON containing all requested fields.""",
         }
 
         return prompts.get(analysis_type, "You are a content analyst.")

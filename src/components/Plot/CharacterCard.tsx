@@ -55,8 +55,14 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
   const [editedCharacter, setEditedCharacter] = useState<Partial<Character>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  
+  // Archetype modal state
+  const [showArchetypeModal, setShowArchetypeModal] = useState(false);
+  const [newArchetypeName, setNewArchetypeName] = useState('');
+  const [archetypeError, setArchetypeError] = useState('');
 
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const archetypeInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (isEditing && nameInputRef.current) {
@@ -103,15 +109,48 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
   };
 
   const handleAddArchetype = () => {
-    const newArchetype = prompt('Enter archetype name:');
-    if (newArchetype?.trim()) {
-      const currentArchetypes = editedCharacter.archetypes || character.archetypes || [];
-      if (!currentArchetypes.includes(newArchetype.trim())) {
-        setEditedCharacter(prev => ({
-          ...prev,
-          archetypes: [...currentArchetypes, newArchetype.trim()]
-        }));
-      }
+    setShowArchetypeModal(true);
+    setNewArchetypeName('');
+    setArchetypeError('');
+  };
+
+  const handleConfirmAddArchetype = () => {
+    const trimmedName = newArchetypeName.trim();
+    
+    if (!trimmedName) {
+      setArchetypeError('Archetype name is required');
+      return;
+    }
+
+    const currentArchetypes = editedCharacter.archetypes || character.archetypes || [];
+    if (currentArchetypes.includes(trimmedName)) {
+      setArchetypeError('This archetype already exists');
+      return;
+    }
+
+    setEditedCharacter(prev => ({
+      ...prev,
+      archetypes: [...currentArchetypes, trimmedName]
+    }));
+    
+    setShowArchetypeModal(false);
+    setNewArchetypeName('');
+    setArchetypeError('');
+  };
+
+  const handleCancelAddArchetype = () => {
+    setShowArchetypeModal(false);
+    setNewArchetypeName('');
+    setArchetypeError('');
+  };
+
+  const handleArchetypeKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleConfirmAddArchetype();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      handleCancelAddArchetype();
     }
   };
 
@@ -365,6 +404,65 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
           )}
         </div>
       </div>
+
+      {/* Add Archetype Modal */}
+      {showArchetypeModal && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={handleCancelAddArchetype}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-900">Add Archetype</h3>
+              <button
+                onClick={handleCancelAddArchetype}
+                className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Enter archetype name:
+              </label>
+              <input
+                ref={archetypeInputRef}
+                type="text"
+                value={newArchetypeName}
+                onChange={(e) => {
+                  setNewArchetypeName(e.target.value);
+                  setArchetypeError('');
+                }}
+                onKeyDown={handleArchetypeKeyDown}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="e.g., Hero, Mentor, Trickster"
+              />
+              {archetypeError && (
+                <p className="text-red-600 text-sm mt-1">{archetypeError}</p>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancelAddArchetype}
+                className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmAddArchetype}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

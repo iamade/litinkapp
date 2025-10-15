@@ -7,6 +7,8 @@ import { toast } from "react-hot-toast";
 
 interface PlotOverviewPanelProps {
   bookId: string;
+  /** Optional callback invoked after character create/delete to refresh plot overview in parent. */
+  onCharacterChange?: () => void | Promise<void>;
 }
 
 interface Character {
@@ -24,7 +26,7 @@ interface Character {
   image_url?: string;
 }
 
-const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
+const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharacterChange }) => {
   const { plotOverview, isGenerating, isLoading, generatePlot, loadPlot, deleteCharacter } =
     usePlotGeneration(bookId);
 
@@ -93,6 +95,16 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
     setDeletingCharacterId(characterToDelete.id);
     try {
       await deleteCharacter(characterToDelete.id);
+
+      // Invoke parent callback to refresh plot overview
+      if (onCharacterChange) {
+        try {
+          await onCharacterChange();
+        } catch (callbackError) {
+          console.warn('onCharacterChange callback failed:', callbackError);
+        }
+      }
+
       setShowDeleteModal(false);
       setCharacterToDelete(null);
     } catch (error) {
@@ -283,6 +295,15 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
       const ids = Array.from(selectedCharacters);
       await userService.bulkDeleteCharacters(ids);
 
+      // Invoke parent callback to refresh plot overview
+      if (onCharacterChange) {
+        try {
+          await onCharacterChange();
+        } catch (callbackError) {
+          console.warn('onCharacterChange callback failed:', callbackError);
+        }
+      }
+
       toast.success(`Deleted ${ids.length} character${ids.length > 1 ? 's' : ''}`);
       setSelectedCharacters(new Set());
       setShowBulkDeleteModal(false);
@@ -362,6 +383,15 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
     setIsCreatingCharacter(true);
     try {
       await userService.createCharacter(plotOverview.id, newCharacter);
+
+      // Invoke parent callback to refresh plot overview
+      if (onCharacterChange) {
+        try {
+          await onCharacterChange();
+        } catch (callbackError) {
+          console.warn('onCharacterChange callback failed:', callbackError);
+        }
+      }
 
       toast.success(`Character "${newCharacter.name}" created successfully`);
       setShowCreateModal(false);

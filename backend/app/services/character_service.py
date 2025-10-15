@@ -1161,30 +1161,46 @@ IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make 
         role: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Parse AI response and extract character details.
+        Parse AI response and extract character details with robust JSON extraction.
         """
         logger.info(f"[CharacterService] Parsing AI response (length: {len(ai_response)})")
         logger.debug(f"[CharacterService] AI response content: {ai_response[:500]}")
 
         try:
-            # Try to extract JSON from markdown code blocks
-            json_match = re.search(r'```json\s*(\{.*?\})\s*```', ai_response, re.DOTALL)
+            json_str = None
+            
+            # Try multiple extraction strategies
+            # Strategy 1: Extract from markdown code blocks (```json ... ```)
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', ai_response, re.DOTALL | re.IGNORECASE)
             if json_match:
                 json_str = json_match.group(1)
                 logger.info("[CharacterService] Found JSON in markdown code block")
-            else:
-                # Try to find JSON object directly
-                json_match = re.search(r'\{[^}]*"physical_description"[^}]*\}', ai_response, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0)
-                    logger.info("[CharacterService] Found JSON object in response")
-                else:
-                    json_str = ai_response.strip()
+            
+            # Strategy 2: Extract JSON object with proper brace matching
+            if not json_str:
+                # Find first { and match all the way to its closing }
+                start_idx = ai_response.find('{')
+                if start_idx != -1:
+                    brace_count = 0
+                    for i in range(start_idx, len(ai_response)):
+                        if ai_response[i] == '{':
+                            brace_count += 1
+                        elif ai_response[i] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                json_str = ai_response[start_idx:i+1]
+                                logger.info("[CharacterService] Extracted JSON with brace matching")
+                                break
+            
+            # Strategy 3: Try entire response if no JSON delimiters found
+            if not json_str:
+                json_str = ai_response.strip()
+                logger.info("[CharacterService] Using entire response as JSON")
 
             # Try to parse as JSON
             character_data = json.loads(json_str)
 
-            # Validate and provide defaults
+            # Validate all required fields are present
             result = {
                 "name": character_name,
                 "role": role or "supporting",
@@ -1197,13 +1213,13 @@ IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make 
                 "ghost": character_data.get("ghost", "")
             }
 
-            logger.info("[CharacterService] Successfully parsed JSON response")
+            logger.info(f"[CharacterService] Successfully parsed JSON response with {sum(1 for v in result.values() if v)} non-empty fields")
             return result
 
-        except (json.JSONDecodeError, AttributeError) as e:
-            logger.warning(f"[CharacterService] AI response not valid JSON, attempting text parsing: {str(e)}")
+        except (json.JSONDecodeError, AttributeError, ValueError) as e:
+            logger.warning(f"[CharacterService] JSON parsing failed: {str(e)}, attempting text extraction")
 
-            # Fallback: extract information from text
+            # Fallback: extract information from text using pattern matching
             result = {
                 "name": character_name,
                 "role": role or "supporting",
@@ -1216,7 +1232,12 @@ IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make 
                 "ghost": self._extract_field_from_ai_text(ai_response, "ghost") or ""
             }
 
-            logger.info(f"[CharacterService] Text parsing extracted {sum(1 for v in result.values() if v)} fields")
+            extracted_count = sum(1 for v in result.values() if v and v not in [character_name, role or "supporting"])
+            logger.info(f"[CharacterService] Text parsing extracted {extracted_count} character detail fields")
+            
+            if extracted_count == 0:
+                logger.error(f"[CharacterService] Failed to extract any character details from response")
+            
             return result
 
     def _extract_field_from_ai_text(self, text: str, field_name: str) -> Optional[str]:

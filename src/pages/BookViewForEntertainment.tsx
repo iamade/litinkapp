@@ -360,6 +360,11 @@ export default function BookViewForEntertainment() {
     loadPlot
   } = usePlotGeneration(id || '');
 
+  // Callback to refresh plot overview after character changes
+  const refreshPlotOverview = useCallback(() => {
+    return loadPlot();
+  }, [loadPlot]);
+
   // Load plot on component mount and chapter change
   useEffect(() => {
     if (book) {
@@ -759,6 +764,7 @@ export default function BookViewForEntertainment() {
          return (
           <PlotOverviewPanel
             bookId={book!.id}
+            onCharacterChange={refreshPlotOverview}
           />
         );
 
@@ -810,6 +816,7 @@ if (!selectedChapter) {
           chapterTitle={selectedChapter.title}
           selectedScript={selectedScript}
           plotOverview={plotOverview}
+          onRefreshPlotOverview={refreshPlotOverview}
         />
       );
 

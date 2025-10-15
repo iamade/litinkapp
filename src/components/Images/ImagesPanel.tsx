@@ -53,12 +53,14 @@ interface ImagesPanelProps {
   chapterTitle: string;
   selectedScript: unknown;
   plotOverview: { characters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string }> } | null;
+  onRefreshPlotOverview?: () => void | Promise<void>;
 }
 
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
   chapterTitle,
   selectedScript,
-  plotOverview
+  plotOverview,
+  onRefreshPlotOverview
 }) => {
   const {
     selectedScriptId,
