@@ -329,8 +329,8 @@ export const userService = {
     chapterId: string,
     sceneNumber: number,
     request: SceneImageRequest
-  ): Promise<ImageGenerationResponse> {
-    return apiClient.post<ImageGenerationResponse>(
+  ): Promise<ImageGenerationQueuedResponse> {
+    return apiClient.post<ImageGenerationQueuedResponse>(
       `/chapters/${chapterId}/images/scenes/${sceneNumber}`,
       request
     );
@@ -385,6 +385,15 @@ export const userService = {
   ): Promise<ImageStatusResponse> {
     return apiClient.get<ImageStatusResponse>(
       `/chapters/${chapterId}/images/status/${recordId}`
+    );
+  },
+
+  async getSceneImageStatus(
+    chapterId: string,
+    sceneNumber: number
+  ): Promise<ImageStatusResponse> {
+    return apiClient.get<ImageStatusResponse>(
+      `/chapters/${chapterId}/images/scenes/${sceneNumber}/status`
     );
   },
 

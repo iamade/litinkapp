@@ -173,24 +173,22 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
 
       const result = await userService.generateSceneImage(chapterId!, sceneNumber, request);
 
-      const updatedImage = {
-        ...tempImage,
-        imageUrl: result.image_url,
-        generationStatus: 'completed' as const,
-        generatedAt: new Date().toISOString(),
-        id: result.record_id,
-        script_id: selectedScriptId ?? undefined
-      };
-
-      setSceneImages((prev) => {
-        const updated = {
+      if (result.record_id) {
+        // Start polling for this scene's image status
+        startPollingSceneImage(sceneNumber, result.record_id);
+      } else {
+        setSceneImages((prev) => ({
           ...prev,
-          [sceneNumber]: updatedImage
-        };
-        return updated;
-      });
-
-      toast.success(`Generated image for Scene ${sceneNumber}`);
+          [sceneNumber]: {
+            ...tempImage,
+            generationStatus: 'completed',
+            generatedAt: new Date().toISOString(),
+            id: result.record_id,
+            script_id: selectedScriptId ?? undefined
+          }
+        }));
+        toast.success(`Generated image for Scene ${sceneNumber}`);
+      }
     } catch (error: unknown) {
 
       setSceneImages((prev) => ({
@@ -346,6 +344,113 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     // Don't await - let them generate in parallel and poll individually
     Promise.all(promises).catch(err => {
     });
+  };
+
+  const startPollingSceneImage = (sceneNumber: number, recordId: string) => {
+    if (!chapterId) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await userService.getSceneImageStatus(chapterId, sceneNumber);
+
+        if (status.status === 'completed' && status.image_url) {
+          // Update scene image with completed data
+          setSceneImages((prev) => ({
+            ...prev,
+            [sceneNumber]: {
+              sceneNumber,
+              imageUrl: status.image_url!,
+              prompt: status.prompt || '',
+              characters: [],
+              generationStatus: 'completed',
+              generatedAt: new Date().toISOString(),
+              id: recordId,
+              script_id: status.script_id ?? selectedScriptId ?? undefined
+            }
+          }));
+
+          // Remove from generating set
+          setGeneratingScenes((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(sceneNumber);
+            return newSet;
+          });
+
+          // Clear this interval
+          clearInterval(pollInterval);
+          setPollingIntervals(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(recordId);
+            return newMap;
+          });
+
+          // Reload all images from database to get the complete data
+          loadImages();
+
+          toast.success(`Generated image for Scene ${sceneNumber}`);
+        } else if (status.status === 'failed') {
+          // Update as failed
+          setSceneImages((prev) => ({
+            ...prev,
+            [sceneNumber]: {
+              ...prev[sceneNumber],
+              generationStatus: 'failed'
+            }
+          }));
+
+          // Remove from generating set
+          setGeneratingScenes((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(sceneNumber);
+            return newSet;
+          });
+
+          // Clear this interval
+          clearInterval(pollInterval);
+          setPollingIntervals(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(recordId);
+            return newMap;
+          });
+
+          toast.error(`Failed to generate image for Scene ${sceneNumber}`);
+        }
+        // If status is still 'pending' or 'processing', keep polling
+      } catch (error) {
+      }
+    }, 3000); // Poll every 3 seconds
+
+    // Store the interval so we can clear it later
+    setPollingIntervals(prev => new Map(prev).set(recordId, pollInterval));
+
+    // Set a timeout to stop polling after 5 minutes
+    setTimeout(() => {
+      clearInterval(pollInterval);
+      setPollingIntervals(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(recordId);
+        return newMap;
+      });
+
+      // Check if still generating and mark as failed
+      setGeneratingScenes((prev) => {
+        if (prev.has(sceneNumber)) {
+          setSceneImages((prevImages) => ({
+            ...prevImages,
+            [sceneNumber]: {
+              ...prevImages[sceneNumber],
+              generationStatus: 'failed'
+            }
+          }));
+          toast.error(`Image generation timeout for Scene ${sceneNumber}`);
+
+          const newSet = new Set(prev);
+          newSet.delete(sceneNumber);
+          return newSet;
+        }
+        return prev;
+      });
+    }, 300000); // 5 minutes timeout
   };
 
   const startPollingCharacterImage = (characterName: string, recordId: string) => {
