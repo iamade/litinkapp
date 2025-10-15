@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 from pydantic import BaseModel
 
 
@@ -43,6 +44,9 @@ class ImageGenerationQueuedResponse(BaseModel):
     message: str
     estimated_time_seconds: Optional[int] = None
     record_id: Optional[str] = None
+    # Scene-related fields for async tracking
+    scene_number: Optional[int] = None
+    retry_count: int = 0
 
 
 class BatchImageResponse(BaseModel):
@@ -63,6 +67,10 @@ class ImageRecord(BaseModel):
     thumbnail_url: Optional[str] = None
     image_prompt: Optional[str] = None
     script_id: Optional[str] = None
+    # Scene-related fields for async tracking
+    chapter_id: Optional[UUID] = None
+    scene_number: Optional[int] = None
+    retry_count: int = 0
     status: str
     generation_time_seconds: Optional[float] = None
     width: Optional[int] = None
@@ -104,6 +112,9 @@ class ImageStatusResponse(BaseModel):
     image_url: Optional[str] = None
     prompt: Optional[str] = None
     script_id: Optional[str] = None
+    # Scene-related fields for async tracking
+    scene_number: Optional[int] = None
+    retry_count: int = 0
     error_message: Optional[str] = None
     generation_time_seconds: Optional[float] = None
     created_at: str

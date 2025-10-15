@@ -44,7 +44,9 @@ class StandaloneImageService:
         style: str = "cinematic",
         aspect_ratio: str = "16:9",
         custom_prompt: Optional[str] = None,
-        script_id: Optional[str] = None
+        script_id: Optional[str] = None,
+        chapter_id: Optional[str] = None,  # Added for scene metadata tracking
+        scene_number: Optional[int] = None  # Added for scene metadata tracking
     ) -> Dict[str, Any]:
         """
         Generate a standalone scene image and store in database.
@@ -55,6 +57,9 @@ class StandaloneImageService:
             style: Visual style (cinematic, realistic, animated, fantasy)
             aspect_ratio: Image aspect ratio (16:9, 4:3, etc.)
             custom_prompt: Optional custom prompt additions
+            script_id: Optional script ID for linking
+            chapter_id: Optional chapter ID for metadata tracking
+            scene_number: Optional scene number for ordering
 
         Returns:
             Dict containing image data and database record info
@@ -66,14 +71,16 @@ class StandaloneImageService:
             usage_check = await self.subscription_manager.check_usage_limits(user_id, "image")
             user_tier = usage_check["tier"]
 
-            # Create database record first
+            # Create database record first with scene metadata
             record_id = await self._create_image_record(
                 user_id=user_id,
                 image_type="scene",
                 scene_description=scene_description,
                 style=style,
                 aspect_ratio=aspect_ratio,
-                script_id=script_id
+                script_id=script_id,
+                chapter_id=chapter_id,  # Pass chapter_id for root-level field
+                scene_number=scene_number  # Pass scene_number for root-level field
             )
 
             # Build enhanced prompt
@@ -125,6 +132,7 @@ class StandaloneImageService:
         aspect_ratio: str = "3:4",
         custom_prompt: Optional[str] = None,
         script_id: Optional[str] = None,
+        chapter_id: Optional[str] = None,  # Added for metadata tracking
         user_tier: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -137,6 +145,8 @@ class StandaloneImageService:
             style: Visual style (realistic, cinematic, animated, fantasy)
             aspect_ratio: Image aspect ratio (3:4 for portraits, etc.)
             custom_prompt: Optional custom prompt additions
+            script_id: Optional script ID for linking
+            chapter_id: Optional chapter ID for metadata tracking
             user_tier: Optional user subscription tier (if not provided, will be fetched)
 
         Returns:
@@ -150,7 +160,7 @@ class StandaloneImageService:
                 usage_check = await self.subscription_manager.check_usage_limits(user_id, "image")
                 user_tier = usage_check["tier"]
 
-            # Create database record first
+            # Create database record first (character images don't have scene_number)
             record_id = await self._create_image_record(
                 user_id=user_id,
                 image_type="character",
@@ -158,7 +168,8 @@ class StandaloneImageService:
                 character_description=character_description,
                 style=style,
                 aspect_ratio=aspect_ratio,
-                script_id=script_id
+                script_id=script_id,
+                chapter_id=chapter_id  # Pass chapter_id for metadata tracking
             )
 
             # Build enhanced prompt
@@ -247,6 +258,10 @@ class StandaloneImageService:
             # Create database records first
             record_ids = []
             for request in image_requests:
+                # Extract scene metadata if present
+                chapter_id = request.get("chapter_id")
+                scene_number = request.get("scene_number")
+                
                 record_id = await self._create_image_record(
                     user_id=user_id,
                     image_type=request.get("type", "general"),
@@ -255,7 +270,9 @@ class StandaloneImageService:
                     character_description=request.get("character_description"),
                     style=request.get("style", "cinematic"),
                     aspect_ratio=request.get("aspect_ratio", "16:9"),
-                    script_id=script_id
+                    script_id=script_id,
+                    chapter_id=chapter_id,  # Pass for scene images
+                    scene_number=scene_number  # Pass for scene images
                 )
                 record_ids.append(record_id)
 
@@ -432,31 +449,54 @@ class StandaloneImageService:
         character_description: Optional[str] = None,
         style: Optional[str] = None,
         aspect_ratio: Optional[str] = None,
-        script_id: Optional[str] = None
+        script_id: Optional[str] = None,
+        chapter_id: Optional[str] = None,  # Added for scene metadata tracking
+        scene_number: Optional[int] = None  # Added for scene metadata tracking
     ) -> str:
         """
         Create initial database record for image generation.
+        
+        Sets root-level fields (chapter_id, script_id, scene_number, image_type) and
+        merges them into metadata JSONB for frontend queries and chapter linking.
         """
         try:
             record_id = str(uuid.uuid4())
 
+            # Build metadata with all tracking fields
+            # Merge new keys into metadata (new keys overwrite old if metadata passed)
+            metadata = {
+                "style": style,
+                "aspect_ratio": aspect_ratio,
+                "character_description": character_description,
+                # Scene-related metadata for async tracking and frontend queries
+                "scene_number": scene_number,
+                "script_id": script_id,
+                "chapter_id": chapter_id,
+                "image_type": image_type
+            }
+            
+            # Remove None values from metadata
+            metadata = {k: v for k, v in metadata.items() if v is not None}
+            
+            # For character images, preserve character-specific metadata
+            if image_type == "character" and character_name:
+                metadata["character_name"] = character_name
+
             record_data = {
                 "id": record_id,
                 "user_id": user_id,
-                "image_type": image_type,
+                "image_type": image_type,  # Root-level field for direct queries
                 "scene_description": scene_description,
                 "character_name": character_name,
-                "script_id": script_id,
+                "script_id": script_id,  # Root-level field for script association
+                "chapter_id": chapter_id,  # Root-level field for chapter association
+                "scene_number": scene_number,  # Root-level field for scene ordering
                 "status": "pending",
                 "created_at": datetime.now().isoformat(),
-                "metadata": {
-                    "style": style,
-                    "aspect_ratio": aspect_ratio,
-                    "character_description": character_description
-                }
+                "metadata": metadata
             }
 
-            # Remove None values
+            # Remove None values from root-level fields
             record_data = {k: v for k, v in record_data.items() if v is not None}
 
             self.db.table('image_generations').insert(record_data).execute()
@@ -476,18 +516,32 @@ class StandaloneImageService:
     ) -> None:
         """
         Update database record with successful generation results.
+        Merges new metadata with existing to preserve scene/chapter tracking fields.
         """
         try:
+            # Fetch existing metadata to preserve scene/chapter tracking fields
+            existing_metadata = {}
+            try:
+                existing_record = self.db.table('image_generations').select('metadata').eq('id', record_id).single().execute()
+                if existing_record.data and existing_record.data.get('metadata'):
+                    existing_metadata = existing_record.data['metadata']
+            except Exception as meta_error:
+                logger.warning(f"[StandaloneImageService] Could not fetch existing metadata: {meta_error}")
+            
+            # Merge metadata: preserve existing tracking fields, add generation results
+            merged_metadata = {
+                **existing_metadata,  # Preserve scene_number, chapter_id, script_id, etc.
+                **generation_result.get("meta", {}),  # Add generation metadata
+                "model_used": generation_result.get("model_used")
+            }
+            
             update_data = {
                 "status": "completed",
                 "image_prompt": prompt_used,
                 "image_url": generation_result.get("image_url"),
                 "thumbnail_url": generation_result.get("thumbnail_url"),
                 "generation_time_seconds": generation_result.get("generation_time"),
-                "metadata": {
-                    **generation_result.get("meta", {}),
-                    "model_used": generation_result.get("model_used")
-                }
+                "metadata": merged_metadata  # Use merged metadata
             }
 
             # Extract dimensions if available

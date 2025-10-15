@@ -857,3 +857,224 @@ def create_scene_image_prompt(scene_description: str, style: str) -> str:
     technical_prompt = ", 16:9 aspect ratio, high quality, detailed background, cinematic framing"
     
     return base_prompt + style_prompt + technical_prompt
+
+
+@celery_app.task(bind=True)
+def generate_scene_image_task(
+    self,
+    record_id: str,
+    scene_description: str,
+    scene_number: int,
+    user_id: str,
+    chapter_id: Optional[str] = None,
+    script_id: Optional[str] = None,
+    style: Optional[str] = None,
+    aspect_ratio: Optional[str] = None,
+    custom_prompt: Optional[str] = None,
+    user_tier: Optional[str] = None,
+    retry_count: int = 0
+) -> None:
+    """
+    Asynchronous Celery task for generating scene images with retry mechanism.
+    
+    Args:
+        record_id: Image generation record ID for tracking
+        scene_description: Description of the scene to generate
+        scene_number: Scene number in the sequence
+        user_id: User ID for database association
+        chapter_id: Optional chapter ID for metadata
+        script_id: Optional script ID for metadata
+        style: Visual style (cinematic, realistic, animated, fantasy)
+        aspect_ratio: Image aspect ratio (default: 16:9)
+        custom_prompt: Optional custom prompt additions
+        user_tier: User subscription tier for model selection
+        retry_count: Current retry count for exponential backoff
+    """
+    import random
+    from datetime import datetime
+    
+    try:
+        logger.info(f"[SceneImageTask] Starting generation for scene {scene_number}")
+        logger.info(f"[SceneImageTask] Parameters: user={user_id}, chapter={chapter_id}, script={script_id}, record={record_id}, tier={user_tier}, retry={retry_count}")
+        
+        # Get database connection
+        supabase = get_supabase()
+        
+        # Verify record exists
+        try:
+            record_check = supabase.table('image_generations').select('id').eq('id', record_id).single().execute()
+            if not record_check.data:
+                logger.error(f"[SceneImageTask] Record {record_id} not found")
+                return
+        except Exception as e:
+            logger.error(f"[SceneImageTask] Failed to verify record: {e}")
+            return
+        
+        # Update status to in_progress with transaction safety
+        try:
+            supabase.table('image_generations').update({
+                'status': 'in_progress',
+                'progress': 0,
+                'last_attempted_at': datetime.utcnow().isoformat(),
+                'retry_count': retry_count
+            }).eq('id', record_id).execute()
+            logger.info(f"[SceneImageTask] Updated record {record_id} status to 'in_progress'")
+        except Exception as db_error:
+            logger.error(f"[SceneImageTask] Failed to update status: {db_error}")
+            raise
+        
+        # Generate the scene image using ModelsLab service
+        # Note: custom_prompt is incorporated into scene_description if provided
+        final_description = custom_prompt or scene_description
+        result = asyncio.run(ModelsLabV7ImageService().generate_scene_image(
+            scene_description=final_description,
+            style=style or "cinematic",
+            aspect_ratio=aspect_ratio or "16:9",
+            user_tier=user_tier
+        ))
+        
+        # Extract result data
+        image_url = result.get('image_url')
+        generation_time = result.get('generation_time', 0)
+        model_used = result.get('model_used', 'gen4_image')
+        
+        if not image_url:
+            raise Exception("No image URL returned from ModelsLab service")
+        
+        # Prepare metadata with scene info
+        existing_metadata = {}
+        try:
+            existing_record = supabase.table('image_generations').select('metadata').eq('id', record_id).single().execute()
+            if existing_record.data and existing_record.data.get('metadata'):
+                existing_metadata = existing_record.data['metadata']
+        except Exception as meta_error:
+            logger.warning(f"[SceneImageTask] Could not fetch existing metadata: {meta_error}")
+        
+        # Merge metadata
+        merged_metadata = {
+            **existing_metadata,
+            'scene_number': scene_number,
+            'script_id': script_id,
+            'chapter_id': chapter_id,
+            'image_type': 'scene',
+            'model_used': model_used,
+            'generation_time': generation_time,
+            'service': 'modelslab_v7',
+            'task_id': self.request.id,
+            'prompt_used': final_description,
+            'style': style or 'cinematic',
+            'aspect_ratio': aspect_ratio or '16:9'
+        }
+        
+        # Update record with success data using transaction
+        try:
+            update_data = {
+                'status': 'completed',
+                'progress': 100,
+                'image_url': image_url,
+                'updated_at': datetime.utcnow().isoformat(),
+                'error_message': None,
+                'generation_time_seconds': generation_time,
+                'model_id': model_used,
+                'chapter_id': chapter_id,
+                'script_id': script_id,
+                'scene_number': scene_number,
+                'image_type': 'scene',
+                'metadata': merged_metadata,
+                'retry_count': retry_count
+            }
+            
+            supabase.table('image_generations').update(update_data).eq('id', record_id).execute()
+            logger.info(f"[SceneImageTask] Successfully generated scene image: {record_id}")
+            logger.info(f"[SceneImageTask] Image URL: {image_url}")
+            
+        except Exception as db_error:
+            logger.error(f"[SceneImageTask] Failed to update record with success: {db_error}")
+            raise
+        
+        logger.info(f"[SceneImageTask] Task completed successfully for record {record_id}")
+        
+    except Exception as e:
+        error_details = str(e) if str(e) else repr(e)
+        error_message = f"Scene image generation failed: {error_details}"
+        logger.error(f"[SceneImageTask] {error_message}")
+        
+        # Determine if error is retryable
+        retryable_keywords = [
+            'timeout', 'connection', 'network', 'rate limit',
+            'service unavailable', 'temporary', 'retry', '429', '503', '504'
+        ]
+        is_retryable = any(keyword in error_details.lower() for keyword in retryable_keywords)
+        
+        # Determine error code if available
+        error_code = 'UNKNOWN_ERROR'
+        if 'timeout' in error_details.lower():
+            error_code = 'TIMEOUT_ERROR'
+        elif 'rate limit' in error_details.lower() or '429' in error_details:
+            error_code = 'RATE_LIMIT_ERROR'
+        elif 'connection' in error_details.lower() or 'network' in error_details.lower():
+            error_code = 'NETWORK_ERROR'
+        elif '503' in error_details or '504' in error_details:
+            error_code = 'SERVICE_UNAVAILABLE'
+        
+        # Update record with error before retry attempt
+        try:
+            supabase = get_supabase()
+            update_data = {
+                'error_message': error_message,
+                'updated_at': datetime.utcnow().isoformat(),
+                'retry_count': retry_count
+            }
+            
+            # Only set status to failed if not retryable or max retries exceeded
+            if not is_retryable or retry_count >= 3:
+                update_data['status'] = 'failed'
+                logger.info(f"[SceneImageTask] Setting status to 'failed' (retryable={is_retryable}, retry_count={retry_count})")
+            
+            supabase.table('image_generations').update(update_data).eq('id', record_id).execute()
+            
+        except Exception as db_error:
+            logger.error(f"[SceneImageTask] Failed to update record with error: {db_error}")
+        
+        # Retry logic with exponential backoff
+        if is_retryable and retry_count < 3:
+            # Calculate backoff with jitter
+            base_backoff = min(60, 5 * (2 ** retry_count))
+            jitter = random.uniform(0.5, 1.5)
+            backoff_seconds = int(base_backoff * jitter)
+            
+            logger.info(f"[SceneImageTask] Retrying in {backoff_seconds}s (attempt {retry_count + 1}/3)")
+            
+            # Increment retry count in DB before retrying
+            try:
+                supabase = get_supabase()
+                supabase.table('image_generations').update({
+                    'retry_count': retry_count + 1,
+                    'last_attempted_at': datetime.utcnow().isoformat()
+                }).eq('id', record_id).execute()
+            except Exception as retry_db_error:
+                logger.error(f"[SceneImageTask] Failed to increment retry_count: {retry_db_error}")
+            
+            # Retry the task with exponential backoff
+            raise self.retry(
+                exc=e,
+                countdown=backoff_seconds,
+                max_retries=3,
+                kwargs={
+                    'record_id': record_id,
+                    'scene_description': scene_description,
+                    'scene_number': scene_number,
+                    'user_id': user_id,
+                    'chapter_id': chapter_id,
+                    'script_id': script_id,
+                    'style': style,
+                    'aspect_ratio': aspect_ratio,
+                    'custom_prompt': custom_prompt,
+                    'user_tier': user_tier,
+                    'retry_count': retry_count + 1
+                }
+            )
+        
+        # Max retries exceeded or non-retryable error
+        logger.error(f"[SceneImageTask] Final failure for record {record_id}: {error_message}")
+        raise Exception(error_message)
