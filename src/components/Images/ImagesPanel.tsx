@@ -93,7 +93,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     regenerateImage,
     deleteImage,
     generateAllSceneImages,
-    generateAllCharacterImages
+    generateAllCharacterImages,
+    setCharacterImage
   } = useImageGeneration(stableSelectedChapterId ?? '', selectedScriptId);
 
   // Trigger refresh on selection/version changes
@@ -604,22 +605,39 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     fromPlotOverview={!!plotImageUrl && !filteredCharacterImages?.[characterKey]}
                     plotCharacters={plotOverview?.characters || []}
                     onGenerate={(selectedPlotCharName) => {
-                      // If user selected a plot character, use that character's details
-                      let description = '';
+                      // If user selected a plot character, check if they have an existing image
                       if (selectedPlotCharName) {
                         const plotChar = plotOverview?.characters?.find(c => c.name === selectedPlotCharName);
                         if (plotChar) {
-                          description = `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim();
+                          // If plot character has an existing image, use it immediately
+                          if (plotChar.image_url) {
+                            // Update character images state with the plot character's image
+                            setCharacterImage(characterKey, {
+                              name: characterKey,
+                              imageUrl: plotChar.image_url,
+                              prompt: `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim(),
+                              generationStatus: 'completed',
+                              generatedAt: new Date().toISOString(),
+                              script_id: selectedScriptId ?? undefined
+                            });
+                            toast.success(`Using image from ${selectedPlotCharName}`);
+                            return;
+                          }
+
+                          // If no image exists, generate one using their description
+                          const description = `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim();
+                          if (description) {
+                            generateCharacterImage(characterKey, description, generationOptions);
+                            return;
+                          }
                         }
                       }
 
                       // Fall back to current character details if no selection or description found
-                      if (!description) {
-                        description =
-                          typeof character === "object" && character.physical_description && character.personality && character.role
-                            ? `${character.physical_description}. ${character.personality}. ${character.role}`
-                            : `Portrait of ${characterKey}, detailed character design`;
-                      }
+                      const description =
+                        typeof character === "object" && character.physical_description && character.personality && character.role
+                          ? `${character.physical_description}. ${character.personality}. ${character.role}`
+                          : `Portrait of ${characterKey}, detailed character design`;
 
                       generateCharacterImage(characterKey, description, generationOptions);
                     }}
@@ -835,6 +853,12 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
 }) => {
   const [selectedPlotCharacter, setSelectedPlotCharacter] = useState<string>('');
   const [showSelector, setShowSelector] = useState(false);
+
+  // Get selected plot character details
+  const selectedPlotCharDetails = React.useMemo(() => {
+    if (!selectedPlotCharacter) return null;
+    return plotCharacters.find(c => c.name === selectedPlotCharacter);
+  }, [selectedPlotCharacter, plotCharacters]);
   if (viewMode === 'list') {
     return (
       <div className="bg-white border rounded-lg p-4">
@@ -879,6 +903,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
               onRegenerate={onRegenerate}
               onDelete={fromPlotOverview ? undefined : onDelete}
               onView={onView}
+              selectedPlotCharHasImage={!!selectedPlotCharDetails?.image_url}
             />
           </div>
         </div>
@@ -913,6 +938,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
             onDelete={fromPlotOverview ? undefined : onDelete}
             onView={onView}
             compact
+            selectedPlotCharHasImage={!!selectedPlotCharDetails?.image_url}
           />
         </div>
       </div>
@@ -943,14 +969,41 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
                   <option value="">-- Select Character --</option>
                   {plotCharacters.map((char, idx) => (
                     <option key={idx} value={char.name}>
-                      {char.name} {char.role ? `(${char.role})` : ''}
+                      {char.name} {char.role ? `(${char.role})` : ''} {char.image_url ? '✓' : ''}
                     </option>
                   ))}
                 </select>
-                {selectedPlotCharacter && (
-                  <p className="text-xs text-gray-600 mt-1">
-                    Using description from: {selectedPlotCharacter}
-                  </p>
+                {selectedPlotCharDetails && (
+                  <div className="mt-2 p-2 bg-white rounded border border-gray-200">
+                    <div className="flex items-start space-x-2">
+                      {selectedPlotCharDetails.image_url && (
+                        <img
+                          src={selectedPlotCharDetails.image_url}
+                          alt={selectedPlotCharDetails.name}
+                          className="w-12 h-12 object-cover rounded"
+                        />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-gray-900">
+                          {selectedPlotCharDetails.name}
+                        </p>
+                        {selectedPlotCharDetails.role && (
+                          <p className="text-xs text-gray-600">
+                            {selectedPlotCharDetails.role}
+                          </p>
+                        )}
+                        {selectedPlotCharDetails.image_url ? (
+                          <p className="text-xs text-green-600 mt-1">
+                            ✓ Has existing image
+                          </p>
+                        ) : (
+                          <p className="text-xs text-orange-600 mt-1">
+                            No image - will generate new
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
@@ -1030,6 +1083,7 @@ interface ImageActionsProps {
   onDelete?: () => void;
   onView: () => void;
   compact?: boolean;
+  selectedPlotCharHasImage?: boolean;
 }
 
 const ImageActions: React.FC<ImageActionsProps> = ({
@@ -1039,7 +1093,8 @@ const ImageActions: React.FC<ImageActionsProps> = ({
   onRegenerate,
   onDelete,
   onView,
-  compact = false
+  compact = false,
+  selectedPlotCharHasImage = false
 }) => {
   if (compact) {
     return (
@@ -1108,8 +1163,17 @@ const ImageActions: React.FC<ImageActionsProps> = ({
           disabled={isGenerating}
           className="flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-blue-400"
         >
-          <Plus className="w-4 h-4" />
-          <span>Generate</span>
+          {selectedPlotCharHasImage ? (
+            <>
+              <Download className="w-4 h-4" />
+              <span>Use Image</span>
+            </>
+          ) : (
+            <>
+              <Plus className="w-4 h-4" />
+              <span>Generate</span>
+            </>
+          )}
         </button>
       )}
     </div>

@@ -454,6 +454,13 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     }, 300000); // 5 minutes timeout
   };
 
+  const setCharacterImage = useCallback((characterName: string, imageData: CharacterImage) => {
+    setCharacterImages(prev => ({
+      ...prev,
+      [characterName]: imageData
+    }));
+  }, []);
+
   return {
     sceneImages,
     characterImages,
@@ -466,6 +473,7 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     regenerateImage,
     deleteImage,
     generateAllSceneImages,
-    generateAllCharacterImages
+    generateAllCharacterImages,
+    setCharacterImage
   };
 };
