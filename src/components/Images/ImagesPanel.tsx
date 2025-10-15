@@ -602,11 +602,25 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     isGenerating={generatingCharacters.has(characterKey)}
                     viewMode={viewMode}
                     fromPlotOverview={!!plotImageUrl && !filteredCharacterImages?.[characterKey]}
-                    onGenerate={() => {
-                      const description =
-                        typeof character === "object" && character.physical_description && character.personality && character.role
-                          ? `${character.physical_description}. ${character.personality}. ${character.role}`
-                          : `Portrait of ${characterKey}, detailed character design`;
+                    plotCharacters={plotOverview?.characters || []}
+                    onGenerate={(selectedPlotCharName) => {
+                      // If user selected a plot character, use that character's details
+                      let description = '';
+                      if (selectedPlotCharName) {
+                        const plotChar = plotOverview?.characters?.find(c => c.name === selectedPlotCharName);
+                        if (plotChar) {
+                          description = `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim();
+                        }
+                      }
+
+                      // Fall back to current character details if no selection or description found
+                      if (!description) {
+                        description =
+                          typeof character === "object" && character.physical_description && character.personality && character.role
+                            ? `${character.physical_description}. ${character.personality}. ${character.role}`
+                            : `Portrait of ${characterKey}, detailed character design`;
+                      }
+
                       generateCharacterImage(characterKey, description, generationOptions);
                     }}
                     onRegenerate={() => regenerateImage('character', characterKey, generationOptions)}
@@ -799,7 +813,8 @@ interface CharacterImageCardProps {
   isGenerating: boolean;
   viewMode: 'grid' | 'list';
   fromPlotOverview?: boolean;
-  onGenerate: () => void;
+  plotCharacters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string; image_url?: string }>;
+  onGenerate: (selectedPlotCharName?: string) => void;
   onRegenerate: () => void;
   onDelete: () => void;
   onView: () => void;
@@ -812,11 +827,14 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
   isGenerating,
   viewMode,
   fromPlotOverview = false,
+  plotCharacters = [],
   onGenerate,
   onRegenerate,
   onDelete,
   onView
 }) => {
+  const [selectedPlotCharacter, setSelectedPlotCharacter] = useState<string>('');
+  const [showSelector, setShowSelector] = useState(false);
   if (viewMode === 'list') {
     return (
       <div className="bg-white border rounded-lg p-4">
@@ -857,7 +875,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
             <ImageActions
               hasImage={!!characterImage?.imageUrl}
               isGenerating={isGenerating}
-              onGenerate={onGenerate}
+              onGenerate={() => onGenerate(selectedPlotCharacter)}
               onRegenerate={onRegenerate}
               onDelete={fromPlotOverview ? undefined : onDelete}
               onView={onView}
@@ -890,7 +908,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
           <ImageActions
             hasImage={!!characterImage?.imageUrl}
             isGenerating={isGenerating}
-            onGenerate={onGenerate}
+            onGenerate={() => onGenerate(selectedPlotCharacter)}
             onRegenerate={onRegenerate}
             onDelete={fromPlotOverview ? undefined : onDelete}
             onView={onView}
@@ -901,6 +919,44 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
 
       <div className="p-4">
         <h5 className="font-medium text-gray-900 mb-1">{characterName}</h5>
+
+        {/* Character Selector for matching with Plot Overview */}
+        {plotCharacters && plotCharacters.length > 0 && !fromPlotOverview && (
+          <div className="mb-2">
+            <button
+              onClick={() => setShowSelector(!showSelector)}
+              className="text-xs text-blue-600 hover:text-blue-800 underline"
+            >
+              {showSelector ? 'Hide' : 'Match with Plot Character'}
+            </button>
+
+            {showSelector && (
+              <div className="mt-2 p-2 bg-gray-50 rounded border border-gray-200">
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  Select matching character from Plot Overview:
+                </label>
+                <select
+                  value={selectedPlotCharacter}
+                  onChange={(e) => setSelectedPlotCharacter(e.target.value)}
+                  className="w-full text-xs border rounded px-2 py-1 focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">-- Select Character --</option>
+                  {plotCharacters.map((char, idx) => (
+                    <option key={idx} value={char.name}>
+                      {char.name} {char.role ? `(${char.role})` : ''}
+                    </option>
+                  ))}
+                </select>
+                {selectedPlotCharacter && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    Using description from: {selectedPlotCharacter}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <p className="text-sm text-gray-600 mb-2">
           {typeof characterDetails === "object" && characterDetails !== null
             ? (characterDetails as any).role ?? ""

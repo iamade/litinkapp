@@ -93,13 +93,6 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
-  const [editMode, setEditMode] = useState(false);
-  const [form, setForm] = useState({
-    display_name: "",
-    avatar_url: "",
-    bio: "",
-  });
-  const [saving, setSaving] = useState(false);
   const [allBooks, setAllBooks] = useState<Book[]>([]);
   const navigate = useNavigate();
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
@@ -136,16 +129,6 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [allBooks]);
 
-  useEffect(() => {
-    if (profile) {
-      setForm({
-        display_name: profile.display_name || "",
-        avatar_url: profile.avatar_url || "",
-        bio: profile.bio || "",
-      });
-    }
-  }, [profile]);
-
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -163,22 +146,6 @@ export default function Dashboard() {
       </div>
     );
   }
-
-  const handleEdit = () => setEditMode(true);
-  const handleCancel = () => setEditMode(false);
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
-  ) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  };
-  const handleSave = async () => {
-    setSaving(true);
-    await userService.updateProfile(form);
-    setEditMode(false);
-    setSaving(false);
-    const updated = (await userService.getProfile()) as UserProfile;
-    setProfile(updated);
-  };
 
   const handleChapterRetry = async (bookId: string) => {
     setRetryingBookId(bookId);
@@ -215,86 +182,18 @@ export default function Dashboard() {
     <div className="min-h-screen py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Welcome back, {profile?.display_name || user.display_name}!
-            </h1>
-            <p className="text-gray-600">
-              {hasRole(user, "author") && hasRole(user, "explorer")
-                ? "Create, explore, and learn amazing content!"
-                : hasRole(user, "author")
-                ? "Ready to create amazing interactive content?"
-                : "Continue your learning and exploration journey."}
-            </p>
-          </div>
-          <div className="mt-4 md:mt-0 flex space-x-2">
-            <button
-              onClick={handleEdit}
-              className="px-4 py-2 bg-purple-600 text-white rounded-xl font-medium hover:bg-purple-700 transition-all"
-            >
-              Edit Profile
-            </button>
-          </div>
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Welcome back, {profile?.display_name || user.display_name}!
+          </h1>
+          <p className="text-gray-600">
+            {hasRole(user, "author") && hasRole(user, "explorer")
+              ? "Create, explore, and learn amazing content!"
+              : hasRole(user, "author")
+              ? "Ready to create amazing interactive content?"
+              : "Continue your learning and exploration journey."}
+          </p>
         </div>
-        {editMode && (
-          <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 mb-8 max-w-xl mx-auto">
-            <h2 className="text-xl font-bold mb-4">Edit Profile</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Display Name
-                </label>
-                <input
-                  type="text"
-                  name="display_name"
-                  value={form.display_name}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Avatar URL
-                </label>
-                <input
-                  type="text"
-                  name="avatar_url"
-                  value={form.avatar_url}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Bio
-                </label>
-                <textarea
-                  name="bio"
-                  value={form.bio}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-xl px-3 py-2"
-                  rows={3}
-                />
-              </div>
-              <div className="flex space-x-3 mt-4">
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="px-4 py-2 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-all disabled:opacity-50"
-                >
-                  {saving ? "Saving..." : "Save"}
-                </button>
-                <button
-                  onClick={handleCancel}
-                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Upgrade Banner - Show only for users without creator role */}
         {!hasRole(user, "author") && (
@@ -305,28 +204,35 @@ export default function Dashboard() {
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          <Link
-            to="/learn"
-            className="group bg-gradient-to-br from-green-50 to-blue-50 p-6 rounded-2xl border border-green-100 hover:border-green-200 transition-all transform hover:scale-105 hover:shadow-lg"
-          >
-            <Brain className="h-12 w-12 text-green-600 mb-4 group-hover:scale-110 transition-transform" />
-            <h3 className="font-semibold text-gray-900 mb-2">Learning Mode</h3>
-            <p className="text-sm text-gray-600">
-              Interactive tutorials & quizzes
-            </p>
-          </Link>
+          {/* Show Learning Mode only for explorer users */}
+          {hasRole(user, "explorer") && (
+            <Link
+              to="/learn"
+              className="group bg-gradient-to-br from-green-50 to-blue-50 p-6 rounded-2xl border border-green-100 hover:border-green-200 transition-all transform hover:scale-105 hover:shadow-lg"
+            >
+              <Brain className="h-12 w-12 text-green-600 mb-4 group-hover:scale-110 transition-transform" />
+              <h3 className="font-semibold text-gray-900 mb-2">Learning Mode</h3>
+              <p className="text-sm text-gray-600">
+                Interactive tutorials & quizzes
+              </p>
+            </Link>
+          )}
 
-          <Link
-            to="/explore"
-            className="group bg-gradient-to-br from-purple-50 to-pink-50 p-6 rounded-2xl border border-purple-100 hover:border-purple-200 transition-all transform hover:scale-105 hover:shadow-lg"
-          >
-            <Sparkles className="h-12 w-12 text-purple-600 mb-4 group-hover:scale-110 transition-transform" />
-            <h3 className="font-semibold text-gray-900 mb-2">Entertainment</h3>
-            <p className="text-sm text-gray-600">
-              Interactive stories & adventures
-            </p>
-          </Link>
+          {/* Show Entertainment only for explorer users */}
+          {hasRole(user, "explorer") && (
+            <Link
+              to="/explore"
+              className="group bg-gradient-to-br from-purple-50 to-pink-50 p-6 rounded-2xl border border-purple-100 hover:border-purple-200 transition-all transform hover:scale-105 hover:shadow-lg"
+            >
+              <Sparkles className="h-12 w-12 text-purple-600 mb-4 group-hover:scale-110 transition-transform" />
+              <h3 className="font-semibold text-gray-900 mb-2">Entertainment</h3>
+              <p className="text-sm text-gray-600">
+                Interactive stories & adventures
+              </p>
+            </Link>
+          )}
 
+          {/* Show Creator Mode only for author users */}
           {hasRole(user, "author") && (
             <Link
               to="/creator"
@@ -351,15 +257,6 @@ export default function Dashboard() {
                 ? "Upload and claim authorship"
                 : "Upload a book to the platform"}
             </p>
-          </Link>
-
-          <Link
-            to="/profile"
-            className="group bg-gradient-to-br from-gray-50 to-slate-50 p-6 rounded-2xl border border-gray-100 hover:border-gray-200 transition-all transform hover:scale-105 hover:shadow-lg"
-          >
-            <Award className="h-12 w-12 text-gray-600 mb-4 group-hover:scale-110 transition-transform" />
-            <h3 className="font-semibold text-gray-900 mb-2">My Profile</h3>
-            <p className="text-sm text-gray-600">Progress & achievements</p>
           </Link>
         </div>
 
