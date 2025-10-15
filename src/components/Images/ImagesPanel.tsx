@@ -75,6 +75,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'scenes' | 'characters' | null>(null);
+  const [selectedSceneIds, setSelectedSceneIds] = useState<Set<string>>(new Set());
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [deleteAction, setDeleteAction] = useState<'selected' | 'all' | null>(null);
   const [generationOptions, setGenerationOptions] = useState<ImageGenerationOptions>({
     style: 'cinematic',
     quality: 'hd',
@@ -94,6 +97,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     generateCharacterImage,
     regenerateImage,
     deleteImage,
+    deleteGenerations,
+    deleteAllSceneGenerations,
     generateAllSceneImages,
     generateAllCharacterImages,
     setCharacterImage
@@ -447,6 +452,50 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     </div>
   );
 
+  const handleSelectAllScenes = () => {
+    const filteredSceneImages = Object.entries(sceneImages || {}).reduce((acc, [key, image]) => {
+      const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+      if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
+        acc[key] = image;
+      }
+      return acc;
+    }, {} as Record<string | number, SceneImage>);
+
+    const allIds = Object.values(filteredSceneImages)
+      .filter(img => img.id)
+      .map(img => img.id!);
+
+    if (selectedSceneIds.size === allIds.length) {
+      setSelectedSceneIds(new Set());
+    } else {
+      setSelectedSceneIds(new Set(allIds));
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedSceneIds.size === 0) return;
+    setDeleteAction('selected');
+    setShowDeleteConfirmModal(true);
+  };
+
+  const handleDeleteAllScenes = () => {
+    setDeleteAction('all');
+    setShowDeleteConfirmModal(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    setShowDeleteConfirmModal(false);
+
+    if (deleteAction === 'selected') {
+      await deleteGenerations(Array.from(selectedSceneIds));
+      setSelectedSceneIds(new Set());
+    } else if (deleteAction === 'all') {
+      await deleteAllSceneGenerations(selectedScriptId!);
+    }
+
+    setDeleteAction(null);
+  };
+
   const renderScenesTab = () => {
     // Filter images by selected script_id, accepting both script_id and scriptId fields
     const filteredSceneImages = Object.entries(sceneImages || {}).reduce((acc, [key, image]) => {
@@ -458,19 +507,69 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     }, {} as Record<string | number, SceneImage>);
     const sourceSceneImages = filteredSceneImages;
     const hasImages = Object.keys(sourceSceneImages).length > 0;
+    const allSceneIds = Object.values(sourceSceneImages)
+      .filter(img => img.id)
+      .map(img => img.id!);
+    const isAllSelected = allSceneIds.length > 0 && selectedSceneIds.size === allSceneIds.length;
+    const isIndeterminate = selectedSceneIds.size > 0 && selectedSceneIds.size < allSceneIds.length;
 
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h4 className="text-lg font-semibold text-gray-900">Scene Images</h4>
-          <button
-            onClick={handleGenerateAllScenes}
-            disabled={!scenes.length || generatingScenes.size > 0}
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
-          >
-            <Wand2 className="w-4 h-4" />
-            <span>Generate All Scenes</span>
-          </button>
+          <div className="flex items-center space-x-4">
+            <h4 className="text-lg font-semibold text-gray-900">Scene Images</h4>
+            {selectedSceneIds.size > 0 && (
+              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
+                {selectedSceneIds.size} selected
+              </span>
+            )}
+          </div>
+          <div className="flex items-center space-x-2">
+            {hasImages && (
+              <>
+                <button
+                  onClick={handleSelectAllScenes}
+                  className="flex items-center space-x-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+                  title={isAllSelected ? "Deselect all" : "Select all"}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isAllSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = isIndeterminate;
+                    }}
+                    readOnly
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>{isAllSelected ? "Deselect All" : "Select All"}</span>
+                </button>
+                <button
+                  onClick={handleDeleteSelected}
+                  disabled={selectedSceneIds.size === 0}
+                  className="flex items-center space-x-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:bg-gray-400"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Delete Selected</span>
+                </button>
+                <button
+                  onClick={handleDeleteAllScenes}
+                  disabled={!hasImages}
+                  className="flex items-center space-x-2 px-3 py-2 bg-red-700 text-white rounded-md hover:bg-red-800 disabled:bg-gray-400"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Delete All</span>
+                </button>
+              </>
+            )}
+            <button
+              onClick={handleGenerateAllScenes}
+              disabled={!scenes.length || generatingScenes.size > 0}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+            >
+              <Wand2 className="w-4 h-4" />
+              <span>Generate All Scenes</span>
+            </button>
+          </div>
         </div>
 
         {!scenes.length ? (
@@ -494,6 +593,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             {scenes.map((scene: any, idx: number) => {
               const sceneNumber = scene.scene_number || idx + 1;
               const sceneImage = sourceSceneImages?.[sceneNumber];
+              const isSelected = sceneImage?.id ? selectedSceneIds.has(sceneImage.id) : false;
+
               return (
                 <SceneImageCard
                   key={sceneNumber}
@@ -501,6 +602,19 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                   sceneImage={sceneImage}
                   isGenerating={generatingScenes.has(sceneNumber)}
                   viewMode={viewMode}
+                  isSelected={isSelected}
+                  onSelect={(selected) => {
+                    if (!sceneImage?.id) return;
+                    setSelectedSceneIds(prev => {
+                      const newSet = new Set(prev);
+                      if (selected) {
+                        newSet.add(sceneImage.id);
+                      } else {
+                        newSet.delete(sceneImage.id);
+                      }
+                      return newSet;
+                    });
+                  }}
                   onGenerate={() => generateSceneImage(
                     sceneNumber,
                     scene.visual_description || scene.description || '',
@@ -706,6 +820,30 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           confirmButtonClass="bg-blue-600 hover:bg-blue-700"
         />
       )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirmModal && (
+        <ConfirmationModal
+          isOpen={showDeleteConfirmModal}
+          onClose={() => {
+            setShowDeleteConfirmModal(false);
+            setDeleteAction(null);
+          }}
+          onConfirm={handleConfirmDelete}
+          title={
+            deleteAction === 'selected'
+              ? `Delete ${selectedSceneIds.size} Selected Image${selectedSceneIds.size !== 1 ? 's' : ''}`
+              : 'Delete All Generated Scene Images'
+          }
+          message={
+            deleteAction === 'selected'
+              ? `Are you sure you want to delete ${selectedSceneIds.size} selected image${selectedSceneIds.size !== 1 ? 's' : ''}? This action cannot be undone.`
+              : `Are you sure you want to delete all generated scene images for this script? This action cannot be undone.`
+          }
+          confirmText={deleteAction === 'selected' ? 'Delete Selected' : 'Delete All'}
+          confirmButtonClass="bg-red-600 hover:bg-red-700"
+        />
+      )}
     </div>
   );
 };
@@ -716,6 +854,8 @@ interface SceneImageCardProps {
   sceneImage?: SceneImage;
   isGenerating: boolean;
   viewMode: 'grid' | 'list';
+  isSelected?: boolean;
+  onSelect?: (selected: boolean) => void;
   onGenerate: () => void;
   onRegenerate: () => void;
   onDelete: () => void;
@@ -727,6 +867,8 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
   sceneImage,
   isGenerating,
   viewMode,
+  isSelected = false,
+  onSelect,
   onGenerate,
   onRegenerate,
   onDelete,
@@ -792,12 +934,24 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
           alt={`Scene ${scene.scene_number}`}
           size="large"
         />
-        
+
         <div className="absolute top-2 left-2">
           <span className="px-2 py-1 bg-black bg-opacity-70 text-white text-xs rounded">
             Scene {scene.scene_number}
           </span>
         </div>
+
+        {sceneImage?.id && (
+          <div className="absolute top-2 left-1/2 transform -translate-x-1/2">
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={(e) => onSelect?.(e.target.checked)}
+              className="w-4 h-4 text-blue-600 bg-white border-2 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+              aria-label={`Select scene ${scene.scene_number}`}
+            />
+          </div>
+        )}
 
         <div className="absolute top-2 right-2">
           <ImageActions

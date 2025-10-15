@@ -566,6 +566,49 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     }));
   }, []);
 
+  const deleteGenerations = async (ids: string[]) => {
+    try {
+      await userService.deleteImageGenerations(ids);
+      // Remove deleted images from local state
+      setSceneImages(prev => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach(key => {
+          const sceneImage = updated[key];
+          if (sceneImage.id && ids.includes(sceneImage.id)) {
+            delete updated[key];
+          }
+        });
+        return updated;
+      });
+      setCharacterImages(prev => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach(key => {
+          const charImage = updated[key];
+          if (charImage.id && ids.includes(charImage.id)) {
+            delete updated[key];
+          }
+        });
+        return updated;
+      });
+      toast.success(`Deleted ${ids.length} image${ids.length > 1 ? 's' : ''}`);
+    } catch (error) {
+      toast.error('Failed to delete selected images');
+      throw error;
+    }
+  };
+
+  const deleteAllSceneGenerations = async (sceneId: string) => {
+    try {
+      await userService.deleteAllSceneGenerations(sceneId);
+      // Remove all scene images from local state
+      setSceneImages({});
+      toast.success('Deleted all generated scene images');
+    } catch (error) {
+      toast.error('Failed to delete all scene images');
+      throw error;
+    }
+  };
+
   return {
     sceneImages,
     characterImages,
@@ -577,6 +620,8 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
     generateCharacterImage,
     regenerateImage,
     deleteImage,
+    deleteGenerations,
+    deleteAllSceneGenerations,
     generateAllSceneImages,
     generateAllCharacterImages,
     setCharacterImage

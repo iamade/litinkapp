@@ -397,6 +397,20 @@ export const userService = {
     );
   },
 
+  async deleteImageGenerations(ids: string[]): Promise<{ success: boolean; message: string }> {
+    return apiClient.post<{ success: boolean; message: string }>(
+      `/image-generations/delete`,
+      { ids }
+    );
+  },
+
+  async deleteAllSceneGenerations(scriptId: string): Promise<{ success: boolean; message: string }> {
+    return apiClient.post<{ success: boolean; message: string }>(
+      `/image-generations/delete-all`,
+      { script_id: scriptId }
+    );
+  },
+
   // Audio generation methods
   async getChapterAudio(chapterId: string) {
     return apiClient.get<any>(`/chapters/${chapterId}/audio`);
