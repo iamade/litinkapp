@@ -212,4 +212,5 @@ class ImageGenerationRequest(BaseModel):
     character_id: str = Field(..., description="ID of the character for image generation")
     user_id: str = Field(..., description="ID of the user requesting generation")
     prompt: Optional[str] = Field(None, max_length=1000, description="Custom prompt for image generation")
-    style: Optional[str] = Field(None, max_length=100, description="Desired art style")
+    style: Optional[str] = Field("realistic", max_length=100, description="Desired art style (realistic, cinematic, animated, fantasy)")
+    aspect_ratio: Optional[str] = Field("3:4", max_length=10, description="Image aspect ratio (3:4 for portrait, 16:9 for landscape)")

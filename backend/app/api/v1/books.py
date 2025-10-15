@@ -149,12 +149,19 @@ async def get_learning_books_with_progress(
 
 @router.get("", response_model=List[BookSchema])
 async def get_books(
+    book_type: Optional[str] = None,
     supabase_client: Client = Depends(get_supabase),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get books uploaded by the current user"""
+    """Get books uploaded by the current user, optionally filtered by book_type"""
     try:
-        response = supabase_client.table('books').select('*').eq('user_id', current_user["id"]).execute()
+        query = supabase_client.table('books').select('*').eq('user_id', current_user["id"])
+
+        # Filter by book_type if provided
+        if book_type:
+            query = query.eq('book_type', book_type)
+
+        response = query.execute()
         return response.data
     except APIError as e:
         raise HTTPException(status_code=400, detail=e.message)

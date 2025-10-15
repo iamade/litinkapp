@@ -47,7 +47,8 @@ export default function EntertainmentMode() {
     const fetchExploreStories = async () => {
       setExploreLoading(true);
       try {
-        const stories = await userService.getSuperadminEntertainmentBooks();
+        // Changed to use user's own entertainment books instead of superadmin books
+        const stories = await userService.getMyEntertainmentBooks();
         setExploreStories(Array.isArray(stories) ? stories : []);
       } catch {
         // Optionally show a toast
@@ -163,11 +164,11 @@ export default function EntertainmentMode() {
         <div className="mb-12">
           <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center">
             <Sparkles className="h-7 w-7 text-purple-600 mr-2" />
-            Interactive Stories
+            My Entertainment Books
           </h2>
           {exploreLoading ? (
             <div className="text-center py-8">
-              Loading Interactive Stories...
+              Loading your entertainment books...
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">

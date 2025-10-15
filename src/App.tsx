@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
 import { Toaster } from "react-hot-toast";
 import Navbar from "./components/Navbar";
 import HomePage from "./pages/HomePage";
@@ -45,33 +46,35 @@ export function LoadingProvider({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <AuthProvider>
-      <ScriptSelectionProvider>
-        <VideoGenerationProvider>
-          <LoadingProvider>
-            <Router>
-              <Toaster position="top-center" reverseOrder={false} />
-              <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50">
-                <Navbar />
-                <Routes>
-                  <Route path="/" element={<HomePage />} />
-                  <Route path="/auth" element={<AuthPage />} />
-                  <Route path="/dashboard" element={<Dashboard />} />
-                  <Route path="/author" element={<AuthorPanel />} />
-                  <Route path="/learn" element={<LearningMode />} />
-                  <Route path="/explore" element={<EntertainmentMode />} />
-                  <Route path="/creator" element={<CreatorMode />} />
-                  <Route path="/profile" element={<Profile />} />
-                  <Route path="/upload" element={<BookUpload />} />
-                  <Route path="/book/:id" element={<BookView />} />
-                  <Route path="/subscription" element={<SubscriptionPage />} />
-                </Routes>
-              </div>
-            </Router>
-          </LoadingProvider>
-        </VideoGenerationProvider>
-      </ScriptSelectionProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <ScriptSelectionProvider>
+          <VideoGenerationProvider>
+            <LoadingProvider>
+              <Router>
+                <Toaster position="top-center" reverseOrder={false} />
+                <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50 dark:from-gray-900 dark:to-gray-800 transition-colors">
+                  <Navbar />
+                  <Routes>
+                    <Route path="/" element={<HomePage />} />
+                    <Route path="/auth" element={<AuthPage />} />
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/author" element={<AuthorPanel />} />
+                    <Route path="/learn" element={<LearningMode />} />
+                    <Route path="/explore" element={<EntertainmentMode />} />
+                    <Route path="/creator" element={<CreatorMode />} />
+                    <Route path="/profile" element={<Profile />} />
+                    <Route path="/upload" element={<BookUpload />} />
+                    <Route path="/book/:id" element={<BookView />} />
+                    <Route path="/subscription" element={<SubscriptionPage />} />
+                  </Routes>
+                </div>
+              </Router>
+            </LoadingProvider>
+          </VideoGenerationProvider>
+        </ScriptSelectionProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

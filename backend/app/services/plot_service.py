@@ -454,8 +454,20 @@ Return ONLY a valid JSON object with these exact keys:
             named_characters = []
             chapters_summary = book_context.get("chapters_summary", "")
             import re
-            # Find capitalized names (basic heuristic)
-            named_characters += list(set(re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b", chapters_summary)))
+
+            # Find proper names (improved heuristic)
+            # Match patterns like "Harry Potter", "Ron Weasley", "Hermione" but not single common words
+            # Pattern: Capitalized word followed by optional capitalized surname, but must be 3+ chars
+            potential_names = re.findall(r"\b([A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)?)\b", chapters_summary)
+
+            # Additional filtering: names should appear multiple times to be considered real characters
+            from collections import Counter
+            name_counts = Counter(potential_names)
+
+            # Only keep names that appear at least 2 times OR have both first and last name
+            for name, count in name_counts.items():
+                if count >= 2 or ' ' in name:
+                    named_characters.append(name)
             # For non-fiction, generate fictional personas if genre is non-fiction
             if genre == "non-fiction":
                 personas_prompt = (
@@ -491,19 +503,56 @@ Return ONLY a valid JSON object with these exact keys:
             else:
                 logger.warning(f"[PlotService] Character generation failed, using fallback")
 
-            # Filter out invalid character names (pronouns and generic terms)
+            # Filter out invalid character names (comprehensive list)
             invalid_names = {
+                # Pronouns
                 'he', 'she', 'it', 'they', 'him', 'her', 'his', 'hers', 'its', 'their', 'theirs',
                 'i', 'me', 'my', 'mine', 'we', 'us', 'our', 'ours', 'you', 'your', 'yours',
+                # Generic terms
                 'cat', 'dog', 'baby', 'child', 'man', 'woman', 'boy', 'girl', 'person',
                 'uncle', 'aunt', 'mother', 'father', 'brother', 'sister', 'cousin',
-                'mr', 'mrs', 'ms', 'miss', 'dr', 'professor', 'sir', 'madam'
+                'mr', 'mrs', 'ms', 'miss', 'dr', 'professor', 'sir', 'madam',
+                # Common words that aren't characters
+                'be', 'anyway', 'investigations', 'well', 'five', 'thank', 'no', 'yes', 'how',
+                'who', 'what', 'when', 'where', 'why', 'there', 'one', 'two', 'three', 'four',
+                'all', 'but', 'by', 'through', 'know', 'indeed', 'shouldn', 'vol',
+                # Locations and places (not characters)
+                'diagon alley', 'leaky cauldron', 'privet drive', 'gringotts', 'grunnings',
+                'brazilian', 'greek', 'norwegian ridgeback',
+                # Events and concepts
+                'halloween', 'christmas', 'tuesday', 'july', 'dark arts', 'quidditch',
+                # Chapter titles and artifacts
+                'vanishing glass', 'the mirror', 'mirror', 'erised', 'stone', 'sorcerer',
+                'sorting hat', 'caput draconis', 'trapdoor', 'quarters',
+                'midnight duel', 'man with two faces', 'potions master', 'forbidden forest',
+                'boy who lived',
+                # Fragments and partial words
+                'min\nchapter', 'gri\nchapter', 'hagr\nchapter', 'gringott\nchapter',
+                'uncle\nvernon', 'but snape', 'dark',
+                # Single letters or short non-names
+                'a', 'an', 'the', 'and', 'or', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
+                'yeah', 'everybody', 'everyone', 'fluffy'
             }
 
             # Add extracted named characters if not already present
             existing_names = {c.get("name", "").lower() for c in characters_data}
             for name in named_characters:
-                if name and name.lower() not in existing_names and name.lower() not in invalid_names and len(name) > 1:
+                # More strict validation:
+                # 1. Must exist and be at least 3 characters
+                # 2. Not in invalid_names list
+                # 3. Not already in existing characters
+                # 4. Must start with a letter
+                # 5. Should not be all uppercase (likely acronym)
+                # 6. Should not contain newlines or special characters
+                if (name and
+                    len(name) >= 3 and
+                    name.lower() not in existing_names and
+                    name.lower() not in invalid_names and
+                    name[0].isalpha() and
+                    not name.isupper() and
+                    '\n' not in name and
+                    not any(char in name for char in ['\\', '/', '|', '<', '>'])):
+
                     characters_data.append({
                         "name": name,
                         "role": "supporting",
@@ -555,10 +604,17 @@ PLOT OVERVIEW:
 CHAPTER CONTEXT:
 {book_context.get('chapters_summary', '')[:2000]}
 
-TASK:
-Extract ALL significant characters mentioned in the book context. Include both major and minor characters. For each character, provide:
+CRITICAL RULES:
+- ONLY extract PEOPLE/BEINGS with proper names (e.g., "Harry Potter", "Hermione Granger")
+- DO NOT extract: locations, places, objects, events, dates, common words, chapter titles
+- DO NOT extract: "The Mirror", "Diagon Alley", "Christmas", "Halloween", "Stone", "Sorting Hat"
+- Characters must have first names or full names (first + last name)
+- Avoid single common words that happen to be capitalized
 
-1. Name: Character's full name
+TASK:
+Extract ALL significant CHARACTERS (people/beings) mentioned in the book context. Include both major and minor characters. For each character, provide:
+
+1. Name: Character's full name (first name or first + last name)
 2. Role: protagonist/antagonist/supporting/minor
 3. Character Arc: How they change/develop
 4. Physical Description: Appearance details
@@ -584,7 +640,8 @@ Return ONLY a valid JSON array of character objects:
     }}
 ]
 
-Extract ALL characters mentioned, not just 3-5 main ones.
+Extract main and important supporting characters (aim for 5-10 key characters).
+Focus on characters who actually appear in the story, not locations or objects.
 """
 
         return prompt.strip()
@@ -1101,33 +1158,14 @@ Return the enhanced script.
 
             plot_data = plot_response.data[0]
 
-            # Get associated characters
+            # Get associated characters (ordered by creation time for consistent display)
             characters_response = self.db.table('characters').select('*').eq(
                 'plot_overview_id', plot_data['id']
-            ).execute()
+            ).order('created_at', desc=False).execute()
 
             characters = []
             for char_data in characters_response.data or []:
-                char_response = CharacterResponse(
-                    id=char_data['id'],
-                    plot_overview_id=char_data['plot_overview_id'],
-                    book_id=char_data['book_id'],
-                    user_id=char_data['user_id'],
-                    name=char_data['name'],
-                    role=char_data['role'],
-                    character_arc=char_data['character_arc'],
-                    physical_description=char_data['physical_description'],
-                    personality=char_data['personality'],
-                    archetypes=char_data['archetypes'],
-                    want=char_data['want'],
-                    need=char_data['need'],
-                    lie=char_data['lie'],
-                    ghost=char_data['ghost'],
-                    generation_method=char_data['generation_method'],
-                    model_used=char_data['model_used'],
-                    created_at=char_data['created_at'],
-                    updated_at=char_data['updated_at']
-                )
+                char_response = CharacterResponse(**char_data)
                 characters.append(char_response)
 
             # Create plot overview response
@@ -1193,26 +1231,7 @@ Return the enhanced script.
 
             characters = []
             for char_data in characters_response.data or []:
-                char_response = CharacterResponse(
-                    id=char_data['id'],
-                    plot_overview_id=char_data['plot_overview_id'],
-                    book_id=char_data['book_id'],
-                    user_id=char_data['user_id'],
-                    name=char_data['name'],
-                    role=char_data['role'],
-                    character_arc=char_data['character_arc'],
-                    physical_description=char_data['physical_description'],
-                    personality=char_data['personality'],
-                    archetypes=char_data['archetypes'],
-                    want=char_data['want'],
-                    need=char_data['need'],
-                    lie=char_data['lie'],
-                    ghost=char_data['ghost'],
-                    generation_method=char_data['generation_method'],
-                    model_used=char_data['model_used'],
-                    created_at=char_data['created_at'],
-                    updated_at=char_data['updated_at']
-                )
+                char_response = CharacterResponse(**char_data)
                 characters.append(char_response)
 
             if update_data:

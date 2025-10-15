@@ -256,8 +256,22 @@ class SubscriptionManager:
         Record usage for billing and limits tracking
         """
         try:
+            # Get user's active subscription
+            subscription_result = self.supabase.table('user_subscriptions')\
+                .select('id')\
+                .eq('user_id', user_id)\
+                .eq('status', 'active')\
+                .order('created_at', desc=True)\
+                .limit(1)\
+                .execute()
+
+            subscription_id = None
+            if subscription_result.data and len(subscription_result.data) > 0:
+                subscription_id = subscription_result.data[0]['id']
+
             usage_data = {
                 'user_id': user_id,
+                'subscription_id': subscription_id,
                 'resource_type': resource_type,
                 'cost_usd': cost_usd,
                 'metadata': metadata or {},
@@ -279,6 +293,7 @@ class SubscriptionManager:
 
         except Exception as e:
             logger.error(f"Error recording usage: {str(e)}")
+            logger.error(f"Usage data attempted: {usage_data if 'usage_data' in locals() else 'N/A'}")
 
     async def can_user_generate_video(self, user_id: str) -> Dict[str, Any]:
         """

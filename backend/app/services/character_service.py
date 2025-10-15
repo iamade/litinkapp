@@ -207,14 +207,16 @@ class CharacterService:
         self,
         character_id: str,
         user_id: str,
-        custom_prompt: Optional[str] = None
+        custom_prompt: Optional[str] = None,
+        style: str = "realistic",
+        aspect_ratio: str = "3:4"
     ) -> Dict[str, Any]:
         """
-        Generates character portrait using existing image generation service.
-        Builds appropriate prompt from character data and handles subscription limits.
+        Generates character portrait using async Celery task.
+        Returns task information for status tracking instead of blocking.
         """
         try:
-            logger.info(f"[CharacterService] Generating image for character {character_id}")
+            logger.info(f"[CharacterService] Queueing image generation for character {character_id}")
 
             # Check subscription limits for image generation
             usage_check = await self.subscription_manager.check_usage_limits(user_id, "image")
@@ -229,62 +231,130 @@ class CharacterService:
             if not character:
                 raise CharacterNotFoundError(f"Character {character_id} not found")
 
-            # Build image generation prompt
-            prompt = self._build_character_image_prompt(character, custom_prompt)
+            # Build character description for image generation
+            character_description = character.physical_description or character.personality or f"Character portrait of {character.name}"
 
-            # Generate image using ModelsLab service with tier-based model selection
-            image_result = await self.image_service.generate_character_image(
+            # Create initial record in image_generations table
+            from datetime import datetime
+            image_record_data = {
+                'user_id': user_id,
+                'image_type': 'character',
+                'character_name': character.name,
+                'character_id': character_id,
+                'scene_description': character_description,
+                'status': 'pending',
+                'style': style,
+                'aspect_ratio': aspect_ratio,
+                'prompt': self._build_character_image_prompt(character, custom_prompt),
+                'metadata': {
+                    'character_id': character_id,
+                    'image_type': 'character_portrait',
+                    'created_via': 'character_service'
+                }
+            }
+
+            record_result = self.db.table('image_generations').insert(image_record_data).execute()
+            record_id = record_result.data[0]['id'] if record_result.data else None
+
+            if not record_id:
+                raise CharacterServiceError("Failed to create image generation record")
+
+            # Update character status to pending
+            self.db.table('characters').update({
+                'image_generation_status': 'pending',
+                'updated_at': datetime.now().isoformat()
+            }).eq('id', character_id).execute()
+
+            # Queue the async task
+            from app.tasks.image_tasks import generate_character_image_task
+            task = generate_character_image_task.delay(
                 character_name=character.name,
-                character_description=character.physical_description or character.personality or "",
-                style="realistic",  # Default style
-                aspect_ratio="3:4",  # Portrait aspect ratio
+                character_description=character_description,
+                user_id=user_id,
+                character_id=character_id,
+                style=style,
+                aspect_ratio=aspect_ratio,
+                custom_prompt=custom_prompt,
+                record_id=record_id,
                 user_tier=user_tier
             )
 
-            if image_result.get("status") == "success":
-                # Update character with image data
-                await self._update_character_image_metadata(
-                    character_id,
-                    {
-                        "image_url": image_result.get("image_url"),
-                        "image_generation_prompt": prompt,
-                        "image_metadata": {
-                            "model_used": image_result.get("model_used"),
-                            "generation_time": image_result.get("generation_time"),
-                            "aspect_ratio": "3:4",
-                            "style": "realistic"
-                        }
-                    }
-                )
-
-                # Record usage
+            # Record usage immediately (image generation is queued)
+            try:
                 await self.subscription_manager.record_usage(
                     user_id=user_id,
                     resource_type="image",
-                    cost_usd=0.0,  # Could be calculated based on service
+                    cost_usd=0.0,
                     metadata={
                         "character_id": character_id,
-                        "image_type": "character_portrait"
+                        "image_type": "character_portrait",
+                        "task_id": task.id
                     }
                 )
+            except Exception as usage_error:
+                logger.warning(f"[CharacterService] Failed to record usage: {str(usage_error)}")
 
-                return {
-                    "character_id": character_id,
-                    "image_url": image_result.get("image_url"),
-                    "prompt_used": prompt,
-                    "metadata": image_result.get("meta", {}),
-                    "message": "Character image generated successfully"
-                }
-            else:
-                raise ImageGenerationError(f"Image generation failed: {image_result.get('error', 'Unknown error')}")
+            logger.info(f"[CharacterService] Queued image generation task {task.id} for character {character_id}")
+
+            return {
+                "character_id": character_id,
+                "task_id": task.id,
+                "record_id": record_id,
+                "status": "queued",
+                "message": "Character image generation has been queued",
+                "estimated_time_seconds": 60
+            }
 
         except CharacterNotFoundError:
             raise
         except CharacterServiceError:
             raise
         except Exception as e:
-            logger.error(f"[CharacterService] Error generating character image: {str(e)}")
-            raise ImageGenerationError(f"Image generation failed: {str(e)}")
+            logger.error(f"[CharacterService] Error queueing character image generation: {str(e)}")
+            raise ImageGenerationError(f"Failed to queue image generation: {str(e)}")
+
+    async def get_character_image_status(
+        self,
+        character_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get the current status of character image generation.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+
+            result = self.db.table('characters').select(
+                'image_generation_status, image_generation_task_id, image_url, image_metadata'
+            ).eq('id', character_id).single().execute()
+
+            if not result.data:
+                raise CharacterNotFoundError(f"Character {character_id} not found")
+
+            data = result.data
+            status = data.get('image_generation_status', 'none')
+            task_id = data.get('image_generation_task_id')
+            image_url = data.get('image_url')
+            metadata = data.get('image_metadata', {})
+
+            response = {
+                "character_id": character_id,
+                "status": status,
+                "task_id": task_id,
+                "image_url": image_url,
+                "metadata": metadata
+            }
+
+            if status == 'failed' and metadata:
+                response["error"] = metadata.get('error')
+
+            return response
+
+        except CharacterNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"[CharacterService] Error getting image status: {str(e)}")
+            raise CharacterServiceError(f"Failed to get image status: {str(e)}")
 
     async def get_character_by_id(self, character_id: str, user_id: str) -> Optional[CharacterResponse]:
         """
@@ -473,6 +543,66 @@ class CharacterService:
             logger.error(f"[CharacterService] Error deleting character {character_id}: {str(e)}")
             return False
 
+    async def create_character(
+        self,
+        plot_overview_id: str,
+        user_id: str,
+        character_data: CharacterCreate
+    ) -> CharacterResponse:
+        """
+        Create a new character manually.
+        """
+        try:
+            # Validate plot overview exists and user owns it
+            plot_response = self.db.table('plot_overviews').select('id, book_id').eq(
+                'id', plot_overview_id
+            ).eq('user_id', user_id).execute()
+
+            if not plot_response.data:
+                raise PermissionDeniedError("Plot overview not found or access denied")
+
+            plot_data = plot_response.data[0]
+            book_id = plot_data['book_id']
+
+            # Create character record
+            character_id = str(uuid.uuid4())
+            character_dict = {
+                'id': character_id,
+                'plot_overview_id': plot_overview_id,
+                'book_id': book_id,
+                'user_id': user_id,
+                'name': character_data.name,
+                'role': character_data.role or '',
+                'character_arc': character_data.character_arc or '',
+                'physical_description': character_data.physical_description or '',
+                'personality': character_data.personality or '',
+                'archetypes': character_data.archetypes or [],
+                'want': character_data.want or '',
+                'need': character_data.need or '',
+                'lie': character_data.lie or '',
+                'ghost': character_data.ghost or '',
+                'image_url': character_data.image_url,
+                'image_generation_prompt': character_data.image_generation_prompt,
+                'image_metadata': character_data.image_metadata or {},
+                'generation_method': 'manual',
+                'model_used': None,
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+
+            result = self.db.table('characters').insert(character_dict).execute()
+
+            if not result.data:
+                raise CharacterServiceError("Failed to create character")
+
+            return CharacterResponse(**result.data[0])
+
+        except PermissionDeniedError:
+            raise
+        except Exception as e:
+            logger.error(f"[CharacterService] Error creating character: {str(e)}")
+            raise CharacterServiceError(f"Failed to create character: {str(e)}")
+
     async def get_all_archetypes(self) -> List[CharacterArchetypeResponse]:
         """
         Get all available character archetypes.
@@ -645,17 +775,38 @@ Return a JSON array of matches sorted by confidence:
         Update character record with image metadata.
         """
         try:
+            # Extract and validate image_url
+            image_url = image_data.get('image_url')
+            if not image_url:
+                logger.error(f"[CharacterService] No image_url provided in image_data: {image_data}")
+                raise CharacterServiceError("image_url is required")
+
             update_data = {
-                'image_url': image_data.get('image_url'),
+                'image_url': image_url,
                 'image_generation_prompt': image_data.get('image_generation_prompt'),
                 'image_metadata': image_data.get('image_metadata', {}),
                 'updated_at': datetime.now().isoformat()
             }
 
-            self.db.table('characters').update(update_data).eq('id', character_id).execute()
+            logger.info(f"[CharacterService] Updating character {character_id}")
+            logger.info(f"[CharacterService] Update data: {update_data}")
+
+            result = self.db.table('characters').update(update_data).eq('id', character_id).execute()
+
+            logger.info(f"[CharacterService] Update result: {result}")
+
+            if not result.data:
+                logger.error(f"[CharacterService] No character found to update with ID: {character_id}")
+                raise CharacterServiceError(f"Character {character_id} not found for image update")
+
+            logger.info(f"[CharacterService] Successfully updated character {character_id} with image_url: {image_url}")
+            logger.info(f"[CharacterService] Updated character data: {result.data[0]}")
 
         except Exception as e:
             logger.error(f"[CharacterService] Error updating character image metadata: {str(e)}")
+            logger.error(f"[CharacterService] Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"[CharacterService] Traceback: {traceback.format_exc()}")
             raise CharacterServiceError(f"Failed to update image metadata: {str(e)}")
 
     async def _get_all_archetypes(self) -> List[Dict[str, Any]]:

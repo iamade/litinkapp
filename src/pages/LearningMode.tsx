@@ -69,10 +69,11 @@ export default function LearningMode() {
     const fetchExploreBooks = async () => {
       setExploreLoading(true);
       try {
-        const books = await userService.getSuperadminLearningBooks();
+        // Changed to use user's own learning books instead of superadmin books
+        const books = await userService.getMyLearningBooks();
         setExploreBooks(Array.isArray(books) ? books : []);
       } catch {
-        toast.error("Failed to load Explore Learning Materials");
+        toast.error("Failed to load your learning books");
       } finally {
         setExploreLoading(false);
       }
@@ -191,11 +192,11 @@ export default function LearningMode() {
         <div className="mb-12">
           <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center">
             <BookOpen className="h-7 w-7 text-purple-600 mr-2" />
-            Explore Learning Materials
+            My Learning Books
           </h2>
           {exploreLoading ? (
             <div className="text-center py-8">
-              Loading Explore Learning Materials...
+              Loading your learning books...
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">

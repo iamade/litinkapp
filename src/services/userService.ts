@@ -230,9 +230,21 @@ export const userService = {
       }
     );
   },
+  // Get user's own learning books (not superadmin books)
+  getMyLearningBooks: async () => {
+    return apiClient.get("/books?book_type=learning");
+  },
+
+  // Get user's own entertainment books (not superadmin books)
+  getMyEntertainmentBooks: async () => {
+    return apiClient.get("/books?book_type=entertainment");
+  },
+
   getLearningBooksWithProgress: async () => {
     return apiClient.get("/books/learning-progress");
   },
+
+  // These are for the Explore page - superadmin curated content
   getSuperadminLearningBooks: async () => {
     return apiClient.get("/books/superadmin-learning-books");
   },
@@ -482,6 +494,64 @@ export const userService = {
       `/plots/books/${bookId}/overview`
     );
     return response;
+  },
+
+  async deleteCharacter(characterId: string) {
+    return apiClient.delete(`/characters/${characterId}`);
+  },
+
+  async bulkDeleteCharacters(characterIds: string[]) {
+    return apiClient.post(`/characters/bulk-delete`, characterIds);
+  },
+
+  async createCharacter(plotOverviewId: string, characterData: {
+    name: string;
+    role?: string;
+    physical_description?: string;
+    personality?: string;
+    character_arc?: string;
+    archetypes?: string[];
+    want?: string;
+    need?: string;
+    lie?: string;
+    ghost?: string;
+  }) {
+    return apiClient.post(`/characters/plot/${plotOverviewId}`, {
+      ...characterData,
+      plot_overview_id: plotOverviewId,
+      book_id: '', // Will be filled by backend
+      user_id: '', // Will be filled by backend
+    });
+  },
+
+  async updateCharacter(characterId: string, updates: {
+    name?: string;
+    role?: string;
+    physical_description?: string;
+    personality?: string;
+    character_arc?: string;
+    archetypes?: string[];
+  }) {
+    return apiClient.put(`/characters/${characterId}`, updates);
+  },
+
+  async generateCharacterImageGlobal(characterId: string, customPrompt?: string) {
+    return apiClient.post(`/characters/${characterId}/generate-image`, {
+      prompt: customPrompt,
+      character_id: characterId,
+      user_id: '' // Will be set by backend from auth token
+    });
+  },
+
+  async getCharacterImageStatus(characterId: string): Promise<{
+    character_id: string;
+    status: string;
+    task_id?: string;
+    image_url?: string;
+    metadata?: any;
+    error?: string;
+  }> {
+    return apiClient.get(`/characters/${characterId}/image-status`);
   },
 
   // Add these methods to userService.ts

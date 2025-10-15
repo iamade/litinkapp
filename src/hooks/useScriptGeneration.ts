@@ -27,6 +27,7 @@ interface ChapterScript {
   scenes: Scene[];
   created_at: string;
   status: 'draft' | 'ready' | 'approved';
+  script_story_type?: string;
 }
 
 interface Act {

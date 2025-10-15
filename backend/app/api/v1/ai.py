@@ -2406,6 +2406,30 @@ Script to analyze:
             # Extract character names with improved logic, filtered by script style
             characters = extract_characters(character_details, script_style)
 
+        # ✅ FALLBACK: If no characters found from AI analysis, extract directly from script
+        if not characters or len(characters) == 0:
+            print(f"[DEBUG] No characters from AI analysis, extracting directly from script")
+            # Extract character names from dialogue - lines that are all caps followed by dialogue
+            script_lines = script.split('\n')
+            potential_characters = set()
+
+            for i, line in enumerate(script_lines):
+                line_stripped = line.strip()
+                # Look for character names: ALL CAPS lines that are not scene headers
+                if (line_stripped and line_stripped.isupper() and
+                    not line_stripped.startswith(('INT.', 'EXT.', 'SCENE', 'ACT', 'FADE', 'CUT TO')) and
+                    not any(x in line_stripped for x in ['**', ':', 'NARRATOR ('])):
+                    # Clean up the character name
+                    char_name = line_stripped.strip('*').strip()
+                    # Remove parenthetical descriptions like "(V.O.)" or "(mocking)"
+                    char_name = re.sub(r'\([^)]+\)', '', char_name).strip()
+                    # Only add if it looks like a valid name (2-30 chars, contains letters)
+                    if 2 <= len(char_name) <= 30 and any(c.isalpha() for c in char_name):
+                        potential_characters.add(char_name.title())
+
+            characters = list(potential_characters)[:15]  # Limit to 15 characters
+            print(f"[DEBUG] Extracted {len(characters)} characters directly from script: {characters}")
+
         # Generate default script name if not provided
         if not script_name:
             script_name = f"{script_style.title()} Script - {datetime.now().strftime('%Y-%m-%d %H:%M')}"

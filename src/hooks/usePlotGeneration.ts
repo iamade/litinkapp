@@ -84,12 +84,37 @@ export const usePlotGeneration = (bookId: string) => {
     }
   }, [bookId]);
 
+  const deleteCharacter = async (characterId: string) => {
+    try {
+      await userService.deleteCharacter(characterId);
+
+      // Update local state by removing the character
+      setPlotOverview(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          characters: prev.characters.filter(char => {
+            // Character might have id or might be identified by name
+            // Backend returns character with id field
+            const charId = (char as any).id;
+            return charId !== characterId;
+          })
+        };
+      });
+
+      toast.success('Character deleted successfully');
+    } catch (error) {
+      toast.error('Failed to delete character');
+      throw error;
+    }
+  };
+
   return {
     plotOverview,
     isGenerating,
     isLoading,
     generatePlot,
-    // savePlot,
-    loadPlot
+    loadPlot,
+    deleteCharacter
   };
 };
