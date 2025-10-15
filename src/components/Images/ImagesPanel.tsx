@@ -161,23 +161,54 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     return [];
   }, [selectedScript]);
 
-  // Get characters from selected script (primary source) or fallback to plot overview
+  // Get characters from selected script and enrich with plot overview data
   const characters = React.useMemo(() => {
-
     // First priority: characters from the selected script
     if (typeof selectedScript === "object" && selectedScript !== null && "characters" in selectedScript) {
       const scriptCharacters = (selectedScript as { characters?: any[] }).characters || [];
       if (scriptCharacters.length > 0) {
-        // Convert simple string array to object format if needed
-        return scriptCharacters.map(char =>
-          typeof char === 'string' ? { name: char } : char
-        );
+        // Convert to normalized format and enrich with plot overview data
+        return scriptCharacters.map(char => {
+          const charName = typeof char === 'string' ? char : char.name;
+
+          // Try to find matching character in plot overview (case-insensitive, fuzzy match)
+          const plotChar = plotOverview?.characters?.find(pc => {
+            const plotName = pc.name.toLowerCase().trim();
+            const scriptName = charName.toLowerCase().trim();
+
+            // Exact match
+            if (plotName === scriptName) return true;
+
+            // Check if one is substring of other (e.g., "Dumbledore" matches "Albus Dumbledore")
+            if (plotName.includes(scriptName) || scriptName.includes(plotName)) return true;
+
+            // Check first name match (e.g., "Harry" matches "Harry Potter")
+            const plotFirstName = plotName.split(' ')[0];
+            const scriptFirstName = scriptName.split(' ')[0];
+            if (plotFirstName === scriptFirstName && plotFirstName.length > 2) return true;
+
+            return false;
+          });
+
+          // Merge script character with plot overview data if found
+          if (plotChar) {
+            return {
+              name: charName,
+              ...plotChar,
+              // Keep original name from script for display
+              displayName: charName
+            };
+          }
+
+          // Return basic character if not found in plot overview
+          return typeof char === 'string' ? { name: char, displayName: char } : { ...char, displayName: char.name };
+        });
       }
     }
 
     // Fallback: use plot overview characters
     if (plotOverview?.characters && plotOverview.characters.length > 0) {
-      return plotOverview.characters;
+      return plotOverview.characters.map(char => ({ ...char, displayName: char.name }));
     }
 
     return [];
@@ -543,15 +574,34 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             }`}>
               {characters.map((character) => {
                 const characterKey = typeof character === "string" ? character : character.name;
-                const characterImage = filteredCharacterImages?.[characterKey];
+                const displayName = typeof character === "object" && character.displayName ? character.displayName : characterKey;
+
+                // Check for script-specific image first, then fall back to plot overview image
+                let characterImage = filteredCharacterImages?.[characterKey];
+
+                // If no script-specific image, check if plot overview has an image
+                const plotImageUrl = typeof character === "object" && character.image_url ? character.image_url : null;
+
+                if (!characterImage && plotImageUrl) {
+                  // Create a pseudo-image object from plot overview
+                  characterImage = {
+                    name: characterKey,
+                    imageUrl: plotImageUrl,
+                    prompt: '',
+                    generationStatus: 'completed',
+                    id: undefined
+                  } as CharacterImage;
+                }
+
                 return (
                   <CharacterImageCard
                     key={characterKey}
-                    characterName={characterKey}
+                    characterName={displayName}
                     characterImage={characterImage}
                     characterDetails={character}
                     isGenerating={generatingCharacters.has(characterKey)}
                     viewMode={viewMode}
+                    fromPlotOverview={!!plotImageUrl && !filteredCharacterImages?.[characterKey]}
                     onGenerate={() => {
                       const description =
                         typeof character === "object" && character.physical_description && character.personality && character.role
@@ -748,6 +798,7 @@ interface CharacterImageCardProps {
   characterDetails?: Tables<'characters'> | string;
   isGenerating: boolean;
   viewMode: 'grid' | 'list';
+  fromPlotOverview?: boolean;
   onGenerate: () => void;
   onRegenerate: () => void;
   onDelete: () => void;
@@ -760,6 +811,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
   characterDetails,
   isGenerating,
   viewMode,
+  fromPlotOverview = false,
   onGenerate,
   onRegenerate,
   onDelete,
@@ -777,9 +829,16 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
               size="small"
             />
           </div>
-          
+
           <div className="flex-1 min-w-0">
-            <h5 className="font-medium text-gray-900">{characterName}</h5>
+            <div className="flex items-center gap-2">
+              <h5 className="font-medium text-gray-900">{characterName}</h5>
+              {fromPlotOverview && characterImage?.imageUrl && (
+                <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded">
+                  From Plot Overview
+                </span>
+              )}
+            </div>
             <p className="text-sm text-gray-600">
               {typeof characterDetails === "object" && characterDetails !== null
                 ? (characterDetails as any).role ?? ""
@@ -800,7 +859,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
               isGenerating={isGenerating}
               onGenerate={onGenerate}
               onRegenerate={onRegenerate}
-              onDelete={onDelete}
+              onDelete={fromPlotOverview ? undefined : onDelete}
               onView={onView}
             />
           </div>
@@ -818,14 +877,22 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
           alt={characterName}
           size="large"
         />
-        
+
+        {fromPlotOverview && characterImage?.imageUrl && (
+          <div className="absolute top-2 left-2">
+            <span className="px-2 py-1 bg-green-600 text-white text-xs rounded shadow-lg">
+              From Plot Overview
+            </span>
+          </div>
+        )}
+
         <div className="absolute top-2 right-2">
           <ImageActions
             hasImage={!!characterImage?.imageUrl}
             isGenerating={isGenerating}
             onGenerate={onGenerate}
             onRegenerate={onRegenerate}
-            onDelete={onDelete}
+            onDelete={fromPlotOverview ? undefined : onDelete}
             onView={onView}
             compact
           />
@@ -904,7 +971,7 @@ interface ImageActionsProps {
   isGenerating: boolean;
   onGenerate: () => void;
   onRegenerate: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   onView: () => void;
   compact?: boolean;
 }
@@ -969,13 +1036,15 @@ const ImageActions: React.FC<ImageActionsProps> = ({
           >
             <RefreshCw className="w-4 h-4" />
           </button>
-          <button
-            onClick={onDelete}
-            className="p-2 text-red-600 hover:bg-red-50 rounded"
-            title="Delete"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {onDelete && (
+            <button
+              onClick={onDelete}
+              className="p-2 text-red-600 hover:bg-red-50 rounded"
+              title="Delete"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </>
       ) : (
         <button
