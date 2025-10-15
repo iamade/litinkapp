@@ -2,12 +2,14 @@ import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, hasRole } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
-import { Menu, X, User, LogOut, Moon, Sun } from "lucide-react";
+import { useUserMode } from "../hooks/useUserMode";
+import { Menu, X, User, LogOut, Moon, Sun, Compass, Sparkles } from "lucide-react";
 import { toast } from "react-hot-toast";
 
 export default function Navbar() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const { mode, switchMode, canAccessCreatorMode, canAccessExplorerMode } = useUserMode();
   const location = useLocation();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -95,6 +97,33 @@ export default function Navbar() {
           <div className="hidden md:flex items-center space-x-4">
             {user ? (
               <div className="flex items-center space-x-4">
+                {/* Mode Switcher - Only show if user has both roles */}
+                {canAccessCreatorMode && canAccessExplorerMode && (
+                  <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                    <button
+                      onClick={() => switchMode('explorer')}
+                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                        mode === 'explorer'
+                          ? 'bg-white dark:bg-gray-700 text-green-600 dark:text-green-400 shadow-sm'
+                          : 'text-gray-600 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400'
+                      }`}
+                    >
+                      <Compass className="h-4 w-4" />
+                      <span>Explorer</span>
+                    </button>
+                    <button
+                      onClick={() => switchMode('creator')}
+                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                        mode === 'creator'
+                          ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
+                          : 'text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400'
+                      }`}
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      <span>Creator</span>
+                    </button>
+                  </div>
+                )}
                 <button
                   onClick={toggleTheme}
                   className="p-2 text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -210,6 +239,42 @@ export default function Navbar() {
 
               {user ? (
                 <>
+                  {/* Mobile Mode Switcher */}
+                  {canAccessCreatorMode && canAccessExplorerMode && (
+                    <div className="px-2 py-3 border-t border-b border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 px-2">Switch Mode</p>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => {
+                            switchMode('explorer');
+                            setIsMenuOpen(false);
+                          }}
+                          className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                            mode === 'explorer'
+                              ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                          }`}
+                        >
+                          <Compass className="h-4 w-4" />
+                          <span>Explorer</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            switchMode('creator');
+                            setIsMenuOpen(false);
+                          }}
+                          className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                            mode === 'creator'
+                              ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                          }`}
+                        >
+                          <Sparkles className="h-4 w-4" />
+                          <span>Creator</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <Link
                     to="/dashboard"
                     onClick={() => setIsMenuOpen(false)}

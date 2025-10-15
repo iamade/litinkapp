@@ -14,6 +14,11 @@ interface User {
   display_name: string;
   roles: ("author" | "explorer")[];
   role?: "author" | "explorer";
+  preferred_mode?: "explorer" | "creator";
+  onboarding_completed?: {
+    explorer?: boolean;
+    creator?: boolean;
+  };
 }
 
 export const hasRole = (user: User | null, role: "author" | "explorer"): boolean => {

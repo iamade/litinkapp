@@ -4,6 +4,7 @@ import { useAuth, hasRole } from "../contexts/AuthContext";
 import { userService } from "../services/userService";
 import { subscriptionService, SubscriptionUsageStats } from "../services/subscriptionService";
 import UsageIndicator from "../components/Subscription/UsageIndicator";
+import UpgradeBanner from "../components/Dashboard/UpgradeBanner";
 import {
   Brain,
   Sparkles,
@@ -292,6 +293,13 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Upgrade Banner - Show only for users without creator role */}
+        {!hasRole(user, "author") && (
+          <div className="mb-8">
+            <UpgradeBanner />
           </div>
         )}
 

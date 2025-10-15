@@ -1,5 +1,6 @@
 import React from "react";
 import { useAuth, hasRole } from "../contexts/AuthContext";
+import RoleManagement from "../components/Profile/RoleManagement";
 import {
   User,
   Award,
@@ -175,6 +176,8 @@ export default function Profile() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Stats and Activity */}
           <div className="lg:col-span-2 space-y-8">
+            {/* Role Management Section */}
+            <RoleManagement />
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
