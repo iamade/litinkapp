@@ -604,23 +604,37 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     viewMode={viewMode}
                     fromPlotOverview={!!plotImageUrl && !filteredCharacterImages?.[characterKey]}
                     plotCharacters={plotOverview?.characters || []}
-                    onGenerate={(selectedPlotCharName) => {
+                    onGenerate={async (selectedPlotCharName) => {
                       // If user selected a plot character, check if they have an existing image
                       if (selectedPlotCharName) {
                         const plotChar = plotOverview?.characters?.find(c => c.name === selectedPlotCharName);
                         if (plotChar) {
                           // If plot character has an existing image, use it immediately
                           if (plotChar.image_url) {
-                            // Update character images state with the plot character's image
+                            // First update local state for immediate feedback
+                            const prompt = `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim();
                             setCharacterImage(characterKey, {
                               name: characterKey,
                               imageUrl: plotChar.image_url,
-                              prompt: `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim(),
+                              prompt: prompt,
                               generationStatus: 'completed',
                               generatedAt: new Date().toISOString(),
                               script_id: selectedScriptId ?? undefined
                             });
-                            toast.success(`Using image from ${selectedPlotCharName}`);
+
+                            // Persist to database
+                            try {
+                              await userService.linkCharacterImage(stableSelectedChapterId!, {
+                                character_name: characterKey,
+                                image_url: plotChar.image_url,
+                                script_id: selectedScriptId ?? undefined,
+                                prompt: prompt
+                              });
+                              toast.success(`Using image from ${selectedPlotCharName}`);
+                            } catch (error) {
+                              console.error('Failed to persist character image:', error);
+                              toast.error('Image displayed but not saved. Please try again.');
+                            }
                             return;
                           }
 

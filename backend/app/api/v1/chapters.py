@@ -265,6 +265,62 @@ async def generate_character_image(
         raise HTTPException(status_code=500, detail=f"Error queuing character image generation: {str(e)}")
 
 
+@router.post("/{chapter_id}/images/characters/link")
+async def link_character_image(
+    chapter_id: str,
+    request: Dict[str, Any],
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """Link an existing character image (e.g., from plot overview) to a script"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user['id'], supabase_client)
+
+        character_name = request.get('character_name')
+        image_url = request.get('image_url')
+        script_id = request.get('script_id')
+        prompt = request.get('prompt', '')
+
+        if not character_name or not image_url:
+            raise HTTPException(status_code=400, detail="character_name and image_url are required")
+
+        # Create record in database
+        record_data = {
+            'user_id': current_user['id'],
+            'image_type': 'character',
+            'character_name': character_name,
+            'image_url': image_url,
+            'image_prompt': prompt,
+            'script_id': script_id,
+            'status': 'completed',
+            'metadata': {
+                'chapter_id': chapter_id,
+                'character_name': character_name,
+                'image_type': 'character',
+                'image_prompt': prompt,
+                'linked_from_plot': True
+            }
+        }
+
+        record_result = supabase_client.table('image_generations').insert(record_data).execute()
+        record_id = record_result.data[0]['id'] if record_result.data else None
+
+        if not record_id:
+            raise HTTPException(status_code=500, detail="Failed to create image record")
+
+        return {
+            'success': True,
+            'record_id': record_id,
+            'message': 'Character image linked successfully'
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error linking character image: {str(e)}")
+
+
 @router.delete("/{chapter_id}/images/scenes/{scene_number}", response_model=DeleteImageResponse)
 async def delete_scene_image(
     chapter_id: str,

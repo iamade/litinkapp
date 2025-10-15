@@ -346,6 +346,21 @@ export const userService = {
     );
   },
 
+  async linkCharacterImage(
+    chapterId: string,
+    request: {
+      character_name: string;
+      image_url: string;
+      script_id?: string;
+      prompt?: string;
+    }
+  ): Promise<{ success: boolean; record_id: string; message: string }> {
+    return apiClient.post(
+      `/chapters/${chapterId}/images/characters/link`,
+      request
+    );
+  },
+
   async deleteSceneImage(
     chapterId: string,
     sceneNumber: number
