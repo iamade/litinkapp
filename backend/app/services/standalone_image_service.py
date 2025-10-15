@@ -124,7 +124,8 @@ class StandaloneImageService:
         style: str = "realistic",
         aspect_ratio: str = "3:4",
         custom_prompt: Optional[str] = None,
-        script_id: Optional[str] = None
+        script_id: Optional[str] = None,
+        user_tier: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate a standalone character image and store in database.
@@ -136,6 +137,7 @@ class StandaloneImageService:
             style: Visual style (realistic, cinematic, animated, fantasy)
             aspect_ratio: Image aspect ratio (3:4 for portraits, etc.)
             custom_prompt: Optional custom prompt additions
+            user_tier: Optional user subscription tier (if not provided, will be fetched)
 
         Returns:
             Dict containing image data and database record info
@@ -143,9 +145,10 @@ class StandaloneImageService:
         try:
             logger.info(f"[StandaloneImageService] Generating character image for {character_name} (user {user_id})")
 
-            # Get user tier for model selection
-            usage_check = await self.subscription_manager.check_usage_limits(user_id, "image")
-            user_tier = usage_check["tier"]
+            # Get user tier for model selection if not provided
+            if not user_tier:
+                usage_check = await self.subscription_manager.check_usage_limits(user_id, "image")
+                user_tier = usage_check["tier"]
 
             # Create database record first
             record_id = await self._create_image_record(

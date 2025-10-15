@@ -683,27 +683,56 @@ def create_character_image_prompt(character: str, style: str) -> str:
 
 
 @celery_app.task(bind=True)
-def generate_character_image_task(self, character_name: str, character_description: str, user_id: str, chapter_id: str, style: str = "realistic", aspect_ratio: str = "3:4", custom_prompt: Optional[str] = None, record_id: Optional[str] = None):
+def generate_character_image_task(
+    self,
+    character_name: str,
+    character_description: str,
+    user_id: str,
+    chapter_id: Optional[str] = None,
+    character_id: Optional[str] = None,
+    style: str = "realistic",
+    aspect_ratio: str = "3:4",
+    custom_prompt: Optional[str] = None,
+    record_id: Optional[str] = None,
+    user_tier: str = "free"
+):
     """
-    Asynchronous Celery task for generating character images.
+    Unified asynchronous Celery task for generating character images.
+    Supports both standalone character images (chapter-based) and character record images (plot-based).
 
     Args:
         character_name: Name of the character
         character_description: Description of the character
         user_id: User ID for database association
-        chapter_id: Chapter ID for metadata association
+        chapter_id: Optional chapter ID for metadata association
+        character_id: Optional character record ID - if provided, updates characters table
         style: Visual style (realistic, cinematic, animated, fantasy)
         aspect_ratio: Image aspect ratio
         custom_prompt: Optional custom prompt additions
+        record_id: Image generation record ID for tracking
+        user_tier: User subscription tier for model selection
 
     Returns:
         Dict containing task result with record_id and status
     """
     try:
-        logger.info(f"[CharacterImageTask] Starting generation for {character_name} (user: {user_id}, chapter: {chapter_id}, record: {record_id})")
+        logger.info(f"[CharacterImageTask] Starting generation for {character_name}")
+        logger.info(f"[CharacterImageTask] Parameters: user={user_id}, chapter={chapter_id}, character={character_id}, record={record_id}, tier={user_tier}")
 
         # Get database connection
         supabase = get_supabase()
+
+        # Update character status to 'generating' if character_id provided
+        if character_id:
+            try:
+                supabase.table('characters').update({
+                    'image_generation_status': 'generating',
+                    'image_generation_task_id': self.request.id,
+                    'updated_at': 'now()'
+                }).eq('id', character_id).execute()
+                logger.info(f"[CharacterImageTask] Updated character {character_id} status to 'generating'")
+            except Exception as char_update_error:
+                logger.warning(f"[CharacterImageTask] Failed to update character status: {char_update_error}")
 
         # Create standalone image service instance
         image_service = StandaloneImageService(supabase)
@@ -715,36 +744,72 @@ def generate_character_image_task(self, character_name: str, character_descripti
             user_id=user_id,
             style=style,
             aspect_ratio=aspect_ratio,
-            custom_prompt=custom_prompt
+            custom_prompt=custom_prompt,
+            user_tier=user_tier
         ))
 
-        # Update the existing record with the result
+        image_url = result.get('image_url')
+        generation_time = result.get('generation_time', 0)
+        model_used = result.get('model_used', 'gen4_image')
+
+        # Update the image_generations record with the result
         update_data = {
             'status': 'completed',
-            'image_url': result.get('image_url'),
-            'generation_time_seconds': result.get('generation_time', 0),
-            'updated_at': 'now()'
+            'image_url': image_url,
+            'generation_time_seconds': generation_time,
+            'updated_at': 'now()',
+            'character_id': character_id,
+            'model_id': model_used
         }
 
-        # Update metadata in database
         supabase.table('image_generations').update(update_data).eq('id', record_id).execute()
+        logger.info(f"[CharacterImageTask] Updated image_generations record {record_id}")
+
+        # If character_id provided, also update the characters table
+        if character_id and image_url:
+            try:
+                character_update_data = {
+                    'image_url': image_url,
+                    'image_generation_status': 'completed',
+                    'image_generation_prompt': result.get('prompt_used', custom_prompt or f"Character portrait: {character_name}"),
+                    'image_metadata': {
+                        'model_used': model_used,
+                        'generation_time': generation_time,
+                        'aspect_ratio': aspect_ratio,
+                        'style': style,
+                        'service': 'modelslab_v7',
+                        'task_id': self.request.id,
+                        'image_generation_record_id': record_id
+                    },
+                    'generation_method': 'async_celery',
+                    'model_used': model_used,
+                    'updated_at': 'now()'
+                }
+
+                supabase.table('characters').update(character_update_data).eq('id', character_id).execute()
+                logger.info(f"[CharacterImageTask] Updated character {character_id} with image URL: {image_url}")
+
+            except Exception as char_update_error:
+                logger.error(f"[CharacterImageTask] Failed to update character record: {char_update_error}")
 
         logger.info(f"[CharacterImageTask] Successfully generated character image: {record_id}")
 
         return {
             'status': 'success',
             'record_id': record_id,
+            'character_id': character_id,
             'character_name': character_name,
-            'image_url': result.get('image_url'),
+            'image_url': image_url,
             'message': 'Character image generated successfully',
-            'generation_time': result.get('generation_time')
+            'generation_time': generation_time,
+            'model_used': model_used
         }
 
     except Exception as e:
         error_message = f"Character image generation failed: {str(e)}"
         logger.error(f"[CharacterImageTask] {error_message}")
 
-        # Try to update the record with error
+        # Update image_generations record with error
         try:
             if record_id:
                 supabase = get_supabase()
@@ -754,7 +819,23 @@ def generate_character_image_task(self, character_name: str, character_descripti
                     'updated_at': 'now()'
                 }).eq('id', record_id).execute()
         except Exception as db_error:
-            logger.error(f"[CharacterImageTask] Failed to update record with error: {db_error}")
+            logger.error(f"[CharacterImageTask] Failed to update image_generations with error: {db_error}")
+
+        # Update character record with failed status if character_id provided
+        try:
+            if character_id:
+                supabase = get_supabase()
+                supabase.table('characters').update({
+                    'image_generation_status': 'failed',
+                    'image_metadata': {
+                        'error': error_message,
+                        'task_id': self.request.id,
+                        'failed_at': 'now()'
+                    },
+                    'updated_at': 'now()'
+                }).eq('id', character_id).execute()
+        except Exception as char_error:
+            logger.error(f"[CharacterImageTask] Failed to update character with error status: {char_error}")
 
         raise Exception(error_message)
 

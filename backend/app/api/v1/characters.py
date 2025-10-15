@@ -171,17 +171,31 @@ async def generate_character_image(
     current_user: dict = Depends(get_current_active_user)
 ):
     """
-    Generate character portrait.
+    Queue character portrait generation (async).
+
+    Returns task information for status tracking.
 
     - **character_id**: ID of the character
-    - **request**: Image generation parameters
+    - **request**: Image generation parameters (prompt, style, aspect_ratio)
+
+    Response includes:
+    - task_id: Celery task ID for status tracking
+    - record_id: Image generation record ID
+    - status: Current status (queued)
+    - estimated_time_seconds: Estimated completion time
     """
     try:
         character_service = CharacterService(supabase_client)
+
+        style = getattr(request, 'style', 'realistic')
+        aspect_ratio = getattr(request, 'aspect_ratio', '3:4')
+
         result = await character_service.generate_character_image(
             character_id=character_id,
             user_id=current_user['id'],
-            custom_prompt=request.prompt
+            custom_prompt=request.prompt,
+            style=style,
+            aspect_ratio=aspect_ratio
         )
 
         return result
@@ -189,7 +203,39 @@ async def generate_character_image(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate character image: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to queue character image generation: {str(e)}")
+
+
+@router.get("/{character_id}/image-status")
+async def get_character_image_status(
+    character_id: str,
+    supabase_client: Client = Depends(get_supabase),
+    current_user: dict = Depends(get_current_active_user)
+):
+    """
+    Get character image generation status.
+
+    Returns current status of image generation including:
+    - status: none, pending, generating, completed, failed
+    - task_id: Celery task ID (if available)
+    - image_url: Generated image URL (if completed)
+    - error: Error message (if failed)
+
+    - **character_id**: ID of the character
+    """
+    try:
+        character_service = CharacterService(supabase_client)
+        status = await character_service.get_character_image_status(
+            character_id=character_id,
+            user_id=current_user['id']
+        )
+
+        return status
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get image status: {str(e)}")
 
 
 @router.get("/archetypes", response_model=List[CharacterArchetypeResponse])

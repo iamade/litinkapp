@@ -207,14 +207,16 @@ class CharacterService:
         self,
         character_id: str,
         user_id: str,
-        custom_prompt: Optional[str] = None
+        custom_prompt: Optional[str] = None,
+        style: str = "realistic",
+        aspect_ratio: str = "3:4"
     ) -> Dict[str, Any]:
         """
-        Generates character portrait using existing image generation service.
-        Builds appropriate prompt from character data and handles subscription limits.
+        Generates character portrait using async Celery task.
+        Returns task information for status tracking instead of blocking.
         """
         try:
-            logger.info(f"[CharacterService] Generating image for character {character_id}")
+            logger.info(f"[CharacterService] Queueing image generation for character {character_id}")
 
             # Check subscription limits for image generation
             usage_check = await self.subscription_manager.check_usage_limits(user_id, "image")
@@ -229,65 +231,130 @@ class CharacterService:
             if not character:
                 raise CharacterNotFoundError(f"Character {character_id} not found")
 
-            # Build image generation prompt
-            prompt = self._build_character_image_prompt(character, custom_prompt)
+            # Build character description for image generation
+            character_description = character.physical_description or character.personality or f"Character portrait of {character.name}"
 
-            # Generate image using ModelsLab service with tier-based model selection
-            image_result = await self.image_service.generate_character_image(
+            # Create initial record in image_generations table
+            from datetime import datetime
+            image_record_data = {
+                'user_id': user_id,
+                'image_type': 'character',
+                'character_name': character.name,
+                'character_id': character_id,
+                'scene_description': character_description,
+                'status': 'pending',
+                'style': style,
+                'aspect_ratio': aspect_ratio,
+                'prompt': self._build_character_image_prompt(character, custom_prompt),
+                'metadata': {
+                    'character_id': character_id,
+                    'image_type': 'character_portrait',
+                    'created_via': 'character_service'
+                }
+            }
+
+            record_result = self.db.table('image_generations').insert(image_record_data).execute()
+            record_id = record_result.data[0]['id'] if record_result.data else None
+
+            if not record_id:
+                raise CharacterServiceError("Failed to create image generation record")
+
+            # Update character status to pending
+            self.db.table('characters').update({
+                'image_generation_status': 'pending',
+                'updated_at': datetime.now().isoformat()
+            }).eq('id', character_id).execute()
+
+            # Queue the async task
+            from app.tasks.image_tasks import generate_character_image_task
+            task = generate_character_image_task.delay(
                 character_name=character.name,
-                character_description=character.physical_description or character.personality or "",
-                style="realistic",  # Default style
-                aspect_ratio="3:4",  # Portrait aspect ratio
+                character_description=character_description,
+                user_id=user_id,
+                character_id=character_id,
+                style=style,
+                aspect_ratio=aspect_ratio,
+                custom_prompt=custom_prompt,
+                record_id=record_id,
                 user_tier=user_tier
             )
 
-            if image_result.get("status") == "success":
-                # Update character with image data
-                await self._update_character_image_metadata(
-                    character_id,
-                    {
-                        "image_url": image_result.get("image_url"),
-                        "image_generation_prompt": prompt,
-                        "image_metadata": {
-                            "model_used": image_result.get("model_used"),
-                            "generation_time": image_result.get("generation_time"),
-                            "aspect_ratio": "3:4",
-                            "style": "realistic"
-                        }
+            # Record usage immediately (image generation is queued)
+            try:
+                await self.subscription_manager.record_usage(
+                    user_id=user_id,
+                    resource_type="image",
+                    cost_usd=0.0,
+                    metadata={
+                        "character_id": character_id,
+                        "image_type": "character_portrait",
+                        "task_id": task.id
                     }
                 )
+            except Exception as usage_error:
+                logger.warning(f"[CharacterService] Failed to record usage: {str(usage_error)}")
 
-                # Record usage (don't let this block the image save)
-                try:
-                    await self.subscription_manager.record_usage(
-                        user_id=user_id,
-                        resource_type="image",
-                        cost_usd=0.0,  # Could be calculated based on service
-                        metadata={
-                            "character_id": character_id,
-                            "image_type": "character_portrait"
-                        }
-                    )
-                except Exception as usage_error:
-                    logger.warning(f"[CharacterService] Failed to record usage, but image was saved: {str(usage_error)}")
+            logger.info(f"[CharacterService] Queued image generation task {task.id} for character {character_id}")
 
-                return {
-                    "character_id": character_id,
-                    "image_url": image_result.get("image_url"),
-                    "prompt_used": prompt,
-                    "metadata": image_result.get("meta", {}),
-                    "message": "Character image generated successfully"
-                }
-            else:
-                raise ImageGenerationError(f"Image generation failed: {image_result.get('error', 'Unknown error')}")
+            return {
+                "character_id": character_id,
+                "task_id": task.id,
+                "record_id": record_id,
+                "status": "queued",
+                "message": "Character image generation has been queued",
+                "estimated_time_seconds": 60
+            }
 
         except CharacterNotFoundError:
             raise
         except CharacterServiceError:
             raise
         except Exception as e:
-            logger.error(f"[CharacterService] Error generating character image: {str(e)}")
-            raise ImageGenerationError(f"Image generation failed: {str(e)}")
+            logger.error(f"[CharacterService] Error queueing character image generation: {str(e)}")
+            raise ImageGenerationError(f"Failed to queue image generation: {str(e)}")
+
+    async def get_character_image_status(
+        self,
+        character_id: str,
+        user_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get the current status of character image generation.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+
+            result = self.db.table('characters').select(
+                'image_generation_status, image_generation_task_id, image_url, image_metadata'
+            ).eq('id', character_id).single().execute()
+
+            if not result.data:
+                raise CharacterNotFoundError(f"Character {character_id} not found")
+
+            data = result.data
+            status = data.get('image_generation_status', 'none')
+            task_id = data.get('image_generation_task_id')
+            image_url = data.get('image_url')
+            metadata = data.get('image_metadata', {})
+
+            response = {
+                "character_id": character_id,
+                "status": status,
+                "task_id": task_id,
+                "image_url": image_url,
+                "metadata": metadata
+            }
+
+            if status == 'failed' and metadata:
+                response["error"] = metadata.get('error')
+
+            return response
+
+        except CharacterNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"[CharacterService] Error getting image status: {str(e)}")
+            raise CharacterServiceError(f"Failed to get image status: {str(e)}")
 
     async def get_character_by_id(self, character_id: str, user_id: str) -> Optional[CharacterResponse]:
         """
