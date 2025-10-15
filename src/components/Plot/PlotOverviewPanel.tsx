@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { BookOpen, Loader2, AlertCircle, Wand2, Users, Plus, Trash2 } from "lucide-react";
+import React, { useEffect, useState, useMemo } from "react";
+import { BookOpen, Loader2, AlertCircle, Wand2, Users, Plus, Trash2, Search, X } from "lucide-react";
 import { usePlotGeneration } from "../../hooks/usePlotGeneration";
 import CharacterCard from "./CharacterCard";
 import { userService } from "../../services/userService";
@@ -54,6 +54,28 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
     lie: '',
     ghost: '',
   });
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Filter characters based on search query
+  const filteredCharacters = useMemo(() => {
+    if (!plotOverview?.characters) return [];
+
+    if (!searchQuery.trim()) {
+      return plotOverview.characters;
+    }
+
+    const query = searchQuery.toLowerCase().trim();
+    return plotOverview.characters.filter((character: Character) => {
+      return (
+        character.name?.toLowerCase().includes(query) ||
+        character.role?.toLowerCase().includes(query) ||
+        character.physical_description?.toLowerCase().includes(query) ||
+        character.personality?.toLowerCase().includes(query)
+      );
+    });
+  }, [plotOverview?.characters, searchQuery]);
 
   useEffect(() => {
     loadPlot();
@@ -244,10 +266,10 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
   };
 
   const handleSelectAll = () => {
-    if (selectedCharacters.size === plotOverview?.characters.length) {
+    if (selectedCharacters.size === filteredCharacters.length) {
       setSelectedCharacters(new Set());
     } else {
-      const allIds = plotOverview?.characters.map((c: Character) => c.id) || [];
+      const allIds = filteredCharacters.map((c: Character) => c.id);
       setSelectedCharacters(new Set(allIds));
     }
   };
@@ -480,7 +502,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                 onClick={handleSelectAll}
                 className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm"
               >
-                {selectedCharacters.size === plotOverview.characters.length ? 'Deselect All' : 'Select All'}
+                {selectedCharacters.size === filteredCharacters.length && filteredCharacters.length > 0 ? 'Deselect All' : 'Select All'}
               </button>
             )}
             {hasCharacters && charactersWithoutImages > 0 && (
@@ -503,10 +525,42 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
           </div>
         </div>
 
+        {/* Search Bar */}
+        {hasCharacters && (
+          <div className="relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search className="h-5 w-5 text-gray-400" />
+            </div>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search characters by name, role, description..."
+              className="block w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+              >
+                <X className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Search Results Info */}
+        {hasCharacters && searchQuery && (
+          <div className="text-sm text-gray-600">
+            Found {filteredCharacters.length} character{filteredCharacters.length !== 1 ? 's' : ''} matching "{searchQuery}"
+          </div>
+        )}
+
         {/* Characters Grid */}
         {hasCharacters ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {plotOverview.characters.map((character: Character) => (
+          filteredCharacters.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {filteredCharacters.map((character: Character) => (
               <CharacterCard
                 key={character.id}
                 character={character}
@@ -519,8 +573,20 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
                 onRegenerateImage={handleRegenerateImage}
                 onViewImage={(url) => setShowImageModal(url)}
               />
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed">
+              <Search className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+              <p className="text-gray-600 mb-2">No characters found matching "{searchQuery}"</p>
+              <button
+                onClick={() => setSearchQuery('')}
+                className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+              >
+                Clear search
+              </button>
+            </div>
+          )
         ) : (
           <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed">
             <Users className="mx-auto h-12 w-12 text-gray-400 mb-4" />
