@@ -543,6 +543,17 @@ export const userService = {
     });
   },
 
+  async getCharacterImageStatus(characterId: string): Promise<{
+    character_id: string;
+    status: string;
+    task_id?: string;
+    image_url?: string;
+    metadata?: any;
+    error?: string;
+  }> {
+    return apiClient.get(`/characters/${characterId}/image-status`);
+  },
+
   // Add these methods to userService.ts
 
   async getVideoProduction(chapterId: string) {

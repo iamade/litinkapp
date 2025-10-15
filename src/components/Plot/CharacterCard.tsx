@@ -153,10 +153,16 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
         </div>
 
         {isGeneratingImage ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
-            <div className="text-center">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-2" />
-              <span className="text-sm text-gray-600">Generating...</span>
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-50 to-purple-50">
+            <div className="text-center p-4">
+              <div className="relative">
+                <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-3" />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Wand2 className="w-6 h-6 text-purple-500" />
+                </div>
+              </div>
+              <span className="text-sm font-medium text-gray-700">Generating Image</span>
+              <p className="text-xs text-gray-500 mt-1">This may take 20-30 seconds...</p>
             </div>
           </div>
         ) : character.image_url ? (

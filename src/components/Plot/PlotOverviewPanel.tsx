@@ -109,18 +109,77 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
     try {
       const result = await userService.generateCharacterImageGlobal(characterId);
 
-      // Reload plot to get updated character with image_url
-      await loadPlot();
-      toast.success("Character image generated successfully");
+      if (result.status === 'queued') {
+        toast.success(`Image generation queued for ${result.estimated_time_seconds || 60}s`);
+
+        // Start polling for status
+        pollCharacterImageStatus(characterId);
+      }
     } catch (error) {
-      toast.error("Failed to generate character image");
-    } finally {
+      toast.error("Failed to queue character image generation");
       setGeneratingImages(prev => {
         const newSet = new Set(prev);
         newSet.delete(characterId);
         return newSet;
       });
     }
+  };
+
+  const pollCharacterImageStatus = async (characterId: string) => {
+    const maxAttempts = 120; // 2 minutes with 1s intervals
+    let attempts = 0;
+
+    const poll = async () => {
+      try {
+        const status = await userService.getCharacterImageStatus(characterId);
+
+        if (status.status === 'completed' && status.image_url) {
+          setGeneratingImages(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(characterId);
+            return newSet;
+          });
+          await loadPlot();
+          toast.success("Character image generated successfully");
+          return;
+        } else if (status.status === 'failed') {
+          setGeneratingImages(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(characterId);
+            return newSet;
+          });
+          toast.error(status.error || "Image generation failed");
+          return;
+        } else if (status.status === 'generating') {
+          // Show progress update
+          if (attempts % 10 === 0) {
+            toast.loading("Generating character image...", { id: `gen-${characterId}` });
+          }
+        }
+
+        // Continue polling if still pending or generating
+        attempts++;
+        if (attempts < maxAttempts) {
+          setTimeout(poll, 1000);
+        } else {
+          setGeneratingImages(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(characterId);
+            return newSet;
+          });
+          toast.error("Image generation timed out. Please check status later.");
+        }
+      } catch (error) {
+        setGeneratingImages(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(characterId);
+          return newSet;
+        });
+        toast.error("Failed to check image generation status");
+      }
+    };
+
+    setTimeout(poll, 1000); // Start polling after 1 second
   };
 
   const handleRegenerateImage = async (characterId: string) => {
