@@ -134,6 +134,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
         const status = await userService.getCharacterImageStatus(characterId);
 
         if (status.status === 'completed' && status.image_url) {
+          // Dismiss loading toast
+          toast.dismiss(`gen-${characterId}`);
+
           setGeneratingImages(prev => {
             const newSet = new Set(prev);
             newSet.delete(characterId);
@@ -143,6 +146,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
           toast.success("Character image generated successfully");
           return;
         } else if (status.status === 'failed') {
+          // Dismiss loading toast
+          toast.dismiss(`gen-${characterId}`);
+
           setGeneratingImages(prev => {
             const newSet = new Set(prev);
             newSet.delete(characterId);
@@ -162,6 +168,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
         if (attempts < maxAttempts) {
           setTimeout(poll, 1000);
         } else {
+          // Dismiss loading toast
+          toast.dismiss(`gen-${characterId}`);
+
           setGeneratingImages(prev => {
             const newSet = new Set(prev);
             newSet.delete(characterId);
@@ -170,6 +179,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId }) => {
           toast.error("Image generation timed out. Please check status later.");
         }
       } catch (error) {
+        // Dismiss loading toast
+        toast.dismiss(`gen-${characterId}`);
+
         setGeneratingImages(prev => {
           const newSet = new Set(prev);
           newSet.delete(characterId);

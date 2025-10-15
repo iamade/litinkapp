@@ -1101,10 +1101,10 @@ Return the enhanced script.
 
             plot_data = plot_response.data[0]
 
-            # Get associated characters
+            # Get associated characters (ordered by creation time for consistent display)
             characters_response = self.db.table('characters').select('*').eq(
                 'plot_overview_id', plot_data['id']
-            ).execute()
+            ).order('created_at', desc=False).execute()
 
             characters = []
             for char_data in characters_response.data or []:
