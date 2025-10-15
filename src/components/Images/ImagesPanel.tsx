@@ -1104,6 +1104,7 @@ const ImageActions: React.FC<ImageActionsProps> = ({
             <button
               onClick={onView}
               className="p-1 bg-black bg-opacity-50 text-white rounded hover:bg-opacity-70"
+              title="View"
             >
               <Eye className="w-4 h-4" />
             </button>
@@ -1111,6 +1112,7 @@ const ImageActions: React.FC<ImageActionsProps> = ({
               onClick={onRegenerate}
               disabled={isGenerating}
               className="p-1 bg-black bg-opacity-50 text-white rounded hover:bg-opacity-70 disabled:opacity-50"
+              title="Regenerate"
             >
               <RefreshCw className="w-4 h-4" />
             </button>
@@ -1120,8 +1122,13 @@ const ImageActions: React.FC<ImageActionsProps> = ({
             onClick={onGenerate}
             disabled={isGenerating}
             className="p-1 bg-black bg-opacity-50 text-white rounded hover:bg-opacity-70 disabled:opacity-50"
+            title={selectedPlotCharHasImage ? "Use existing image" : "Generate image"}
           >
-            <Plus className="w-4 h-4" />
+            {selectedPlotCharHasImage ? (
+              <Download className="w-4 h-4" />
+            ) : (
+              <Plus className="w-4 h-4" />
+            )}
           </button>
         )}
       </div>
