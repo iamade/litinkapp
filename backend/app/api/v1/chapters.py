@@ -250,6 +250,7 @@ async def generate_scene_image(
 
         # Queue the scene image generation task
         try:
+            print(f"[DEBUG] [generate_scene_image] About to queue task for record_id={record_id}, scene={scene_number}")
             task = generate_scene_image_task.delay(
                 record_id=record_id,
                 scene_description=scene_description,
@@ -264,6 +265,7 @@ async def generate_scene_image(
                 retry_count=0,
             )
 
+            print(f"[DEBUG] [generate_scene_image] Task queued successfully with task_id={task.id}")
             return ImageGenerationQueuedResponse(
                 task_id=task.id,
                 status="queued",
@@ -276,6 +278,11 @@ async def generate_scene_image(
 
         except Exception as task_error:
             # If task queueing fails, mark the DB record as failed
+            print(f"[ERROR] [generate_scene_image] Failed to queue task: {str(task_error)}")
+            print(f"[ERROR] [generate_scene_image] Task error type: {type(task_error)}")
+            import traceback
+            print(f"[ERROR] [generate_scene_image] Traceback: {traceback.format_exc()}")
+
             try:
                 supabase_client.table("image_generations").update(
                     {
@@ -284,7 +291,7 @@ async def generate_scene_image(
                     }
                 ).eq("id", record_id).execute()
             except Exception as update_error:
-                # Log but don't fail the response
+                print(f"[ERROR] [generate_scene_image] Failed to update DB record: {str(update_error)}")
                 pass
 
             raise HTTPException(
