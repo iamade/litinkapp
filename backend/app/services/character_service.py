@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional
 import uuid
 import json
 import logging
+import re
 from datetime import datetime
 
 from app.core.database import get_supabase
@@ -1162,9 +1163,26 @@ IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make 
         """
         Parse AI response and extract character details.
         """
+        logger.info(f"[CharacterService] Parsing AI response (length: {len(ai_response)})")
+        logger.debug(f"[CharacterService] AI response content: {ai_response[:500]}")
+
         try:
-            # Try to parse as JSON first
-            character_data = json.loads(ai_response.strip())
+            # Try to extract JSON from markdown code blocks
+            json_match = re.search(r'```json\s*(\{.*?\})\s*```', ai_response, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+                logger.info("[CharacterService] Found JSON in markdown code block")
+            else:
+                # Try to find JSON object directly
+                json_match = re.search(r'\{[^}]*"physical_description"[^}]*\}', ai_response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(0)
+                    logger.info("[CharacterService] Found JSON object in response")
+                else:
+                    json_str = ai_response.strip()
+
+            # Try to parse as JSON
+            character_data = json.loads(json_str)
 
             # Validate and provide defaults
             result = {
@@ -1179,13 +1197,14 @@ IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make 
                 "ghost": character_data.get("ghost", "")
             }
 
+            logger.info("[CharacterService] Successfully parsed JSON response")
             return result
 
-        except json.JSONDecodeError:
-            logger.warning("[CharacterService] AI response not valid JSON, attempting text parsing")
+        except (json.JSONDecodeError, AttributeError) as e:
+            logger.warning(f"[CharacterService] AI response not valid JSON, attempting text parsing: {str(e)}")
 
             # Fallback: extract information from text
-            return {
+            result = {
                 "name": character_name,
                 "role": role or "supporting",
                 "physical_description": self._extract_field_from_ai_text(ai_response, "physical_description") or "",
@@ -1197,27 +1216,43 @@ IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make 
                 "ghost": self._extract_field_from_ai_text(ai_response, "ghost") or ""
             }
 
+            logger.info(f"[CharacterService] Text parsing extracted {sum(1 for v in result.values() if v)} fields")
+            return result
+
     def _extract_field_from_ai_text(self, text: str, field_name: str) -> Optional[str]:
         """
         Extract a specific field value from AI text response.
+        Handles both single-line and multi-line values.
         """
         import re
 
-        # Try various patterns
+        # Try various patterns with multi-line support
         patterns = [
+            # Pattern 1: Field with colon and value on same or next lines
+            rf"{field_name}:\s*(.+?)(?:\n\n|\n[A-Z]|\n\d+\.|\Z)",
+            rf"{field_name.replace('_', ' ')}:\s*(.+?)(?:\n\n|\n[A-Z]|\n\d+\.|\Z)",
+            rf"{field_name.replace('_', ' ').title()}:\s*(.+?)(?:\n\n|\n[A-Z]|\n\d+\.|\Z)",
+            # Pattern 2: Numbered list format
+            rf"\d+\.\s+{field_name.replace('_', ' ').title()}:\s*(.+?)(?:\n\n|\n\d+\.|\Z)",
+            # Pattern 3: Single line format
             rf"{field_name}:\s*([^\n]+)",
             rf"{field_name.replace('_', ' ')}:\s*([^\n]+)",
-            rf"{field_name.replace('_', ' ').title()}:\s*([^\n]+)",
         ]
 
         for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
             if match:
                 value = match.group(1).strip()
                 # Clean up common artifacts
                 value = re.sub(r'^["\']\s*', '', value)
                 value = re.sub(r'\s*["\']$', '', value)
-                return value if value else None
+                # Remove trailing punctuation from section markers
+                value = re.sub(r'\s*\n\s*$', '', value)
+                # Collapse multiple spaces and newlines
+                value = re.sub(r'\s+', ' ', value)
+
+                if value and len(value) > 5:  # Ensure we have meaningful content
+                    return value
 
         return None
 
