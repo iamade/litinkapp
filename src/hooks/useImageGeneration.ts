@@ -80,11 +80,13 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       const characterImagesMap: Record<string, CharacterImage> = {};
 
       if (response.images && Array.isArray(response.images)) {
-        response.images.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
+        response.images.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; scene_number?: number; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
           const metadata = img.metadata ?? {};
           const url = img.image_url ?? "";
           const imageType = img.image_type || metadata.image_type;
           const characterName = img.character_name || metadata.character_name;
+          // Read scene_number from root level first, then fall back to metadata
+          const sceneNumber = img.scene_number ?? metadata.scene_number;
 
           // Normalize script_id from either field
           const normalizedScriptId = img.script_id ?? img.scriptId;
@@ -92,12 +94,12 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
           // Scene images: accept explicit scene or fallback when image_type missing but URL exists
           if (
             (imageType === "scene" || !imageType) &&
-            (typeof metadata.scene_number === "number" || url)
+            (typeof sceneNumber === "number" || url)
           ) {
             // Use scene_number if present, else fallback to index or hash if needed
             const sceneKey =
-              typeof metadata.scene_number === "number"
-                ? metadata.scene_number
+              typeof sceneNumber === "number"
+                ? sceneNumber
                 : img.id || url;
 
             // Map database status to UI status
@@ -113,7 +115,7 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
             }
 
             sceneImagesMap[sceneKey] = {
-              sceneNumber: metadata.scene_number ?? -1,
+              sceneNumber: sceneNumber ?? -1,
               imageUrl: url,
               prompt: metadata.image_prompt ?? "",
               characters: [],
