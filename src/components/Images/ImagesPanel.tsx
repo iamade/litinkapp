@@ -497,9 +497,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   };
 
   const renderScenesTab = () => {
+    console.log('[ImagesPanel] renderScenesTab - sceneImages:', sceneImages);
+    console.log('[ImagesPanel] renderScenesTab - selectedScriptId:', selectedScriptId);
+
     // Filter images by selected script_id, accepting both script_id and scriptId fields
     const filteredSceneImages = Object.entries(sceneImages || {}).reduce((acc, [key, image]) => {
       const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+      console.log('[ImagesPanel] Filtering image:', {
+        key,
+        normalizedScriptId,
+        selectedScriptId,
+        matches: !selectedScriptId || normalizedScriptId === selectedScriptId
+      });
       if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
         acc[key] = image;
       }
@@ -507,6 +516,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     }, {} as Record<string | number, SceneImage>);
     const sourceSceneImages = filteredSceneImages;
     const hasImages = Object.keys(sourceSceneImages).length > 0;
+
+    console.log('[ImagesPanel] filteredSceneImages:', filteredSceneImages);
+    console.log('[ImagesPanel] hasImages:', hasImages);
     const allSceneIds = Object.values(sourceSceneImages)
       .filter(img => img.id)
       .map(img => img.id!);

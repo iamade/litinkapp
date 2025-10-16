@@ -80,6 +80,7 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       const characterImagesMap: Record<string, CharacterImage> = {};
 
       if (response.images && Array.isArray(response.images)) {
+        console.log('[useImageGeneration] Processing images:', response.images.length);
         response.images.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; scene_number?: number; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
           const metadata = img.metadata ?? {};
           const url = img.image_url ?? "";
@@ -90,6 +91,14 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
 
           // Normalize script_id from either field
           const normalizedScriptId = img.script_id ?? img.scriptId;
+
+          console.log('[useImageGeneration] Processing image:', {
+            id: img.id,
+            imageType,
+            sceneNumber,
+            script_id: normalizedScriptId,
+            hasUrl: !!url
+          });
 
           // Scene images: accept explicit scene or fallback when image_type missing but URL exists
           if (
@@ -113,6 +122,13 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
             } else {
               uiStatus = 'pending';
             }
+
+            console.log('[useImageGeneration] Adding scene image:', {
+              sceneKey,
+              sceneNumber,
+              script_id: normalizedScriptId,
+              status: uiStatus
+            });
 
             sceneImagesMap[sceneKey] = {
               sceneNumber: sceneNumber ?? -1,
@@ -155,6 +171,9 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
           // Optionally ignore other types without logging noise
         });
       }
+
+      console.log('[useImageGeneration] Final sceneImagesMap:', sceneImagesMap);
+      console.log('[useImageGeneration] Final characterImagesMap:', characterImagesMap);
 
       setSceneImages(sceneImagesMap);
       setCharacterImages(characterImagesMap);
