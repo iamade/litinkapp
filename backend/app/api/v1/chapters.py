@@ -150,11 +150,14 @@ async def list_chapter_images(
         image_service = StandaloneImageService(supabase_client)
         user_images = await image_service.get_user_images(current_user["id"])
 
-        # Filter images associated with this chapter (via metadata)
+        # Filter images associated with this chapter (check both metadata and root-level chapter_id)
         chapter_images = []
         for img in user_images:
             metadata = img.get("metadata", {})
-            if metadata.get("chapter_id") == chapter_id:
+            root_chapter_id = img.get("chapter_id")
+
+            # Check both metadata.chapter_id and root-level chapter_id field
+            if metadata.get("chapter_id") == chapter_id or root_chapter_id == chapter_id:
                 chapter_images.append(ImageRecord(**img))
 
         return ChapterImagesResponse(

@@ -505,6 +505,21 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       }
       return acc;
     }, {} as Record<string | number, SceneImage>);
+
+    // Create a lookup helper that works with both composite keys and plain scene numbers
+    const getSceneImage = (sceneNumber: number): SceneImage | undefined => {
+      // Try composite key first (preferred)
+      const compositeKey = `${selectedScriptId}_${sceneNumber}`;
+      if (filteredSceneImages[compositeKey]) {
+        return filteredSceneImages[compositeKey];
+      }
+      // Fallback to plain scene number for backwards compatibility
+      if (filteredSceneImages[sceneNumber]) {
+        return filteredSceneImages[sceneNumber];
+      }
+      return undefined;
+    };
+
     const sourceSceneImages = filteredSceneImages;
     const hasImages = Object.keys(sourceSceneImages).length > 0;
     const allSceneIds = Object.values(sourceSceneImages)
@@ -592,7 +607,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           }`}>
             {scenes.map((scene: any, idx: number) => {
               const sceneNumber = scene.scene_number || idx + 1;
-              const sceneImage = sourceSceneImages?.[sceneNumber];
+              const sceneImage = getSceneImage(sceneNumber);
               const isSelected = sceneImage?.id ? selectedSceneIds.has(sceneImage.id) : false;
 
               return (

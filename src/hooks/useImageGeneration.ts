@@ -619,18 +619,35 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
         return updated;
       });
       toast.success(`Deleted ${ids.length} image${ids.length > 1 ? 's' : ''}`);
+
+      // Reload images from server to ensure consistency
+      await loadImages();
     } catch (error) {
       toast.error('Failed to delete selected images');
       throw error;
     }
   };
 
-  const deleteAllSceneGenerations = async (sceneId: string) => {
+  const deleteAllSceneGenerations = async (scriptId: string) => {
     try {
-      await userService.deleteAllSceneGenerations(sceneId);
-      // Remove all scene images from local state
-      setSceneImages({});
-      toast.success('Deleted all generated scene images');
+      await userService.deleteAllSceneGenerations(scriptId);
+      // Remove scene images for this specific script from local state
+      setSceneImages(prev => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach(key => {
+          const sceneImage = updated[key];
+          // Remove images that match the script_id
+          const normalizedScriptId = sceneImage.script_id ?? (sceneImage as any).scriptId;
+          if (normalizedScriptId === scriptId) {
+            delete updated[key];
+          }
+        });
+        return updated;
+      });
+      toast.success('Deleted all generated scene images for this script');
+
+      // Reload images from server to ensure consistency
+      await loadImages();
     } catch (error) {
       toast.error('Failed to delete all scene images');
       throw error;
