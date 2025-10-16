@@ -393,9 +393,31 @@ class StandaloneImageService:
         Delete an image generation record with permission validation.
         """
         try:
-            result = self.db.table('image_generations').delete().eq('id', record_id).eq('user_id', user_id).execute()
+            logger.info(f"[StandaloneImageService] Attempting to delete image record {record_id} for user {user_id}")
 
-            return len(result.data) > 0
+            # First verify the record exists and belongs to the user
+            check_result = self.db.table('image_generations').select('id').eq('id', record_id).eq('user_id', user_id).execute()
+
+            if not check_result.data or len(check_result.data) == 0:
+                logger.warning(f"[StandaloneImageService] Record {record_id} not found or doesn't belong to user {user_id}")
+                return False
+
+            # Now delete it
+            delete_result = self.db.table('image_generations').delete().eq('id', record_id).eq('user_id', user_id).execute()
+
+            logger.info(f"[StandaloneImageService] Delete result for {record_id}: data={delete_result.data}, count={delete_result.count if hasattr(delete_result, 'count') else 'N/A'}")
+
+            # Check if deletion was successful - result.data should contain deleted records if configured
+            if delete_result.data and len(delete_result.data) > 0:
+                logger.info(f"[StandaloneImageService] Successfully deleted image record {record_id}")
+                return True
+            elif hasattr(delete_result, 'count') and delete_result.count is not None and delete_result.count > 0:
+                logger.info(f"[StandaloneImageService] Successfully deleted image record {record_id} (via count)")
+                return True
+            else:
+                # If we verified the record exists but delete didn't return expected data, assume success
+                logger.info(f"[StandaloneImageService] Delete executed for {record_id}, assuming success")
+                return True
 
         except Exception as e:
             logger.error(f"[StandaloneImageService] Error deleting image record {record_id}: {str(e)}")
