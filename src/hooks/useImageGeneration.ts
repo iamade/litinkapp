@@ -99,12 +99,25 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
               typeof metadata.scene_number === "number"
                 ? metadata.scene_number
                 : img.id || url;
+
+            // Map database status to UI status
+            let uiStatus: 'pending' | 'generating' | 'completed' | 'failed' = 'pending';
+            if (img.status === 'completed') {
+              uiStatus = 'completed';
+            } else if (img.status === 'failed') {
+              uiStatus = 'failed';
+            } else if (img.status === 'in_progress' || img.status === 'processing') {
+              uiStatus = 'generating';
+            } else {
+              uiStatus = 'pending';
+            }
+
             sceneImagesMap[sceneKey] = {
               sceneNumber: metadata.scene_number ?? -1,
               imageUrl: url,
               prompt: metadata.image_prompt ?? "",
               characters: [],
-              generationStatus: img.status === "completed" ? "completed" : "failed",
+              generationStatus: uiStatus,
               generatedAt: img.created_at,
               id: img.id,
               script_id: normalizedScriptId,
@@ -114,11 +127,23 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
 
           // Character images: use character_name from top level or metadata
           if (imageType === "character" && characterName) {
+            // Map database status to UI status
+            let uiStatus: 'pending' | 'generating' | 'completed' | 'failed' = 'pending';
+            if (img.status === 'completed') {
+              uiStatus = 'completed';
+            } else if (img.status === 'failed') {
+              uiStatus = 'failed';
+            } else if (img.status === 'in_progress' || img.status === 'processing') {
+              uiStatus = 'generating';
+            } else {
+              uiStatus = 'pending';
+            }
+
             characterImagesMap[characterName] = {
               name: characterName,
               imageUrl: url,
               prompt: metadata.image_prompt ?? "",
-              generationStatus: img.status === "completed" ? "completed" : "failed",
+              generationStatus: uiStatus,
               generatedAt: img.created_at,
               id: img.id,
               script_id: normalizedScriptId,
