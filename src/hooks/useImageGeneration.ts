@@ -80,7 +80,6 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
       const characterImagesMap: Record<string, CharacterImage> = {};
 
       if (response.images && Array.isArray(response.images)) {
-        console.log('[useImageGeneration] Processing images:', response.images.length);
         response.images.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; scene_number?: number; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
           const metadata = img.metadata ?? {};
           const url = img.image_url ?? "";
@@ -92,23 +91,16 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
           // Normalize script_id from either field
           const normalizedScriptId = img.script_id ?? img.scriptId;
 
-          console.log('[useImageGeneration] Processing image:', {
-            id: img.id,
-            imageType,
-            sceneNumber,
-            script_id: normalizedScriptId,
-            hasUrl: !!url
-          });
-
           // Scene images: accept explicit scene or fallback when image_type missing but URL exists
           if (
             (imageType === "scene" || !imageType) &&
             (typeof sceneNumber === "number" || url)
           ) {
-            // Use scene_number if present, else fallback to index or hash if needed
+            // Create a composite key using script_id and scene_number to avoid collisions
+            // when multiple scripts have images for the same scene number
             const sceneKey =
-              typeof sceneNumber === "number"
-                ? sceneNumber
+              typeof sceneNumber === "number" && normalizedScriptId
+                ? `${normalizedScriptId}_${sceneNumber}`
                 : img.id || url;
 
             // Map database status to UI status
@@ -122,13 +114,6 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
             } else {
               uiStatus = 'pending';
             }
-
-            console.log('[useImageGeneration] Adding scene image:', {
-              sceneKey,
-              sceneNumber,
-              script_id: normalizedScriptId,
-              status: uiStatus
-            });
 
             sceneImagesMap[sceneKey] = {
               sceneNumber: sceneNumber ?? -1,
@@ -171,9 +156,6 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
           // Optionally ignore other types without logging noise
         });
       }
-
-      console.log('[useImageGeneration] Final sceneImagesMap:', sceneImagesMap);
-      console.log('[useImageGeneration] Final characterImagesMap:', characterImagesMap);
 
       setSceneImages(sceneImagesMap);
       setCharacterImages(characterImagesMap);
