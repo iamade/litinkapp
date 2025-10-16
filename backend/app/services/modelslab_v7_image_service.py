@@ -34,8 +34,8 @@ class ModelsLabV7ImageService:
 
         # ✅ Tier-based model mapping (based on architecture)
         self.tier_model_mapping = {
-            'free': 'imagen-4.0-ultra',        # ModelsLab Imagen 4.0 Ultra for free tier
-            'basic': 'imagen-4.0-fast-generate',       # ModelsLab Imagen 4.0 Fast Generate for basic tier
+            'free': 'gen4_image',        # ModelsLab Gen4 for free tier (imagen models may be unavailable)
+            'basic': 'gen4_image',       # ModelsLab Gen4 for basic tier
             'pro': 'runway_image',       # Better quality for Pro tier
             'premium': 'runway_image',   # Premium models
             'professional': 'runway_image',  # Professional tier

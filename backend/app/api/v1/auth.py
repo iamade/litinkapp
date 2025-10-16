@@ -65,17 +65,27 @@ async def register(
     
     try:
         profile_response = supabase_client.table('profiles').insert(profile_data).execute()
-        
+
         # Add missing fields to align with the User response model
         new_profile = profile_response.data[0]
         new_profile['is_active'] = True
         new_profile['is_verified'] = True
-        
+
         return new_profile
     except APIError as e:
         # If profile creation fails, we should ideally delete the auth user
         # This is a complex operation, for now, we'll raise an error
-        raise HTTPException(status_code=500, detail=f"User created in auth, but profile creation failed: {e.message}")
+        import traceback
+        print(f"[AUTH] Profile creation failed: {e}")
+        print(f"[AUTH] Profile data attempted: {profile_data}")
+        print(f"[AUTH] Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail=f"Database error saving new user")
+    except Exception as e:
+        import traceback
+        print(f"[AUTH] Unexpected error during profile creation: {e}")
+        print(f"[AUTH] Profile data attempted: {profile_data}")
+        print(f"[AUTH] Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail=f"Database error saving new user")
 
 
 @router.post("/login", response_model=Token)
