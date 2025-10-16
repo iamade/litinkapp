@@ -60,7 +60,7 @@ async def register(
         "id": response.user.id,
         "email": user_data.email,
         "display_name": user_data.display_name,
-        "role": user_data.role
+        "roles": user_data.roles
     }
     
     try:
