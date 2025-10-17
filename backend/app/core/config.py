@@ -74,6 +74,20 @@ class Settings(BaseSettings):
     ALGORAND_INDEXER: str = "https://testnet-idx.algonode.cloud"
     CREATOR_MNEMONIC: Optional[str] = None
     
+    # Email Configuration
+    MAIL_SERVICE: str = "mailpit"  # mailpit for dev, mailgun for production
+
+    # Mailpit Configuration (Development)
+    MAILPIT_SMTP_HOST: str = "localhost"
+    MAILPIT_SMTP_PORT: int = 1025
+    MAILPIT_WEB_UI_PORT: int = 8025
+
+    # Mailgun Configuration (Production)
+    MAILGUN_API_KEY: Optional[str] = None
+    MAILGUN_DOMAIN: Optional[str] = None
+    MAILGUN_SENDER_EMAIL: str = "noreply@litinkai.com"
+    MAILGUN_SENDER_NAME: str = "Litink"
+
     # Stripe Configuration
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None

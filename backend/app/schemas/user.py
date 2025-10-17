@@ -25,6 +25,8 @@ class User(UserBase):
     id: str
     is_active: bool
     is_verified: bool
+    email_verified: bool
+    email_verified_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

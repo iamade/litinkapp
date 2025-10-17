@@ -1,19 +1,22 @@
 """
 Admin API Endpoints
-Superadmin-only endpoints for cost tracking, metrics, and system monitoring
+Superadmin-only endpoints for cost tracking, metrics, system monitoring, and user management
 """
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import Client
 from pydantic import BaseModel
+import logging
 
 from app.core.auth import get_current_superadmin
 from app.core.database import get_supabase
 from app.services.cost_tracker_service import CostTrackerService
 from app.services.metrics_service import MetricsService
 from app.services.alert_service import AlertService
+from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -268,3 +271,189 @@ async def update_alert_settings(
     )
 
     return {"success": True, "settings": result}
+
+
+# User Verification Management Endpoints
+class ManualVerifyRequest(BaseModel):
+    user_id: str
+
+
+class BulkSendVerificationRequest(BaseModel):
+    limit: Optional[int] = 100
+
+
+@router.get("/users/unverified")
+async def get_unverified_users(
+    limit: int = Query(100, description="Maximum number of users to return"),
+    offset: int = Query(0, description="Pagination offset"),
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Get list of unverified users"""
+    try:
+        response = supabase.table('profiles')\
+            .select('id, email, display_name, created_at, verification_token_sent_at')\
+            .eq('email_verified', False)\
+            .order('created_at', desc=True)\
+            .range(offset, offset + limit - 1)\
+            .execute()
+
+        # Get total count
+        count_response = supabase.table('profiles')\
+            .select('id', count='exact')\
+            .eq('email_verified', False)\
+            .execute()
+
+        return {
+            "users": response.data,
+            "total": count_response.count,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Error fetching unverified users: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch unverified users")
+
+
+@router.post("/users/verify-manually")
+async def manually_verify_user(
+    request: ManualVerifyRequest,
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Manually verify a user's email (bypass email verification)"""
+    try:
+        # Update profile to mark as verified
+        response = supabase.table('profiles').update({
+            'email_verified': True
+        }).eq('id', request.user_id).execute()
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        logger.info(f"Admin {current_user['email']} manually verified user {request.user_id}")
+
+        return {
+            "success": True,
+            "message": "User email verified successfully",
+            "user": response.data[0]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error manually verifying user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to verify user")
+
+
+@router.post("/users/send-verification-bulk")
+async def send_verification_emails_bulk(
+    request: BulkSendVerificationRequest,
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Send verification emails to all unverified users (batch operation)"""
+    try:
+        # Get unverified users
+        response = supabase.table('profiles')\
+            .select('id, email')\
+            .eq('email_verified', False)\
+            .limit(request.limit)\
+            .execute()
+
+        if not response.data:
+            return {
+                "success": True,
+                "message": "No unverified users found",
+                "sent": 0,
+                "failed": 0
+            }
+
+        sent_count = 0
+        failed_count = 0
+        failed_users = []
+
+        for user in response.data:
+            try:
+                # Resend verification email via Supabase Auth
+                supabase.auth.resend(
+                    type='signup',
+                    email=user['email'],
+                    options={
+                        'email_redirect_to': f"{settings.FRONTEND_URL}/auth/verify-email"
+                    }
+                )
+
+                # Update timestamp
+                supabase.rpc('update_verification_token_sent', {'user_id': user['id']}).execute()
+
+                sent_count += 1
+            except Exception as e:
+                logger.error(f"Failed to send verification to {user['email']}: {e}")
+                failed_count += 1
+                failed_users.append({
+                    "email": user['email'],
+                    "error": str(e)
+                })
+
+        logger.info(f"Admin {current_user['email']} sent bulk verification emails: {sent_count} sent, {failed_count} failed")
+
+        return {
+            "success": True,
+            "sent": sent_count,
+            "failed": failed_count,
+            "failed_users": failed_users if failed_users else None
+        }
+    except Exception as e:
+        logger.error(f"Error sending bulk verification emails: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send verification emails")
+
+
+@router.get("/users/verification-stats")
+async def get_verification_statistics(
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Get statistics about email verification"""
+    try:
+        # Total users
+        total_response = supabase.table('profiles').select('id', count='exact').execute()
+        total_users = total_response.count
+
+        # Verified users
+        verified_response = supabase.table('profiles').select('id', count='exact').eq('email_verified', True).execute()
+        verified_users = verified_response.count
+
+        # Unverified users
+        unverified_users = total_users - verified_users
+
+        # Users who verified within 24 hours
+        quick_verify_response = supabase.rpc('count', {
+            'table_name': 'profiles',
+            'where_clause': "email_verified = true AND (email_verified_at - created_at) < interval '24 hours'"
+        }).execute()
+
+        verification_rate = (verified_users / total_users * 100) if total_users > 0 else 0
+
+        return {
+            "total_users": total_users,
+            "verified_users": verified_users,
+            "unverified_users": unverified_users,
+            "verification_rate": round(verification_rate, 2),
+            "verified_within_24h": quick_verify_response.data if hasattr(quick_verify_response, 'data') else 0
+        }
+    except Exception as e:
+        logger.error(f"Error fetching verification statistics: {e}")
+        # Return basic stats if advanced query fails
+        total_response = supabase.table('profiles').select('id', count='exact').execute()
+        verified_response = supabase.table('profiles').select('id', count='exact').eq('email_verified', True).execute()
+
+        total_users = total_response.count
+        verified_users = verified_response.count
+        verification_rate = (verified_users / total_users * 100) if total_users > 0 else 0
+
+        return {
+            "total_users": total_users,
+            "verified_users": verified_users,
+            "unverified_users": total_users - verified_users,
+            "verification_rate": round(verification_rate, 2)
+        }

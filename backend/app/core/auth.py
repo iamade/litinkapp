@@ -67,12 +67,16 @@ async def get_current_user(
             raise credentials_exception
         
         user_data = response.data
-        
+
         # --- Data Correction ---
         # The User schema expects 'display_name', which the DB provides.
         # Add other missing fields required by the User schema.
         user_data['is_active'] = True
-        user_data['is_verified'] = True
+        user_data['is_verified'] = user_data.get('email_verified', False)
+
+        # Ensure email_verified field exists (backward compatibility)
+        if 'email_verified' not in user_data:
+            user_data['email_verified'] = False
         # -----------------------
 
         return user_data
