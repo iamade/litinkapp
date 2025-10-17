@@ -6,69 +6,19 @@ from openai.types.chat import (
     ChatCompletionUserMessageParam,
 )
 from app.core.config import settings
+from app.core.model_config import ModelTier, SCRIPT_MODEL_CONFIG, get_model_config
+from app.services.model_fallback_manager import fallback_manager
 import logging
-from enum import Enum
 
 logger = logging.getLogger(__name__)
-
-
-class ModelTier(Enum):
-    FREE = "free"
-    BASIC = "basic"
-    STANDARD = "standard"
-    PREMIUM = "premium"
-    PROFESSIONAL = "professional"
 
 
 class OpenRouterService:
     """
     OpenRouter integration for intelligent model routing
     Handles all LLM requests with automatic fallback and cost optimization
+    Uses centralized model configuration and fallback manager
     """
-
-    # Model configurations with costs (per 1K tokens)
-    MODEL_CONFIGS = {
-        ModelTier.FREE: {
-            "primary": "arliai/qwq-32b-arliai-rpr-v1:free",
-            "fallback": "meta-llama/llama-3.2-3b-instruct",
-            "max_tokens": 2000,
-            "temperature": 0.7,
-            "cost_per_1k_input": 0.00006,
-            "cost_per_1k_output": 0.00006,
-        },
-        ModelTier.BASIC: {
-            "primary": "deepseek-chat-v3-0324:free",
-            "fallback": "mistralai/mistral-7b-instruct",
-            "max_tokens": 3000,
-            "temperature": 0.7,
-            "cost_per_1k_input": 0.00014,
-            "cost_per_1k_output": 0.00028,
-        },
-        ModelTier.STANDARD: {
-            "primary": "anthropic/claude-3-haiku-20240307",
-            "fallback": "openai/gpt-3.5-turbo",
-            "max_tokens": 4000,
-            "temperature": 0.7,
-            "cost_per_1k_input": 0.00025,
-            "cost_per_1k_output": 0.00125,
-        },
-        ModelTier.PREMIUM: {
-            "primary": "openai/gpt-4o-mini",
-            "fallback": "anthropic/claude-3.5-sonnet",
-            "max_tokens": 8000,
-            "temperature": 0.7,
-            "cost_per_1k_input": 0.00015,
-            "cost_per_1k_output": 0.00060,
-        },
-        ModelTier.PROFESSIONAL: {
-            "primary": "openai/gpt-4o",
-            "fallback": "anthropic/claude-3-opus-20240229",
-            "max_tokens": 16000,
-            "temperature": 0.8,
-            "cost_per_1k_input": 0.00250,
-            "cost_per_1k_output": 0.01000,
-        },
-    }
 
     def __init__(self):
         if not settings.OPENROUTER_API_KEY:
@@ -93,146 +43,161 @@ class OpenRouterService:
         script_type: str = "cinematic",
         target_duration: Optional[int] = None,
         plot_context: Optional[Dict[str, Any]] = None,
-        use_fallback: bool = False,
     ) -> Dict[str, Any]:
         """
-        Generate script using tier-appropriate model
+        Generate script using tier-appropriate model with automatic fallback
         """
-        config = self.MODEL_CONFIGS[user_tier]
-        model = config["fallback"] if use_fallback else config["primary"]
+        tier_str = user_tier.value if isinstance(user_tier, ModelTier) else str(user_tier)
 
+        config = get_model_config("script", tier_str)
+        if not config:
+            logger.warning(f"No config for tier {tier_str}, using FREE tier defaults")
+            config = get_model_config("script", "free")
+
+        async def _generate_with_model(model: str, **kwargs) -> Dict[str, Any]:
+            return await self._execute_generation(
+                model=model,
+                content=content,
+                script_type=script_type,
+                target_duration=target_duration,
+                plot_context=plot_context,
+                config=config,
+                tier_str=tier_str
+            )
+
+        return await fallback_manager.try_with_fallback(
+            service_type="script",
+            user_tier=tier_str,
+            generation_function=_generate_with_model,
+            request_params={"model": config.primary},
+            model_param_name="model"
+        )
+
+    async def _execute_generation(
+        self,
+        model: str,
+        content: str,
+        script_type: str,
+        target_duration: Optional[int],
+        plot_context: Optional[Dict[str, Any]],
+        config: Any,
+        tier_str: str
+    ) -> Dict[str, Any]:
+        """
+        Execute the actual script generation with specified model
+        """
+
+        # Prepare messages based on script type
+        messages = self._prepare_script_messages(
+            content, script_type, target_duration, plot_context
+        )
+
+        # Log the request
+        logger.info(
+            f"[OpenRouter] Generating {script_type} script with {model} for tier {tier_str}"
+        )
+
+        # Make the API call
+        create_fn: Any = getattr(self.client.chat.completions, "create")
+        response = await create_fn(
+            model=model,
+            messages=messages,
+            max_tokens=config.max_tokens if config.max_tokens else 4000,
+            temperature=config.temperature if config.temperature else 0.7,
+            stream=False,
+        )
+
+        # Handle OpenAI client response (should always be parsed)
         try:
-            # Prepare messages based on script type
-            messages = self._prepare_script_messages(
-                content, script_type, target_duration, plot_context
-            )
-
-            # Log the request
-            logger.info(
-                f"[OpenRouter] Generating {script_type} script with {model} for {user_tier.value} tier"
-            )
-
-            # Make the API call
-            create_fn: Any = getattr(self.client.chat.completions, "create")
-            response = await create_fn(
-                model=model,
-                messages=messages,
-                max_tokens=config["max_tokens"],
-                temperature=config["temperature"],
-                stream=False,
-            )
-
-            # Handle OpenAI client response (should always be parsed)
-            try:
-                # Check if response is properly parsed
-                if hasattr(response, "choices") and response.choices:
-                    generated_content = response.choices[0].message.content
-                    usage_raw = response.usage
-                    logger.info(
-                        f"[OpenRouter] Successfully parsed response for {model}"
-                    )
-                else:
-                    # Fallback: try to parse as JSON string if response is raw
-                    if hasattr(response, "json"):
-                        try:
-                            parsed_response = response.json()
-                            if isinstance(parsed_response, str):
-                                # If json() returns a string, it might be double-encoded
-                                import json
-
-                                parsed_response = json.loads(parsed_response)
-                            generated_content = parsed_response["choices"][0][
-                                "message"
-                            ]["content"]
-                            usage_raw = parsed_response["usage"]
-                            logger.info(
-                                f"[OpenRouter] Parsed raw JSON response for {model}"
-                            )
-                        except Exception as json_error:
-                            logger.error(
-                                f"[OpenRouter] Failed to parse JSON response: {str(json_error)}"
-                            )
-                            raise ValueError(
-                                f"Failed to parse JSON API response: {str(json_error)}"
-                            )
-                    else:
-                        raise ValueError(
-                            "Invalid response format: no choices or json method available"
-                        )
-            except Exception as e:
-                logger.error(
-                    f"[OpenRouter] Failed to parse response for {model}: {str(e)}"
+            # Check if response is properly parsed
+            if hasattr(response, "choices") and response.choices:
+                generated_content = response.choices[0].message.content
+                usage_raw = response.usage
+                logger.info(
+                    f"[OpenRouter] Successfully parsed response for {model}"
                 )
-                raise ValueError(f"Failed to parse API response: {str(e)}")
-
-            # Normalize usage to dict for consistent access
-            if isinstance(usage_raw, dict):
-                usage = usage_raw
             else:
-                usage = {
-                    "prompt_tokens": usage_raw.prompt_tokens,
-                    "completion_tokens": usage_raw.completion_tokens,
-                    "total_tokens": usage_raw.total_tokens,
-                }
+                # Fallback: try to parse as JSON string if response is raw
+                if hasattr(response, "json"):
+                    try:
+                        parsed_response = response.json()
+                        if isinstance(parsed_response, str):
+                            # If json() returns a string, it might be double-encoded
+                            import json
 
-            # Clean narrator elements from cinematic scripts
-            if script_type == "cinematic_movie":
-                # delegate cleaning to CostTracker which defines the helper
-                generated_content = (
-                    self.cost_tracker._clean_narrator_from_cinematic_script(
-                        generated_content
+                            parsed_response = json.loads(parsed_response)
+                        generated_content = parsed_response["choices"][0][
+                            "message"
+                        ]["content"]
+                        usage_raw = parsed_response["usage"]
+                        logger.info(
+                            f"[OpenRouter] Parsed raw JSON response for {model}"
+                        )
+                    except Exception as json_error:
+                        logger.error(
+                            f"[OpenRouter] Failed to parse JSON response: {str(json_error)}"
+                        )
+                        raise ValueError(
+                            f"Failed to parse JSON API response: {str(json_error)}"
+                        )
+                else:
+                    raise ValueError(
+                        "Invalid response format: no choices or json method available"
                     )
+        except Exception as e:
+            logger.error(
+                f"[OpenRouter] Failed to parse response for {model}: {str(e)}"
+            )
+            raise ValueError(f"Failed to parse API response: {str(e)}")
+
+        # Normalize usage to dict for consistent access
+        if isinstance(usage_raw, dict):
+            usage = usage_raw
+        else:
+            usage = {
+                "prompt_tokens": usage_raw.prompt_tokens,
+                "completion_tokens": usage_raw.completion_tokens,
+                "total_tokens": usage_raw.total_tokens,
+            }
+
+        # Clean narrator elements from cinematic scripts
+        if script_type == "cinematic_movie":
+            # delegate cleaning to CostTracker which defines the helper
+            generated_content = (
+                self.cost_tracker._clean_narrator_from_cinematic_script(
+                    generated_content
                 )
-
-            # Calculate cost
-            input_cost = (usage["prompt_tokens"] / 1000) * config["cost_per_1k_input"]
-            output_cost = (usage["completion_tokens"] / 1000) * config[
-                "cost_per_1k_output"
-            ]
-            total_cost = input_cost + output_cost
-
-            # Track the cost
-            await self.cost_tracker.track(
-                user_tier=user_tier,
-                model=model,
-                input_tokens=usage["prompt_tokens"],
-                output_tokens=usage["completion_tokens"],
-                cost=total_cost,
             )
 
-            return {
-                "status": "success",
-                "content": generated_content,
-                "model_used": model,
-                "tier": user_tier.value,
-                "usage": {
-                    "prompt_tokens": usage["prompt_tokens"],
-                    "completion_tokens": usage["completion_tokens"],
-                    "total_tokens": usage["total_tokens"],
-                    "estimated_cost": total_cost,
-                },
-            }
+        # Calculate cost
+        cost_per_1k_input = config.cost_per_1k_input if config.cost_per_1k_input else 0.0
+        cost_per_1k_output = config.cost_per_1k_output if config.cost_per_1k_output else 0.0
+        input_cost = (usage["prompt_tokens"] / 1000) * cost_per_1k_input
+        output_cost = (usage["completion_tokens"] / 1000) * cost_per_1k_output
+        total_cost = input_cost + output_cost
 
-        except Exception as e:
-            logger.error(f"[OpenRouter] Error with {model}: {str(e)}")
+        # Track the cost
+        tier_enum = ModelTier(tier_str) if tier_str in [t.value for t in ModelTier] else ModelTier.FREE
+        await self.cost_tracker.track(
+            user_tier=tier_enum,
+            model=model,
+            input_tokens=usage["prompt_tokens"],
+            output_tokens=usage["completion_tokens"],
+            cost=total_cost,
+        )
 
-            # Try fallback if not already using it
-            if not use_fallback:
-                logger.info(f"[OpenRouter] Attempting fallback model")
-                return await self.generate_script(
-                    content=content,
-                    user_tier=user_tier,
-                    script_type=script_type,
-                    use_fallback=True,
-                )
-
-            # If fallback also failed, return error
-            return {
-                "status": "error",
-                "error": str(e),
-                "model_attempted": model,
-                "tier": user_tier.value,
-            }
+        return {
+            "status": "success",
+            "content": generated_content,
+            "model_used": model,
+            "tier": tier_str,
+            "usage": {
+                "prompt_tokens": usage["prompt_tokens"],
+                "completion_tokens": usage["completion_tokens"],
+                "total_tokens": usage["total_tokens"],
+                "estimated_cost": total_cost,
+            },
+        }
 
     def _prepare_script_messages(
         self,

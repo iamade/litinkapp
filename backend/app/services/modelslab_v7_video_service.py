@@ -2,6 +2,8 @@ from typing import Dict, Any, Optional, List
 import aiohttp
 import asyncio
 from app.core.config import settings
+from app.core.model_config import get_model_config
+from app.services.model_fallback_manager import fallback_manager
 import logging
 
 logger = logging.getLogger(__name__)

@@ -2,6 +2,8 @@ from typing import Dict, Any, Optional, List
 import aiohttp
 import asyncio
 from app.core.config import settings
+from app.core.model_config import get_model_config
+from app.services.model_fallback_manager import fallback_manager
 import logging
 
 logger = logging.getLogger(__name__)
@@ -32,14 +34,16 @@ class ModelsLabV7ImageService:
             'artistic': 'gen4_image'
         }
 
-        # ✅ Tier-based model mapping (based on architecture)
+        # Tier-based model mapping now uses centralized configuration
+        # Kept for backward compatibility but prefer using get_model_config()
         self.tier_model_mapping = {
-            'free': 'gen4_image',        # ModelsLab Gen4 for free tier (imagen models may be unavailable)
-            'basic': 'gen4_image',       # ModelsLab Gen4 for basic tier
-            'pro': 'runway_image',       # Better quality for Pro tier
-            'premium': 'runway_image',   # Premium models
-            'professional': 'runway_image',  # Professional tier
-            'enterprise': 'runway_image' # Enterprise tier
+            'free': 'gen4_image',
+            'basic': 'gen4_image',
+            'standard': 'runway_image',
+            'pro': 'runway_image',
+            'premium': 'runway_image',
+            'professional': 'runway_image',
+            'enterprise': 'runway_image'
         }
 
         logger.info(f"[MODELSLAB V7 IMAGE] Initialized with image models: {self.image_models}")
@@ -69,15 +73,48 @@ class ModelsLabV7ImageService:
         wait_for_completion: bool = True,
         max_wait_time: int = 60
     ) -> Dict[str, Any]:
-        """Generate image using ModelsLab V7 API with async handling"""
+        """Generate image using ModelsLab V7 API with automatic fallback"""
+
+        if user_tier:
+            async def _generate_with_model(model_id: str, **kwargs) -> Dict[str, Any]:
+                return await self._execute_generation(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    model_id=model_id,
+                    wait_for_completion=wait_for_completion,
+                    max_wait_time=max_wait_time
+                )
+
+            return await fallback_manager.try_with_fallback(
+                service_type="image",
+                user_tier=user_tier,
+                generation_function=_generate_with_model,
+                request_params={"model_id": model_id or self._get_model_for_tier(user_tier)},
+                model_param_name="model_id"
+            )
+        else:
+            if model_id is None:
+                model_id = "gen4_image"
+
+            return await self._execute_generation(
+                prompt=prompt,
+                aspect_ratio=aspect_ratio,
+                model_id=model_id,
+                wait_for_completion=wait_for_completion,
+                max_wait_time=max_wait_time
+            )
+
+    async def _execute_generation(
+        self,
+        prompt: str,
+        aspect_ratio: str,
+        model_id: str,
+        wait_for_completion: bool = True,
+        max_wait_time: int = 60
+    ) -> Dict[str, Any]:
+        """Execute the actual image generation with specified model"""
 
         try:
-            # Determine model_id based on user_tier if not explicitly provided
-            if model_id is None and user_tier is not None:
-                model_id = self._get_model_for_tier(user_tier)
-            elif model_id is None:
-                model_id = "gen4_image"  # Fallback to default
-
             payload = {
                 "prompt": prompt,
                 "aspect_ratio": aspect_ratio,
@@ -86,10 +123,8 @@ class ModelsLabV7ImageService:
             }
 
             logger.info(f"[MODELSLAB V7 IMAGE] Generating image with model: {model_id}")
-            logger.info(f"[MODELSLAB V7 IMAGE] User tier: {user_tier}")
             logger.info(f"[MODELSLAB V7 IMAGE] Aspect ratio: {aspect_ratio}")
             logger.info(f"[MODELSLAB V7 IMAGE] Prompt: {prompt[:100]}...")
-            logger.info(f"[MODELSLAB V7 IMAGE] Model selection: {'tier-based' if user_tier else 'hardcoded/default'}")
             logger.info(f"[DEBUG] API payload model_id: {payload.get('model_id')}")
             
             async with aiohttp.ClientSession() as session:
@@ -211,53 +246,45 @@ class ModelsLabV7ImageService:
         aspect_ratio: str = "3:4",  # Portrait for characters
         user_tier: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Generate character image using V7 API"""
-        
+        """Generate character image using V7 API with automatic fallback"""
+
         try:
-            # ✅ Enhanced character prompts for better quality
+            # Enhanced character prompts for better quality
             style_modifiers = {
                 "realistic": "photorealistic portrait, detailed facial features, professional lighting, high quality, 8k resolution",
                 "cinematic": "cinematic character portrait, dramatic lighting, film noir style, movie quality",
                 "animated": "animated character design, cartoon style, expressive features, vibrant colors",
                 "fantasy": "fantasy character art, magical aura, ethereal lighting, detailed fantasy design"
             }
-            
+
             style_prompt = style_modifiers.get(style, style_modifiers["realistic"])
-            
-            # ✅ Comprehensive character prompt
-            full_prompt = f"""Character portrait of {character_name}: {character_description}. 
-            {style_prompt}. 
-            Clear background, centered composition, detailed character design, 
+
+            # Comprehensive character prompt
+            full_prompt = f"""Character portrait of {character_name}: {character_description}.
+            {style_prompt}.
+            Clear background, centered composition, detailed character design,
             expressive eyes, well-defined features, professional character art"""
-            
-            # Get appropriate model for style (fallback if no tier provided)
-            if user_tier:
-                model_id = self._get_model_for_tier(user_tier)
-            else:
-                model_id = self._get_model_for_style(style)
 
             logger.info(f"[CHARACTER IMAGE] Generating {style} portrait for: {character_name}")
             logger.info(f"[CHARACTER IMAGE] User tier: {user_tier}")
-            logger.info(f"[CHARACTER IMAGE] Selected model: {model_id} ({'tier-based' if user_tier else 'style-based'})")
 
             result = await self.generate_image(
                 prompt=full_prompt,
                 aspect_ratio=aspect_ratio,
-                model_id=model_id,
+                model_id=None,
                 user_tier=user_tier,
-                wait_for_completion=True,  # Wait for character images
-                max_wait_time=120  # 2 minutes for characters
-            
+                wait_for_completion=True,
+                max_wait_time=120
             )
-            
+
             # Add character metadata
             if result.get('status') == 'success':
                 result['character_name'] = character_name
                 result['character_style'] = style
                 result['image_type'] = 'character'
-            
+
             return result
-            
+
         except Exception as e:
             error_msg = str(e) if str(e) else repr(e)
             logger.error(f"[CHARACTER IMAGE ERROR] {character_name}: {error_msg}")
@@ -270,51 +297,44 @@ class ModelsLabV7ImageService:
         aspect_ratio: str = "16:9",
         user_tier: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Generate scene image using V7 API"""
-        
+        """Generate scene image using V7 API with automatic fallback"""
+
         try:
-            # ✅ Enhanced scene prompts
+            # Enhanced scene prompts
             style_modifiers = {
                 "realistic": "photorealistic environment, detailed landscape, natural lighting, high resolution",
                 "cinematic": "cinematic scene, dramatic lighting, movie-quality composition, epic vista",
                 "animated": "animated scene background, cartoon environment, vibrant world design",
                 "fantasy": "fantasy environment, magical atmosphere, otherworldly landscape, mystical setting"
             }
-            
+
             style_prompt = style_modifiers.get(style, style_modifiers["cinematic"])
-            
-            full_prompt = f"""Scene: {scene_description}. 
-            {style_prompt}. 
-            Wide establishing shot, detailed environment, atmospheric perspective, 
+
+            full_prompt = f"""Scene: {scene_description}.
+            {style_prompt}.
+            Wide establishing shot, detailed environment, atmospheric perspective,
             rich visual storytelling, immersive background, professional scene composition"""
-            
-            # Get appropriate model for style (fallback if no tier provided)
-            if user_tier:
-                model_id = self._get_model_for_tier(user_tier)
-            else:
-                model_id = self._get_model_for_style(style)
 
             logger.info(f"[SCENE IMAGE] Generating {style} scene: {scene_description[:50]}...")
             logger.info(f"[SCENE IMAGE] User tier: {user_tier}")
-            logger.info(f"[SCENE IMAGE] Selected model: {model_id} ({'tier-based' if user_tier else 'style-based'})")
 
             result = await self.generate_image(
                 prompt=full_prompt,
                 aspect_ratio=aspect_ratio,
-                model_id=model_id,
+                model_id=None,
                 user_tier=user_tier,
-                wait_for_completion=True,  # Wait for scene images
-                max_wait_time=120  # 2 minutes for scenes
+                wait_for_completion=True,
+                max_wait_time=120
             )
-            
+
             # Add scene metadata
             if result.get('status') == 'success':
                 result['scene_description'] = scene_description
                 result['scene_style'] = style
                 result['image_type'] = 'scene'
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"[SCENE IMAGE ERROR]: {str(e)}")
             raise e

@@ -3,6 +3,7 @@ import aiohttp
 import asyncio
 import random
 from app.core.config import settings
+from app.core.model_config import get_model_config
 import logging
 
 logger = logging.getLogger(__name__)
