@@ -92,20 +92,21 @@ async def get_current_active_user(current_user: dict = Depends(get_current_user)
 
 async def get_current_author(current_user: dict = Depends(get_current_active_user)) -> dict:
     """Get current user if they are an author"""
-    if current_user.get('role') != "author":
+    user_roles = current_user.get('roles', [])
+    if 'author' not in user_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
+            detail="Not enough permissions - author role required"
         )
     return current_user
 
 
 async def get_current_superadmin(current_user: dict = Depends(get_current_active_user)) -> dict:
     """Get current user if they are a superadmin"""
-    user_role = current_user.get('role')
+    user_roles = current_user.get('roles', [])
     user_email = current_user.get('email')
 
-    if user_role != "superadmin" and user_email != "support@litinkai.com":
+    if 'superadmin' not in user_roles and user_email != "support@litinkai.com":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Superadmin access required"
@@ -115,4 +116,5 @@ async def get_current_superadmin(current_user: dict = Depends(get_current_active
 
 def is_superadmin(user: dict) -> bool:
     """Check if a user is a superadmin"""
-    return user.get('role') == "superadmin" or user.get('email') == "support@litinkai.com"
+    user_roles = user.get('roles', [])
+    return 'superadmin' in user_roles or user.get('email') == "support@litinkai.com"

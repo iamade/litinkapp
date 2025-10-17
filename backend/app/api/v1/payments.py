@@ -25,7 +25,8 @@ async def create_book_upload_checkout_session(
     """Create a Stripe Checkout Session for book upload payment"""
     try:
         # Prevent superadmin from creating a payment session
-        if current_user.get('role') == 'superadmin':
+        user_roles = current_user.get('roles', [])
+        if 'superadmin' in user_roles:
             raise HTTPException(status_code=400, detail="Superadmin does not require payment for book uploads.")
         # Verify the book exists and belongs to the user
         book_response = supabase_client.table('books').select('*').eq('id', book_id).eq('user_id', current_user['id']).single().execute()

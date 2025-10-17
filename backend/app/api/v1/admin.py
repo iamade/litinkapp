@@ -6,7 +6,7 @@ from typing import Optional, List
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from supabase import Client
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import logging
 
 from app.core.auth import get_current_superadmin
@@ -457,3 +457,251 @@ async def get_verification_statistics(
             "unverified_users": total_users - verified_users,
             "verification_rate": round(verification_rate, 2)
         }
+
+
+# User Role Management Endpoints
+class AddRoleToUserRequest(BaseModel):
+    user_id: str
+    role: str = Field(..., pattern="^(explorer|author|admin|superadmin)$")
+
+
+class RemoveRoleFromUserRequest(BaseModel):
+    user_id: str
+    role: str = Field(..., pattern="^(explorer|author|admin|superadmin)$")
+
+
+@router.get("/users/list")
+async def list_all_users(
+    limit: int = Query(50, description="Maximum number of users to return"),
+    offset: int = Query(0, description="Pagination offset"),
+    search: Optional[str] = Query(None, description="Search by email or display name"),
+    role_filter: Optional[str] = Query(None, description="Filter by role"),
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Get list of all users with their roles"""
+    try:
+        query = supabase.table('profiles').select('id, email, display_name, roles, email_verified, created_at, updated_at')
+
+        # Apply search filter if provided
+        if search:
+            query = query.or_(f"email.ilike.%{search}%,display_name.ilike.%{search}%")
+
+        # Apply role filter if provided
+        if role_filter:
+            query = query.contains('roles', [role_filter])
+
+        # Apply pagination
+        query = query.order('created_at', desc=True).range(offset, offset + limit - 1)
+
+        response = query.execute()
+
+        # Get total count
+        count_query = supabase.table('profiles').select('id', count='exact')
+        if search:
+            count_query = count_query.or_(f"email.ilike.%{search}%,display_name.ilike.%{search}%")
+        if role_filter:
+            count_query = count_query.contains('roles', [role_filter])
+
+        count_response = count_query.execute()
+
+        return {
+            "users": response.data,
+            "total": count_response.count,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Error listing users: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list users")
+
+
+@router.get("/users/{user_id}")
+async def get_user_details(
+    user_id: str,
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Get detailed information about a specific user"""
+    try:
+        response = supabase.table('profiles').select('*').eq('id', user_id).maybeSingle().execute()
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        return {
+            "user": response.data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching user details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch user details")
+
+
+@router.get("/users/{user_id}/roles")
+async def get_user_roles(
+    user_id: str,
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Get roles for a specific user"""
+    try:
+        response = supabase.table('profiles').select('id, email, display_name, roles').eq('id', user_id).maybeSingle().execute()
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        return {
+            "user_id": response.data['id'],
+            "email": response.data['email'],
+            "display_name": response.data['display_name'],
+            "roles": response.data['roles']
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching user roles: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch user roles")
+
+
+@router.post("/users/roles/add")
+async def add_role_to_user(
+    request: AddRoleToUserRequest,
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Add a role to a user"""
+    try:
+        # Prevent adding superadmin role unless current user is superadmin
+        if request.role == 'superadmin' and current_user['email'] != 'support@litinkai.com':
+            raise HTTPException(
+                status_code=403,
+                detail="Only the primary superadmin can grant superadmin role"
+            )
+
+        # Check if user exists
+        user_response = supabase.table('profiles').select('id, email, display_name, roles').eq('id', request.user_id).maybeSingle().execute()
+
+        if not user_response.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Check if user already has the role
+        if request.role in user_response.data['roles']:
+            return {
+                "success": True,
+                "message": f"User already has the {request.role} role",
+                "user": user_response.data
+            }
+
+        # Use the database function to add role
+        supabase.rpc('add_role_to_user', {
+            'user_id': request.user_id,
+            'new_role': request.role
+        }).execute()
+
+        # Fetch updated user data
+        updated_user = supabase.table('profiles').select('id, email, display_name, roles').eq('id', request.user_id).maybeSingle().execute()
+
+        logger.info(f"Admin {current_user['email']} added role '{request.role}' to user {user_response.data['email']}")
+
+        return {
+            "success": True,
+            "message": f"Successfully added {request.role} role to user",
+            "user": updated_user.data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding role to user: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add role: {str(e)}")
+
+
+@router.post("/users/roles/remove")
+async def remove_role_from_user(
+    request: RemoveRoleFromUserRequest,
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Remove a role from a user"""
+    try:
+        # Prevent removing superadmin role from primary superadmin
+        user_response = supabase.table('profiles').select('id, email, display_name, roles').eq('id', request.user_id).maybeSingle().execute()
+
+        if not user_response.data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if request.role == 'superadmin' and user_response.data['email'] == 'support@litinkai.com':
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot remove superadmin role from primary superadmin account"
+            )
+
+        # Check if user has the role
+        if request.role not in user_response.data['roles']:
+            return {
+                "success": True,
+                "message": f"User does not have the {request.role} role",
+                "user": user_response.data
+            }
+
+        # Use the database function to remove role
+        try:
+            supabase.rpc('remove_role_from_user', {
+                'user_id': request.user_id,
+                'role_to_remove': request.role
+            }).execute()
+        except Exception as e:
+            if "Cannot remove last role" in str(e):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot remove last role from user. User must have at least one role."
+                )
+            raise
+
+        # Fetch updated user data
+        updated_user = supabase.table('profiles').select('id, email, display_name, roles').eq('id', request.user_id).maybeSingle().execute()
+
+        logger.info(f"Admin {current_user['email']} removed role '{request.role}' from user {user_response.data['email']}")
+
+        return {
+            "success": True,
+            "message": f"Successfully removed {request.role} role from user",
+            "user": updated_user.data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing role from user: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to remove role: {str(e)}")
+
+
+@router.get("/roles/available")
+async def get_available_roles(
+    current_user: dict = Depends(get_current_superadmin),
+):
+    """Get list of available roles in the system"""
+    return {
+        "roles": [
+            {
+                "value": "explorer",
+                "label": "Explorer",
+                "description": "Basic user who can explore and consume content"
+            },
+            {
+                "value": "author",
+                "label": "Author",
+                "description": "Can create and publish their own content"
+            },
+            {
+                "value": "admin",
+                "label": "Admin",
+                "description": "Can moderate content and manage users (except superadmin)"
+            },
+            {
+                "value": "superadmin",
+                "label": "Superadmin",
+                "description": "Full system access including user role management"
+            }
+        ]
+    }

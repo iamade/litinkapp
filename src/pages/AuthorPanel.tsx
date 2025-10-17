@@ -18,7 +18,7 @@ export default function AuthorPanel() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
 
-  if (!user || user.role !== 'author') {
+  if (!user || !user.roles?.includes('author')) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">

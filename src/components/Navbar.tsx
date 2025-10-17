@@ -53,7 +53,7 @@ export default function Navbar() {
       ? [{ path: "/author", label: "Create", showWhenLoggedIn: true }]
       : []),
     { path: "/subscription", label: "Subscription", showWhenLoggedIn: true },
-    ...(user && (user.role === "superadmin" || user.email === "support@litinkai.com")
+    ...(user && (hasRole(user, "superadmin") || user.email === "support@litinkai.com")
       ? [{ path: "/admin", label: "Admin", showWhenLoggedIn: true }]
       : []),
   ];

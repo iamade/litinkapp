@@ -21,7 +21,7 @@ export default function AdminDashboard() {
     }
 
     const isSuperadmin =
-      user.role === "superadmin" || user.email === "support@litinkai.com";
+      user.roles?.includes("superadmin") || user.email === "support@litinkai.com";
 
     if (!isSuperadmin) {
       navigate("/dashboard");
