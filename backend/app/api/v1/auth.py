@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from supabase import Client
 from gotrue.errors import AuthApiError
@@ -67,7 +67,7 @@ async def register(
         "display_name": user_data.display_name or user_data.email.split('@')[0],
         "roles": user_data.roles,
         "email_verified": False,
-        "verification_token_sent_at": "now()"
+        "verification_token_sent_at": datetime.now(timezone.utc).isoformat()
     }
 
     try:
