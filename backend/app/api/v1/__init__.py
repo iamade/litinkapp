@@ -13,6 +13,7 @@ from .characters import router as characters_router
 from .chapters import router as chapters_router
 from .merge import router as merge_router
 from .image_generations import router as image_generations_router
+from .admin import router as admin_router
 
 api_router = APIRouter()
 
@@ -34,3 +35,4 @@ api_router.include_router(merge_router, prefix="/merge", tags=["merge"])
 api_router.include_router(
     image_generations_router, prefix="/image-generations", tags=["image-generations"]
 )
+api_router.include_router(admin_router, tags=["admin"])

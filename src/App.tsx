@@ -15,6 +15,7 @@ import Profile from "./pages/Profile";
 import BookUpload from "./pages/BookUpload";
 import BookView from "./pages/BookView";
 import SubscriptionPage from "./pages/SubscriptionPage";
+import AdminDashboard from "./pages/AdminDashboard";
 import { setLoadingContextSetter } from "./lib/api";
 import { VideoGenerationProvider } from "./contexts/VideoGenerationContext";
 import { ScriptSelectionProvider } from "./contexts/ScriptSelectionContext";
@@ -67,6 +68,7 @@ function App() {
                     <Route path="/upload" element={<BookUpload />} />
                     <Route path="/book/:id" element={<BookView />} />
                     <Route path="/subscription" element={<SubscriptionPage />} />
+                    <Route path="/admin" element={<AdminDashboard />} />
                   </Routes>
                 </div>
               </Router>

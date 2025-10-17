@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, hasRole } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useUserMode } from "../hooks/useUserMode";
-import { Menu, X, User, LogOut, Moon, Sun, Compass, Sparkles } from "lucide-react";
+import { Menu, X, User, LogOut, Moon, Sun, Compass, Sparkles, Shield } from "lucide-react";
 import { toast } from "react-hot-toast";
 
 export default function Navbar() {
@@ -53,6 +53,9 @@ export default function Navbar() {
       ? [{ path: "/author", label: "Create", showWhenLoggedIn: true }]
       : []),
     { path: "/subscription", label: "Subscription", showWhenLoggedIn: true },
+    ...(user && (user.role === "superadmin" || user.email === "support@litinkai.com")
+      ? [{ path: "/admin", label: "Admin", showWhenLoggedIn: true }]
+      : []),
   ];
 
   // Filter nav items based on authentication status

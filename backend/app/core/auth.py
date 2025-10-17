@@ -94,3 +94,21 @@ async def get_current_author(current_user: dict = Depends(get_current_active_use
             detail="Not enough permissions"
         )
     return current_user
+
+
+async def get_current_superadmin(current_user: dict = Depends(get_current_active_user)) -> dict:
+    """Get current user if they are a superadmin"""
+    user_role = current_user.get('role')
+    user_email = current_user.get('email')
+
+    if user_role != "superadmin" and user_email != "support@litinkai.com":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superadmin access required"
+        )
+    return current_user
+
+
+def is_superadmin(user: dict) -> bool:
+    """Check if a user is a superadmin"""
+    return user.get('role') == "superadmin" or user.get('email') == "support@litinkai.com"
