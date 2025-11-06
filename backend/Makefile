@@ -10,7 +10,7 @@ up:
 
 # Run in development mode WITH debugger
 debug:
-    DEBUG=true ENVIRONMENT=development docker-compose up
+	DEBUG=true ENVIRONMENT=development docker-compose up
 
 # Stop containers
 stop:

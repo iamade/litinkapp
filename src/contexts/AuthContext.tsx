@@ -115,7 +115,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       password,
       roles,
     });
-    await login(email, password);
+    // await login(email, password);
   };
 
   const addRole = async (role: "author" | "explorer") => {
