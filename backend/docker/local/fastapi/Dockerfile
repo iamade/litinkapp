@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install \
     g++
 
 # Copy requirements and install Python dependencies
-COPY ./backend/requirements.txt .
+COPY ./requirements.txt .
 
 RUN pip wheel --wheel-dir /usr/src/app/wheels \
     -r requirements.txt \
@@ -62,11 +62,11 @@ RUN pip install --no-cache-dir --no-index --find-links=/wheels/ /wheels/* \
 # Install debugpy only for development
 RUN if [ "$ENVIRONMENT" = "development" ] ; then pip install debugpy ; fi
 
-COPY --chown=${APP_USER}:{APP_GROUP} ./backend/docker/local/fastapi/entrypoint.sh /entrypoint.sh
-COPY --chown=${APP_USER}:{APP_GROUP} ./backend/docker/local/fastapi/start.sh /start.sh
-COPY --chown=${APP_USER}:{APP_GROUP} ./backend/docker/local/fastapi/celery/worker/start.sh /start-celeryworker.sh
-COPY --chown=${APP_USER}:{APP_GROUP} ./backend/docker/local/fastapi/celery/beat/start.sh /start-celerybeat.sh
-COPY --chown=${APP_USER}:{APP_GROUP} ./backend/docker/local/fastapi/celery/flower/start.sh /start-flower.sh
+COPY --chown=${APP_USER}:{APP_GROUP} ./docker/local/fastapi/entrypoint.sh /entrypoint.sh
+COPY --chown=${APP_USER}:{APP_GROUP} ./docker/local/fastapi/start.sh /start.sh
+COPY --chown=${APP_USER}:{APP_GROUP} ./docker/local/fastapi/celery/worker/start.sh /start-celeryworker.sh
+COPY --chown=${APP_USER}:{APP_GROUP} ./docker/local/fastapi/celery/beat/start.sh /start-celerybeat.sh
+COPY --chown=${APP_USER}:{APP_GROUP} ./docker/local/fastapi/celery/flower/start.sh /start-flower.sh
 
 
 RUN sed -i 's/\r$//g' /entrypoint.sh /start.sh /start-celeryworker.sh /start-celerybeat.sh /start-flower.sh && \
