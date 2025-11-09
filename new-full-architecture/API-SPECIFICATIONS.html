@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>API-SPECIFICATIONS.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="api-specifications---litinkai-platform">API Specifications - LitinkAI Platform</h1>
+<p>Complete API documentation for all endpoints in the LitinkAI platform.</p>
+<hr>
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#api-overview">API Overview</a></li>
+<li><a href="#authentication-endpoints">Authentication Endpoints</a></li>
+<li><a href="#books-management-endpoints">Books Management Endpoints</a></li>
+<li><a href="#ai-generation-endpoints">AI Generation Endpoints</a></li>
+<li><a href="#plot-management-endpoints">Plot Management Endpoints</a></li>
+<li><a href="#character-management-endpoints">Character Management Endpoints</a></li>
+<li><a href="#audio-generation-endpoints">Audio Generation Endpoints</a></li>
+<li><a href="#video-production-endpoints">Video Production Endpoints</a></li>
+<li><a href="#subscription-management-endpoints">Subscription Management Endpoints</a></li>
+<li><a href="#admin-endpoints">Admin Endpoints</a></li>
+<li><a href="#error-codes">Error Codes</a></li>
+<li><a href="#rate-limiting">Rate Limiting</a></li>
+</ol>
+<hr>
+<h2 id="api-overview">API Overview</h2>
+<h3 id="base-url">Base URL</h3>
+<pre class="hljs"><code><div>Production: https://api.litinkai.com/api/v1
+Staging: https://staging-api.litinkai.com/api/v1
+Development: http://localhost:8000/api/v1
+</div></code></pre>
+<h3 id="authentication">Authentication</h3>
+<p>All authenticated endpoints require a JWT token in the Authorization header:</p>
+<pre class="hljs"><code><div><span class="hljs-attribute">Authorization</span>: Bearer &lt;access_token&gt;
+</div></code></pre>
+<h3 id="response-format">Response Format</h3>
+<p>All responses follow this structure:</p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: { ... },
+  <span class="hljs-attr">"message"</span>: <span class="hljs-string">"Operation successful"</span>,
+  <span class="hljs-attr">"timestamp"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>
+}
+</div></code></pre>
+<p>Error responses:</p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">false</span>,
+  <span class="hljs-attr">"error"</span>: {
+    <span class="hljs-attr">"code"</span>: <span class="hljs-string">"VALIDATION_ERROR"</span>,
+    <span class="hljs-attr">"message"</span>: <span class="hljs-string">"Invalid input data"</span>,
+    <span class="hljs-attr">"details"</span>: { ... }
+  },
+  <span class="hljs-attr">"timestamp"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>
+}
+</div></code></pre>
+<hr>
+<h2 id="authentication-endpoints">Authentication Endpoints</h2>
+<h3 id="register-user">Register User</h3>
+<p><strong>POST</strong> <code>/auth/register</code></p>
+<p>Creates a new user account.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"email"</span>: <span class="hljs-string">"user@example.com"</span>,
+  <span class="hljs-attr">"password"</span>: <span class="hljs-string">"securePassword123!"</span>,
+  <span class="hljs-attr">"full_name"</span>: <span class="hljs-string">"John Doe"</span>,
+  <span class="hljs-attr">"agree_to_terms"</span>: <span class="hljs-literal">true</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>201 Created</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"user_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"email"</span>: <span class="hljs-string">"user@example.com"</span>,
+    <span class="hljs-attr">"full_name"</span>: <span class="hljs-string">"John Doe"</span>,
+    <span class="hljs-attr">"requires_verification"</span>: <span class="hljs-literal">true</span>,
+    <span class="hljs-attr">"created_at"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>
+  }
+}
+</div></code></pre>
+<p><strong>Errors:</strong></p>
+<ul>
+<li><code>400</code> - Invalid email or weak password</li>
+<li><code>409</code> - Email already registered</li>
+</ul>
+<hr>
+<h3 id="login">Login</h3>
+<p><strong>POST</strong> <code>/auth/login</code></p>
+<p>Authenticates user and returns JWT tokens.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"email"</span>: <span class="hljs-string">"user@example.com"</span>,
+  <span class="hljs-attr">"password"</span>: <span class="hljs-string">"securePassword123!"</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"access_token"</span>: <span class="hljs-string">"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."</span>,
+    <span class="hljs-attr">"refresh_token"</span>: <span class="hljs-string">"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."</span>,
+    <span class="hljs-attr">"token_type"</span>: <span class="hljs-string">"bearer"</span>,
+    <span class="hljs-attr">"expires_in"</span>: <span class="hljs-number">3600</span>,
+    <span class="hljs-attr">"user"</span>: {
+      <span class="hljs-attr">"user_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+      <span class="hljs-attr">"email"</span>: <span class="hljs-string">"user@example.com"</span>,
+      <span class="hljs-attr">"full_name"</span>: <span class="hljs-string">"John Doe"</span>,
+      <span class="hljs-attr">"tier"</span>: <span class="hljs-string">"free"</span>
+    }
+  }
+}
+</div></code></pre>
+<p><strong>Errors:</strong></p>
+<ul>
+<li><code>401</code> - Invalid credentials</li>
+<li><code>403</code> - Email not verified</li>
+</ul>
+<hr>
+<h3 id="verify-email">Verify Email</h3>
+<p><strong>POST</strong> <code>/auth/verify-email</code></p>
+<p>Verifies user email with token from email link.</p>
+<p><strong>Query Parameters:</strong></p>
+<ul>
+<li><code>token</code> (required): Verification token</li>
+</ul>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"verified"</span>: <span class="hljs-literal">true</span>,
+    <span class="hljs-attr">"message"</span>: <span class="hljs-string">"Email verified successfully"</span>
+  }
+}
+</div></code></pre>
+<p><strong>Errors:</strong></p>
+<ul>
+<li><code>400</code> - Invalid or expired token</li>
+<li><code>404</code> - Token not found</li>
+</ul>
+<hr>
+<h3 id="refresh-token">Refresh Token</h3>
+<p><strong>POST</strong> <code>/auth/refresh</code></p>
+<p>Refreshes access token using refresh token.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"refresh_token"</span>: <span class="hljs-string">"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"access_token"</span>: <span class="hljs-string">"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."</span>,
+    <span class="hljs-attr">"token_type"</span>: <span class="hljs-string">"bearer"</span>,
+    <span class="hljs-attr">"expires_in"</span>: <span class="hljs-number">3600</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="request-password-reset">Request Password Reset</h3>
+<p><strong>POST</strong> <code>/auth/request-password-reset</code></p>
+<p>Sends password reset email.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"email"</span>: <span class="hljs-string">"user@example.com"</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"message"</span>: <span class="hljs-string">"Password reset email sent"</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="reset-password">Reset Password</h3>
+<p><strong>POST</strong> <code>/auth/reset-password</code></p>
+<p>Resets password using token from email.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"token"</span>: <span class="hljs-string">"reset-token-from-email"</span>,
+  <span class="hljs-attr">"new_password"</span>: <span class="hljs-string">"newSecurePassword123!"</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"message"</span>: <span class="hljs-string">"Password reset successfully"</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h2 id="books-management-endpoints">Books Management Endpoints</h2>
+<h3 id="upload-book">Upload Book</h3>
+<p><strong>POST</strong> <code>/books/upload</code></p>
+<p>Uploads and processes a book file.</p>
+<p><strong>Request:</strong> <code>multipart/form-data</code></p>
+<ul>
+<li><code>file</code> (required): Book file (PDF, DOCX, EPUB, TXT)</li>
+<li><code>book_type</code> (required): &quot;learning&quot; | &quot;entertainment&quot;</li>
+<li><code>title</code> (optional): Custom book title</li>
+<li><code>author</code> (optional): Book author</li>
+</ul>
+<p><strong>Response:</strong> <code>201 Created</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"book_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"title"</span>: <span class="hljs-string">"Introduction to AI"</span>,
+    <span class="hljs-attr">"author"</span>: <span class="hljs-string">"John Smith"</span>,
+    <span class="hljs-attr">"book_type"</span>: <span class="hljs-string">"learning"</span>,
+    <span class="hljs-attr">"status"</span>: <span class="hljs-string">"processing"</span>,
+    <span class="hljs-attr">"file_url"</span>: <span class="hljs-string">"https://storage.supabase.co/..."</span>,
+    <span class="hljs-attr">"upload_date"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>,
+    <span class="hljs-attr">"total_pages"</span>: <span class="hljs-number">250</span>,
+    <span class="hljs-attr">"estimated_chapters"</span>: <span class="hljs-number">12</span>
+  }
+}
+</div></code></pre>
+<p><strong>Errors:</strong></p>
+<ul>
+<li><code>400</code> - Invalid file format</li>
+<li><code>413</code> - File too large (max 50MB)</li>
+<li><code>402</code> - Upload limit reached for tier</li>
+</ul>
+<hr>
+<h3 id="get-books">Get Books</h3>
+<p><strong>GET</strong> <code>/books</code></p>
+<p>Retrieves user's books.</p>
+<p><strong>Query Parameters:</strong></p>
+<ul>
+<li><code>book_type</code> (optional): Filter by type (&quot;learning&quot; | &quot;entertainment&quot;)</li>
+<li><code>status</code> (optional): Filter by status (&quot;processing&quot; | &quot;ready&quot; | &quot;failed&quot;)</li>
+<li><code>limit</code> (optional): Results per page (default: 20)</li>
+<li><code>offset</code> (optional): Pagination offset (default: 0)</li>
+</ul>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"books"</span>: [
+      {
+        <span class="hljs-attr">"book_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+        <span class="hljs-attr">"title"</span>: <span class="hljs-string">"Introduction to AI"</span>,
+        <span class="hljs-attr">"author"</span>: <span class="hljs-string">"John Smith"</span>,
+        <span class="hljs-attr">"book_type"</span>: <span class="hljs-string">"learning"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"ready"</span>,
+        <span class="hljs-attr">"cover_image_url"</span>: <span class="hljs-string">"https://..."</span>,
+        <span class="hljs-attr">"total_chapters"</span>: <span class="hljs-number">12</span>,
+        <span class="hljs-attr">"upload_date"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>
+      }
+    ],
+    <span class="hljs-attr">"total"</span>: <span class="hljs-number">5</span>,
+    <span class="hljs-attr">"limit"</span>: <span class="hljs-number">20</span>,
+    <span class="hljs-attr">"offset"</span>: <span class="hljs-number">0</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="get-book-details">Get Book Details</h3>
+<p><strong>GET</strong> <code>/books/{book_id}</code></p>
+<p>Retrieves detailed book information with chapters.</p>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"book_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"title"</span>: <span class="hljs-string">"Introduction to AI"</span>,
+    <span class="hljs-attr">"author"</span>: <span class="hljs-string">"John Smith"</span>,
+    <span class="hljs-attr">"book_type"</span>: <span class="hljs-string">"learning"</span>,
+    <span class="hljs-attr">"status"</span>: <span class="hljs-string">"ready"</span>,
+    <span class="hljs-attr">"file_url"</span>: <span class="hljs-string">"https://..."</span>,
+    <span class="hljs-attr">"total_chapters"</span>: <span class="hljs-number">12</span>,
+    <span class="hljs-attr">"total_pages"</span>: <span class="hljs-number">250</span>,
+    <span class="hljs-attr">"chapters"</span>: [
+      {
+        <span class="hljs-attr">"chapter_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+        <span class="hljs-attr">"chapter_number"</span>: <span class="hljs-number">1</span>,
+        <span class="hljs-attr">"title"</span>: <span class="hljs-string">"What is AI?"</span>,
+        <span class="hljs-attr">"summary"</span>: <span class="hljs-string">"An introduction to artificial intelligence..."</span>,
+        <span class="hljs-attr">"content_preview"</span>: <span class="hljs-string">"In this chapter, we explore..."</span>,
+        <span class="hljs-attr">"word_count"</span>: <span class="hljs-number">2500</span>
+      }
+    ]
+  }
+}
+</div></code></pre>
+<p><strong>Errors:</strong></p>
+<ul>
+<li><code>404</code> - Book not found</li>
+<li><code>403</code> - Access denied</li>
+</ul>
+<hr>
+<h3 id="delete-book">Delete Book</h3>
+<p><strong>DELETE</strong> <code>/books/{book_id}</code></p>
+<p>Deletes a book and all associated content.</p>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"message"</span>: <span class="hljs-string">"Book deleted successfully"</span>,
+    <span class="hljs-attr">"deleted_chapters"</span>: <span class="hljs-number">12</span>,
+    <span class="hljs-attr">"deleted_scripts"</span>: <span class="hljs-number">5</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h2 id="ai-generation-endpoints">AI Generation Endpoints</h2>
+<h3 id="generate-script-and-scenes">Generate Script and Scenes</h3>
+<p><strong>POST</strong> <code>/ai/generate-script-and-scenes</code></p>
+<p>Generates a video script with scene breakdowns.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"chapter_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+  <span class="hljs-attr">"script_type"</span>: <span class="hljs-string">"educational"</span> | <span class="hljs-string">"entertainment"</span> | <span class="hljs-string">"documentary"</span>,
+  <span class="hljs-attr">"duration_minutes"</span>: <span class="hljs-number">5</span>,
+  <span class="hljs-attr">"style"</span>: <span class="hljs-string">"engaging"</span> | <span class="hljs-string">"formal"</span> | <span class="hljs-string">"casual"</span>,
+  <span class="hljs-attr">"include_plot_context"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"custom_instructions"</span>: <span class="hljs-string">"Focus on visual examples"</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>201 Created</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"script_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"title"</span>: <span class="hljs-string">"Understanding Neural Networks"</span>,
+    <span class="hljs-attr">"script_type"</span>: <span class="hljs-string">"educational"</span>,
+    <span class="hljs-attr">"duration_minutes"</span>: <span class="hljs-number">5</span>,
+    <span class="hljs-attr">"script_content"</span>: <span class="hljs-string">"Full script text..."</span>,
+    <span class="hljs-attr">"scenes"</span>: [
+      {
+        <span class="hljs-attr">"scene_number"</span>: <span class="hljs-number">1</span>,
+        <span class="hljs-attr">"description"</span>: <span class="hljs-string">"Opening shot of human brain"</span>,
+        <span class="hljs-attr">"duration_seconds"</span>: <span class="hljs-number">10</span>,
+        <span class="hljs-attr">"dialogue"</span>: <span class="hljs-string">"The human brain is remarkable..."</span>,
+        <span class="hljs-attr">"characters"</span>: [<span class="hljs-string">"narrator"</span>],
+        <span class="hljs-attr">"location"</span>: <span class="hljs-string">"Modern office"</span>,
+        <span class="hljs-attr">"time_of_day"</span>: <span class="hljs-string">"day"</span>
+      }
+    ],
+    <span class="hljs-attr">"characters"</span>: [
+      {
+        <span class="hljs-attr">"character_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+        <span class="hljs-attr">"name"</span>: <span class="hljs-string">"Dr. Sarah Chen"</span>,
+        <span class="hljs-attr">"role"</span>: <span class="hljs-string">"Expert"</span>,
+        <span class="hljs-attr">"description"</span>: <span class="hljs-string">"A brilliant AI researcher..."</span>
+      }
+    ],
+    <span class="hljs-attr">"estimated_cost"</span>: <span class="hljs-number">0.50</span>,
+    <span class="hljs-attr">"model_used"</span>: <span class="hljs-string">"gpt-4o"</span>,
+    <span class="hljs-attr">"created_at"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>
+  }
+}
+</div></code></pre>
+<p><strong>Errors:</strong></p>
+<ul>
+<li><code>402</code> - Insufficient credits</li>
+<li><code>400</code> - Invalid parameters</li>
+<li><code>404</code> - Chapter not found</li>
+</ul>
+<hr>
+<h3 id="generate-entertainment-video">Generate Entertainment Video</h3>
+<p><strong>POST</strong> <code>/ai/generate-entertainment-video</code></p>
+<p>Initiates full video generation pipeline.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"script_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+  <span class="hljs-attr">"quality"</span>: <span class="hljs-string">"standard"</span> | <span class="hljs-string">"high"</span> | <span class="hljs-string">"ultra"</span>,
+  <span class="hljs-attr">"aspect_ratio"</span>: <span class="hljs-string">"16:9"</span> | <span class="hljs-string">"9:16"</span> | <span class="hljs-string">"1:1"</span>,
+  <span class="hljs-attr">"voice_settings"</span>: {
+    <span class="hljs-attr">"narrator_voice_id"</span>: <span class="hljs-string">"voice-id"</span>,
+    <span class="hljs-attr">"speed"</span>: <span class="hljs-number">1.0</span>,
+    <span class="hljs-attr">"stability"</span>: <span class="hljs-number">0.5</span>
+  },
+  <span class="hljs-attr">"image_style"</span>: <span class="hljs-string">"realistic"</span> | <span class="hljs-string">"animated"</span> | <span class="hljs-string">"cinematic"</span>,
+  <span class="hljs-attr">"include_lipsync"</span>: <span class="hljs-literal">true</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>202 Accepted</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"video_generation_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"status"</span>: <span class="hljs-string">"pending"</span>,
+    <span class="hljs-attr">"estimated_duration_minutes"</span>: <span class="hljs-number">15</span>,
+    <span class="hljs-attr">"steps"</span>: [
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"script_processing"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"pending"</span>
+      },
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"image_generation"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"pending"</span>,
+        <span class="hljs-attr">"estimated_images"</span>: <span class="hljs-number">12</span>
+      },
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"audio_generation"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"pending"</span>
+      },
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"video_generation"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"pending"</span>
+      },
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"lipsync"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"pending"</span>
+      },
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"merge"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"pending"</span>
+      }
+    ],
+    <span class="hljs-attr">"created_at"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="get-video-generation-status">Get Video Generation Status</h3>
+<p><strong>GET</strong> <code>/ai/video-generation-status/{video_gen_id}</code></p>
+<p>Retrieves current status of video generation.</p>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"video_generation_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"status"</span>: <span class="hljs-string">"video_generation"</span>,
+    <span class="hljs-attr">"progress_percentage"</span>: <span class="hljs-number">65</span>,
+    <span class="hljs-attr">"current_step"</span>: <span class="hljs-string">"video_generation"</span>,
+    <span class="hljs-attr">"steps"</span>: [
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"script_processing"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"completed"</span>,
+        <span class="hljs-attr">"completed_at"</span>: <span class="hljs-string">"2025-11-06T18:01:00Z"</span>
+      },
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"image_generation"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"completed"</span>,
+        <span class="hljs-attr">"completed_at"</span>: <span class="hljs-string">"2025-11-06T18:05:00Z"</span>,
+        <span class="hljs-attr">"images_generated"</span>: <span class="hljs-number">12</span>,
+        <span class="hljs-attr">"images_failed"</span>: <span class="hljs-number">0</span>
+      },
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"audio_generation"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"completed"</span>,
+        <span class="hljs-attr">"completed_at"</span>: <span class="hljs-string">"2025-11-06T18:07:00Z"</span>
+      },
+      {
+        <span class="hljs-attr">"step"</span>: <span class="hljs-string">"video_generation"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"in_progress"</span>,
+        <span class="hljs-attr">"videos_completed"</span>: <span class="hljs-number">7</span>,
+        <span class="hljs-attr">"videos_total"</span>: <span class="hljs-number">12</span>
+      }
+    ],
+    <span class="hljs-attr">"estimated_completion"</span>: <span class="hljs-string">"2025-11-06T18:15:00Z"</span>,
+    <span class="hljs-attr">"preview_url"</span>: <span class="hljs-literal">null</span>
+  }
+}
+</div></code></pre>
+<p><strong>Status Values:</strong></p>
+<ul>
+<li><code>pending</code> - Queued, not started</li>
+<li><code>script_processing</code> - Processing script</li>
+<li><code>image_generation</code> - Generating images</li>
+<li><code>audio_generation</code> - Generating audio</li>
+<li><code>video_generation</code> - Generating videos</li>
+<li><code>lipsync</code> - Processing lip sync</li>
+<li><code>merge</code> - Merging final video</li>
+<li><code>completed</code> - Video ready</li>
+<li><code>failed</code> - Generation failed</li>
+</ul>
+<hr>
+<h3 id="retry-video-generation">Retry Video Generation</h3>
+<p><strong>POST</strong> <code>/ai/retry-video-generation/{video_gen_id}</code></p>
+<p>Retries failed video generation from specific step.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"retry_from_step"</span>: <span class="hljs-string">"image_generation"</span> | <span class="hljs-string">"audio_generation"</span> | <span class="hljs-string">"video_generation"</span> | <span class="hljs-string">"lipsync"</span> | <span class="hljs-string">"merge"</span>,
+  <span class="hljs-attr">"retry_failed_only"</span>: <span class="hljs-literal">true</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"video_generation_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"status"</span>: <span class="hljs-string">"image_generation"</span>,
+    <span class="hljs-attr">"retry_started"</span>: <span class="hljs-literal">true</span>,
+    <span class="hljs-attr">"retrying_items"</span>: <span class="hljs-number">3</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="get-pipeline-status">Get Pipeline Status</h3>
+<p><strong>GET</strong> <code>/ai/pipeline-status/{video_gen_id}</code></p>
+<p>Retrieves detailed pipeline status for debugging.</p>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"video_generation_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"overall_status"</span>: <span class="hljs-string">"video_generation"</span>,
+    <span class="hljs-attr">"character_images"</span>: {
+      <span class="hljs-attr">"total"</span>: <span class="hljs-number">4</span>,
+      <span class="hljs-attr">"completed"</span>: <span class="hljs-number">4</span>,
+      <span class="hljs-attr">"failed"</span>: <span class="hljs-number">0</span>,
+      <span class="hljs-attr">"images"</span>: [
+        {
+          <span class="hljs-attr">"character_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+          <span class="hljs-attr">"character_name"</span>: <span class="hljs-string">"Dr. Sarah Chen"</span>,
+          <span class="hljs-attr">"status"</span>: <span class="hljs-string">"completed"</span>,
+          <span class="hljs-attr">"image_url"</span>: <span class="hljs-string">"https://..."</span>
+        }
+      ]
+    },
+    <span class="hljs-attr">"scene_images"</span>: {
+      <span class="hljs-attr">"total"</span>: <span class="hljs-number">12</span>,
+      <span class="hljs-attr">"completed"</span>: <span class="hljs-number">12</span>,
+      <span class="hljs-attr">"failed"</span>: <span class="hljs-number">0</span>
+    },
+    <span class="hljs-attr">"audio_files"</span>: {
+      <span class="hljs-attr">"total"</span>: <span class="hljs-number">12</span>,
+      <span class="hljs-attr">"completed"</span>: <span class="hljs-number">12</span>,
+      <span class="hljs-attr">"failed"</span>: <span class="hljs-number">0</span>
+    },
+    <span class="hljs-attr">"scene_videos"</span>: {
+      <span class="hljs-attr">"total"</span>: <span class="hljs-number">12</span>,
+      <span class="hljs-attr">"completed"</span>: <span class="hljs-number">7</span>,
+      <span class="hljs-attr">"in_progress"</span>: <span class="hljs-number">5</span>,
+      <span class="hljs-attr">"failed"</span>: <span class="hljs-number">0</span>
+    },
+    <span class="hljs-attr">"tasks"</span>: [
+      {
+        <span class="hljs-attr">"task_id"</span>: <span class="hljs-string">"celery-task-id"</span>,
+        <span class="hljs-attr">"task_type"</span>: <span class="hljs-string">"generate_scene_video"</span>,
+        <span class="hljs-attr">"status"</span>: <span class="hljs-string">"running"</span>,
+        <span class="hljs-attr">"started_at"</span>: <span class="hljs-string">"2025-11-06T18:10:00Z"</span>
+      }
+    ]
+  }
+}
+</div></code></pre>
+<hr>
+<h2 id="plot-management-endpoints">Plot Management Endpoints</h2>
+<h3 id="generate-plot-overview">Generate Plot Overview</h3>
+<p><strong>POST</strong> <code>/plots/generate/{book_id}</code></p>
+<p>Generates comprehensive plot overview for a book.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"custom_instructions"</span>: <span class="hljs-string">"Focus on character development"</span>,
+  <span class="hljs-attr">"include_character_archetypes"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"style"</span>: <span class="hljs-string">"detailed"</span> | <span class="hljs-string">"concise"</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>201 Created</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"plot_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"book_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"title"</span>: <span class="hljs-string">"Plot Analysis: Introduction to AI"</span>,
+    <span class="hljs-attr">"overview"</span>: <span class="hljs-string">"This educational book follows..."</span>,
+    <span class="hljs-attr">"themes"</span>: [<span class="hljs-string">"Innovation"</span>, <span class="hljs-string">"Ethics"</span>, <span class="hljs-string">"Future"</span>],
+    <span class="hljs-attr">"story_arc"</span>: <span class="hljs-string">"Educational progression from basics to advanced"</span>,
+    <span class="hljs-attr">"characters"</span>: [
+      {
+        <span class="hljs-attr">"character_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+        <span class="hljs-attr">"name"</span>: <span class="hljs-string">"Dr. Sarah Chen"</span>,
+        <span class="hljs-attr">"role"</span>: <span class="hljs-string">"protagonist"</span>,
+        <span class="hljs-attr">"description"</span>: <span class="hljs-string">"A brilliant AI researcher..."</span>,
+        <span class="hljs-attr">"archetype"</span>: <span class="hljs-string">"The Sage"</span>,
+        <span class="hljs-attr">"personality_traits"</span>: [<span class="hljs-string">"intelligent"</span>, <span class="hljs-string">"curious"</span>, <span class="hljs-string">"patient"</span>],
+        <span class="hljs-attr">"relationships"</span>: [
+          {
+            <span class="hljs-attr">"related_character_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+            <span class="hljs-attr">"relationship_type"</span>: <span class="hljs-string">"mentor"</span>,
+            <span class="hljs-attr">"description"</span>: <span class="hljs-string">"Guides students"</span>
+          }
+        ]
+      }
+    ],
+    <span class="hljs-attr">"key_plot_points"</span>: [
+      {
+        <span class="hljs-attr">"chapter_number"</span>: <span class="hljs-number">1</span>,
+        <span class="hljs-attr">"event"</span>: <span class="hljs-string">"Introduction to AI concepts"</span>,
+        <span class="hljs-attr">"significance"</span>: <span class="hljs-string">"Establishes foundation"</span>
+      }
+    ],
+    <span class="hljs-attr">"created_at"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="get-plot-overview">Get Plot Overview</h3>
+<p><strong>GET</strong> <code>/plots/{book_id}</code></p>
+<p>Retrieves plot overview for a book.</p>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"plot_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"book_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"title"</span>: <span class="hljs-string">"Plot Analysis"</span>,
+    <span class="hljs-attr">"overview"</span>: <span class="hljs-string">"..."</span>,
+    <span class="hljs-attr">"characters"</span>: [...],
+    <span class="hljs-attr">"themes"</span>: [...],
+    <span class="hljs-attr">"created_at"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h2 id="character-management-endpoints">Character Management Endpoints</h2>
+<h3 id="create-character">Create Character</h3>
+<p><strong>POST</strong> <code>/characters/create/{plot_id}</code></p>
+<p>Creates a new character for a plot.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"name"</span>: <span class="hljs-string">"Alex Martinez"</span>,
+  <span class="hljs-attr">"role"</span>: <span class="hljs-string">"supporting"</span>,
+  <span class="hljs-attr">"description"</span>: <span class="hljs-string">"A talented engineer with a passion for robotics"</span>,
+  <span class="hljs-attr">"personality_traits"</span>: [<span class="hljs-string">"innovative"</span>, <span class="hljs-string">"friendly"</span>, <span class="hljs-string">"determined"</span>],
+  <span class="hljs-attr">"archetype"</span>: <span class="hljs-string">"The Hero"</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>201 Created</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"character_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"plot_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"name"</span>: <span class="hljs-string">"Alex Martinez"</span>,
+    <span class="hljs-attr">"role"</span>: <span class="hljs-string">"supporting"</span>,
+    <span class="hljs-attr">"description"</span>: <span class="hljs-string">"A talented engineer..."</span>,
+    <span class="hljs-attr">"archetype"</span>: <span class="hljs-string">"The Hero"</span>,
+    <span class="hljs-attr">"personality_traits"</span>: [<span class="hljs-string">"innovative"</span>, <span class="hljs-string">"friendly"</span>, <span class="hljs-string">"determined"</span>],
+    <span class="hljs-attr">"image_url"</span>: <span class="hljs-literal">null</span>,
+    <span class="hljs-attr">"created_at"</span>: <span class="hljs-string">"2025-11-06T18:00:00Z"</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="generate-character-image">Generate Character Image</h3>
+<p><strong>POST</strong> <code>/characters/{character_id}/generate-image</code></p>
+<p>Generates an image for a character.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"custom_prompt"</span>: <span class="hljs-string">"Portrait photo, professional attire, office background"</span>,
+  <span class="hljs-attr">"style"</span>: <span class="hljs-string">"realistic"</span> | <span class="hljs-string">"animated"</span> | <span class="hljs-string">"illustration"</span>,
+  <span class="hljs-attr">"aspect_ratio"</span>: <span class="hljs-string">"1:1"</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>202 Accepted</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"task_id"</span>: <span class="hljs-string">"celery-task-id"</span>,
+    <span class="hljs-attr">"character_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"status"</span>: <span class="hljs-string">"pending"</span>,
+    <span class="hljs-attr">"estimated_completion"</span>: <span class="hljs-string">"2025-11-06T18:02:00Z"</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="get-character">Get Character</h3>
+<p><strong>GET</strong> <code>/characters/{character_id}</code></p>
+<p>Retrieves character details.</p>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"character_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"name"</span>: <span class="hljs-string">"Dr. Sarah Chen"</span>,
+    <span class="hljs-attr">"role"</span>: <span class="hljs-string">"protagonist"</span>,
+    <span class="hljs-attr">"description"</span>: <span class="hljs-string">"A brilliant AI researcher..."</span>,
+    <span class="hljs-attr">"archetype"</span>: <span class="hljs-string">"The Sage"</span>,
+    <span class="hljs-attr">"personality_traits"</span>: [<span class="hljs-string">"intelligent"</span>, <span class="hljs-string">"curious"</span>, <span class="hljs-string">"patient"</span>],
+    <span class="hljs-attr">"image_url"</span>: <span class="hljs-string">"https://..."</span>,
+    <span class="hljs-attr">"voice_id"</span>: <span class="hljs-string">"elevenlabs-voice-id"</span>,
+    <span class="hljs-attr">"relationships"</span>: [...],
+    <span class="hljs-attr">"appearances"</span>: [
+      {
+        <span class="hljs-attr">"script_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+        <span class="hljs-attr">"scene_numbers"</span>: [<span class="hljs-number">1</span>, <span class="hljs-number">3</span>, <span class="hljs-number">5</span>, <span class="hljs-number">7</span>]
+      }
+    ]
+  }
+}
+</div></code></pre>
+<hr>
+<h2 id="subscription-management-endpoints">Subscription Management Endpoints</h2>
+<h3 id="get-current-subscription">Get Current Subscription</h3>
+<p><strong>GET</strong> <code>/subscriptions/current</code></p>
+<p>Retrieves user's current subscription details.</p>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"subscription_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"user_id"</span>: <span class="hljs-string">"uuid-string"</span>,
+    <span class="hljs-attr">"tier"</span>: <span class="hljs-string">"premium"</span>,
+    <span class="hljs-attr">"status"</span>: <span class="hljs-string">"active"</span>,
+    <span class="hljs-attr">"billing_cycle"</span>: <span class="hljs-string">"monthly"</span>,
+    <span class="hljs-attr">"current_period_start"</span>: <span class="hljs-string">"2025-11-01T00:00:00Z"</span>,
+    <span class="hljs-attr">"current_period_end"</span>: <span class="hljs-string">"2025-12-01T00:00:00Z"</span>,
+    <span class="hljs-attr">"cancel_at_period_end"</span>: <span class="hljs-literal">false</span>,
+    <span class="hljs-attr">"usage"</span>: {
+      <span class="hljs-attr">"scripts_generated"</span>: <span class="hljs-number">45</span>,
+      <span class="hljs-attr">"scripts_limit"</span>: <span class="hljs-number">100</span>,
+      <span class="hljs-attr">"videos_generated"</span>: <span class="hljs-number">12</span>,
+      <span class="hljs-attr">"videos_limit"</span>: <span class="hljs-number">50</span>,
+      <span class="hljs-attr">"storage_used_gb"</span>: <span class="hljs-number">2.5</span>,
+      <span class="hljs-attr">"storage_limit_gb"</span>: <span class="hljs-number">10</span>
+    }
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="create-checkout-session">Create Checkout Session</h3>
+<p><strong>POST</strong> <code>/subscriptions/checkout</code></p>
+<p>Creates Stripe checkout session for subscription.</p>
+<p><strong>Request Body:</strong></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"tier"</span>: <span class="hljs-string">"premium"</span> | <span class="hljs-string">"professional"</span>,
+  <span class="hljs-attr">"billing_cycle"</span>: <span class="hljs-string">"monthly"</span> | <span class="hljs-string">"annual"</span>,
+  <span class="hljs-attr">"success_url"</span>: <span class="hljs-string">"https://app.litinkai.com/success"</span>,
+  <span class="hljs-attr">"cancel_url"</span>: <span class="hljs-string">"https://app.litinkai.com/pricing"</span>
+}
+</div></code></pre>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"session_id"</span>: <span class="hljs-string">"stripe-session-id"</span>,
+    <span class="hljs-attr">"checkout_url"</span>: <span class="hljs-string">"https://checkout.stripe.com/..."</span>,
+    <span class="hljs-attr">"expires_at"</span>: <span class="hljs-string">"2025-11-06T18:30:00Z"</span>
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="handle-stripe-webhook">Handle Stripe Webhook</h3>
+<p><strong>POST</strong> <code>/subscriptions/webhook</code></p>
+<p>Handles Stripe webhook events (internal use).</p>
+<p><strong>Headers:</strong></p>
+<pre class="hljs"><code><div>Stripe-Signature: stripe-signature-value
+</div></code></pre>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<hr>
+<h3 id="get-usage-statistics">Get Usage Statistics</h3>
+<p><strong>GET</strong> <code>/subscriptions/usage</code></p>
+<p>Retrieves detailed usage statistics.</p>
+<p><strong>Query Parameters:</strong></p>
+<ul>
+<li><code>period</code> (optional): &quot;current&quot; | &quot;last_month&quot; | &quot;last_year&quot;</li>
+</ul>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"period"</span>: <span class="hljs-string">"current"</span>,
+    <span class="hljs-attr">"tier"</span>: <span class="hljs-string">"premium"</span>,
+    <span class="hljs-attr">"scripts"</span>: {
+      <span class="hljs-attr">"used"</span>: <span class="hljs-number">45</span>,
+      <span class="hljs-attr">"limit"</span>: <span class="hljs-number">100</span>,
+      <span class="hljs-attr">"percentage"</span>: <span class="hljs-number">45</span>
+    },
+    <span class="hljs-attr">"videos"</span>: {
+      <span class="hljs-attr">"used"</span>: <span class="hljs-number">12</span>,
+      <span class="hljs-attr">"limit"</span>: <span class="hljs-number">50</span>,
+      <span class="hljs-attr">"percentage"</span>: <span class="hljs-number">24</span>
+    },
+    <span class="hljs-attr">"storage"</span>: {
+      <span class="hljs-attr">"used_gb"</span>: <span class="hljs-number">2.5</span>,
+      <span class="hljs-attr">"limit_gb"</span>: <span class="hljs-number">10</span>,
+      <span class="hljs-attr">"percentage"</span>: <span class="hljs-number">25</span>
+    },
+    <span class="hljs-attr">"cost_this_month"</span>: <span class="hljs-number">12.50</span>,
+    <span class="hljs-attr">"daily_usage"</span>: [
+      {
+        <span class="hljs-attr">"date"</span>: <span class="hljs-string">"2025-11-01"</span>,
+        <span class="hljs-attr">"scripts"</span>: <span class="hljs-number">3</span>,
+        <span class="hljs-attr">"videos"</span>: <span class="hljs-number">1</span>,
+        <span class="hljs-attr">"cost"</span>: <span class="hljs-number">0.85</span>
+      }
+    ]
+  }
+}
+</div></code></pre>
+<hr>
+<h2 id="admin-endpoints">Admin Endpoints</h2>
+<h3 id="get-cost-summary">Get Cost Summary</h3>
+<p><strong>GET</strong> <code>/admin/costs/summary</code></p>
+<p><strong>Admin Only</strong> - Retrieves overall cost metrics.</p>
+<p><strong>Query Parameters:</strong></p>
+<ul>
+<li><code>start_date</code> (optional): Start date (ISO 8601)</li>
+<li><code>end_date</code> (optional): End date (ISO 8601)</li>
+</ul>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"total_costs"</span>: <span class="hljs-number">1250.50</span>,
+    <span class="hljs-attr">"total_revenue"</span>: <span class="hljs-number">2100.00</span>,
+    <span class="hljs-attr">"profit_margin"</span>: <span class="hljs-number">40.5</span>,
+    <span class="hljs-attr">"by_service"</span>: {
+      <span class="hljs-attr">"openrouter"</span>: <span class="hljs-number">850.30</span>,
+      <span class="hljs-attr">"modelslab"</span>: <span class="hljs-number">250.20</span>,
+      <span class="hljs-attr">"elevenlabs"</span>: <span class="hljs-number">150.00</span>
+    },
+    <span class="hljs-attr">"by_tier"</span>: {
+      <span class="hljs-attr">"free"</span>: <span class="hljs-number">-50.00</span>,
+      <span class="hljs-attr">"basic"</span>: <span class="hljs-number">150.00</span>,
+      <span class="hljs-attr">"standard"</span>: <span class="hljs-number">300.00</span>,
+      <span class="hljs-attr">"premium"</span>: <span class="hljs-number">450.00</span>,
+      <span class="hljs-attr">"professional"</span>: <span class="hljs-number">400.00</span>
+    }
+  }
+}
+</div></code></pre>
+<hr>
+<h3 id="get-model-performance">Get Model Performance</h3>
+<p><strong>GET</strong> <code>/admin/models/performance</code></p>
+<p><strong>Admin Only</strong> - Retrieves AI model performance metrics.</p>
+<p><strong>Response:</strong> <code>200 OK</code></p>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"success"</span>: <span class="hljs-literal">true</span>,
+  <span class="hljs-attr">"data"</span>: {
+    <span class="hljs-attr">"models"</span>: [
+      {
+        <span class="hljs-attr">"model_name"</span>: <span class="hljs-string">"gpt-4o"</span>,
+        <span class="hljs-attr">"total_requests"</span>: <span class="hljs-number">1250</span>,
+        <span class="hljs-attr">"success_rate"</span>: <span class="hljs-number">98.5</span>,
+        <span class="hljs-attr">"avg_latency_ms"</span>: <span class="hljs-number">2500</span>,
+        <span class="hljs-attr">"avg_cost_per_request"</span>: <span class="hljs-number">0.05</span>,
+        <span class="hljs-attr">"fallback_rate"</span>: <span class="hljs-number">1.5</span>
+      }
+    ]
+  }
+}
+</div></code></pre>
+<hr>
+<h2 id="error-codes">Error Codes</h2>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>HTTP Status</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>VALIDATION_ERROR</code></td>
+<td>400</td>
+<td>Invalid request data</td>
+</tr>
+<tr>
+<td><code>AUTHENTICATION_ERROR</code></td>
+<td>401</td>
+<td>Invalid or missing token</td>
+</tr>
+<tr>
+<td><code>INSUFFICIENT_PERMISSIONS</code></td>
+<td>403</td>
+<td>User lacks required permissions</td>
+</tr>
+<tr>
+<td><code>RESOURCE_NOT_FOUND</code></td>
+<td>404</td>
+<td>Requested resource not found</td>
+</tr>
+<tr>
+<td><code>RATE_LIMIT_EXCEEDED</code></td>
+<td>429</td>
+<td>Too many requests</td>
+</tr>
+<tr>
+<td><code>USAGE_LIMIT_EXCEEDED</code></td>
+<td>402</td>
+<td>Tier usage limit reached</td>
+</tr>
+<tr>
+<td><code>INTERNAL_SERVER_ERROR</code></td>
+<td>500</td>
+<td>Server error</td>
+</tr>
+<tr>
+<td><code>SERVICE_UNAVAILABLE</code></td>
+<td>503</td>
+<td>External service unavailable</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h2 id="rate-limiting">Rate Limiting</h2>
+<p>Rate limits are enforced per tier:</p>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Requests/Minute</th>
+<th>Requests/Hour</th>
+<th>Requests/Day</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Free</td>
+<td>10</td>
+<td>100</td>
+<td>1,000</td>
+</tr>
+<tr>
+<td>Basic</td>
+<td>30</td>
+<td>500</td>
+<td>5,000</td>
+</tr>
+<tr>
+<td>Standard</td>
+<td>60</td>
+<td>1,000</td>
+<td>10,000</td>
+</tr>
+<tr>
+<td>Premium</td>
+<td>120</td>
+<td>2,000</td>
+<td>20,000</td>
+</tr>
+<tr>
+<td>Professional</td>
+<td>300</td>
+<td>5,000</td>
+<td>Unlimited</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rate Limit Headers:</strong></p>
+<pre class="hljs"><code><div>X-RateLimit-Limit: 60
+X-RateLimit-Remaining: 45
+X-RateLimit-Reset: 1699290000
+</div></code></pre>
+<hr>
+<h2 id="api-diagram">API Diagram</h2>
+<pre><code class="language-mermaid"><div class="mermaid">graph TB
+    Client[Client Application]
+    
+    subgraph "API Gateway Layer"
+        Gateway[API Gateway<br/>FastAPI]
+        Auth[Auth Middleware]
+        RateLimit[Rate Limiter]
+    end
+    
+    subgraph "Route Handlers"
+        AuthRoutes[Auth Routes]
+        BookRoutes[Book Routes]
+        AIRoutes[AI Routes]
+        PlotRoutes[Plot Routes]
+        SubRoutes[Subscription Routes]
+        AdminRoutes[Admin Routes]
+    end
+    
+    subgraph "Service Layer"
+        OpenRouter[OpenRouter Service]
+        AIService[AI Service]
+        PlotService[Plot Service]
+        SubManager[Subscription Manager]
+        FileService[File Service]
+    end
+    
+    subgraph "Data Layer"
+        Supabase[(Supabase<br/>PostgreSQL)]
+        Redis[(Redis<br/>Cache)]
+        Storage[Supabase<br/>Storage]
+    end
+    
+    subgraph "Background Workers"
+        Celery[Celery Queue]
+        ImageWorker[Image Worker]
+        VideoWorker[Video Worker]
+        AudioWorker[Audio Worker]
+    end
+    
+    Client -->|HTTPS| Gateway
+    Gateway --> Auth
+    Auth --> RateLimit
+    RateLimit --> AuthRoutes
+    RateLimit --> BookRoutes
+    RateLimit --> AIRoutes
+    RateLimit --> PlotRoutes
+    RateLimit --> SubRoutes
+    RateLimit --> AdminRoutes
+    
+    AIRoutes --> OpenRouter
+    AIRoutes --> AIService
+    PlotRoutes --> PlotService
+    SubRoutes --> SubManager
+    BookRoutes --> FileService
+    
+    OpenRouter --> Supabase
+    AIService --> Supabase
+    PlotService --> Supabase
+    SubManager --> Supabase
+    
+    OpenRouter -.->|Cache| Redis
+    RateLimit -.->|Counters| Redis
+    
+    AIRoutes -->|Queue Tasks| Celery
+    Celery --> ImageWorker
+    Celery --> VideoWorker
+    Celery --> AudioWorker
+    
+    ImageWorker --> Storage
+    VideoWorker --> Storage
+    AudioWorker --> Storage
+</div></code></pre>
+<hr>
+<h2 id="references">References</h2>
+<ul>
+<li><a href="https://fastapi.tiangolo.com/">FastAPI Documentation</a></li>
+<li><a href="https://swagger.io/specification/">OpenAPI Specification</a></li>
+<li><a href="https://restfulapi.net/">REST API Best Practices</a></li>
+<li><a href="README.md">Main Architecture README</a></li>
+</ul>
+<hr>
+<p><strong>Last Updated</strong>: 2025-11-06<br>
+<strong>Version</strong>: 1.0<br>
+<strong>API Version</strong>: v1<br>
+<strong>Maintained By</strong>: API Team</p>
+
+</body>
+</html>

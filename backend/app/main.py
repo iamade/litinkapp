@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
 from contextlib import asynccontextmanager
+from app.api.main import api_router
 
 from app.core.config import settings
 from app.core.database import init_db
@@ -25,11 +26,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Litink API",
-    description="AI-powered interactive book platform backend",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    title=settings.PROJECT_NAME,
+    description=settings.PROJECT_DESCRIPTION,
+    version=settings.VERSION,
+    docs_url=f"{settings.API_V1_STR}/docs",
+    redoc_url=f"{settings.API_V1_STR}/redoc",
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
 )
 
@@ -57,7 +59,7 @@ app.add_middleware(
 security = HTTPBearer()
 
 # Include API routes
-app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # Uploads directory for generated content (fallback for local files)
 if os.path.exists(settings.UPLOAD_DIR):

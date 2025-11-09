@@ -1,15 +1,24 @@
-from pydantic_settings import BaseSettings
-from typing import List, Optional, ClassVar, Dict
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List, Optional, ClassVar, Dict, Literal
 import os
 
 
 class Settings(BaseSettings):
-    """Application settings"""
+    ENVIRONMENT: Literal["development","staging","production"] = "development"
+    
+    model_config = SettingsConfigDict(
+        env_file="../../.envs/.env.local",
+        env_ignore_empty=True,
+        extra="ignore"
+    )
     
     # Basic settings
-    PROJECT_NAME: str = "Litink API"
-    VERSION: str = "1.0.0"
-    ENVIRONMENT: str = "development"
+    API_V1_STR: str = ""
+    PROJECT_NAME: str = ""
+    PROJECT_DESCRIPTION: str = ""
+    SITE_NAME: str = ""
+    VERSION: str = ""
+    # ENVIRONMENT: str = "development"
     DEBUG: bool = True
     
     # Security
@@ -43,9 +52,9 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173" if ENVIRONMENT == "development" else "https://www.litinkai.com"
     
     # Supabase Configuration (Primary Database)
-    SUPABASE_URL: str
-    SUPABASE_SERVICE_ROLE_KEY: str
-    SUPABASE_ANON_KEY: str
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str =""
+    SUPABASE_ANON_KEY: str = ""
     SUPABASE_BUCKET_NAME: str = "books"
     
     # Redis

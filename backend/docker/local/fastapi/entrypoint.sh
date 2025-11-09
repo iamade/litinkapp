@@ -1,5 +1,8 @@
 #!/bin/bash
-set -e
+
+set -o errexit
+set -o nounset
+set -o pipefail
 
 # Debug output
 echo "=== ENVIRONMENT DEBUG ==="
@@ -30,13 +33,3 @@ else
     exit 1
 fi
 
-# #!/bin/bash
-# set -e
-
-# if [ "$ENVIRONMENT" = "development" ]; then
-#     echo "Starting in development mode with debugger..."
-#     exec python -Xfrozen_modules=off -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-# else
-#     echo "Starting in production mode..."
-#     exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-# fi

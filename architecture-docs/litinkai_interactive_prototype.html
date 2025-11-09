@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LitInkAI - Interactive Learning Mode Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .pulse-animation {
+            animation: pulse-slow 2s ease-in-out infinite;
+        }
+        .interactive-hotspot {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .interactive-hotspot:hover {
+            transform: scale(1.1);
+            filter: brightness(1.2);
+        }
+        .skill-node {
+            transition: all 0.3s ease;
+        }
+        .skill-node:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+        .chat-message {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white">
+    <!-- Main Container -->
+    <div class="container mx-auto p-4">
+        <header class="mb-6">
+            <h1 class="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent">
+                LitInkAI - Interactive Learning Mode
+            </h1>
+            <p class="text-gray-400 mt-2">Next-Generation AI-Powered Learning Experience</p>
+        </header>
+
+        <!-- Tab Navigation -->
+        <div class="mb-6 border-b border-gray-700">
+            <nav class="flex space-x-4">
+                <button onclick="showTab('video')" id="tab-video" class="tab-btn pb-2 px-4 border-b-2 border-purple-500 text-purple-400">
+                    Interactive Video
+                </button>
+                <button onclick="showTab('practice')" id="tab-practice" class="tab-btn pb-2 px-4 border-b-2 border-transparent hover:border-gray-500 text-gray-400">
+                    AI Practice
+                </button>
+                <button onclick="showTab('skills')" id="tab-skills" class="tab-btn pb-2 px-4 border-b-2 border-transparent hover:border-gray-500 text-gray-400">
+                    Skill Tree
+                </button>
+                <button onclick="showTab('social')" id="tab-social" class="tab-btn pb-2 px-4 border-b-2 border-transparent hover:border-gray-500 text-gray-400">
+                    Collaborative
+                </button>
+            </nav>
+        </div>
+
+        <!-- Tab Content -->
+        <div id="content-area">
+            
+            <!-- Interactive Video Tab -->
+            <div id="tab-content-video" class="tab-content">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <!-- Video Player Section -->
+                    <div class="lg:col-span-2">
+                        <div class="bg-gray-800 rounded-lg overflow-hidden">
+                            <!-- Video Container -->
+                            <div class="relative aspect-video bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
+                                <div class="absolute inset-0 flex items-center justify-center">
+                                    <svg class="w-20 h-20 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"/>
+                                    </svg>
+                                </div>
+                                
+                                <!-- Interactive Hotspots -->
+                                <div class="absolute top-20 left-32 interactive-hotspot">
+                                    <div class="w-8 h-8 bg-yellow-400 rounded-full pulse-animation opacity-70 flex items-center justify-center">
+                                        <span class="text-xs font-bold text-gray-900">?</span>
+                                    </div>
+                                    <div class="hidden hover-card absolute bg-gray-800 p-3 rounded shadow-lg w-48 mt-2 border border-yellow-400">
+                                        <p class="text-sm">Click to learn more about this concept!</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="absolute top-40 right-24 interactive-hotspot">
+                                    <div class="w-8 h-8 bg-blue-400 rounded-full pulse-animation opacity-70 flex items-center justify-center">
+                                        <span class="text-xs font-bold text-gray-900">i</span>
+                                    </div>
+                                </div>
+
+                                <!-- AI Assistant Overlay -->
+                                <div class="absolute bottom-4 left-4 right-4 bg-black bg-opacity-80 rounded-lg p-4">
+                                    <div class="flex items-center space-x-3">
+                                        <div class="w-10 h-10 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                                            <span class="text-xl">🤖</span>
+                                        </div>
+                                        <div class="flex-1">
+                                            <p class="text-sm text-gray-300">
+                                                <strong class="text-purple-400">AI Assistant:</strong> 
+                                                "Would you like me to explain this concept in simpler terms?"
+                                            </p>
+                                        </div>
+                                        <button class="px-4 py-2 bg-purple-600 rounded hover:bg-purple-700 text-sm">
+                                            Yes, explain
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Video Controls -->
+                            <div class="p-4 bg-gray-850">
+                                <div class="flex items-center space-x-4 mb-3">
+                                    <button class="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center hover:bg-purple-700">
+                                        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z"/>
+                                        </svg>
+                                    </button>
+                                    <div class="flex-1">
+                                        <div class="relative h-2 bg-gray-700 rounded-full">
+                                            <div class="absolute h-full w-1/3 bg-purple-500 rounded-full"></div>
+                                            <!-- Checkpoint markers -->
+                                            <div class="absolute w-3 h-3 bg-yellow-400 rounded-full" style="left: 20%; top: -2px;"></div>
+                                            <div class="absolute w-3 h-3 bg-yellow-400 rounded-full" style="left: 45%; top: -2px;"></div>
+                                            <div class="absolute w-3 h-3 bg-yellow-400 rounded-full" style="left: 70%; top: -2px;"></div>
+                                        </div>
+                                    </div>
+                                    <span class="text-sm text-gray-400">5:23 / 15:45</span>
+                                </div>
+                                
+                                <!-- Quick Actions -->
+                                <div class="flex space-x-2">
+                                    <button class="px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">
+                                        🎤 Ask AI
+                                    </button>
+                                    <button class="px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">
+                                        📝 Take Note
+                                    </button>
+                                    <button class="px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">
+                                        🧪 Try Simulation
+                                    </button>
+                                    <button class="px-3 py-1 bg-gray-700 rounded text-sm hover:bg-gray-600">
+                                        ⚡ Quick Quiz
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Interactive Transcript -->
+                            <div class="p-4 bg-gray-800 border-t border-gray-700">
+                                <h3 class="text-sm font-semibold mb-2 text-purple-400">Interactive Transcript</h3>
+                                <div class="text-sm text-gray-300 space-y-2 max-h-40 overflow-y-auto">
+                                    <p class="hover:bg-gray-700 p-2 rounded cursor-pointer">
+                                        <span class="text-purple-400 mr-2">00:15</span>
+                                        Welcome to our lesson on <span class="underline decoration-dotted cursor-pointer text-blue-400">neural networks</span>...
+                                    </p>
+                                    <p class="bg-gray-700 p-2 rounded border-l-4 border-purple-500">
+                                        <span class="text-purple-400 mr-2">05:23</span>
+                                        The key concept here is <span class="underline decoration-dotted cursor-pointer text-blue-400">backpropagation</span>, which allows...
+                                    </p>
+                                    <p class="hover:bg-gray-700 p-2 rounded cursor-pointer">
+                                        <span class="text-purple-400 mr-2">08:42</span>
+                                        Let's explore how <span class="underline decoration-dotted cursor-pointer text-blue-400">activation functions</span> work...
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Tutor Sidebar -->
+                    <div class="lg:col-span-1 space-y-4">
+                        
+                        <!-- AI Chat -->
+                        <div class="bg-gray-800 rounded-lg p-4">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="font-semibold text-purple-400">AI Study Buddy</h3>
+                                <span class="px-2 py-1 bg-green-600 rounded-full text-xs">Active</span>
+                            </div>
+                            
+                            <div class="space-y-3 max-h-96 overflow-y-auto mb-3">
+                                <div class="chat-message bg-gray-700 rounded-lg p-3">
+                                    <p class="text-sm"><strong class="text-purple-400">AI:</strong> Great! You've completed 65% of this section. Before we move on, can you explain backpropagation in your own words?</p>
+                                </div>
+                                <div class="chat-message bg-purple-900 bg-opacity-30 rounded-lg p-3 ml-6">
+                                    <p class="text-sm"><strong class="text-blue-400">You:</strong> It's how the network learns by adjusting weights...</p>
+                                </div>
+                                <div class="chat-message bg-gray-700 rounded-lg p-3">
+                                    <p class="text-sm"><strong class="text-purple-400">AI:</strong> Good start! Let me help you deepen that understanding. What triggers these weight adjustments?</p>
+                                </div>
+                            </div>
+                            
+                            <div class="flex space-x-2">
+                                <input type="text" placeholder="Ask anything..." class="flex-1 px-3 py-2 bg-gray-700 rounded text-sm">
+                                <button class="px-4 py-2 bg-purple-600 rounded hover:bg-purple-700">
+                                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <div class="mt-3 flex space-x-2">
+                                <button class="flex-1 px-2 py-1 bg-gray-700 rounded text-xs hover:bg-gray-600">
+                                    💡 Hint
+                                </button>
+                                <button class="flex-1 px-2 py-1 bg-gray-700 rounded text-xs hover:bg-gray-600">
+                                    📊 Example
+                                </button>
+                                <button class="flex-1 px-2 py-1 bg-gray-700 rounded text-xs hover:bg-gray-600">
+                                    🎯 Quiz Me
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Progress Card -->
+                        <div class="bg-gray-800 rounded-lg p-4">
+                            <h3 class="font-semibold mb-3 text-purple-400">Your Progress</h3>
+                            <div class="space-y-3">
+                                <div>
+                                    <div class="flex justify-between text-sm mb-1">
+                                        <span>Lesson Completion</span>
+                                        <span class="text-purple-400">65%</span>
+                                    </div>
+                                    <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                        <div class="h-full bg-gradient-to-r from-purple-500 to-pink-500" style="width: 65%"></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between text-sm mb-1">
+                                        <span>Concept Mastery</span>
+                                        <span class="text-green-400">78%</span>
+                                    </div>
+                                    <div class="h-2 bg-gray-700 rounded-full overflow-hidden">
+                                        <div class="h-full bg-green-500" style="width: 78%"></div>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-3 gap-2 mt-4">
+                                    <div class="text-center p-2 bg-gray-700 rounded">
+                                        <div class="text-2xl mb-1">🔥</div>
+                                        <div class="text-xs text-gray-400">7 day streak</div>
+                                    </div>
+                                    <div class="text-center p-2 bg-gray-700 rounded">
+                                        <div class="text-2xl mb-1">⚡</div>
+                                        <div class="text-xs text-gray-400">580 XP</div>
+                                    </div>
+                                    <div class="text-center p-2 bg-gray-700 rounded">
+                                        <div class="text-2xl mb-1">🏆</div>
+                                        <div class="text-xs text-gray-400">12 badges</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Smart Checkpoint -->
+                        <div class="bg-yellow-900 bg-opacity-30 border border-yellow-600 rounded-lg p-4">
+                            <div class="flex items-start space-x-3">
+                                <div class="w-10 h-10 bg-yellow-500 rounded-full flex items-center justify-center flex-shrink-0">
+                                    ⚠️
+                                </div>
+                                <div class="flex-1">
+                                    <h4 class="font-semibold text-yellow-400 mb-2">Quick Check!</h4>
+                                    <p class="text-sm mb-3">Before moving on, can you identify which activation function is shown in the diagram?</p>
+                                    <div class="space-y-2">
+                                        <button class="w-full px-3 py-2 bg-gray-700 rounded text-sm text-left hover:bg-gray-600">
+                                            A) Sigmoid
+                                        </button>
+                                        <button class="w-full px-3 py-2 bg-gray-700 rounded text-sm text-left hover:bg-gray-600">
+                                            B) ReLU
+                                        </button>
+                                        <button class="w-full px-3 py-2 bg-gray-700 rounded text-sm text-left hover:bg-gray-600">
+                                            C) Tanh
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Practice Tab -->
+            <div id="tab-content-practice" class="tab-content hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    
+                    <!-- Practice Problem Generator -->
+                    <div class="bg-gray-800 rounded-lg p-6">
+                        <h2 class="text-2xl font-bold mb-4 text-purple-400">AI Practice Problems</h2>
+                        
+                        <div class="mb-6">
+                            <label class="block text-sm mb-2">Difficulty Level</label>
+                            <div class="flex space-x-2">
+                                <button class="px-4 py-2 bg-gray-700 rounded hover:bg-green-600">Easy</button>
+                                <button class="px-4 py-2 bg-purple-600 rounded">Medium</button>
+                                <button class="px-4 py-2 bg-gray-700 rounded hover:bg-red-600">Hard</button>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-900 rounded-lg p-4 mb-4">
+                            <h3 class="font-semibold mb-3">Problem #127 (AI-Generated)</h3>
+                            <p class="text-gray-300 mb-4">
+                                A neural network has 3 input neurons, 4 hidden neurons, and 2 output neurons. 
+                                Calculate the total number of weights if the network is fully connected.
+                            </p>
+                            
+                            <div class="space-y-2 mb-4">
+                                <input type="text" placeholder="Your answer..." class="w-full px-3 py-2 bg-gray-800 rounded">
+                            </div>
+
+                            <div class="flex space-x-2">
+                                <button class="px-4 py-2 bg-purple-600 rounded hover:bg-purple-700">
+                                    Submit Answer
+                                </button>
+                                <button class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">
+                                    💡 Get Hint
+                                </button>
+                                <button class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">
+                                    📖 Show Solution
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="bg-blue-900 bg-opacity-30 border border-blue-600 rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-400 mb-2">💡 Adaptive Learning Tip</h4>
+                            <p class="text-sm text-gray-300">
+                                You're doing great with weight calculations! I notice you sometimes struggle with 
+                                activation functions. Would you like to practice those next?
+                            </p>
+                            <button class="mt-2 px-3 py-1 bg-blue-600 rounded text-sm hover:bg-blue-700">
+                                Yes, help me improve
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Interactive Code Playground -->
+                    <div class="bg-gray-800 rounded-lg p-6">
+                        <h2 class="text-2xl font-bold mb-4 text-purple-400">Live Code Lab</h2>
+                        
+                        <div class="bg-gray-900 rounded-lg p-4 mb-4">
+                            <div class="flex justify-between items-center mb-2">
+                                <span class="text-sm text-gray-400">Python 3</span>
+                                <button class="px-3 py-1 bg-green-600 rounded text-sm hover:bg-green-700">
+                                    ▶ Run Code
+                                </button>
+                            </div>
+                            <pre class="text-sm text-green-400 bg-black p-3 rounded overflow-x-auto"><code>import numpy as np
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+# Your code here
+x = np.array([0, 1, 2])
+output = sigmoid(x)
+print(output)</code></pre>
+                        </div>
+
+                        <div class="bg-gray-900 rounded-lg p-4 mb-4">
+                            <h4 class="text-sm font-semibold mb-2 text-purple-400">Output:</h4>
+                            <pre class="text-sm text-gray-300">[0.5        0.73105858 0.88079708]</pre>
+                        </div>
+
+                        <div class="bg-green-900 bg-opacity-30 border border-green-600 rounded-lg p-4">
+                            <h4 class="font-semibold text-green-400 mb-2">✅ Great Work!</h4>
+                            <p class="text-sm text-gray-300 mb-2">
+                                Your implementation is correct! Notice how the sigmoid function 
+                                squashes all values between 0 and 1.
+                            </p>
+                            <button class="px-3 py-1 bg-green-600 rounded text-sm hover:bg-green-700">
+                                Next Challenge →
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Spaced Repetition Dashboard -->
+                <div class="mt-6 bg-gray-800 rounded-lg p-6">
+                    <h3 class="text-xl font-bold mb-4 text-purple-400">Review Schedule (Spaced Repetition)</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="bg-red-900 bg-opacity-30 border border-red-600 rounded-lg p-4">
+                            <div class="text-2xl mb-2">⚠️</div>
+                            <h4 class="font-semibold text-red-400">Due Now</h4>
+                            <p class="text-3xl font-bold my-2">7</p>
+                            <p class="text-sm text-gray-400">concepts to review</p>
+                        </div>
+                        <div class="bg-yellow-900 bg-opacity-30 border border-yellow-600 rounded-lg p-4">
+                            <div class="text-2xl mb-2">📅</div>
+                            <h4 class="font-semibold text-yellow-400">Due Tomorrow</h4>
+                            <p class="text-3xl font-bold my-2">12</p>
+                            <p class="text-sm text-gray-400">concepts scheduled</p>
+                        </div>
+                        <div class="bg-blue-900 bg-opacity-30 border border-blue-600 rounded-lg p-4">
+                            <div class="text-2xl mb-2">🎯</div>
+                            <h4 class="font-semibold text-blue-400">This Week</h4>
+                            <p class="text-3xl font-bold my-2">45</p>
+                            <p class="text-sm text-gray-400">concepts to review</p>
+                        </div>
+                        <div class="bg-green-900 bg-opacity-30 border border-green-600 rounded-lg p-4">
+                            <div class="text-2xl mb-2">✅</div>
+                            <h4 class="font-semibold text-green-400">Mastered</h4>
+                            <p class="text-3xl font-bold my-2">89</p>
+                            <p class="text-sm text-gray-400">concepts learned</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Skill Tree Tab -->
+            <div id="tab-content-skills" class="tab-content hidden">
+                <div class="bg-gray-800 rounded-lg p-6">
+                    <h2 class="text-2xl font-bold mb-6 text-purple-400">Your Learning Path</h2>
+                    
+                    <div class="space-y-6">
+                        <!-- Skill Node -->
+                        <div class="skill-node bg-green-900 bg-opacity-50 border-2 border-green-500 rounded-lg p-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-4">
+                                    <div class="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center text-2xl">
+                                        ✅
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-lg">Introduction to Neural Networks</h3>
+                                        <p class="text-sm text-gray-400">Completed • 3 days ago</p>
+                                        <div class="flex space-x-2 mt-2">
+                                            <span class="px-2 py-1 bg-green-600 rounded text-xs">100% Mastery</span>
+                                            <span class="px-2 py-1 bg-gray-700 rounded text-xs">🏆 Badge Earned</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <button class="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">
+                                    Review
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Current Node -->
+                        <div class="relative">
+                            <div class="absolute left-8 top-0 w-0.5 h-full bg-purple-500"></div>
+                            <div class="skill-node bg-purple-900 bg-opacity-50 border-2 border-purple-500 rounded-lg p-4 ml-0">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center space-x-4">
+                                        <div class="w-16 h-16 bg-purple-500 rounded-full flex items-center justify-center text-2xl pulse-animation">
+                                            ⚡
+                                        </div>
+                                        <div>
+                                            <h3 class="font-bold text-lg">Backpropagation & Training</h3>
+                                            <p class="text-sm text-gray-400">In Progress • 65% Complete</p>
+                                            <div class="w-48 h-2 bg-gray-700 rounded-full mt-2">
+                                                <div class="h-full bg-purple-500 rounded-full" style="width: 65%"></div>
+                                            </div>
+                                            <div class="flex space-x-2 mt-2">
+                                                <span class="px-2 py-1 bg-purple-600 rounded text-xs">🎯 Current Focus</span>
+                                                <span class="px-2 py-1 bg-gray-700 rounded text-xs">Est. 2 hours left</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button class="px-4 py-2 bg-purple-600 rounded hover:bg-purple-700">
+                                        Continue
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Locked Nodes -->
+                        <div class="skill-node bg-gray-800 opacity-50 border-2 border-gray-600 rounded-lg p-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-4">
+                                    <div class="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center text-2xl">
+                                        🔒
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-lg text-gray-500">Convolutional Neural Networks</h3>
+                                        <p class="text-sm text-gray-500">Locked • Complete prerequisites</p>
+                                        <div class="flex space-x-2 mt-2">
+                                            <span class="px-2 py-1 bg-gray-700 rounded text-xs">Unlocks in 2 lessons</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="skill-node bg-gray-800 opacity-50 border-2 border-gray-600 rounded-lg p-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center space-x-4">
+                                    <div class="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center text-2xl">
+                                        🔒
+                                    </div>
+                                    <div>
+                                        <h3 class="font-bold text-lg text-gray-500">Recurrent Neural Networks</h3>
+                                        <p class="text-sm text-gray-500">Locked • Complete prerequisites</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Achievement Showcase -->
+                    <div class="mt-8 bg-gradient-to-r from-yellow-900 to-yellow-800 bg-opacity-30 border border-yellow-600 rounded-lg p-6">
+                        <h3 class="text-xl font-bold mb-4 text-yellow-400">🏆 Recent Achievements</h3>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="text-center">
+                                <div class="w-16 h-16 mx-auto mb-2 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-full flex items-center justify-center text-2xl">
+                                    🥇
+                                </div>
+                                <p class="text-sm font-semibold">Neural Network Novice</p>
+                            </div>
+                            <div class="text-center">
+                                <div class="w-16 h-16 mx-auto mb-2 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-2xl">
+                                    🔥
+                                </div>
+                                <p class="text-sm font-semibold">7 Day Streak</p>
+                            </div>
+                            <div class="text-center">
+                                <div class="w-16 h-16 mx-auto mb-2 bg-gradient-to-br from-purple-400 to-purple-600 rounded-full flex items-center justify-center text-2xl">
+                                    ⚡
+                                </div>
+                                <p class="text-sm font-semibold">Quick Learner</p>
+                            </div>
+                            <div class="text-center">
+                                <div class="w-16 h-16 mx-auto mb-2 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center text-2xl">
+                                    🎯
+                                </div>
+                                <p class="text-sm font-semibold">Perfect Score</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Collaborative Tab -->
+            <div id="tab-content-social" class="tab-content hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    
+                    <!-- Study Groups -->
+                    <div class="bg-gray-800 rounded-lg p-6">
+                        <h2 class="text-2xl font-bold mb-4 text-purple-400">Active Study Groups</h2>
+                        
+                        <div class="space-y-4">
+                            <div class="bg-gray-900 rounded-lg p-4 border border-green-600">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h3 class="font-semibold">Neural Networks Study Group</h3>
+                                    <span class="px-2 py-1 bg-green-600 rounded-full text-xs flex items-center">
+                                        <span class="w-2 h-2 bg-green-300 rounded-full mr-1 pulse-animation"></span>
+                                        Live Now
+                                    </span>
+                                </div>
+                                <div class="flex items-center space-x-2 mb-3">
+                                    <div class="flex -space-x-2">
+                                        <div class="w-8 h-8 bg-purple-500 rounded-full border-2 border-gray-900"></div>
+                                        <div class="w-8 h-8 bg-blue-500 rounded-full border-2 border-gray-900"></div>
+                                        <div class="w-8 h-8 bg-pink-500 rounded-full border-2 border-gray-900"></div>
+                                        <div class="w-8 h-8 bg-yellow-500 rounded-full border-2 border-gray-900 flex items-center justify-center text-xs">
+                                            +5
+                                        </div>
+                                    </div>
+                                    <span class="text-sm text-gray-400">8 members online</span>
+                                </div>
+                                <p class="text-sm text-gray-400 mb-3">
+                                    Currently discussing backpropagation algorithms
+                                </p>
+                                <button class="w-full px-4 py-2 bg-green-600 rounded hover:bg-green-700">
+                                    Join Session
+                                </button>
+                            </div>
+
+                            <div class="bg-gray-900 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h3 class="font-semibold">Deep Learning Fundamentals</h3>
+                                    <span class="px-2 py-1 bg-gray-700 rounded-full text-xs">
+                                        Scheduled
+                                    </span>
+                                </div>
+                                <div class="flex items-center space-x-2 mb-3">
+                                    <div class="flex -space-x-2">
+                                        <div class="w-8 h-8 bg-red-500 rounded-full border-2 border-gray-900"></div>
+                                        <div class="w-8 h-8 bg-green-500 rounded-full border-2 border-gray-900"></div>
+                                        <div class="w-8 h-8 bg-orange-500 rounded-full border-2 border-gray-900 flex items-center justify-center text-xs">
+                                            +3
+                                        </div>
+                                    </div>
+                                    <span class="text-sm text-gray-400">5 members</span>
+                                </div>
+                                <p class="text-sm text-gray-400 mb-3">
+                                    Next session: Tomorrow at 7:00 PM
+                                </p>
+                                <button class="w-full px-4 py-2 bg-purple-600 rounded hover:bg-purple-700">
+                                    Set Reminder
+                                </button>
+                            </div>
+                        </div>
+
+                        <button class="w-full mt-4 px-4 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm">
+                            + Create New Study Group
+                        </button>
+                    </div>
+
+                    <!-- Leaderboard & Challenges -->
+                    <div class="bg-gray-800 rounded-lg p-6">
+                        <h2 class="text-2xl font-bold mb-4 text-purple-400">Weekly Challenge</h2>
+                        
+                        <div class="bg-gradient-to-r from-purple-900 to-pink-900 bg-opacity-50 rounded-lg p-4 mb-6">
+                            <h3 class="font-bold text-lg mb-2">🏆 Master 5 Advanced Concepts</h3>
+                            <p class="text-sm text-gray-300 mb-3">
+                                Complete all quizzes with 90%+ accuracy
+                            </p>
+                            <div class="mb-2">
+                                <div class="flex justify-between text-sm mb-1">
+                                    <span>Progress</span>
+                                    <span>3/5</span>
+                                </div>
+                                <div class="h-2 bg-gray-700 rounded-full">
+                                    <div class="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full" style="width: 60%"></div>
+                                </div>
+                            </div>
+                            <div class="flex space-x-2">
+                                <span class="px-2 py-1 bg-gray-700 rounded text-xs">⏰ 3 days left</span>
+                                <span class="px-2 py-1 bg-yellow-600 rounded text-xs">🎁 Reward: Rare Badge NFT</span>
+                            </div>
+                        </div>
+
+                        <h3 class="font-semibold mb-3">Top Learners This Week</h3>
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between p-3 bg-gradient-to-r from-yellow-900 to-yellow-800 bg-opacity-30 rounded-lg">
+                                <div class="flex items-center space-x-3">
+                                    <span class="text-2xl">🥇</span>
+                                    <div>
+                                        <p class="font-semibold">Sarah K.</p>
+                                        <p class="text-sm text-gray-400">2,450 XP</p>
+                                    </div>
+                                </div>
+                                <span class="px-2 py-1 bg-yellow-600 rounded text-xs">Streak: 21</span>
+                            </div>
+                            <div class="flex items-center justify-between p-3 bg-gray-900 rounded-lg">
+                                <div class="flex items-center space-x-3">
+                                    <span class="text-2xl">🥈</span>
+                                    <div>
+                                        <p class="font-semibold">You</p>
+                                        <p class="text-sm text-gray-400">2,120 XP</p>
+                                    </div>
+                                </div>
+                                <span class="px-2 py-1 bg-purple-600 rounded text-xs">Streak: 7</span>
+                            </div>
+                            <div class="flex items-center justify-between p-3 bg-gray-900 rounded-lg">
+                                <div class="flex items-center space-x-3">
+                                    <span class="text-2xl">🥉</span>
+                                    <div>
+                                        <p class="font-semibold">Mike T.</p>
+                                        <p class="text-sm text-gray-400">1,890 XP</p>
+                                    </div>
+                                </div>
+                                <span class="px-2 py-1 bg-gray-700 rounded text-xs">Streak: 14</span>
+                            </div>
+                        </div>
+
+                        <div class="mt-6 bg-blue-900 bg-opacity-30 border border-blue-600 rounded-lg p-4">
+                            <h4 class="font-semibold text-blue-400 mb-2">💪 Quick Battle</h4>
+                            <p class="text-sm text-gray-300 mb-3">
+                                Challenge another learner to a 5-minute quiz duel!
+                            </p>
+                            <button class="w-full px-4 py-2 bg-blue-600 rounded hover:bg-blue-700">
+                                Find Opponent
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.add('hidden');
+            });
+            
+            // Remove active state from all tabs
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('border-purple-500', 'text-purple-400');
+                btn.classList.add('border-transparent', 'text-gray-400');
+            });
+            
+            // Show selected tab content
+            document.getElementById('tab-content-' + tabName).classList.remove('hidden');
+            
+            // Add active state to selected tab
+            const activeTab = document.getElementById('tab-' + tabName);
+            activeTab.classList.add('border-purple-500', 'text-purple-400');
+            activeTab.classList.remove('border-transparent', 'text-gray-400');
+        }
+
+        // Add hover effect to interactive hotspots
+        document.querySelectorAll('.interactive-hotspot').forEach(hotspot => {
+            hotspot.addEventListener('mouseenter', function() {
+                const hoverCard = this.querySelector('.hover-card');
+                if (hoverCard) {
+                    hoverCard.classList.remove('hidden');
+                }
+            });
+            
+            hotspot.addEventListener('mouseleave', function() {
+                const hoverCard = this.querySelector('.hover-card');
+                if (hoverCard) {
+                    hoverCard.classList.add('hidden');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
