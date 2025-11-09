@@ -58,7 +58,16 @@ class Settings(BaseSettings):
     SUPABASE_BUCKET_NAME: str = "books"
     
     # Redis
-    REDIS_URL: str = "redis://localhost:6379"
+    # REDIS_URL: str = "redis://localhost:6379"
+    REDIS_HOST: str = "redis"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    
+    #Rabbitmq
+    RABBITMQ_HOST: str = "rabbitmq"
+    RABBITMQ_PORT: int = 5672
+    RABBITMQ_USER: str = "guest"
+    RABBITMQ_PASSWORD: str = "guest"
     
     # AI Services
     OPENAI_API_KEY: Optional[str] = None
@@ -87,9 +96,11 @@ class Settings(BaseSettings):
     MAIL_SERVICE: str = "mailpit"  # mailpit for dev, mailgun for production
 
     # Mailpit Configuration (Development)
-    MAILPIT_SMTP_HOST: str = "localhost"
-    MAILPIT_SMTP_PORT: int = 1025
-    MAILPIT_WEB_UI_PORT: int = 8025
+    MAIL_FROM: str = ""
+    MAIL_FROM_NAME: str = ""
+    SMTP_HOST: str = "mailpit"
+    SMTP_PORT: int = 1025
+    MAILPIT_UI_PORT: int = 8025
 
     # Mailgun Configuration (Production)
     MAILGUN_API_KEY: Optional[str] = None

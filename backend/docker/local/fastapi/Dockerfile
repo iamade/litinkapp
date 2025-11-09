@@ -68,8 +68,7 @@ COPY --chown=${APP_USER}:{APP_GROUP} ./backend/docker/local/fastapi/celery/worke
 COPY --chown=${APP_USER}:{APP_GROUP} ./backend/docker/local/fastapi/celery/beat/start.sh /start-celerybeat.sh
 COPY --chown=${APP_USER}:{APP_GROUP} ./backend/docker/local/fastapi/celery/flower/start.sh /start-flower.sh
 
-# RUN sed -i 's/\r$//g' /entrypoint.sh /start.sh && \
-#     chmod +x /entrypoint.sh /start.sh 
+
 RUN sed -i 's/\r$//g' /entrypoint.sh /start.sh /start-celeryworker.sh /start-celerybeat.sh /start-flower.sh && \
     chmod +x /entrypoint.sh /start.sh /start-celeryworker.sh /start-celerybeat.sh /start-flower.sh
 

@@ -66,7 +66,71 @@ services:
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
     networks:
       - litinkai_local_nw
+
+  redis:
+    image: docker.io/redis:7.0-alpine
+    command: redis-server --appendonly yes
+    networks:
+      - litinkai_local_nw
+
+  rabbitmq:
+    image: docker.io/rabbitmq:3.13-management
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    volumes:
+      - litinkai_rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - litinkai_local_nw
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rabbitmq.entrypoints=web"
+      - "traefik.http.routers.rabbitmq.rule=Host(`rabbitmq.localhost`)"
+      - "traefik.http.routers.rabbitmq.service=rabbitmq-service"
+      - "traefik.http.services.rabbitmq-service.loadbalancer.server.port=15672"
+
+  celeryworker:
+    <<: *api
+    ports: []
+    command: /start-celeryworker.sh
     
+  flower:
+    <<: *api
+    ports:
+      - "5555:5555"
+    volumes:
+      - litinkai_flower_data:/data
+    command: /start-flower.sh
+    depends_on:
+      - redis
+      - rabbitmq
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.flower.entrypoints=web"
+      - "traefik.http.routers.flower.rule=Host(`flower.localhost`)"
+      - "traefik.http.routers.flower.service=flower-service"
+      - "traefik.http.services.flower-service.loadbalancer.server.port=5555"
+
+  celerybeat:
+    <<: *api
+    ports: []
+    command: /start-celerybeat.sh
+
+  # supabase-db:
+  #   image: supabase/postgres:15.1.0.117
+  #   container_name: litinkapp_supabase_db
+  #   environment:
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  #     POSTGRES_DB: ${POSTGRES_DB:-postgres}
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - supabase_db_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
 
 networks:
   litinkai_local_nw:
@@ -77,3 +141,4 @@ volumes:
   litinkai_mailpit_data:
   litinkai_flower_data:
   litinkai_rabbitmq_data:
+  # supabase_db_data:
