@@ -10,12 +10,11 @@ from app.api.main import api_router
 from app.core.config import settings
 from app.core.database import init_db
 from app.api.v1 import api_router
-from app.core.auth import get_current_user
-from app.services.redis_service import redis_client
 
-from backend.app.core.logging import get_logger
+
+from app.core.logging import get_logger
 from fastapi.responses import JSONResponse
-from backend.app.core.health import health_checker, ServiceStatus
+from app.core.health import health_checker, ServiceStatus
 import asyncio
 import time
 
@@ -152,6 +151,8 @@ async def health_check():
         
 # Include API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+
 
 
 

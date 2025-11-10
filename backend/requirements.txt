@@ -8,12 +8,16 @@ amqp==5.3.1
 annotated-doc==0.0.3
 annotated-types==0.7.0
 anyio==4.9.0
+argon2-cffi==25.1.0
+argon2-cffi-bindings==25.1.0
 asyncpg==0.30.0
 attrs==25.3.0
 bcrypt==4.3.0
+beautifulsoup4==4.14.2
 billiard==4.2.1
 black==23.11.0
 blinker==1.9.0
+bs4==0.0.2
 celery==5.3.6
 certifi==2025.6.15
 cffi==1.17.1
@@ -27,6 +31,7 @@ debugpy==1.8.16
 deprecation==2.1.0
 distro==1.9.0
 dnspython==2.7.0
+EbookLib==0.20
 ecdsa==0.19.1
 elevenlabs==2.3.0
 email_validator==2.2.0
@@ -112,6 +117,7 @@ sentry-sdk==2.43.0
 shellingham==1.5.4
 six==1.17.0
 sniffio==1.3.1
+soupsieve==2.8
 SQLAlchemy==2.0.41
 starlette==0.45.3
 storage3==0.9.0

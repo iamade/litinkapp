@@ -3,9 +3,9 @@ from typing import Dict, Any, Callable, Awaitable, Optional
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from sqlalchemy import text
-from backend.app.tasks.celery_app import celery_app
-from backend.app.core.logging import get_logger
-from backend.app.core.database import get_supabase
+from app.tasks.celery_app import celery_app
+from app.core.logging import get_logger
+from app.core.database import get_supabase
 
 logger = get_logger()
 

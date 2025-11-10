@@ -1,5 +1,6 @@
 from datetime import timedelta, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Body
+from app.auth.schema import PasswordResetRequestSchema
 from supabase import Client
 from gotrue.errors import AuthApiError
 from postgrest.exceptions import APIError
@@ -19,18 +20,7 @@ from app.schemas.user import User as UserSchema, UserCreate
 router = APIRouter()
 
 
-class PasswordResetRequest(BaseModel):
-    email: str
 
-
-class PasswordResetConfirm(BaseModel):
-    email: str
-    token: str
-    new_password: str
-
-
-class EmailVerificationRequest(BaseModel):
-    email: str
 
 
 @router.post("/register", response_model=UserSchema, status_code=201)
@@ -168,7 +158,7 @@ async def login(
 
 @router.post("/request-password-reset")
 async def request_password_reset(
-    request: PasswordResetRequest,
+    request: PasswordResetRequestSchema,
     supabase: Client = Depends(get_supabase)
 ):
     """Request a password reset email"""

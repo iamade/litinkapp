@@ -58,10 +58,11 @@ class Settings(BaseSettings):
     SUPABASE_BUCKET_NAME: str = "books"
     
     # Redis
-    # REDIS_URL: str = "redis://localhost:6379"
+
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
+    REDIS_URL: str = f"redis://{REDIS_HOST}:{REDIS_PORT}"
     
     #Rabbitmq
     RABBITMQ_HOST: str = "rabbitmq"
@@ -156,11 +157,16 @@ class Settings(BaseSettings):
     # MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
     MODELSLAB_BASE_URL: str = "https://modelslab.com/api/v7"  # Updated to v7
     
+    OTP_EXPIRATION_MINUTES: int = 2 if ENVIRONMENT == "local" else 5
+    LOGIN_ATTEMPTS: int = 3
+    LOCKOUT_DURATION_MINUTES: int = 2 if ENVIRONMENT == "local" else 5    
+    ACTIVATION_TOKEN_EXPIRATION_MINUTES: int = 2 if ENVIRONMENT == "local" else 5
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"
+    
+    # class Config:
+    #     env_file = ".env"
+    #     case_sensitive = True
+    #     extra = "ignore"
 
 
 settings = Settings()

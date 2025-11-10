@@ -1,9 +1,9 @@
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
-import logging
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class ModelTier(Enum):

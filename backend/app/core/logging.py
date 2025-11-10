@@ -1,11 +1,12 @@
 import os
 
-from backend.app.core.config import settings
+from app.core.config import settings
 from loguru import logger
 
 logger.remove()
 
 LOG_DIR =os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+# LOG_DIR =os.path.join(os.path.dirname(__file__), "logs")
 
 LOG_FORMAT = (
     "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
