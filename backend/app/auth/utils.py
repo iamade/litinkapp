@@ -62,17 +62,17 @@ def generate_display_name()-> str:
     return display_name
 
 
-# def create_activation_token(id: uuid.UUID) -> str:
-#     payload = {
-#         "id": str(id),
-#         "type": "activation",
-#         "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.ACTIVATION_TOKEN_EXPIRATION_MINUTES), "iat": datetime.now(timezone.utc),
-#     }
+def create_activation_token(id: uuid.UUID) -> str:
+    payload = {
+        "id": str(id),
+        "type": "activation",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.ACTIVATION_TOKEN_EXPIRATION_MINUTES), "iat": datetime.now(timezone.utc),
+    }
     
-#     return jwt.encode(
-#         payload, settings.JWT_SECRET_KEY,
-#         algorithm=settings.JWT_ALGORITHM
-#     )
+    return jwt.encode(
+        payload, settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM
+    )
 
 
 async def get_current_user(

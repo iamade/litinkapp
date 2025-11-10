@@ -71,6 +71,23 @@ class UserReadSchema(UserBaseSchema):
     id: uuid.UUID
     full_name: str
     
+class EmailVerificationRequestSchema(BaseModel):
+    email: EmailStr
+    
+class UserLoginRequestSchema(BaseModel):
+    email: EmailStr
+    password: str = Field(
+        min_length=8,
+        max_length=40,
+    )
+    
+class OTPVerifyRequestSchema(BaseModel):
+    email: EmailStr
+    otp: str = Field(
+        min_length=6,
+        max_length=6,
+    )
+    
 class UserUpdateSchema(BaseModel):
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
@@ -108,12 +125,7 @@ class TokenDataSchema(BaseModel):
     user_id: Optional[str] = None
 
 
-class UserLoginSchema(BaseModel):
-    email: EmailStr
-    password: str = Field(
-        min_length=8,
-        max_length=40,
-    )
+
 
 
 class UserRegisterSchema(BaseModel):
@@ -132,5 +144,3 @@ class PasswordResetConfirmSchema(BaseModel):
     new_password: str
 
 
-class EmailVerificationRequestSchema(BaseModel):
-    email: str
