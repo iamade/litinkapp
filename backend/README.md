@@ -231,3 +231,11 @@ VS Code should stop at your breakpoints
 4. Debug the 'id' Error Specifically
 Set breakpoints at these critical points: -->
 
+New Workflow:
+
+make supabase-start - Start database (once)
+Update .envs/.env.local with the keys from output
+make dev - Start your application
+make down - Stop app when done
+make supabase-stop - Stop database when completely done
+Use make help to see all available commands!
