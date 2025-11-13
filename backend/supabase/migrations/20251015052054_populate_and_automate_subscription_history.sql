@@ -2,11 +2,13 @@
   # Populate and Automate Subscription History Tracking
 
   1. Purpose
+    - Create subscription_history table for audit trail
     - Populate subscription_history with records for all current subscriptions
     - Create database triggers to automatically track all future subscription changes
     - Ensure complete audit trail of subscription lifecycle events
 
   2. Changes
+    - Create subscription_history table
     - Insert initial "created" events for all existing subscriptions
     - Create trigger function to log subscription INSERT/UPDATE/DELETE events
     - Add trigger on user_subscriptions table for automatic tracking
@@ -41,6 +43,45 @@
     - Uses ON CONFLICT to prevent duplicate history records
     - Trigger captures all changes automatically
 */
+
+-- Step 0: Create subscription_history table if it doesn't exist
+CREATE TABLE IF NOT EXISTS subscription_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  subscription_id UUID REFERENCES user_subscriptions(id) ON DELETE SET NULL,
+  event_type VARCHAR(50) NOT NULL,
+  from_tier subscription_tier,
+  to_tier subscription_tier,
+  from_status subscription_status,
+  to_status subscription_status,
+  reason TEXT,
+  metadata JSONB DEFAULT '{}'::JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS
+ALTER TABLE subscription_history ENABLE ROW LEVEL SECURITY;
+
+-- Users can view their own subscription history
+DROP POLICY IF EXISTS "Users can view own subscription history" ON subscription_history;
+CREATE POLICY "Users can view own subscription history"
+  ON subscription_history FOR SELECT
+  TO authenticated
+  USING (auth.uid() = user_id);
+
+-- Service role can manage all history
+DROP POLICY IF EXISTS "Service role can manage all subscription history" ON subscription_history;
+CREATE POLICY "Service role can manage all subscription history"
+  ON subscription_history FOR ALL
+  TO service_role
+  USING (true)
+  WITH CHECK (true);
+
+-- Create indexes for better query performance
+CREATE INDEX IF NOT EXISTS idx_subscription_history_user_id ON subscription_history(user_id);
+CREATE INDEX IF NOT EXISTS idx_subscription_history_subscription_id ON subscription_history(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_subscription_history_event_type ON subscription_history(event_type);
+CREATE INDEX IF NOT EXISTS idx_subscription_history_created_at ON subscription_history(created_at DESC);
 
 -- Step 1: Populate subscription_history with initial records for existing subscriptions
 INSERT INTO subscription_history (
