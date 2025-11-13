@@ -214,14 +214,14 @@ graph TB
         end
         
         subgraph "API Routes"
-            AUTH_ROUTES[/api/v1/auth<br/>Authentication]
-            BOOK_ROUTES[/api/v1/books<br/>Book Management]
-            AI_ROUTES[/api/v1/ai<br/>AI Generation]
-            PLOT_ROUTES[/api/v1/plots<br/>Plot Management]
-            CHAR_ROUTES[/api/v1/characters<br/>Character Profiling]
-            SUB_ROUTES[/api/v1/subscriptions<br/>Subscriptions]
-            ADMIN_ROUTES[/api/v1/admin<br/>Admin Dashboard]
-            MERGE_ROUTES[/api/v1/merge<br/>Video Merging]
+            AUTH_ROUTES["/api/v1/auth<br/>Authentication"]
+            BOOK_ROUTES["/api/v1/books<br/>Book Management"]
+            AI_ROUTES["/api/v1/ai<br/>AI Generation"]
+            PLOT_ROUTES["/api/v1/plots<br/>Plot Management"]
+            CHAR_ROUTES["/api/v1/characters<br/>Character Profiling"]
+            SUB_ROUTES["/api/v1/subscriptions<br/>Subscriptions"]
+            ADMIN_ROUTES["/api/v1/admin<br/>Admin Dashboard"]
+            MERGE_ROUTES[""/api/v1/merge<br/>Video Merging]
         end
         
         subgraph "Core Services"
