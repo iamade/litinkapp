@@ -85,7 +85,7 @@ CREATE POLICY "Superadmin can view all alerts"
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   );
 
@@ -96,7 +96,7 @@ CREATE POLICY "Superadmin can insert alerts"
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   );
 
@@ -107,14 +107,14 @@ CREATE POLICY "Superadmin can update alerts"
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   )
   WITH CHECK (
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   );
 
@@ -125,7 +125,7 @@ CREATE POLICY "Superadmin can delete alerts"
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   );
 
@@ -137,7 +137,7 @@ CREATE POLICY "Superadmin can view all settings"
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   );
 
@@ -148,7 +148,7 @@ CREATE POLICY "Superadmin can insert settings"
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   );
 
@@ -159,14 +159,14 @@ CREATE POLICY "Superadmin can update settings"
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   )
   WITH CHECK (
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   );
 
@@ -177,7 +177,7 @@ CREATE POLICY "Superadmin can delete settings"
     EXISTS (
       SELECT 1 FROM profiles
       WHERE profiles.id = auth.uid()
-      AND (profiles.role = 'superadmin' OR profiles.email = 'support@litinkai.com')
+      AND ('superadmin' = ANY(profiles.roles) OR profiles.email = 'support@litinkai.com')
     )
   );
 
@@ -199,7 +199,7 @@ BEGIN
   RETURN EXISTS (
     SELECT 1 FROM profiles
     WHERE id = auth.uid()
-    AND (role = 'superadmin' OR email = 'support@litinkai.com')
+    AND ('superadmin' = ANY(roles) OR email = 'support@litinkai.com')
   );
 END;
 $$;
