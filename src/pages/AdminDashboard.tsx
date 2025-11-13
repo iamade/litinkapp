@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { Shield, DollarSign, Activity, AlertTriangle, TrendingUp, Database } from "lucide-react";
+import { Shield, DollarSign, Activity, AlertTriangle, TrendingUp, Database, Users } from "lucide-react";
 import CostTrackingDashboard from "../components/Admin/CostTrackingDashboard";
 import MetricsDashboard from "../components/Admin/MetricsDashboard";
 import AlertsPanel from "../components/Admin/AlertsPanel";
+import UserManagementDashboard from "../components/Admin/UserManagementDashboard";
 
-type TabType = "cost" | "metrics" | "alerts";
+type TabType = "cost" | "metrics" | "alerts" | "users";
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -57,6 +58,12 @@ export default function AdminDashboard() {
       name: "Alerts & Monitoring",
       icon: AlertTriangle,
       description: "View system alerts and health status",
+    },
+    {
+      id: "users" as TabType,
+      name: "User Management",
+      icon: Users,
+      description: "Manage users and permissions",
     },
   ];
 
@@ -152,6 +159,7 @@ export default function AdminDashboard() {
           {activeTab === "cost" && <CostTrackingDashboard />}
           {activeTab === "metrics" && <MetricsDashboard />}
           {activeTab === "alerts" && <AlertsPanel />}
+          {activeTab === "users" && <UserManagementDashboard />}
         </div>
       </div>
     </div>

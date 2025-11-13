@@ -33,6 +33,17 @@ class AcknowledgeAlertRequest(BaseModel):
     alert_id: str
 
 
+# User Deletion Models
+class DeleteUserRequest(BaseModel):
+    user_id: str
+    reason: Optional[str] = None
+
+
+class BatchDeleteUsersRequest(BaseModel):
+    user_ids: List[str]
+    reason: Optional[str] = None
+
+
 # Cost Tracking Endpoints
 @router.get("/cost-tracking/summary")
 async def get_cost_summary(
@@ -705,3 +716,173 @@ async def get_available_roles(
             }
         ]
     }
+
+
+# User Deletion Endpoints
+@router.get("/users/{user_id}/deletion-preview")
+async def get_user_deletion_preview(
+    user_id: str,
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Get preview of what will be deleted if user is removed"""
+    try:
+        # Call the database function to get deletion preview
+        response = supabase.rpc('get_user_deletion_preview', {
+            'target_user_id': user_id
+        }).execute()
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail="User not found or preview unavailable")
+
+        return response.data
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Error getting deletion preview for user {user_id}: {error_msg}")
+
+        # Handle specific errors
+        if "User not found" in error_msg:
+            raise HTTPException(status_code=404, detail="User not found")
+        if "Cannot delete primary superadmin" in error_msg:
+            raise HTTPException(status_code=403, detail="Cannot delete primary superadmin account")
+
+        raise HTTPException(status_code=500, detail=f"Failed to get deletion preview: {error_msg}")
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    reason: Optional[str] = None,
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Permanently delete a user and all their content"""
+    try:
+        # Call the database function to delete user
+        response = supabase.rpc('delete_user_completely', {
+            'target_user_id': user_id,
+            'deleting_admin_id': current_user['id'],
+            'deletion_reason': reason
+        }).execute()
+
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Deletion failed: No response from database")
+
+        result = response.data
+
+        # Check if deletion was successful
+        if not result.get('success'):
+            error_message = result.get('error', 'Unknown error')
+            logger.error(f"User deletion failed for {user_id}: {error_message}")
+
+            # Handle specific errors
+            if "User not found" in error_message:
+                raise HTTPException(status_code=404, detail="User not found")
+            if "Cannot delete primary superadmin" in error_message:
+                raise HTTPException(status_code=403, detail="Cannot delete primary superadmin account")
+            if "Cannot delete your own account" in error_message:
+                raise HTTPException(status_code=403, detail="Cannot delete your own account")
+
+            raise HTTPException(status_code=500, detail=f"Deletion failed: {error_message}")
+
+        logger.info(f"User {result.get('deleted_email')} deleted by admin {current_user['email']}")
+
+        return {
+            "success": True,
+            "message": f"User {result.get('deleted_email')} has been permanently deleted",
+            "deleted_user_id": result.get('deleted_user_id'),
+            "deleted_email": result.get('deleted_email'),
+            "audit_id": result.get('audit_id'),
+            "deleted_at": result.get('deleted_at')
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
+
+
+@router.post("/users/batch-delete")
+async def batch_delete_users(
+    request: BatchDeleteUsersRequest,
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Delete multiple users at once"""
+    if not request.user_ids:
+        raise HTTPException(status_code=400, detail="No user IDs provided")
+
+    results = {
+        "total": len(request.user_ids),
+        "successful": [],
+        "failed": []
+    }
+
+    for user_id in request.user_ids:
+        try:
+            # Call the database function to delete user
+            response = supabase.rpc('delete_user_completely', {
+                'target_user_id': user_id,
+                'deleting_admin_id': current_user['id'],
+                'deletion_reason': request.reason or "Batch deletion"
+            }).execute()
+
+            if response.data and response.data.get('success'):
+                results["successful"].append({
+                    "user_id": user_id,
+                    "email": response.data.get('deleted_email'),
+                    "audit_id": response.data.get('audit_id')
+                })
+                logger.info(f"Batch deletion: User {response.data.get('deleted_email')} deleted")
+            else:
+                error_msg = response.data.get('error', 'Unknown error') if response.data else 'No response'
+                results["failed"].append({
+                    "user_id": user_id,
+                    "error": error_msg
+                })
+                logger.error(f"Batch deletion failed for user {user_id}: {error_msg}")
+        except Exception as e:
+            results["failed"].append({
+                "user_id": user_id,
+                "error": str(e)
+            })
+            logger.error(f"Exception during batch deletion for user {user_id}: {e}")
+
+    logger.info(f"Batch deletion completed by {current_user['email']}: {len(results['successful'])} successful, {len(results['failed'])} failed")
+
+    return {
+        "success": len(results["failed"]) == 0,
+        "message": f"Deleted {len(results['successful'])} of {results['total']} users",
+        "results": results
+    }
+
+
+@router.get("/users/deletion-audit")
+async def get_deletion_audit_log(
+    limit: int = Query(50, description="Maximum number of audit records to return"),
+    offset: int = Query(0, description="Pagination offset"),
+    current_user: dict = Depends(get_current_superadmin),
+    supabase: Client = Depends(get_supabase)
+):
+    """Get audit log of deleted users"""
+    try:
+        query = supabase.table('deleted_users_audit').select(
+            'id, original_user_id, email, display_name, roles, user_created_at, deleted_at, deletion_reason, content_summary, deleted_by'
+        ).order('deleted_at', desc=True).range(offset, offset + limit - 1)
+
+        response = query.execute()
+
+        # Get total count
+        count_response = supabase.table('deleted_users_audit').select('id', count='exact').execute()
+
+        return {
+            "audit_logs": response.data,
+            "total": count_response.count,
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        logger.error(f"Error fetching deletion audit log: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch deletion audit log")

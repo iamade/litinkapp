@@ -79,8 +79,8 @@ export const apiClient = {
     return withLoading(() => this.request<T>(endpoint, "PUT", body));
   },
 
-  async delete<T>(endpoint: string): Promise<T> {
-    return withLoading(() => this.request<T>(endpoint, "DELETE"));
+  async delete<T>(endpoint: string, body?: unknown): Promise<T> {
+    return withLoading(() => this.request<T>(endpoint, "DELETE", body));
   },
 
   async upload<T>(endpoint: string, formData: FormData): Promise<T> {
