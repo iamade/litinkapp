@@ -26,7 +26,8 @@ supabase-reset:
 
 # Run in development mode WITHOUT debugger
 dev:
-	@cd scripts && ./start-local-dev.sh
+	DEBUG=false ENVIRONMENT=development docker compose -f local.yml up --build -d
+# 	@cd scripts && ./start-local-dev.sh
 
 # Run in production mode
 up:
@@ -38,7 +39,8 @@ debug:
 
 # Stop application containers only
 down:
-	@cd scripts && ./stop-local-dev.sh
+	docker-compose -f local.yml down
+# 	@cd scripts && ./stop-local-dev.sh
 
 # Rebuild development without debugger
 rebuild-dev:
