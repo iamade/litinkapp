@@ -37,14 +37,16 @@
   - Validates role array is never empty
 */
 
--- Step 1: Create new text array column for roles (temporary)
-ALTER TABLE profiles 
+-- Step 1: Ensure roles column exists as text array
+-- Note: The initial schema already has roles as text[], so this is just a safeguard
+ALTER TABLE profiles
   ADD COLUMN IF NOT EXISTS roles text[];
 
--- Step 2: Migrate existing single role values to array format
-UPDATE profiles 
-SET roles = ARRAY[role::text]
-WHERE roles IS NULL;
+-- Step 2: Set default for roles if not already set
+-- Update any NULL roles to default ['explorer'] array
+UPDATE profiles
+SET roles = ARRAY['explorer']
+WHERE roles IS NULL OR roles = '{}';
 
 -- Step 3: Make roles column non-nullable and set default
 ALTER TABLE profiles 
