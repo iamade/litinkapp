@@ -14,37 +14,35 @@ FastAPI backend for the Litink AI-powered interactive book platform.
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### Local Development (Recommended)
 
-1. Clone the repository and navigate to the backend directory
-2. Copy environment file:
-   ```bash
-   cp .env.example .env
-   ```
-3. Update `.env` with your API keys
-4. Start services:
-   ```bash
-   docker-compose up -d
-   ```
-
-
-# Start services
-docker-compose up -d
-```
-
-### From Supabase to Local:
+**New developers: See [QUICK_START_LOCAL.md](QUICK_START_LOCAL.md)**
 
 ```bash
-# Stop services
-docker-compose down
-
-# Switch environment
-cp docker.env.local .env
-# Edit .env with your API keys
-
-# Start services
-make up 
+cd backend
+./scripts/start-local-dev.sh
 ```
+
+This starts:
+- Supabase local (Database, Auth, Storage, Studio)
+- All application services (API, Redis, Celery, etc.)
+- Email testing with Inbucket
+
+**For detailed setup:** See [LOCAL_DEVELOPMENT_GUIDE.md](LOCAL_DEVELOPMENT_GUIDE.md)
+
+### Production/Cloud Database
+
+To connect to the production database (not recommended for development):
+
+1. Copy environment file:
+   ```bash
+   cp .envs/.env.example .envs/.env.production
+   ```
+2. Update with production credentials
+3. Start services:
+   ```bash
+   docker-compose -f local.yml up -d
+   ```
 
 The API will be available at `http://localhost:8000`
 
