@@ -103,14 +103,12 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO public.profiles (
   id,
   email,
-  full_name,
+  display_name,
   avatar_url,
   created_at,
   updated_at,
-  is_superadmin,
-  is_admin,
-  is_creator,
-  user_mode,
+  roles,
+  preferred_mode,
   onboarding_completed
 ) VALUES
   (
@@ -120,11 +118,9 @@ INSERT INTO public.profiles (
     NULL,
     NOW(),
     NOW(),
-    true,
-    true,
-    true,
+    ARRAY['superadmin', 'creator', 'explorer']::text[],
     'creator',
-    true
+    '{"creator": true, "explorer": true}'::jsonb
   ),
   (
     '00000000-0000-0000-0000-000000000002',
@@ -133,11 +129,9 @@ INSERT INTO public.profiles (
     NULL,
     NOW(),
     NOW(),
-    false,
-    true,
-    true,
+    ARRAY['creator', 'explorer']::text[],
     'creator',
-    true
+    '{"creator": true, "explorer": true}'::jsonb
   ),
   (
     '00000000-0000-0000-0000-000000000003',
@@ -146,11 +140,9 @@ INSERT INTO public.profiles (
     NULL,
     NOW(),
     NOW(),
-    false,
-    false,
-    true,
+    ARRAY['creator', 'explorer']::text[],
     'creator',
-    true
+    '{"creator": true, "explorer": true}'::jsonb
   ),
   (
     '00000000-0000-0000-0000-000000000004',
@@ -159,11 +151,9 @@ INSERT INTO public.profiles (
     NULL,
     NOW(),
     NOW(),
-    false,
-    false,
-    false,
-    'entertainment',
-    true
+    ARRAY['explorer']::text[],
+    'explorer',
+    '{"explorer": true}'::jsonb
   ),
   (
     '00000000-0000-0000-0000-000000000005',
@@ -172,18 +162,16 @@ INSERT INTO public.profiles (
     NULL,
     NOW(),
     NOW(),
-    false,
-    false,
-    true,
+    ARRAY['creator', 'explorer']::text[],
     'creator',
-    true
+    '{"creator": true, "explorer": true}'::jsonb
   )
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================
 -- 3. Create Subscriptions for Test Users
 -- ============================================
-INSERT INTO public.subscriptions (
+INSERT INTO public.user_subscriptions (
   user_id,
   tier,
   status,
@@ -197,7 +185,7 @@ INSERT INTO public.subscriptions (
 ) VALUES
   (
     '00000000-0000-0000-0000-000000000001',
-    'enterprise',
+    'pro',
     'active',
     'sub_local_superadmin',
     'cus_local_superadmin',
@@ -209,7 +197,7 @@ INSERT INTO public.subscriptions (
   ),
   (
     '00000000-0000-0000-0000-000000000002',
-    'professional',
+    'pro',
     'active',
     'sub_local_admin',
     'cus_local_admin',
@@ -221,7 +209,7 @@ INSERT INTO public.subscriptions (
   ),
   (
     '00000000-0000-0000-0000-000000000003',
-    'standard',
+    'basic',
     'active',
     'sub_local_creator',
     'cus_local_creator',
@@ -245,7 +233,7 @@ INSERT INTO public.subscriptions (
   ),
   (
     '00000000-0000-0000-0000-000000000005',
-    'premium',
+    'pro',
     'active',
     'sub_local_premium',
     'cus_local_premium',
@@ -264,10 +252,13 @@ INSERT INTO public.books (
   id,
   user_id,
   title,
-  author,
+  author_name,
   description,
   content,
   status,
+  book_type,
+  uploaded_by_user_id,
+  is_author,
   created_at,
   updated_at
 ) VALUES
@@ -278,7 +269,10 @@ INSERT INTO public.books (
     'Creator User',
     'A fascinating journey through the world of artificial intelligence',
     'This is sample content for testing purposes...',
-    'completed',
+    'READY',
+    'entertainment',
+    '00000000-0000-0000-0000-000000000003',
+    true,
     NOW(),
     NOW()
   ),
@@ -289,7 +283,10 @@ INSERT INTO public.books (
     'Creator User',
     'An epic tale of exploration beyond Earth',
     'Sample content for space adventures...',
-    'processing',
+    'PROCESSING',
+    'entertainment',
+    '00000000-0000-0000-0000-000000000003',
+    true,
     NOW(),
     NOW()
   ),
@@ -300,7 +297,10 @@ INSERT INTO public.books (
     'Premium User',
     'A thrilling mystery novel set in Victorian England',
     'Sample mystery content...',
-    'completed',
+    'READY',
+    'entertainment',
+    '00000000-0000-0000-0000-000000000005',
+    true,
     NOW(),
     NOW()
   )
