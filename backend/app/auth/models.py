@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from pydantic import computed_field, Field
 from app.auth.schema import UserBaseSchema, RoleChoicesSchema
 
-class User(UserBaseSchema, table=True):
+class User(UserBaseSchema):
     id: uuid.UUID = Field(default_factory=uuid.uuid4)
     hashed_password: str
     failed_login_attempts: int = Field(default=0)

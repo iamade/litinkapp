@@ -31,7 +31,7 @@ def generate_otp(length: int = 6) -> str:
     otp = "".join(random.choices(string.digits, k=length))
     return otp
 
-def get_password_hash(password: str) -> str:
+def generate_password_hash(password: str) -> str:
     """
     Hash a password using Argon2 (new hashes).
     All new passwords will be hashed with Argon2.

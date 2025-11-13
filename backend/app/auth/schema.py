@@ -124,15 +124,11 @@ class TokenSchema(BaseModel):
 class TokenDataSchema(BaseModel):
     user_id: Optional[str] = None
 
-
-
-
-
-class UserRegisterSchema(BaseModel):
-    email: EmailStr
-    password: str
-    display_name: Optional[str] = None
-    role: str = "explorer"
+# class UserRegisterSchema(BaseModel):
+#     email: EmailStr
+#     password: str
+#     display_name: Optional[str] = None
+#     role: str = "explorer"
     
 class PasswordResetRequestSchema(BaseModel):
     email: str
