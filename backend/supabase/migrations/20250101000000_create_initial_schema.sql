@@ -151,18 +151,21 @@ CREATE TABLE IF NOT EXISTS profiles (
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
 -- Profiles policies
-CREATE POLICY IF NOT EXISTS "Users can view own profile"
+DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
+CREATE POLICY "Users can view own profile"
   ON profiles FOR SELECT
   TO authenticated
   USING (auth.uid() = id);
 
-CREATE POLICY IF NOT EXISTS "Users can update own profile"
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+CREATE POLICY "Users can update own profile"
   ON profiles FOR UPDATE
   TO authenticated
   USING (auth.uid() = id)
   WITH CHECK (auth.uid() = id);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all profiles"
+DROP POLICY IF EXISTS "Service role can manage all profiles" ON profiles;
+CREATE POLICY "Service role can manage all profiles"
   ON profiles FOR ALL
   TO service_role
   USING (true)
@@ -210,28 +213,33 @@ CREATE TABLE IF NOT EXISTS books (
 ALTER TABLE books ENABLE ROW LEVEL SECURITY;
 
 -- Books policies
-CREATE POLICY IF NOT EXISTS "Users can view own books"
+DROP POLICY IF EXISTS "Users can view own books" ON books;
+CREATE POLICY "Users can view own books"
   ON books FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Users can create own books"
+DROP POLICY IF EXISTS "Users can create own books" ON books;
+CREATE POLICY "Users can create own books"
   ON books FOR INSERT
   TO authenticated
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Users can update own books"
+DROP POLICY IF EXISTS "Users can update own books" ON books;
+CREATE POLICY "Users can update own books"
   ON books FOR UPDATE
   TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Users can delete own books"
+DROP POLICY IF EXISTS "Users can delete own books" ON books;
+CREATE POLICY "Users can delete own books"
   ON books FOR DELETE
   TO authenticated
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all books"
+DROP POLICY IF EXISTS "Service role can manage all books" ON books;
+CREATE POLICY "Service role can manage all books"
   ON books FOR ALL
   TO service_role
   USING (true)
@@ -260,7 +268,8 @@ CREATE TABLE IF NOT EXISTS chapters (
 ALTER TABLE chapters ENABLE ROW LEVEL SECURITY;
 
 -- Chapters policies
-CREATE POLICY IF NOT EXISTS "Users can view chapters of own books"
+DROP POLICY IF EXISTS "Users can view chapters of own books" ON chapters;
+CREATE POLICY "Users can view chapters of own books"
   ON chapters FOR SELECT
   TO authenticated
   USING (
@@ -271,7 +280,8 @@ CREATE POLICY IF NOT EXISTS "Users can view chapters of own books"
     )
   );
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all chapters"
+DROP POLICY IF EXISTS "Service role can manage all chapters" ON chapters;
+CREATE POLICY "Service role can manage all chapters"
   ON chapters FOR ALL
   TO service_role
   USING (true)
@@ -306,12 +316,14 @@ CREATE TABLE IF NOT EXISTS plot_overviews (
 ALTER TABLE plot_overviews ENABLE ROW LEVEL SECURITY;
 
 -- Plot overviews policies
-CREATE POLICY IF NOT EXISTS "Users can view own plot overviews"
+DROP POLICY IF EXISTS "Users can view own plot overviews" ON plot_overviews;
+CREATE POLICY "Users can view own plot overviews"
   ON plot_overviews FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all plot overviews"
+DROP POLICY IF EXISTS "Service role can manage all plot overviews" ON plot_overviews;
+CREATE POLICY "Service role can manage all plot overviews"
   ON plot_overviews FOR ALL
   TO service_role
   USING (true)
@@ -351,12 +363,14 @@ CREATE TABLE IF NOT EXISTS characters (
 ALTER TABLE characters ENABLE ROW LEVEL SECURITY;
 
 -- Characters policies
-CREATE POLICY IF NOT EXISTS "Users can view own characters"
+DROP POLICY IF EXISTS "Users can view own characters" ON characters;
+CREATE POLICY "Users can view own characters"
   ON characters FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all characters"
+DROP POLICY IF EXISTS "Service role can manage all characters" ON characters;
+CREATE POLICY "Service role can manage all characters"
   ON characters FOR ALL
   TO service_role
   USING (true)
@@ -388,7 +402,8 @@ CREATE TABLE IF NOT EXISTS scripts (
 ALTER TABLE scripts ENABLE ROW LEVEL SECURITY;
 
 -- Scripts policies
-CREATE POLICY IF NOT EXISTS "Users can view scripts of own chapters"
+DROP POLICY IF EXISTS "Users can view scripts of own chapters" ON scripts;
+CREATE POLICY "Users can view scripts of own chapters"
   ON scripts FOR SELECT
   TO authenticated
   USING (
@@ -400,7 +415,8 @@ CREATE POLICY IF NOT EXISTS "Users can view scripts of own chapters"
     )
   );
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all scripts"
+DROP POLICY IF EXISTS "Service role can manage all scripts" ON scripts;
+CREATE POLICY "Service role can manage all scripts"
   ON scripts FOR ALL
   TO service_role
   USING (true)
@@ -451,12 +467,14 @@ CREATE TABLE IF NOT EXISTS video_generations (
 ALTER TABLE video_generations ENABLE ROW LEVEL SECURITY;
 
 -- Video generations policies
-CREATE POLICY IF NOT EXISTS "Users can view own video generations"
+DROP POLICY IF EXISTS "Users can view own video generations" ON video_generations;
+CREATE POLICY "Users can view own video generations"
   ON video_generations FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all video generations"
+DROP POLICY IF EXISTS "Service role can manage all video generations" ON video_generations;
+CREATE POLICY "Service role can manage all video generations"
   ON video_generations FOR ALL
   TO service_role
   USING (true)
@@ -511,12 +529,14 @@ CREATE TABLE IF NOT EXISTS image_generations (
 ALTER TABLE image_generations ENABLE ROW LEVEL SECURITY;
 
 -- Image generations policies
-CREATE POLICY IF NOT EXISTS "Users can view own image generations"
+DROP POLICY IF EXISTS "Users can view own image generations" ON image_generations;
+CREATE POLICY "Users can view own image generations"
   ON image_generations FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all image generations"
+DROP POLICY IF EXISTS "Service role can manage all image generations" ON image_generations;
+CREATE POLICY "Service role can manage all image generations"
   ON image_generations FOR ALL
   TO service_role
   USING (true)
@@ -559,12 +579,14 @@ CREATE TABLE IF NOT EXISTS audio_generations (
 ALTER TABLE audio_generations ENABLE ROW LEVEL SECURITY;
 
 -- Audio generations policies
-CREATE POLICY IF NOT EXISTS "Users can view own audio generations"
+DROP POLICY IF EXISTS "Users can view own audio generations" ON audio_generations;
+CREATE POLICY "Users can view own audio generations"
   ON audio_generations FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all audio generations"
+DROP POLICY IF EXISTS "Service role can manage all audio generations" ON audio_generations;
+CREATE POLICY "Service role can manage all audio generations"
   ON audio_generations FOR ALL
   TO service_role
   USING (true)
@@ -598,12 +620,14 @@ CREATE TABLE IF NOT EXISTS subscription_tiers (
 ALTER TABLE subscription_tiers ENABLE ROW LEVEL SECURITY;
 
 -- Subscription tiers policies
-CREATE POLICY IF NOT EXISTS "Anyone can view subscription tiers"
+DROP POLICY IF EXISTS "Anyone can view subscription tiers" ON subscription_tiers;
+CREATE POLICY "Anyone can view subscription tiers"
   ON subscription_tiers FOR SELECT
   TO authenticated
   USING (is_active = TRUE);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage subscription tiers"
+DROP POLICY IF EXISTS "Service role can manage subscription tiers" ON subscription_tiers;
+CREATE POLICY "Service role can manage subscription tiers"
   ON subscription_tiers FOR ALL
   TO service_role
   USING (true)
@@ -638,12 +662,14 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
 ALTER TABLE user_subscriptions ENABLE ROW LEVEL SECURITY;
 
 -- User subscriptions policies
-CREATE POLICY IF NOT EXISTS "Users can view own subscription"
+DROP POLICY IF EXISTS "Users can view own subscription" ON user_subscriptions;
+CREATE POLICY "Users can view own subscription"
   ON user_subscriptions FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all subscriptions"
+DROP POLICY IF EXISTS "Service role can manage all subscriptions" ON user_subscriptions;
+CREATE POLICY "Service role can manage all subscriptions"
   ON user_subscriptions FOR ALL
   TO service_role
   USING (true)
@@ -671,17 +697,20 @@ CREATE TABLE IF NOT EXISTS usage_logs (
 ALTER TABLE usage_logs ENABLE ROW LEVEL SECURITY;
 
 -- Usage logs policies
-CREATE POLICY IF NOT EXISTS "Users can view own usage logs"
+DROP POLICY IF EXISTS "Users can view own usage logs" ON usage_logs;
+CREATE POLICY "Users can view own usage logs"
   ON usage_logs FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Users can insert own usage logs"
+DROP POLICY IF EXISTS "Users can insert own usage logs" ON usage_logs;
+CREATE POLICY "Users can insert own usage logs"
   ON usage_logs FOR INSERT
   TO authenticated
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Service role can manage all usage logs"
+DROP POLICY IF EXISTS "Service role can manage all usage logs" ON usage_logs;
+CREATE POLICY "Service role can manage all usage logs"
   ON usage_logs FOR ALL
   TO service_role
   USING (true)
