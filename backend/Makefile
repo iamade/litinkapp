@@ -6,11 +6,11 @@
 
 # Start Supabase services only
 supabase-start:
-	@cd scripts && ./start-supabase.sh
+	@./scripts/start-supabase.sh
 
 # Stop Supabase services only
 supabase-stop:
-	@cd scripts && ./stop-supabase.sh
+	@./scripts/stop-supabase.sh
 
 # Check Supabase status
 supabase-status:
@@ -18,7 +18,7 @@ supabase-status:
 
 # Reset Supabase database (WARNING: Deletes all data!)
 supabase-reset:
-	@cd scripts && ./reset-local-db.sh
+	@./scripts/reset-local-db.sh
 
 # ============================================
 # Application Service Commands
