@@ -239,3 +239,5 @@ make dev - Start your application
 make down - Stop app when done
 make supabase-stop - Stop database when completely done
 Use make help to see all available commands!
+
+ALL test users (superadmin, admin, creator, user, premium accounts)
