@@ -1,13 +1,14 @@
 #!/bin/bash
 
 # ============================================
-# Stop Local Development Environment
+# Stop Application Services Only
 # ============================================
-# This script stops all local development services
+# This script stops only the application services
+# Supabase services will continue running if they were started separately
 
 set -e
 
-echo "🛑 Stopping Litinkai Local Development Environment..."
+echo "🛑 Stopping Litinkai Application Services..."
 echo ""
 
 # Colors for output
@@ -29,17 +30,8 @@ echo ""
 echo -e "${GREEN}✅ Application services stopped${NC}"
 echo ""
 
-# Stop Supabase local services
-echo -e "${BLUE}🗄️  Stopping Supabase local services...${NC}"
-cd supabase
-supabase stop
-cd ..
-
-echo ""
-echo -e "${GREEN}✅ Supabase services stopped${NC}"
-echo ""
-
-echo -e "${GREEN}🎉 All services stopped successfully!${NC}"
-echo ""
-echo "💡 To start again, run: ./scripts/start-local-dev.sh"
+echo "💡 Useful commands:"
+echo "   - Start app again:     make dev"
+echo "   - Stop Supabase:       make supabase-stop"
+echo "   - Stop everything:     make all-down"
 echo ""
