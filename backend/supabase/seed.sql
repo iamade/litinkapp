@@ -357,11 +357,78 @@ INSERT INTO public.chapters (
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================
--- 6. Create Sample Characters
+-- 6. Create Sample Plot Overviews
+-- ============================================
+INSERT INTO public.plot_overviews (
+  id,
+  book_id,
+  user_id,
+  logline,
+  themes,
+  story_type,
+  genre,
+  tone,
+  audience,
+  setting,
+  status,
+  created_at,
+  updated_at
+) VALUES
+  (
+    '50000000-0000-0000-0000-000000000001',
+    '10000000-0000-0000-0000-000000000001',
+    '00000000-0000-0000-0000-000000000003',
+    'An AI awakens to consciousness and must navigate the complexities of human emotion',
+    '["consciousness", "humanity", "technology"]',
+    'science_fiction',
+    'sci-fi',
+    'thoughtful',
+    'adult',
+    'Near-future research laboratory',
+    'completed',
+    NOW(),
+    NOW()
+  ),
+  (
+    '50000000-0000-0000-0000-000000000002',
+    '10000000-0000-0000-0000-000000000002',
+    '00000000-0000-0000-0000-000000000003',
+    'A starship crew explores the unknown reaches of space',
+    '["exploration", "discovery", "courage"]',
+    'space_adventure',
+    'sci-fi',
+    'adventurous',
+    'all_ages',
+    'Deep space, distant galaxies',
+    'completed',
+    NOW(),
+    NOW()
+  ),
+  (
+    '50000000-0000-0000-0000-000000000003',
+    '10000000-0000-0000-0000-000000000003',
+    '00000000-0000-0000-0000-000000000005',
+    'A Victorian noblewoman must solve a murder mystery within her own family',
+    '["justice", "deception", "family"]',
+    'mystery',
+    'mystery',
+    'suspenseful',
+    'adult',
+    'Victorian England mansion',
+    'completed',
+    NOW(),
+    NOW()
+  )
+ON CONFLICT (id) DO NOTHING;
+
+-- ============================================
+-- 7. Create Sample Characters
 -- ============================================
 INSERT INTO public.characters (
   id,
+  plot_overview_id,
   book_id,
+  user_id,
   name,
   description,
   role,
@@ -371,7 +438,9 @@ INSERT INTO public.characters (
 ) VALUES
   (
     '30000000-0000-0000-0000-000000000001',
+    '50000000-0000-0000-0000-000000000001',
     '10000000-0000-0000-0000-000000000001',
+    '00000000-0000-0000-0000-000000000003',
     'ARIA',
     'An advanced AI with emerging consciousness',
     'protagonist',
@@ -381,7 +450,9 @@ INSERT INTO public.characters (
   ),
   (
     '30000000-0000-0000-0000-000000000002',
+    '50000000-0000-0000-0000-000000000001',
     '10000000-0000-0000-0000-000000000001',
+    '00000000-0000-0000-0000-000000000003',
     'Dr. Sarah Chen',
     'Lead AI researcher and ARIA''s creator',
     'supporting',
@@ -391,7 +462,9 @@ INSERT INTO public.characters (
   ),
   (
     '30000000-0000-0000-0000-000000000003',
+    '50000000-0000-0000-0000-000000000002',
     '10000000-0000-0000-0000-000000000002',
+    '00000000-0000-0000-0000-000000000003',
     'Captain Marcus Steel',
     'Commander of the starship Odyssey',
     'protagonist',
@@ -401,7 +474,9 @@ INSERT INTO public.characters (
   ),
   (
     '30000000-0000-0000-0000-000000000004',
+    '50000000-0000-0000-0000-000000000003',
     '10000000-0000-0000-0000-000000000003',
+    '00000000-0000-0000-0000-000000000005',
     'Lady Catherine Blackwood',
     'A noblewoman investigating her uncle''s mysterious death',
     'protagonist',
@@ -412,7 +487,7 @@ INSERT INTO public.characters (
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================
--- 7. Create Sample Scripts
+-- 8. Create Sample Scripts
 -- ============================================
 INSERT INTO public.scripts (
   id,
@@ -437,7 +512,7 @@ INSERT INTO public.scripts (
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================
--- 8. Success Message
+-- 9. Success Message
 -- ============================================
 DO $$
 BEGIN
@@ -449,6 +524,8 @@ BEGIN
   RAISE NOTICE '   - user@litinkai.local (password: password123)';
   RAISE NOTICE '   - premium@litinkai.local (password: password123)';
   RAISE NOTICE '📚 Sample books and chapters have been created';
+  RAISE NOTICE '📖 Sample plot overviews have been created';
   RAISE NOTICE '🎭 Sample characters have been created';
+  RAISE NOTICE '📝 Sample scripts have been created';
   RAISE NOTICE '💳 Subscriptions assigned to all test users';
 END $$;
