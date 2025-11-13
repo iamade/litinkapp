@@ -54,9 +54,18 @@ ALTER TABLE profiles
   ALTER COLUMN roles SET DEFAULT ARRAY['explorer']::text[];
 
 -- Step 4: Add constraint to ensure at least one role exists
-ALTER TABLE profiles
-  ADD CONSTRAINT check_roles_not_empty 
-  CHECK (array_length(roles, 1) > 0);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'check_roles_not_empty'
+    AND table_name = 'profiles'
+  ) THEN
+    ALTER TABLE profiles
+      ADD CONSTRAINT check_roles_not_empty
+      CHECK (array_length(roles, 1) > 0);
+  END IF;
+END $$;
 
 -- Step 5: Drop the old single role column (keeping it for now for backward compatibility)
 -- We'll keep both columns temporarily and phase out the old one
