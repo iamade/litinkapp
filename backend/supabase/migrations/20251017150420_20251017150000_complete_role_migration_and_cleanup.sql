@@ -34,26 +34,44 @@
 -- Step 1: Ensure all profiles have migrated roles data
 DO $$
 BEGIN
-  -- Migrate any remaining single role values to roles array
-  UPDATE profiles 
-  SET roles = ARRAY[role::text]
-  WHERE roles IS NULL AND role IS NOT NULL;
-  
+  -- Only migrate if the old 'role' column exists
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+    AND table_name = 'profiles'
+    AND column_name = 'role'
+  ) THEN
+    -- Migrate any remaining single role values to roles array
+    UPDATE profiles
+    SET roles = ARRAY[role::text]
+    WHERE roles IS NULL AND role IS NOT NULL;
+  END IF;
+
   -- Set default roles for any profiles with NULL roles
-  UPDATE profiles 
+  UPDATE profiles
   SET roles = ARRAY['explorer']::text[]
   WHERE roles IS NULL;
 END $$;
 
 -- Step 2: Add constraint to validate role values
-ALTER TABLE profiles
-  DROP CONSTRAINT IF EXISTS check_valid_roles;
+DO $$
+BEGIN
+  -- Drop existing constraint if it exists
+  IF EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'check_valid_roles'
+    AND table_name = 'profiles'
+  ) THEN
+    ALTER TABLE profiles DROP CONSTRAINT check_valid_roles;
+  END IF;
 
-ALTER TABLE profiles
-  ADD CONSTRAINT check_valid_roles 
-  CHECK (
-    roles <@ ARRAY['explorer', 'author', 'admin', 'superadmin']::text[]
-  );
+  -- Add the constraint
+  ALTER TABLE profiles
+    ADD CONSTRAINT check_valid_roles
+    CHECK (
+      roles <@ ARRAY['explorer', 'author', 'admin', 'superadmin']::text[]
+    );
+END $$;
 
 -- Step 3: Drop the old role column (it's now redundant)
 ALTER TABLE profiles DROP COLUMN IF EXISTS role;
