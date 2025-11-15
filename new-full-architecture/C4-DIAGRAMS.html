@@ -898,8 +898,8 @@ code {
         +generate_script(content, user_tier, script_type, target_duration, plot_context) Dict
         +analyze_content(content, user_tier, analysis_type) Dict
         +get_available_models() Dict
-        -_execute_generation(model, content, script_type, ...) Dict
-        -_prepare_script_messages(content, script_type, ...) List
+        -_execute_generation(model, content, script_type, params) Dict
+        -_prepare_script_messages(content, script_type, params) List
         -_get_special_system_prompt(analysis_type) str
     }
     
