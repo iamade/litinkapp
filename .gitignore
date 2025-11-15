@@ -1,6 +1,6 @@
 .envs/*
 !.envs/.env.example
-.env.production
+.env.prod
 # Logs
 logs
 *.log
