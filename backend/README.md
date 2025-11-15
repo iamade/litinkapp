@@ -16,16 +16,25 @@ FastAPI backend for the Litink AI-powered interactive book platform.
 
 ### Local Development (Recommended)
 
-**New developers: See [QUICK_START_LOCAL.md](QUICK_START_LOCAL.md)**
+**New developers: Follow these steps for first-time setup:**
 
 ```bash
 cd backend
 
-# Verify setup (optional but recommended)
-./scripts/verify-supabase-setup.sh
+# Step 1: Start Supabase local instance
+make supabase-start
 
-# Start everything
-make all-up
+# Step 2: Update .env.local with LOCAL Supabase keys
+./scripts/update-env-keys.sh
+
+# Step 3: Start application services
+make dev
+```
+
+**For subsequent starts:**
+```bash
+cd backend
+make all-up  # Starts both Supabase and application
 ```
 
 This starts:
@@ -238,8 +247,9 @@ VS Code should stop at your breakpoints
 4. Debug the 'id' Error Specifically
 Set breakpoints at these critical points: -->
 
-New Workflow:
+## Quick Start Workflow
 
+<<<<<<< HEAD
 make supabase-start - Start database (once)
 Update .envs/.env.local with the keys from output
 make dev - Start your application
@@ -248,3 +258,40 @@ make supabase-stop - Stop database when completely done
 Use make help to see all available commands!
 
 ALL test users (superadmin, admin, creator, user, premium accounts)
+=======
+**First Time Setup:**
+1. `make supabase-start` - Start local Supabase (database, auth, storage)
+2. `./scripts/update-env-keys.sh` - Automatically update .env.local with local keys
+3. Create superadmin user in Supabase Studio (http://127.0.0.1:54323)
+   - Email: support@litinkai.com
+   - Set a secure password
+4. `make dev` - Start your application
+
+**Daily Development:**
+1. `make all-up` - Start everything (Supabase + app)
+2. Make your changes and develop
+3. `make down` - Stop app when done
+4. `make supabase-stop` - Stop database when completely done
+
+**Common Commands:**
+- `make help` - See all available commands
+- `make logs` - View API logs
+- `make supabase-status` - Check Supabase status
+- `make supabase-reset` - Reset database (⚠️ deletes all data!)
+
+## Important Notes
+
+### Local vs Remote Supabase
+Your `.env.local` should use **LOCAL** Supabase keys for development:
+- ✅ `SUPABASE_URL=http://127.0.0.1:54321`
+- ✅ `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres`
+- ✅ Local API keys from `supabase status` or `./scripts/update-env-keys.sh`
+
+❌ **Do NOT use remote/cloud Supabase keys** (vtuqaubejlzqjmieelyr.supabase.co) in local development
+
+### Stripe Integration
+Stripe payment processing is fully integrated. Ensure you have:
+- `STRIPE_SECRET_KEY` in your `.env.local`
+- `STRIPE_PUBLISHABLE_KEY` for frontend
+- `STRIPE_WEBHOOK_SECRET` for webhook handling
+>>>>>>> 6dfa896d66876e109dc1a4daac823c22a14a5fde

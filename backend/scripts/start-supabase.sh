@@ -37,11 +37,12 @@ echo -e "${BLUE}🔍 Running pre-flight checks...${NC}"
 if [ ! -d "supabase/storage" ]; then
     echo -e "${YELLOW}   Creating storage directory structure...${NC}"
     mkdir -p supabase/storage/books
-    echo "Storage directory for book uploads" > supabase/storage/books/.gitkeep
     echo -e "${GREEN}   ✓ Storage directories created${NC}"
 else
     echo -e "${GREEN}   ✓ Storage directories exist${NC}"
 fi
+
+# Note: No .gitkeep file created to avoid MIME type errors during bucket initialization
 
 # Verify critical directories exist
 if [ ! -d "supabase/migrations" ]; then
@@ -65,8 +66,8 @@ check_migrations() {
         echo -e "${GREEN}✓ Unique constraint migration found${NC}"
     fi
 
-    # Check if superadmin migration exists
-    if [ ! -f "supabase/migrations/20251017150504_20251017150100_create_initial_superadmin_user.sql" ]; then
+    # Check if superadmin migration exists (updated filename)
+    if [ ! -f "supabase/migrations/20251113080000_create_initial_superadmin_user.sql" ]; then
         echo -e "${YELLOW}⚠️  Warning: Superadmin creation migration not found${NC}"
     else
         echo -e "${GREEN}✓ Superadmin creation migration found${NC}"
@@ -200,15 +201,16 @@ echo ""
 echo -e "${GREEN}🎉 Supabase is ready!${NC}"
 echo ""
 echo "📝 Next steps:"
-echo "   1. Create the superadmin auth user (if not already done):"
+echo "   1. Update .env.local with LOCAL Supabase keys (see above)"
+echo "      Run: ./scripts/update-env-keys.sh (automated helper)"
+echo ""
+echo "   2. Create the superadmin auth user (if not already done):"
 echo "      - Open Studio: http://127.0.0.1:54323"
 echo "      - Go to Authentication > Users > Add User"
 echo "      - Email: support@litinkai.com"
 echo "      - Set a secure password"
 echo ""
-echo "   2. Copy the ANON_KEY and SERVICE_ROLE_KEY from above"
-echo "   3. Update your backend/.envs/.env.local file with these values"
-echo "   4. Start your application with: make dev"
+echo "   3. Start your application with: make dev"
 echo ""
 echo "💡 Useful commands:"
 echo "   - Check status:      cd supabase && supabase status && cd .."
