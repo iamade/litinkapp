@@ -74,8 +74,6 @@ logs-all:
 all-up:
 	@echo "Starting Supabase..."
 	@make supabase-start
-	@echo "Update env keys"
-	@make "supabase-envupdate"
 	@echo ""
 	@echo "Starting application services..."
 	@make dev

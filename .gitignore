@@ -1,5 +1,6 @@
 .envs/*
 !.envs/.env.example
+.env.production
 # Logs
 logs
 *.log
