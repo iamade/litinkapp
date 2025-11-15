@@ -20,6 +20,10 @@ supabase-status:
 supabase-reset:
 	@./scripts/reset-local-db.sh
 
+# update environment keys
+supabase-envupdate:
+	@./scripts/update-env-keys.sh
+
 # ============================================
 # Application Service Commands
 # ============================================
@@ -70,6 +74,8 @@ logs-all:
 all-up:
 	@echo "Starting Supabase..."
 	@make supabase-start
+	@echo "Update env keys"
+	@make "supabase-envupdate"
 	@echo ""
 	@echo "Starting application services..."
 	@make dev
