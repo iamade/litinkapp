@@ -20,7 +20,12 @@ FastAPI backend for the Litink AI-powered interactive book platform.
 
 ```bash
 cd backend
-./scripts/start-local-dev.sh
+
+# Verify setup (optional but recommended)
+./scripts/verify-supabase-setup.sh
+
+# Start everything
+make all-up
 ```
 
 This starts:
@@ -29,6 +34,8 @@ This starts:
 - Email testing with Inbucket
 
 **For detailed setup:** See [LOCAL_DEVELOPMENT_GUIDE.md](LOCAL_DEVELOPMENT_GUIDE.md)
+
+**Having issues?** See [SUPABASE_TROUBLESHOOTING.md](SUPABASE_TROUBLESHOOTING.md)
 
 ### Production/Cloud Database
 
