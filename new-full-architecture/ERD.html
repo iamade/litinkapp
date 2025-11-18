@@ -418,7 +418,7 @@ code {
     
     users {
         uuid id PK
-        string email UK
+        string email UNIQUE
         string encrypted_password
         timestamp email_confirmed_at
         timestamp last_sign_in_at
@@ -430,7 +430,7 @@ code {
     
     profiles {
         uuid id PK,FK
-        string email UK
+        string email UNIQUE
         string display_name
         string avatar_url
         jsonb roles
@@ -478,7 +478,7 @@ code {
     
     users {
         uuid id PK "Supabase auth.users"
-        string email UK "User email"
+        string email UNIQUE "User email"
         string encrypted_password "Hashed password"
         timestamp email_confirmed_at "Email verification time"
         timestamp last_sign_in_at "Last login"
@@ -490,7 +490,7 @@ code {
     
     profiles {
         uuid id PK "FK to users"
-        string email UK "Synced from auth.users"
+        string email UNIQUE "Synced from auth.users"
         string display_name "User's display name"
         string avatar_url "Profile picture URL"
         jsonb roles "Array of role strings"
@@ -511,7 +511,7 @@ code {
     email_verifications {
         uuid id PK
         uuid user_id FK
-        string token UK "Verification token"
+        string token UNIQUE "Verification token"
         timestamp expires_at "Token expiration"
         boolean verified "Verification status"
         timestamp verified_at
@@ -546,7 +546,7 @@ code {
     
     book_structure {
         uuid id PK
-        uuid book_id FK UK
+        uuid book_id FK UNIQUE
         jsonb structure_data "Parsed structure"
         string extraction_method "ai|manual|toc"
         timestamp confirmed_at "User confirmation"
@@ -568,7 +568,7 @@ code {
     
     chapter_embeddings {
         uuid id PK
-        uuid chapter_id FK UK
+        uuid chapter_id FK UNIQUE
         vector embedding "pgvector embedding"
         string embedding_model "Model used"
         integer dimension "Vector dimension"
@@ -610,13 +610,13 @@ code {
 <pre><code class="language-mermaid"><div class="mermaid">erDiagram
     books ||--o{ plot_overviews : "has plot"
     plot_overviews ||--o{ characters : "contains"
-    characters }o--o{ character_archetypes : "assigned"
+    characters }o--|| character_archetypes : "assigned"
     scripts ||--o{ chapter_scripts : "enhanced by plot"
     plot_overviews ||--o{ chapter_scripts : "enhances"
     
     plot_overviews {
         uuid id PK
-        uuid book_id FK UK
+        uuid book_id FK UNIQUE
         uuid user_id FK
         text logline "One-sentence summary"
         jsonb themes "Array of themes"
@@ -639,7 +639,7 @@ code {
         uuid plot_overview_id FK
         uuid book_id FK
         uuid user_id FK
-        string name UK "Character name"
+        string name "Character name"
         string role "protagonist|antagonist|supporting|minor"
         text character_arc "Character development"
         text physical_description "Physical traits"
@@ -660,7 +660,7 @@ code {
     
     character_archetypes {
         uuid id PK
-        string name UK "Archetype name"
+        string name UNIQUE "Archetype name"
         text description "Archetype description"
         string category "hero|mentor|shadow|etc"
         jsonb traits "Typical traits"
@@ -807,7 +807,7 @@ code {
     
     lipsync_jobs {
         uuid id PK
-        uuid scene_video_id FK UK
+        uuid scene_video_id FK UNIQUE
         uuid video_generation_id FK
         uuid audio_generation_id FK
         string status "pending|processing|completed|failed"
@@ -824,7 +824,7 @@ code {
     
     merge_jobs {
         uuid id PK
-        uuid video_generation_id FK UK
+        uuid video_generation_id FK UNIQUE
         uuid user_id FK
         string merge_type "auto|manual"
         string status "pending|processing|completed|failed"
@@ -861,10 +861,10 @@ code {
     
     user_subscriptions {
         uuid id PK
-        uuid user_id FK UK
+        uuid user_id FK UNIQUE
         string tier "free|basic|standard|premium|professional|enterprise"
         string status "active|canceled|past_due|trialing"
-        string stripe_subscription_id UK
+        string stripe_subscription_id UNIQUE
         string stripe_customer_id
         timestamp current_period_start
         timestamp current_period_end
@@ -895,7 +895,7 @@ code {
         string model_used "AI model identifier"
         integer input_tokens "Input token count"
         integer output_tokens "Output token count"
-        float duration_seconds "Processing duration"
+        decimal duration_seconds "Processing duration"
         decimal cost_usd "Cost in USD"
         string tier_at_time "User tier when generated"
         jsonb metadata "Additional context"
@@ -915,13 +915,13 @@ code {
     
     model_metrics {
         uuid id PK
-        string model_name UK "Model identifier"
+        string model_name UNIQUE "Model identifier"
         integer request_count "Total requests"
         integer success_count "Successful requests"
         integer failure_count "Failed requests"
-        float avg_latency_ms "Average latency"
+        decimal avg_latency_ms "Average latency"
         decimal avg_cost_usd "Average cost"
-        date date UK "Metrics date"
+        date date UNIQUE "Metrics date"
     }
 </div></code></pre>
 <hr>
@@ -931,11 +931,11 @@ code {
     profiles ||--o{ user_badges : "earns"
     badges ||--o{ user_badges : "awarded to"
     profiles ||--o{ nfts : "owns"
-    user_badges ||--o{ nfts : "minted as"
+    user_badges ||--|| nfts : "minted as"
     
     badges {
         uuid id PK
-        string name UK "Badge name"
+        string name UNIQUE "Badge name"
         text description "Badge description"
         string category "achievement|milestone|skill"
         string rarity "common|rare|epic|legendary"
@@ -960,8 +960,8 @@ code {
     nfts {
         uuid id PK
         uuid user_id FK
-        uuid badge_id FK
-        string asset_id UK "Blockchain asset ID"
+        uuid user_badge_id FK
+        string asset_id UNIQUE "Blockchain asset ID"
         string blockchain "algorand|polygon"
         string transaction_id "Blockchain tx ID"
         string metadata_uri "IPFS metadata"
@@ -974,7 +974,7 @@ code {
     
     user_progress {
         uuid id PK
-        uuid user_id FK UK
+        uuid user_id FK UNIQUE
         integer total_xp "Total experience points"
         integer level "Current level"
         integer videos_created "Total videos"

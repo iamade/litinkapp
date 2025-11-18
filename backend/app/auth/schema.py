@@ -30,7 +30,8 @@ class AccountStatusSchema(str, Enum):
 
 class RoleChoicesSchema(str, Enum):
     EXPLORER = "explorer"
-    AUTHOR = "author"
+    # AUTHOR = "author"
+    CREATOR = "creator"
     ADMIN = "admin"
     SUPER_ADMIN = "super_admin"
     

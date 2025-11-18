@@ -58,7 +58,7 @@ erDiagram
     
     users {
         uuid id PK
-        string email UK
+        string email UNIQUE
         string encrypted_password
         timestamp email_confirmed_at
         timestamp last_sign_in_at
@@ -69,8 +69,8 @@ erDiagram
     }
     
     profiles {
-        uuid id PK,FK
-        string email UK
+        uuid id PK FK
+        string email UNIQUE
         string display_name
         string avatar_url
         jsonb roles
@@ -122,43 +122,43 @@ erDiagram
     profiles ||--o{ email_verifications : "tracks verification"
     
     users {
-        uuid id PK "Supabase auth.users"
-        string email UK "User email"
-        string encrypted_password "Hashed password"
-        timestamp email_confirmed_at "Email verification time"
-        timestamp last_sign_in_at "Last login"
-        jsonb raw_app_meta_data "App metadata"
-        jsonb raw_user_meta_data "User metadata"
+        uuid id PK
+        string email UNIQUE
+        string encrypted_password
+        timestamp email_confirmed_at
+        timestamp last_sign_in_at
+        jsonb raw_app_meta_data
+        jsonb raw_user_meta_data
         timestamp created_at
         timestamp updated_at
     }
     
     profiles {
-        uuid id PK "FK to users"
-        string email UK "Synced from auth.users"
-        string display_name "User's display name"
-        string avatar_url "Profile picture URL"
-        jsonb roles "Array of role strings"
-        string user_mode "learning|creator|entertainment"
-        boolean onboarding_complete "Has completed onboarding"
+        uuid id PK FK
+        string email UNIQUE
+        string display_name
+        string avatar_url
+        jsonb roles
+        string user_mode
+        boolean onboarding_complete
         timestamp created_at
         timestamp updated_at
     }
     
     user_roles {
         uuid id PK
-        uuid user_id FK "FK to profiles"
-        string role_name "user|creator|superadmin|author"
+        uuid user_id FK
+        string role_name
         timestamp granted_at
-        uuid granted_by FK "Admin who granted role"
+        uuid granted_by FK
     }
     
     email_verifications {
         uuid id PK
         uuid user_id FK
-        string token UK "Verification token"
-        timestamp expires_at "Token expiration"
-        boolean verified "Verification status"
+        string token UNIQUE
+        timestamp expires_at
+        boolean verified
         timestamp verified_at
         timestamp created_at
     }
@@ -176,16 +176,16 @@ erDiagram
     
     books {
         uuid id PK
-        uuid user_id FK "Book author"
-        string title "Book title"
-        text description "Book description"
-        string book_type "learning|entertainment"
-        string structure_type "linear|chapters|mixed"
-        string status "draft|processing|ready|failed"
-        string file_url "Original file location"
-        string cover_url "Cover image URL"
-        integer total_chapters "Number of chapters"
-        jsonb metadata "Additional book metadata"
+        uuid user_id FK
+        string title
+        text description
+        string book_type
+        string structure_type
+        string status
+        string file_url
+        string cover_url
+        integer total_chapters
+        jsonb metadata
         timestamp processing_started_at
         timestamp processing_completed_at
         timestamp created_at
@@ -194,32 +194,32 @@ erDiagram
     
     book_structure {
         uuid id PK
-        uuid book_id FK UK
-        jsonb structure_data "Parsed structure"
-        string extraction_method "ai|manual|toc"
-        timestamp confirmed_at "User confirmation"
+        uuid book_id FK UNIQUE
+        jsonb structure_data
+        string extraction_method
+        timestamp confirmed_at
         timestamp created_at
     }
     
     chapters {
         uuid id PK
         uuid book_id FK
-        integer chapter_number "Sequential number"
-        string title "Chapter title"
-        text content "Chapter content"
-        text summary "AI-generated summary"
-        integer duration "Estimated reading time (minutes)"
-        jsonb ai_content "Quiz, objectives, etc."
+        integer chapter_number
+        string title
+        text content
+        text summary
+        integer duration
+        jsonb ai_content
         timestamp created_at
         timestamp updated_at
     }
     
     chapter_embeddings {
         uuid id PK
-        uuid chapter_id FK UK
-        vector embedding "pgvector embedding"
-        string embedding_model "Model used"
-        integer dimension "Vector dimension"
+        uuid chapter_id FK UNIQUE
+        vector embedding
+        string embedding_model
+        integer dimension
         timestamp created_at
     }
     
@@ -227,14 +227,14 @@ erDiagram
         uuid id PK
         uuid chapter_id FK
         uuid user_id FK
-        string script_style "cinematic|narration|educational"
-        text script "Generated script"
-        text character_details "Character info JSON"
-        integer scene_count "Number of scenes"
-        string story_type "From plot if available"
-        uuid linked_script_id FK "Link to plot-enhanced script"
-        string status "draft|active|archived"
-        integer version "Version number"
+        string script_style
+        text script
+        text character_details
+        integer scene_count
+        string story_type
+        uuid linked_script_id FK
+        string status
+        integer version
         timestamp created_at
         timestamp updated_at
     }
@@ -242,13 +242,13 @@ erDiagram
     scene_descriptions {
         uuid id PK
         uuid script_id FK
-        integer scene_number "Sequential number"
-        string location "Scene location"
-        string time_of_day "morning|afternoon|night"
-        jsonb characters "Characters in scene"
-        text key_actions "Main actions"
-        text visual_description "Visual details"
-        text audio_requirements "Audio needs"
+        integer scene_number
+        string location
+        string time_of_day
+        jsonb characters
+        text key_actions
+        text visual_description
+        text audio_requirements
         timestamp created_at
     }
 ```
@@ -263,26 +263,26 @@ erDiagram
 erDiagram
     books ||--o{ plot_overviews : "has plot"
     plot_overviews ||--o{ characters : "contains"
-    characters }o--o{ character_archetypes : "assigned"
+    characters }o--|| character_archetypes : "assigned"
     scripts ||--o{ chapter_scripts : "enhanced by plot"
     plot_overviews ||--o{ chapter_scripts : "enhances"
     
     plot_overviews {
         uuid id PK
-        uuid book_id FK UK
+        uuid book_id FK UNIQUE
         uuid user_id FK
-        text logline "One-sentence summary"
-        jsonb themes "Array of themes"
-        string story_type "hero_journey|three_act|etc"
-        string genre "Genre classification"
-        string tone "Tone/mood"
-        string audience "Target audience"
-        text setting "Story setting"
-        string generation_method "openrouter|manual"
-        string model_used "AI model used"
-        decimal generation_cost "Cost in USD"
-        string status "active|archived|deleted"
-        integer version "Version number"
+        text logline
+        jsonb themes
+        string story_type
+        string genre
+        string tone
+        string audience
+        text setting
+        string generation_method
+        string model_used
+        decimal generation_cost
+        string status
+        integer version
         timestamp created_at
         timestamp updated_at
     }
@@ -292,34 +292,34 @@ erDiagram
         uuid plot_overview_id FK
         uuid book_id FK
         uuid user_id FK
-        string name UK "Character name"
-        string role "protagonist|antagonist|supporting|minor"
-        text character_arc "Character development"
-        text physical_description "Physical traits"
-        text personality "Personality traits"
-        jsonb archetypes "Array of archetype IDs"
-        text want "External goal"
-        text need "Internal need"
-        text lie "Character's false belief"
-        text ghost "Backstory wound"
-        string image_url "Character image"
-        text image_generation_prompt "Image prompt used"
-        jsonb image_metadata "Image generation metadata"
-        string generation_method "openrouter|manual"
-        string model_used "AI model used"
+        string name
+        string role
+        text character_arc
+        text physical_description
+        text personality
+        jsonb archetypes
+        text want
+        text need
+        text lie
+        text ghost
+        string image_url
+        text image_generation_prompt
+        jsonb image_metadata
+        string generation_method
+        string model_used
         timestamp created_at
         timestamp updated_at
     }
     
     character_archetypes {
         uuid id PK
-        string name UK "Archetype name"
-        text description "Archetype description"
-        string category "hero|mentor|shadow|etc"
-        jsonb traits "Typical traits"
-        jsonb typical_roles "Common roles"
-        text example_characters "Examples from literature"
-        boolean is_active "Active status"
+        string name UNIQUE
+        text description
+        string category
+        jsonb traits
+        jsonb typical_roles
+        text example_characters
+        boolean is_active
         timestamp created_at
     }
     
@@ -329,16 +329,16 @@ erDiagram
         uuid plot_overview_id FK
         uuid script_id FK
         uuid user_id FK
-        boolean plot_enhanced "Used plot context"
-        boolean character_enhanced "Used character details"
-        jsonb scenes "Scene breakdown"
-        jsonb acts "Act structure"
-        jsonb beats "Story beats"
-        jsonb character_details "Character info used"
-        jsonb character_arcs "Arc progression"
-        string status "active|archived|deleted"
-        integer version "Version number"
-        jsonb generation_metadata "Generation details"
+        boolean plot_enhanced
+        boolean character_enhanced
+        jsonb scenes
+        jsonb acts
+        jsonb beats
+        jsonb character_details
+        jsonb character_arcs
+        string status
+        integer version
+        jsonb generation_metadata
         timestamp created_at
         timestamp updated_at
     }
@@ -361,17 +361,17 @@ erDiagram
         uuid chapter_id FK
         uuid script_id FK
         uuid user_id FK
-        string image_type "character|scene"
-        string character_name "If character image"
-        integer scene_number "If scene image"
-        text prompt "Generation prompt"
-        string status "pending|in_progress|completed|failed"
-        string image_url "Generated image URL"
-        string model_used "AI model"
-        decimal cost_usd "Generation cost"
-        jsonb metadata "Additional metadata"
-        text error_message "Error if failed"
-        integer retry_count "Number of retries"
+        string image_type
+        string character_name
+        integer scene_number
+        text prompt
+        string status
+        string image_url
+        string model_used
+        decimal cost_usd
+        jsonb metadata
+        text error_message
+        integer retry_count
         timestamp started_at
         timestamp completed_at
         timestamp created_at
@@ -381,11 +381,11 @@ erDiagram
     image_generation_retries {
         uuid id PK
         uuid image_generation_id FK
-        integer attempt_number "Retry attempt"
-        string model_used "Model for this attempt"
-        string status "Status of this attempt"
-        text error_message "Error if any"
-        decimal cost_usd "Cost of this attempt"
+        integer attempt_number
+        string model_used
+        string status
+        text error_message
+        decimal cost_usd
         timestamp attempted_at
     }
 ```
@@ -404,18 +404,18 @@ erDiagram
         uuid script_id FK
         uuid scene_description_id FK
         uuid user_id FK
-        string audio_type "narration|dialogue|sound_effect|music"
-        integer scene_number "Scene reference"
-        text text_content "Text to synthesize"
-        string voice_id "Voice model ID"
-        jsonb voice_settings "ElevenLabs settings"
-        string status "pending|in_progress|completed|failed"
-        string audio_url "Generated audio URL"
-        integer duration_ms "Audio duration"
-        string model_used "elevenlabs|modelslab"
-        decimal cost_usd "Generation cost"
-        jsonb metadata "Additional metadata"
-        text error_message "Error if failed"
+        string audio_type
+        integer scene_number
+        text text_content
+        string voice_id
+        jsonb voice_settings
+        string status
+        string audio_url
+        integer duration_ms
+        string model_used
+        decimal cost_usd
+        jsonb metadata
+        text error_message
         timestamp started_at
         timestamp completed_at
         timestamp created_at
@@ -437,17 +437,17 @@ erDiagram
         uuid chapter_id FK
         uuid script_id FK
         uuid user_id FK
-        string status "pending|script|images|audio|video|lipsync|merge|completed|failed"
-        integer progress_percentage "0-100"
-        string last_completed_step "Last successful step"
-        string current_step "Current processing step"
-        text error_message "Error if failed"
-        string video_url "Final merged video URL"
-        string quality_tier "free|basic|standard|premium"
-        decimal total_cost_usd "Total generation cost"
-        jsonb pipeline_metadata "Step-by-step metadata"
-        integer total_scenes "Number of scenes"
-        integer completed_scenes "Scenes completed"
+        string status
+        integer progress_percentage
+        string last_completed_step
+        string current_step
+        text error_message
+        string video_url
+        string quality_tier
+        decimal total_cost_usd
+        jsonb pipeline_metadata
+        integer total_scenes
+        integer completed_scenes
         timestamp started_at
         timestamp completed_at
         timestamp created_at
@@ -457,30 +457,30 @@ erDiagram
     scene_videos {
         uuid id PK
         uuid video_generation_id FK
-        integer scene_number "Scene sequence"
-        string scene_video_url "Video URL before lipsync"
-        string lipsynced_video_url "Video URL after lipsync"
-        integer duration_ms "Video duration"
-        string status "pending|generating|completed|failed"
-        string model_used "modelslab-veo2|veo3"
-        decimal cost_usd "Scene generation cost"
-        jsonb metadata "Generation metadata"
+        integer scene_number
+        string scene_video_url
+        string lipsynced_video_url
+        integer duration_ms
+        string status
+        string model_used
+        decimal cost_usd
+        jsonb metadata
         timestamp created_at
         timestamp updated_at
     }
     
     lipsync_jobs {
         uuid id PK
-        uuid scene_video_id FK UK
+        uuid scene_video_id FK UNIQUE
         uuid video_generation_id FK
         uuid audio_generation_id FK
-        string status "pending|processing|completed|failed"
-        string input_video_url "Original video"
-        string input_audio_url "Audio for sync"
-        string output_video_url "Lip-synced result"
-        string model_used "Lip sync model"
-        decimal cost_usd "Processing cost"
-        text error_message "Error if failed"
+        string status
+        string input_video_url
+        string input_audio_url
+        string output_video_url
+        string model_used
+        decimal cost_usd
+        text error_message
         timestamp started_at
         timestamp completed_at
         timestamp created_at
@@ -488,16 +488,16 @@ erDiagram
     
     merge_jobs {
         uuid id PK
-        uuid video_generation_id FK UK
+        uuid video_generation_id FK UNIQUE
         uuid user_id FK
-        string merge_type "auto|manual"
-        string status "pending|processing|completed|failed"
-        jsonb input_videos "Array of video URLs"
-        jsonb ffmpeg_params "FFmpeg parameters"
-        string output_video_url "Merged video URL"
-        integer output_duration_ms "Final duration"
-        integer output_size_bytes "File size"
-        text error_message "Error if failed"
+        string merge_type
+        string status
+        jsonb input_videos
+        jsonb ffmpeg_params
+        string output_video_url
+        integer output_duration_ms
+        integer output_size_bytes
+        text error_message
         timestamp started_at
         timestamp completed_at
         timestamp created_at
@@ -507,10 +507,10 @@ erDiagram
     merge_assets {
         uuid id PK
         uuid merge_job_id FK
-        string asset_type "video|audio|image"
-        string asset_url "Asset location"
-        integer sequence_order "Order in merge"
-        jsonb transform_params "Transformations applied"
+        string asset_type
+        string asset_url
+        integer sequence_order
+        jsonb transform_params
         timestamp created_at
     }
 ```
@@ -530,15 +530,15 @@ erDiagram
     
     user_subscriptions {
         uuid id PK
-        uuid user_id FK UK
-        string tier "free|basic|standard|premium|professional|enterprise"
-        string status "active|canceled|past_due|trialing"
-        string stripe_subscription_id UK
+        uuid user_id FK UNIQUE
+        string tier
+        string status
+        string stripe_subscription_id UNIQUE
         string stripe_customer_id
         timestamp current_period_start
         timestamp current_period_end
-        integer video_count_limit "Videos per month"
-        integer video_count_used "Videos used this period"
+        integer video_count_limit
+        integer video_count_used
         boolean cancel_at_period_end
         timestamp trial_end
         timestamp created_at
@@ -549,10 +549,10 @@ erDiagram
         uuid id PK
         uuid user_id FK
         uuid subscription_id FK
-        string from_tier "Previous tier"
-        string to_tier "New tier"
-        string change_reason "upgrade|downgrade|cancel|renewal"
-        timestamp effective_date "When change occurred"
+        string from_tier
+        string to_tier
+        string change_reason
+        timestamp effective_date
         timestamp created_at
     }
     
@@ -560,37 +560,37 @@ erDiagram
         uuid id PK
         uuid user_id FK
         uuid subscription_id FK
-        string resource_type "script|image|audio|video|plot"
-        string model_used "AI model identifier"
-        integer input_tokens "Input token count"
-        integer output_tokens "Output token count"
-        float duration_seconds "Processing duration"
-        decimal cost_usd "Cost in USD"
-        string tier_at_time "User tier when generated"
-        jsonb metadata "Additional context"
+        string resource_type
+        string model_used
+        integer input_tokens
+        integer output_tokens
+        decimal duration_seconds
+        decimal cost_usd
+        string tier_at_time
+        jsonb metadata
         timestamp created_at
     }
     
     cost_aggregations {
         uuid id PK
         uuid user_id FK
-        date period_start "Aggregation start"
-        date period_end "Aggregation end"
-        decimal total_cost "Total cost in period"
-        integer total_videos "Videos generated"
-        jsonb breakdown "Cost by resource type"
+        date period_start
+        date period_end
+        decimal total_cost
+        integer total_videos
+        jsonb breakdown
         timestamp created_at
     }
     
     model_metrics {
         uuid id PK
-        string model_name UK "Model identifier"
-        integer request_count "Total requests"
-        integer success_count "Successful requests"
-        integer failure_count "Failed requests"
-        float avg_latency_ms "Average latency"
-        decimal avg_cost_usd "Average cost"
-        date date UK "Metrics date"
+        string model_name UNIQUE
+        integer request_count
+        integer success_count
+        integer failure_count
+        decimal avg_latency_ms
+        decimal avg_cost_usd
+        date date UNIQUE
     }
 ```
 
@@ -605,18 +605,18 @@ erDiagram
     profiles ||--o{ user_badges : "earns"
     badges ||--o{ user_badges : "awarded to"
     profiles ||--o{ nfts : "owns"
-    user_badges ||--o{ nfts : "minted as"
+    user_badges ||--|| nfts : "minted as"
     
     badges {
         uuid id PK
-        string name UK "Badge name"
-        text description "Badge description"
-        string category "achievement|milestone|skill"
-        string rarity "common|rare|epic|legendary"
-        string icon_url "Badge icon"
-        jsonb criteria "Earning criteria"
-        integer xp_reward "XP awarded"
-        boolean is_active "Active status"
+        string name UNIQUE
+        text description
+        string category
+        string rarity
+        string icon_url
+        jsonb criteria
+        integer xp_reward
+        boolean is_active
         timestamp created_at
         timestamp updated_at
     }
@@ -625,37 +625,37 @@ erDiagram
         uuid id PK
         uuid user_id FK
         uuid badge_id FK
-        timestamp earned_at "When earned"
-        jsonb earning_context "How earned"
-        boolean displayed "Show on profile"
+        timestamp earned_at
+        jsonb earning_context
+        boolean displayed
         timestamp created_at
     }
     
     nfts {
         uuid id PK
         uuid user_id FK
-        uuid badge_id FK
-        string asset_id UK "Blockchain asset ID"
-        string blockchain "algorand|polygon"
-        string transaction_id "Blockchain tx ID"
-        string metadata_uri "IPFS metadata"
-        string image_uri "IPFS image"
-        jsonb attributes "NFT attributes"
-        string status "pending|minted|failed"
+        uuid user_badge_id FK
+        string asset_id UNIQUE
+        string blockchain
+        string transaction_id
+        string metadata_uri
+        string image_uri
+        jsonb attributes
+        string status
         timestamp minted_at
         timestamp created_at
     }
     
     user_progress {
         uuid id PK
-        uuid user_id FK UK
-        integer total_xp "Total experience points"
-        integer level "Current level"
-        integer videos_created "Total videos"
-        integer books_uploaded "Total books"
-        integer quizzes_completed "Total quizzes"
-        decimal total_spent_usd "Total spending"
-        jsonb achievements "Achievement flags"
+        uuid user_id FK UNIQUE
+        integer total_xp
+        integer level
+        integer videos_created
+        integer books_uploaded
+        integer quizzes_completed
+        decimal total_spent_usd
+        jsonb achievements
         timestamp created_at
         timestamp updated_at
     }
