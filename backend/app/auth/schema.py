@@ -108,11 +108,11 @@ class UserUpdateSchema(BaseModel):
 #         from_attributes = True
 
 class AddRoleRequestSchema(BaseModel):
-    role: str = Field(..., description="Role to add: 'author' or 'explorer'")
+    role: str = Field(..., description="Role to add: 'creator' or 'explorer'")
 
 
 class RemoveRoleRequestSchema(BaseModel):
-    role: str = Field(..., description="Role to remove: 'author' or 'explorer'")
+    role: str = Field(..., description="Role to remove: 'creator' or 'explorer'")
 
     
 

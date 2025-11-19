@@ -473,12 +473,12 @@ async def get_verification_statistics(
 # User Role Management Endpoints
 class AddRoleToUserRequest(BaseModel):
     user_id: str
-    role: str = Field(..., pattern="^(explorer|author|admin|superadmin)$")
+    role: str = Field(..., pattern="^(explorer|creator|admin|superadmin)$")
 
 
 class RemoveRoleFromUserRequest(BaseModel):
     user_id: str
-    role: str = Field(..., pattern="^(explorer|author|admin|superadmin)$")
+    role: str = Field(..., pattern="^(explorer|creator|admin|superadmin)$")
 
 
 @router.get("/users/list")
