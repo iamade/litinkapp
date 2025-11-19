@@ -91,12 +91,12 @@ async def get_current_active_user(current_user: dict = Depends(get_current_user)
 
 
 async def get_current_author(current_user: dict = Depends(get_current_active_user)) -> dict:
-    """Get current user if they are an author"""
+    """Get current user if they are a creator (formerly author)"""
     user_roles = current_user.get('roles', [])
-    if 'author' not in user_roles:
+    if 'creator' not in user_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions - author role required"
+            detail="Not enough permissions - creator role required"
         )
     return current_user
 

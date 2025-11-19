@@ -700,8 +700,8 @@ async def get_available_roles(
                 "description": "Basic user who can explore and consume content"
             },
             {
-                "value": "author",
-                "label": "Author",
+                "value": "creator",
+                "label": "Creator",
                 "description": "Can create and publish their own content"
             },
             {

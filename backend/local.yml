@@ -22,17 +22,14 @@ services:
     volumes:
       - .:/backend
       - ./app/logs:/backend/app/logs
-    ports: 
+    ports:
       - "8000:8000"  # Keep direct access for debugging
       - "5678:5678"  # Debug port
-    # environment:
-    #   # Use Supabase for database
-    #   - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:litink123@db.vtuqaubejlzqjmieelyr.supabase.co:5432/litink}
-    #   - REDIS_URL=redis://redis:6379
-    #   - CELERY_BROKER_URL=redis://redis:6379/0
-    #   - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    #   - DEBUG=${DEBUG:-false}
-    #   - ENVIRONMENT=${ENVIRONMENT:-production}
+    environment:
+      # These two variables are required by entrypoint.sh
+      # All other config comes from .env.local file below
+      - DEBUG=${DEBUG:-false}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
     env_file:
       - ./.envs/.env.local
     depends_on:
