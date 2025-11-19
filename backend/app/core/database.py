@@ -7,7 +7,7 @@ logger = get_logger()
 
 def _get_environment_info() -> str:
     """Get human-readable environment information"""
-    if "127.0.0.1" in settings.SUPABASE_URL or "localhost" in settings.SUPABASE_URL:
+    if "127.0.0.1" in settings.SUPABASE_URL or "localhost" in settings.SUPABASE_URL or "host.docker.internal" in settings.SUPABASE_URL:
         return "LOCAL"
     elif "supabase.co" in settings.SUPABASE_URL:
         return "CLOUD"
@@ -18,6 +18,7 @@ def _get_environment_info() -> str:
 # Initialize Supabase client
 logger.info(f"Initializing Supabase client for {_get_environment_info()} environment")
 logger.info(f"Supabase URL: {settings.SUPABASE_URL}")
+logger.info(f"Supabase_ROLE_KEY: {settings.SUPABASE_SERVICE_ROLE_KEY}")
 supabase: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
 
 async def init_db():

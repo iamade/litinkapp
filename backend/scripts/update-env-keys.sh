@@ -43,8 +43,8 @@ fi
 # Extract keys from supabase status
 echo -e "${BLUE}📋 Reading Supabase configuration...${NC}"
 
-ANON_KEY=$(supabase status | grep "anon key:" | awk '{print $3}')
-SERVICE_ROLE_KEY=$(supabase status | grep "service_role key:" | awk '{print $3}')
+ANON_KEY=$(supabase status | grep "Publishable key:" | awk '{print $3}')
+SERVICE_ROLE_KEY=$(supabase status | grep "Secret key:" | awk '{print $3}')
 API_URL=$(supabase status | grep "API URL:" | awk '{print $3}')
 DB_URL=$(supabase status | grep "DB URL:" | awk '{print $3}')
 
