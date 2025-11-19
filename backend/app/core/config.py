@@ -132,8 +132,8 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     
     # Celery
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    CELERY_BROKER_URL: str = "redis://redis:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://redis:6379/0"
     
     # Book processing limits
     MAX_CHUNKS_PER_BOOK: int = 50  # Back to original limit
