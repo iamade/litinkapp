@@ -290,24 +290,64 @@ class UserAuthService:
     # Registration and activation
     # ---------------------------
     async def create_user(self, user_data: UserCreateSchema) -> dict:
-        data = user_data.model_dump(
-            exclude={"confirm_password", "display_name", "is_active", "account_status"}
-        )
-        password = data.pop("password")
+        # data = user_data.model_dump(
+        #     exclude={"confirm_password", "display_name", "is_active", "account_status"}
+        # )
+        # password = data.pop("password")
+        
+        password = user_data.password
+        
+        # Step 1: Create user via admin API (no email sent by Supabase)
+        try:
+            auth_response = self.supabase.auth.admin.create_user({
+                "email": user_data.email,
+                "password": password,  # Plain password - Supabase hashes it
+                "email_confirm": False,  # Disable Supabase email verification
+                "user_metadata": {
+                    "first_name": user_data.first_name,
+                    "last_name": user_data.last_name
+                }
+            })
+        except Exception as e:
+            logger.error(f"Supabase admin create_user failed: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"status": "error", "message": "Registration failed"}
+            )
+        
+        if not auth_response.user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"status": "error", "message": "Could not create user"}
+            )
+        
+        user_id = auth_response.user.id  # UUID from auth.users
+
 
         profile = {
-            **data,
+            "id": user_id,
+            "email": user_data.email,
+            "first_name": user_data.first_name,
+            "middle_name": user_data.middle_name,
+            "last_name": user_data.last_name,
             "display_name": generate_display_name(),
-            "hashed_password": generate_password_hash(password),
             "is_active": False,
             "account_status": AccountStatusSchema.PENDING,
+            "security_question": user_data.security_question.value,
+            "security_answer": generate_password_hash(user_data.security_answer.lower().strip()),
             "roles": [r.value if hasattr(r, "value") else r for r in user_data.roles],
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat(),
+    
         }
 
-        resp = self.supabase.table(self.table).insert(profile).execute()
-        if resp.error or not resp.data:
+        resp = self.supabase.table(self.table).upsert(profile).execute()
+        if not resp.data:
+            # Cleanup: delete auth user if profile creation fails
+            try:
+                self.supabase.auth.admin.delete_user(user_id)
+            except Exception:
+                pass
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"status": "error", "message": f"Registration failed: {getattr(resp.error,'message','unknown')}"},
