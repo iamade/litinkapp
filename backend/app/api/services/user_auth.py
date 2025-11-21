@@ -384,12 +384,25 @@ class UserAuthService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={"status": "error", "message": "User already activated"},
                 )
+                
+            # IMPORTANT: Update Supabase Auth user (mark email as verified)
+            try:
+                self.supabase.auth.admin.update_user_by_id(
+                    user_id,
+                    {"email_confirm": True}
+                )
+                logger.info(f"Email verified in Supabase Auth for user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to verify email in Supabase Auth: {e}")
+                # Continue with profile activation even if auth update fails
+        
 
             updated = await self.reset_user_state(user_id, clear_otp=True, log_action=True)
             updated = await self._update_user(
                 user_id,
                 {"is_active": True, "account_status": AccountStatusSchema.ACTIVE},
             )
+            logger.info(f"User {updated.get('email')} activated successfully")
             return updated
 
         except jwt.ExpiredSignatureError:
@@ -425,21 +438,42 @@ class UserAuthService:
                     detail={"status": "error", "message": "User not found"},
                 )
 
-            await self._update_user(
-                user_id,
-                {"hashed_password": generate_password_hash(new_password)},
-            )
+            # IMPORTANT: Update password in Supabase Auth (not profiles!)
+            try:
+                self.supabase.auth.admin.update_user_by_id(
+                    user_id,
+                    {"password": new_password}  # Supabase hashes it securely
+                )
+                logger.info(f"Password updated in Supabase Auth for user {user_id}")
+            except Exception as e:
+                logger.error(f"Failed to update password in Supabase Auth: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={"status": "error", "message": "Failed to reset password"}
+                )
 
+            # Reset custom lockout state
             await self.reset_user_state(user_id, clear_otp=True, log_action=True)
             logger.info(f"Password reset successful for user {user.get('email')}")
 
         except jwt.ExpiredSignatureError:
-            raise ValueError("Password reset token expired")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"status": "error", "message": "Password reset token expired"}
+            )
         except jwt.InvalidTokenError:
-            raise ValueError("Invalid password reset token")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"status": "error", "message": "Invalid password reset token"}
+            )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Failed to reset password: {e}")
-            raise
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"status": "error", "message": "Failed to reset password"}
+            )
 
     
 

@@ -132,12 +132,12 @@ class TokenDataSchema(BaseModel):
 #     role: str = "explorer"
     
 class PasswordResetRequestSchema(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class PasswordResetConfirmSchema(BaseModel):
-    email: str
+    email: EmailStr
     token: str
-    new_password: str
+    new_password: str = Field(min_length=8, max_length=40)
 
 

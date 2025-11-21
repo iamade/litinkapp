@@ -153,3 +153,44 @@ def is_superadmin(user: dict) -> bool:
     """Check if a user is a superadmin"""
     user_roles = user.get('roles', [])
     return 'superadmin' in user_roles or user.get('email') == "support@litinkai.com"
+
+# def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+#     """
+#     Create JWT access token for user sessions.
+#     Used after successful login to maintain user session.
+#     """
+#     to_encode = data.copy()
+#     if expires_delta:
+#         expire = datetime.now(timezone.utc) + expires_delta
+#     else:
+#         expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+#     to_encode.update({
+#         "exp": expire,
+#         "iat": datetime.now(timezone.utc),
+#         "type": "access"
+#     })
+    
+#     return jwt.encode(
+#         to_encode,
+#         settings.JWT_SECRET_KEY,
+#         algorithm=settings.JWT_ALGORITHM
+#     )
+
+# def create_password_reset_token(user_id: uuid.UUID) -> str:
+#     """
+#     Create JWT token for password reset flow.
+#     Token expires after 1 hour.
+#     """
+#     payload = {
+#         "id": str(user_id),
+#         "type": "password_reset",
+#         "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+#         "iat": datetime.now(timezone.utc),
+#     }
+    
+#     return jwt.encode(
+#         payload,
+#         settings.JWT_SECRET_KEY,
+#         algorithm=settings.JWT_ALGORITHM
+#     )

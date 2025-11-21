@@ -77,6 +77,13 @@ all-up:
 	@echo ""
 	@echo "Starting application services..."
 	@make rebuild-dev
+# Start both Supabase and application services
+debug-up:
+	@echo "Starting Supabase..."
+	@make supabase-start
+	@echo ""
+	@echo "Starting application services in debug..."
+	@make rebuild-debug
 
 # Stop both application and Supabase services
 all-down:
