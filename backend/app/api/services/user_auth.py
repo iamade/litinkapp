@@ -43,6 +43,9 @@ class UserAuthService:
             resp = query.single().execute()
             return resp.data if resp.data else None
         except Exception as e:
+            # Suppress PGRST116 (0 rows) as it just means user not found
+            if hasattr(e, 'code') and e.code == 'PGRST116':
+                return None
             logger.error(f"get_user_by_email failed for {email}: {e}")
             return None
         
@@ -309,7 +312,11 @@ class UserAuthService:
                 }
             })
         except Exception as e:
-            logger.error(f"Supabase admin create_user failed: {e}")
+            logger.error(f"Supabase admin create_user failed: {type(e).__name__}: {e}")
+            if hasattr(e, 'code'):
+                logger.error(f"Error code: {e.code}")
+            if hasattr(e, 'details'):
+                logger.error(f"Error details: {e.details}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={"status": "error", "message": "Registration failed"}
