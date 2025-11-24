@@ -5,7 +5,7 @@ from enum import Enum
 from sqlalchemy import text
 from app.tasks.celery_app import celery_app
 from app.core.logging import get_logger
-from app.core.database import get_supabase
+from app.core.database import async_session
 
 logger = get_logger()
 
@@ -69,20 +69,19 @@ class HealthCheck:
             logger.error(f"Redis health check failed: {e}")
             return False
         
-    """Health check for Supabase database and API"""
-    async def check_supabase(self) -> bool:
+    """Health check for Postgres database and API"""
+    async def check_database(self) -> bool:
         try:
             
-            supabase = get_supabase()
+            async with async_session() as session:
+                await session.execute(text("SELECT 1"))
+                await session.commit()
             
-            # Test database connection via Supabase API
-            response = supabase.table('profiles').select('id').limit(1).execute()
-            
-            self._last_check["supabase"] = datetime.now(timezone.utc)
+            self._last_check["database"] = datetime.now(timezone.utc)
             return True
             
         except Exception as e:
-            logger.error(f"Supabase health check failed: {e}")
+            logger.error(f"Postgres Database health check failed: {e}")
             return False
         
     async def check_celery(self) -> bool:

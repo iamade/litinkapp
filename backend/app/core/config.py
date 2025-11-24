@@ -47,10 +47,13 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:5173" if ENVIRONMENT == "development" else "https://www.litinkai.com"
     
     # Supabase Configuration (Primary Database)
-    SUPABASE_URL: str = ""
-    SUPABASE_SERVICE_ROLE_KEY: str =""
-    SUPABASE_ANON_KEY: str = ""
-    SUPABASE_BUCKET_NAME: str = "books"
+    # SUPABASE_URL: str = ""
+    # SUPABASE_SERVICE_ROLE_KEY: str =""
+    # SUPABASE_ANON_KEY: str = ""
+    # SUPABASE_BUCKET_NAME: str = "books"
+
+    #Postgres Configuration
+    DATABASE_URL: str = ""
     
     # Redis
 

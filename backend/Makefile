@@ -1,28 +1,3 @@
-.PHONY: up debug dev down rebuild logs supabase-start supabase-stop supabase-status supabase-reset all-up all-down help
-
-# ============================================
-# Supabase Management Commands
-# ============================================
-
-# Start Supabase services only
-supabase-start:
-	@./scripts/start-supabase.sh
-
-# Stop Supabase services only
-supabase-stop:
-	@./scripts/stop-supabase.sh
-
-# Check Supabase status
-supabase-status:
-	@cd supabase && supabase status
-
-# Reset Supabase database (WARNING: Deletes all data!)
-supabase-reset:
-	@./scripts/reset-local-db.sh
-
-# update environment keys
-supabase-envupdate:
-	@./scripts/update-env-keys.sh
 
 # ============================================
 # Application Service Commands
@@ -66,32 +41,11 @@ logs:
 logs-all:
 	docker-compose -f local.yml logs -f
 
-# ============================================
-# Combined Commands
-# ============================================
+# Show Postgres db
+database:
+	docker-compose -f local.yml exec postgres psql -U adesegun -d litinkai
 
-# Start both Supabase and application services
-all-up:
-	@echo "Starting Supabase..."
-	@make supabase-start
-	@echo ""
-	@echo "Starting application services..."
-	@make rebuild-dev
-# Start both Supabase and application services
-debug-up:
-	@echo "Starting Supabase..."
-	@make supabase-start
-	@echo ""
-	@echo "Starting application services in debug..."
-	@make debug
 
-# Stop both application and Supabase services
-all-down:
-	@echo "Stopping application services..."
-	@make down
-	@echo ""
-	@echo "Stopping Supabase..."
-	@make supabase-stop
 
 # ============================================
 # Utility Commands
@@ -114,12 +68,6 @@ help:
 	@echo "Litinkai Development Commands"
 	@echo "=============================="
 	@echo ""
-	@echo "Supabase Commands:"
-	@echo "  make supabase-start    - Start Supabase services only"
-	@echo "  make supabase-stop     - Stop Supabase services only"
-	@echo "  make supabase-status   - Check Supabase status"
-	@echo "  make supabase-reset    - Reset Supabase database (deletes data!)"
-	@echo ""
 	@echo "Application Commands:"
 	@echo "  make dev               - Start app in development mode (requires Supabase running)"
 	@echo "  make up                - Start app in production mode"
@@ -134,8 +82,6 @@ help:
 	@echo "  make all-down          - Stop both app and Supabase services"
 	@echo ""
 	@echo "Recommended Workflow:"
-	@echo "  1. make supabase-start - Start database (once)"
 	@echo "  2. make dev            - Start your application"
 	@echo "  3. make down           - Stop app when done"
-	@echo "  4. make supabase-stop  - Stop database when completely done"
 	@echo ""

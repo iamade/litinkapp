@@ -65,6 +65,19 @@ services:
     networks:
       - litinkai_local_nw
 
+  postgres:
+    build:
+      context: .
+      dockerfile: ./docker/local/postgres/Dockerfile
+    ports:
+      - "5432:5432"
+    volumes:
+      - litinkai_local_db:/var/lib/postgresql/data
+    env_file:
+      - ./.envs/.env.local
+    networks:
+      - litinkai_local_nw
+
   redis:
     image: docker.io/redis:7.0-alpine
     command: redis-server --appendonly yes
@@ -134,9 +147,9 @@ networks:
   litinkai_local_nw:
     external: true
   
-volumes:    
+volumes:   
+  litinkai_local_db:
   litinkai_redis_data:
   litinkai_mailpit_data:
   litinkai_flower_data:
   litinkai_rabbitmq_data:
-  # supabase_db_data:
