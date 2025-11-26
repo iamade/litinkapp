@@ -42,8 +42,23 @@ logs-all:
 	docker-compose -f local.yml logs -f
 
 # Show Postgres db
-database:
+psql:
 	docker-compose -f local.yml exec postgres psql -U adesegun -d litinkai
+
+makemigrations:
+	docker compose -f local.yml  exec -it api alembic revision --autogenerate -m "$(name)"
+
+migrate:
+	docker compose -f local.yml exec -it api alembic upgrade head
+
+history:
+	docker compose -f local.yml exec -it api alembic history
+
+current-migration:
+	docker compose -f local.yml exec -it api alembic current
+
+downgrade:
+	docker compose -f local.yml exec -it api alembic downgrade $(version)
 
 
 

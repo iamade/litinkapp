@@ -246,34 +246,33 @@ class UserAuthService:
             },
         )
 
-    # async def increment_failed_login_attempts(self, user_id: str, user_email: Optional[str] = None) -> dict:
-    #     user = await self.get_user_by_id(user_id, include_inactive=True)
-    #     if not user:
-    #         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+#   async def increment_failed_login_attempts(
+#         self,
+#         user: User,
+#         session: AsyncSession,
+#     ) -> None:
+#         user.failed_login_attempts += 1
 
-    #     attempts = int(user.get("failed_login_attempts", 0)) + 1
-    #     updates = {
-    #         "failed_login_attempts": attempts,
-    #         "last_failed_login": datetime.now(timezone.utc).isoformat(),
-    #     }
+#         current_time = datetime.now(timezone.utc)
+#         user.last_failed_login = current_time
 
-    #     if attempts >= settings.LOGIN_ATTEMPTS:
-    #         updates["account_status"] = AccountStatusSchema.LOCKED
+#         if user.failed_login_attempts >= settings.LOGIN_ATTEMPTS:
+#             user.account_status = AccountStatusSchema.LOCKED
 
-    #     updated = await self._update_user(user_id, updates)
+#             try:
+#                 await send_account_lockout_email(user.email, current_time)
+#                 logger.info(f"Account lockout notification email sent to {user.email}")
 
-    #     if updates.get("account_status") == AccountStatusSchema.LOCKED and user_email:
-    #         try:
-    #             await self._send_account_lockout_email(user_email, updated.get("last_failed_login"))
-    #             logger.info(f"Account lockout notification email sent to {user_email}")
-    #         except Exception as e:
-    #             logger.error(f"Failed to send account lockout email to {user_email}: {e}")
+#             except Exception as e:
+#                 logger.error(
+#                     f"Failed to send account lockout email to {user.email}: {e}"
+#                 )
+#             logger.warning(
+#                 f"User {user.email} has been locked out due to too many failed login attempts"
+#             )
+#         await session.commit()
 
-    #         logger.warning(
-    #             f"User {user_email} has been locked out due to too many failed login attempts"
-    #         )
-
-    #     return updated
+#         await session.refresh(user)
 
     # ---------------------------
     # Registration and activation
@@ -385,63 +384,48 @@ class UserAuthService:
     # ---------------------------
     # Password reset
     # ---------------------------
-    async def reset_password(self, token: str, new_password: str) -> None:
+    async def reset_password(
+        self,
+        token: str,
+        new_password: str,
+        session: AsyncSession,
+    )-> None:
         try:
-            payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+            payload = jwt.decode(
+                token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+            )
+            
             if payload.get("type") != "password_reset":
                 raise ValueError("Invalid reset token")
-
-            user_id = str(uuid.UUID(payload["id"]))
-            user = await self.get_user_by_id(user_id, include_inactive=True)
+            
+            user_id = uuid.UUID(payload["id"])
+            
+            user = await self.get_user_by_id(user_id, session, include_inactive=True)
+            
             if not user:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail={"status": "error", "message": "User not found"},
+                    detail={
+                        "status": "error", "message": "User not found"
+                    },
                 )
-
-            # IMPORTANT: Update password in Supabase Auth (not profiles!)
-            try:
-                self.supabase.auth.admin.update_user_by_id(
-                    user_id,
-                    {"password": new_password}  # Supabase hashes it securely
-                )
-                logger.info(f"Password updated in Supabase Auth for user {user_id}")
-            except Exception as e:
-                logger.error(f"Failed to update password in Supabase Auth: {e}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail={"status": "error", "message": "Failed to reset password"}
-                )
-
-            # Reset custom lockout state
-            await self.reset_user_state(user_id, clear_otp=True, log_action=True)
-            logger.info(f"Password reset successful for user {user.get('email')}")
-
+                
+            user.hashed_password = generate_password_hash(new_password)
+            
+            await self.reset_user_state(user, session, log_action=True)
+            
+            await session.commit()
+            await session.refresh(user)
+            
+            logger.info(f"Password reset successful for user {user.email}")
+            
         except jwt.ExpiredSignatureError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"status": "error", "message": "Password reset token expired"}
-            )
+            raise ValueError("Password reset token expired")
         except jwt.InvalidTokenError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"status": "error", "message": "Invalid password reset token"}
-            )
-        except HTTPException:
-            raise
+            raise ValueError("Invalid password reset token")
         except Exception as e:
             logger.error(f"Failed to reset password: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={"status": "error", "message": "Failed to reset password"}
-            )
+            raise
 
-    
-
-    async def _send_account_lockout_email(self, email: str, locked_at_iso: Optional[str]) -> None:
-        """
-        Placeholder. Replace with a concrete email template/service.
-        """
-        logger.warning(f"[DEV] Account lockout email to {email} at {locked_at_iso}")
 
 user_auth_service = UserAuthService()

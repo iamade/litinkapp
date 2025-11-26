@@ -5,13 +5,10 @@ from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Response
 from datetime import datetime, timedelta, timezone
-from supabase import Client
 
 from app.core.config import settings
-from app.core.database import get_supabase
 from .schema import TokenDataSchema
 
 # Password hashing with Argon2 (primary) and bcrypt (fallback for existing hashes)
@@ -24,8 +21,6 @@ pwd_context = CryptContext(
     argon2__hash_len=32,  # 32 byte hash
 )
 
-# Security
-security = HTTPBearer()
 
 def generate_otp(length: int = 6) -> str:
     otp = "".join(random.choices(string.digits, k=length))
@@ -74,85 +69,95 @@ def create_activation_token(id: uuid.UUID) -> str:
         algorithm=settings.JWT_ALGORITHM
     )
 
+def create_jwt_token(id: uuid.UUID, type: str = settings.COOKIE_ACCESS_NAME)-> str:
+    if type == settings.COOKIE_ACCESS_NAME:
+        expire_delta = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRATION_MINUTES)
+    else:
+        expire_delta = timedelta(days= settings.JWT_ACCESS_TOKEN_EXPIRATION_MINUTES)
+        
+    payload ={
+        "id": str(id),
+        "type": type,
+        "exp": datetime.now(timezone.utc) + expire_delta,
+        "iat":datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, settings.SIGNING_KEY, algorithm=settings.JWT_ALGORITHM)
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    supabase: Client = Depends(get_supabase)
-):
-    """Get current authenticated user"""
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
+def set_auth_cookies(
+    response: Response, access_token: str, refresh_token: str | None = None
+) -> None:
+    cookie_settings = {
+        "path": settings.COOKIE_PATH,
+        "secure": settings.COOKIE_SECURE,
+        "httponly": settings.COOKIE_HTTP_ONLY,
+        "samesite": settings.COOKIE_SAMESITE,
+    }
+    access_cookie_settings = cookie_settings.copy()
+    access_cookie_settings["max_age"]=(
+        settings.JWT_ACCESS_TOKEN_EXPIRATION_MINUTES * 60
+    )
+    response.set_cookie(
+        settings.COOKIE_ACCESS_NAME,
+        access_token,
+        **access_cookie_settings
     )
     
-    try:
-        payload = jwt.decode(credentials.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-        token_data = TokenData(user_id=user_id)
-    except JWTError:
-        raise credentials_exception
-    
-    # Get user from Supabase
-    try:
-        response = supabase.table('profiles').select('*').eq('id', token_data.user_id).single().execute()
-        if not response.data:
-            raise credentials_exception
+    if refresh_token:
+        refresh_cookie_settings = cookie_settings.copy()
+        refresh_cookie_settings["max_age"] =(
+            settings.JWT_REFRESH_TOKEN_EXPIRATION_DAYS * 24 * 60 * 60
+        )
+        response.set_cookie(
+            settings.COOKIE_REFRESH_NAME,
+            refresh_token,
+            **refresh_cookie_settings,
+        )
         
-        user_data = response.data
+    logged_in_cookie_settings = cookie_settings.copy()
+    logged_in_cookie_settings["httponly"] = False
+    logged_in_cookie_settings["max_age"] = (
+        settings.JWT_ACCESS_TOKEN_EXPIRATION_MINUTES * 60
+    )
+    
+    response.set_cookie(
+        settings.COOKIE_LOGGED_IN_NAME, "true", **logged_in_cookie_settings,
+    )
+    
+def delete_auth_cookies(response: Response) -> None:
+    response.delete_cookie(settings.COOKIE_ACCESS_NAME)
+    response.delete_cookie(settings.COOKIE_REFRESH_NAME)
+    response.delete_cookie(settings.COOKIE_LOGGED_IN_NAME)
 
-        # --- Data Correction ---
-        # The User schema expects 'display_name', which the DB provides.
-        # Add other missing fields required by the User schema.
-        user_data['is_active'] = True
-        user_data['is_verified'] = user_data.get('email_verified', False)
-
-        # Ensure email_verified field exists (backward compatibility)
-        if 'email_verified' not in user_data:
-            user_data['email_verified'] = False
-        # -----------------------
-
-        return user_data
-    except Exception:
-        raise credentials_exception
-
-
-async def get_current_active_user(current_user: dict = Depends(get_current_user)) -> dict:
-    """Get current active user"""
-    # In Supabase, users are active by default unless explicitly disabled
-    return current_user
-
-
-async def get_current_author(current_user: dict = Depends(get_current_active_user)) -> dict:
-    """Get current user if they are an author"""
-    user_roles = current_user.get('roles', [])
-    if 'author' not in user_roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions - author role required"
-        )
-    return current_user
+def create_password_reset_token(id: uuid.UUID) -> str:
+    payload ={
+        "id": str(id),
+        "type": "password_reset",
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=settings.PASSWORD_RESET_TOKEN_EXPIRATION_MINUTES),
+        "iat": datetime.now(timezone.utc),
+    }
+    
+    return jwt.encode(
+        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+    )
 
 
-async def get_current_superadmin(current_user: dict = Depends(get_current_active_user)) -> dict:
-    """Get current user if they are a superadmin"""
-    user_roles = current_user.get('roles', [])
-    user_email = current_user.get('email')
+# async def get_current_superadmin(current_user: dict = Depends(get_current_active_user)) -> dict:
+#     """Get current user if they are a superadmin"""
+#     user_roles = current_user.get('roles', [])
+#     user_email = current_user.get('email')
 
-    if 'superadmin' not in user_roles and user_email != "support@litinkai.com":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Superadmin access required"
-        )
-    return current_user
+#     if 'superadmin' not in user_roles and user_email != "support@litinkai.com":
+#         raise HTTPException(
+#             status_code=status.HTTP_403_FORBIDDEN,
+#             detail="Superadmin access required"
+#         )
+#     return current_user
 
 
-def is_superadmin(user: dict) -> bool:
-    """Check if a user is a superadmin"""
-    user_roles = user.get('roles', [])
-    return 'superadmin' in user_roles or user.get('email') == "support@litinkai.com"
+# def is_superadmin(user: dict) -> bool:
+#     """Check if a user is a superadmin"""
+#     user_roles = user.get('roles', [])
+#     return 'superadmin' in user_roles or user.get('email') == "support@litinkai.com"
 
 # def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
 #     """

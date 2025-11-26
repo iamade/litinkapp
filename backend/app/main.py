@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
         await init_db()
         logger.info("Database initialized successfully")
 
-        await health_checker.add_service("database", health_checker.check_supabase)
+        await health_checker.add_service("database", health_checker.check_database)
         await health_checker.add_service("celery", health_checker.check_celery)
         await health_checker.add_service("redis", health_checker.check_redis)
 

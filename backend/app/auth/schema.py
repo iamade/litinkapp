@@ -1,9 +1,10 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import EmailStr, field_validator
 from sqlmodel import SQLModel, Field
 from typing import Optional, List
 from fastapi import HTTPException, status
 from enum import Enum
 import uuid
+from sqlalchemy import Column, JSON
 
 class SecurityQuestionsSchema(str, Enum):
     MOTHER_MAIDEN_NAME = "mother_maiden_name"
@@ -36,7 +37,7 @@ class RoleChoicesSchema(str, Enum):
     ADMIN = "admin"
     SUPER_ADMIN = "super_admin"
     
-class UserBaseSchema(BaseModel):
+class UserBaseSchema(SQLModel):
     email: EmailStr = Field(unique=True, index=True, max_length=255)
     display_name: str | None = Field(default=None, max_length=12, unique=True)
     avatar_url: Optional[str] = None
@@ -44,7 +45,7 @@ class UserBaseSchema(BaseModel):
     first_name: str = Field(max_length=30)
     middle_name: str | None = Field(max_length=30, default=None)
     last_name: str = Field(max_length=30)
-    roles: List[RoleChoicesSchema] = Field(default=[RoleChoicesSchema.EXPLORER])
+    roles: List[RoleChoicesSchema] = Field(default=[RoleChoicesSchema.EXPLORER], sa_column=Column(JSON))
     is_active: bool = False
     is_superuser: bool = False
     security_question: SecurityQuestionsSchema = Field(max_length=30)
@@ -73,10 +74,10 @@ class UserReadSchema(UserBaseSchema):
     id: uuid.UUID
     full_name: str
     
-class EmailVerificationRequestSchema(BaseModel):
+class EmailVerificationRequestSchema(SQLModel):
     email: EmailStr
     
-class UserLoginRequestSchema(BaseModel):
+class UserLoginRequestSchema(SQLModel):
     email: EmailStr
     password: str = Field(
         min_length=8,
@@ -90,7 +91,7 @@ class UserLoginRequestSchema(BaseModel):
 #         max_length=6,
 #     )
     
-class UserUpdateSchema(BaseModel):
+class UserUpdateSchema(SQLModel):
     display_name: Optional[str] = None
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
@@ -108,22 +109,22 @@ class UserUpdateSchema(BaseModel):
 #     class Config:
 #         from_attributes = True
 
-class AddRoleRequestSchema(BaseModel):
+class AddRoleRequestSchema(SQLModel):
     role: str = Field(..., description="Role to add: 'creator' or 'explorer'")
 
 
-class RemoveRoleRequestSchema(BaseModel):
+class RemoveRoleRequestSchema(SQLModel):
     role: str = Field(..., description="Role to remove: 'creator' or 'explorer'")
 
     
 
-class TokenSchema(BaseModel):
+class TokenSchema(SQLModel):
     access_token: str
     token_type: str
     refresh_token: str
 
 
-class TokenDataSchema(BaseModel):
+class TokenDataSchema(SQLModel):
     user_id: Optional[str] = None
 
 # class UserRegisterSchema(BaseModel):
@@ -132,11 +133,11 @@ class TokenDataSchema(BaseModel):
 #     display_name: Optional[str] = None
 #     role: str = "explorer"
     
-class PasswordResetRequestSchema(BaseModel):
+class PasswordResetRequestSchema(SQLModel):
     email: EmailStr
 
 
-class PasswordResetConfirmSchema(BaseModel):
+class PasswordResetConfirmSchema(SQLModel):
     email: EmailStr
     token: str
     new_password: str = Field(min_length=8, max_length=40)
