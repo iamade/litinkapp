@@ -1,4 +1,5 @@
-from pydantic import BaseModel, EmailStr, field_validator, Field
+from pydantic import BaseModel, EmailStr, field_validator
+from sqlmodel import SQLModel, Field
 from typing import Optional, List
 from fastapi import HTTPException, status
 from enum import Enum
@@ -36,8 +37,8 @@ class RoleChoicesSchema(str, Enum):
     SUPER_ADMIN = "super_admin"
     
 class UserBaseSchema(BaseModel):
-    email: EmailStr
-    display_name: str
+    email: EmailStr = Field(unique=True, index=True, max_length=255)
+    display_name: str | None = Field(default=None, max_length=12, unique=True)
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
     first_name: str = Field(max_length=30)
@@ -82,12 +83,12 @@ class UserLoginRequestSchema(BaseModel):
         max_length=40,
     )
     
-class OTPVerifyRequestSchema(BaseModel):
-    email: EmailStr
-    otp: str = Field(
-        min_length=6,
-        max_length=6,
-    )
+# class OTPVerifyRequestSchema(BaseModel):
+#     email: EmailStr
+#     otp: str = Field(
+#         min_length=6,
+#         max_length=6,
+#     )
     
 class UserUpdateSchema(BaseModel):
     display_name: Optional[str] = None

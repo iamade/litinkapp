@@ -1,5 +1,7 @@
 postgres implementation section 5 vidoe 17 2:50
 
+alembic init -t async migrations
+
 litinkapp
 
 PyMuPDF==1.23.26

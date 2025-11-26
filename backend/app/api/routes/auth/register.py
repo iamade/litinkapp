@@ -1,6 +1,7 @@
 from fastapi import APIRouter,HTTPException,status,Depends
-from app.core.database import get_supabase
-from supabase import Client
+from app.core.database import get_session
+from sqlmodel.ext.asyncio.session import AsyncSession
+
 from app.core.logging import get_logger
 from app.auth.schema import UserCreateSchema,UserReadSchema
 from app.api.services.user_auth import user_auth_service
@@ -16,12 +17,12 @@ router = APIRouter(prefix="/auth")
 )
 async def register_user(
     user_data: UserCreateSchema,
-    supabase_client: Client = Depends(get_supabase)
+    session:AsyncSession = Depends(get_session)
 ):
     """Register a new user with email verification"""
     try:
         # Check if user with this email already exists
-        if await user_auth_service.check_user_email_exists(user_data.email):
+        if await user_auth_service.check_user_email_exists(user_data.email, session):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={

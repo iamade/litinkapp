@@ -155,7 +155,7 @@ class Settings(BaseSettings):
     # MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
     MODELSLAB_BASE_URL: str = "https://modelslab.com/api/v7"  # Updated to v7
     
-    OTP_EXPIRATION_MINUTES: int = 2 if ENVIRONMENT == "development" else 5
+    # OTP_EXPIRATION_MINUTES: int = 2 if ENVIRONMENT == "development" else 5
     LOGIN_ATTEMPTS: int = 3
     LOCKOUT_DURATION_MINUTES: int = 2 if ENVIRONMENT == "development" else 5    
     ACTIVATION_TOKEN_EXPIRATION_MINUTES: int = 2 if ENVIRONMENT == "development" else 5
