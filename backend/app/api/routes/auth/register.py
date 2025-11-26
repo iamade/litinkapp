@@ -33,34 +33,18 @@ async def register_user(
             )
         
         # Create new user (handles password hashing, activation email, etc.)
-        new_user = await user_auth_service.create_user(user_data)
+        new_user = await user_auth_service.create_user(user_data, session)
         
         logger.info(
-            f"New user {new_user['email']} registered successfully, awaiting activation"
+            f"New user {new_user.email} registered successfully, awaiting activation"
         )
         
         # Format response to match UserReadSchema
-        return {
-            "id": new_user["id"],
-            "email": new_user["email"],
-            "display_name": new_user["display_name"],
-            "avatar_url": new_user.get("avatar_url"),
-            "bio": new_user.get("bio"),
-            "first_name": new_user["first_name"],
-            "middle_name": new_user.get("middle_name"),
-            "last_name": new_user["last_name"],
-            "roles": new_user["roles"],
-            "is_active": new_user["is_active"],
-            "is_superuser": new_user.get("is_superuser", False),
-            "security_question": new_user["security_question"],
-            "security_answer": new_user["security_answer"],
-            "account_status": new_user["account_status"],
-            "full_name": f"{new_user['first_name']} {new_user.get('middle_name', '')} {new_user['last_name']}".replace("  ", " ").strip()
-        }
+        return new_user
     
-    except HTTPException:
-        raise
-    
+    except HTTPException as http_ex:
+        await session.rollback()
+        raise http_ex
     except Exception as e:
         logger.error(f"Failed to register user {user_data.email}: {e}")
         raise HTTPException(

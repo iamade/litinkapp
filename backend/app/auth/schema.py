@@ -91,10 +91,10 @@ class UserLoginRequestSchema(SQLModel):
 #         max_length=6,
 #     )
     
-class UserUpdateSchema(SQLModel):
-    display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
-    bio: Optional[str] = None
+# class UserUpdateSchema(SQLModel):
+#     display_name: Optional[str] = None
+#     avatar_url: Optional[str] = None
+#     bio: Optional[str] = None
 
 
 # class UserSchema(UserBaseSchema):

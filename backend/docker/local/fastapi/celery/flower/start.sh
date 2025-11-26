@@ -7,7 +7,7 @@ set -o nounset
 set -o pipefail
 
 FLOWER_CMD="celery \
-    -A backend.app.tasks.celery_app \
+    -A app.tasks.celery_app \
     -b ${CELERY_BROKER_URL} \
     flower \
     --address=0.0.0.0 \

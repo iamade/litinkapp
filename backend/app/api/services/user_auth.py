@@ -285,7 +285,7 @@ class UserAuthService:
         user_data_dict = user_data.model_dump(
             exclude={
                 "confirm_password",
-                "username",
+                "display_name",
                 "is_active",
                 "account_status"
             }
