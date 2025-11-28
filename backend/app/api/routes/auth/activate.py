@@ -1,11 +1,12 @@
 from fastapi import APIRouter,HTTPException,status,Depends
-from app.core.database import get_supabase
+from app.core.database import get_session
 from app.core.logging import get_logger
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth.schema import AccountStatusSchema, EmailVerificationRequestSchema
 from app.auth.utils import create_activation_token
 from app.core.services.activation_email import send_activation_email
-from supabase import Client
+
 from app.api.services.user_auth import user_auth_service
 from app.core.config import settings
 
@@ -17,11 +18,11 @@ router = APIRouter(prefix="/auth")
 @router.get("/activate/{token}", status_code=status.HTTP_200_OK)
 async def activate_user(
     token:str,
-    supabase_client: Client = Depends(get_supabase)
+    session: AsyncSession = Depends(get_session)
 ):
     try:
-        user = await user_auth_service.activate_user_account(token)
-        return {"message":"Account activated successfully", "email":user["email"]}
+        user = await user_auth_service.activate_user_account(token, session)
+        return {"message":"Account activated successfully", "email":user.email}
     except ValueError as e:
         error_msg = str(e)
         
@@ -72,11 +73,11 @@ async def activate_user(
 @router.post("/resend-activation-link", status_code=status.HTTP_200_OK)
 async def resend_activation_link(
     email_data: EmailVerificationRequestSchema,
-    supabase_client: Client = Depends(get_supabase)
+    session: AsyncSession = Depends(get_session)
     ):
     try:
         user = await user_auth_service.get_user_by_email(
-            email_data.email, supabase_client)
+            email_data.email, session, include_inactive=True)
         
         if not user:
             raise HTTPException(
@@ -87,7 +88,7 @@ async def resend_activation_link(
                 },
             )
         
-        if user["is_active"] or user["account_status"] == AccountStatusSchema.ACTIVE:
+        if user.is_active or user.account_status == AccountStatusSchema.ACTIVE:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
@@ -97,8 +98,8 @@ async def resend_activation_link(
                 },
             )
             
-        activation_token = create_activation_token(user["id"])
-        await send_activation_email(user["email"], activation_token)
+        activation_token = create_activation_token(user.id)
+        await send_activation_email(user.email, activation_token)
         
         return{
             "message": "If an account exists with this email, please check your inbox for the activation"
