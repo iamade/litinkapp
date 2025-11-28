@@ -73,10 +73,6 @@ class UserAuthService:
         user.failed_login_attempts = 0
         user.last_failed_login = None
         
-        # if clear_otp:
-        #     user.otp = ""
-        #     user.otp_expiry_time = None
-            
         if user.account_status == AccountStatusSchema.LOCKED:
             user.account_status = AccountStatusSchema.ACTIVE
             
@@ -121,51 +117,6 @@ class UserAuthService:
                 }
             )
             
-   
-
-    # ---------------------------
-    # OTP
-    # ---------------------------
-    # async def generate_and_save_otp(self, user: User, session: AsyncSession,) -> Tuple[bool, str]:
-        # try:
-        #     otp = generate_otp()
-        #     user.otp = otp
-            
-        #     user.otp_expiry_time = datetime.now(timezone.utc) + timedelta(minutes=settings.OTP_EXPIRATION_MINUTES)
-            
-        #     await session.commit()
-        #     await session.refresh(user)
-            
-        #     for attempt in range(3):
-        #         try:
-        #             await send_login_otp_email(user.email, otp)
-        #             logger.info(f"OTP sent to {user.email} successfully")
-        #             return True, otp
-        #         except Exception as e:
-        #             logger.error(
-        #                 f"Failed to send OTP email (attempt {attempt + 1}): {e}"
-        #             )
-        #             if attempt == 2:
-        #                 user.otp = ""
-        #                 user.otp_expiry_time = None
-        #                 await session.commit()
-        #                 await session.refresh(user)
-        #                 return False, ""
-        #             await asyncio.sleep(2**attempt)
-        #     return False, ""
-                    
-            
-        # except Exception as e:
-        #     logger.error(f"Failed to generate and save OTP: {e}")
-            
-        #     user.otp = ""
-        #     user.otp_expiry_time = None
-        #     await session.commit()
-        #     await session.refresh(user)
-        #     return False, ""
-        
-    
-    
 
     # ---------------------------
     # Lockout

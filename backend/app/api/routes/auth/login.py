@@ -82,7 +82,9 @@ async def login(
                         "roles": user.roles,
                     }
                 }    
-        
+        return {
+            "message": "Something went wrong with your email or password"
+        }
         
     except HTTPException as http_ex:
         raise http_ex
