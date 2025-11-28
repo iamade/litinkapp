@@ -115,14 +115,12 @@ class AddRoleRequestSchema(SQLModel):
 
 class RemoveRoleRequestSchema(SQLModel):
     role: str = Field(..., description="Role to remove: 'creator' or 'explorer'")
+  
 
-    
-
-class TokenSchema(SQLModel):
-    access_token: str
-    token_type: str
-    refresh_token: str
-
+# class TokenSchema(SQLModel):
+#     access_token: str
+#     token_type: str
+#     refresh_token: str
 
 class TokenDataSchema(SQLModel):
     user_id: Optional[str] = None

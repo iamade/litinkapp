@@ -1,5 +1,6 @@
 import asyncio
 from typing import Optional, Tuple
+from app.core.services.account_lockout import send_account_lockout_email
 import jwt
 import uuid
 from fastapi import HTTPException, status
@@ -23,10 +24,7 @@ logger = get_logger()
 
 class UserAuthService:
     
-    # def __init__(self, supabase: Optional[Client] = None) -> None:
-    #     self.supabase: Client = supabase or get_supabase()
-    #     self.table = "profiles"
-        
+
     # ---------------------------
     # Query helpers
     # ---------------------------
@@ -65,50 +63,7 @@ class UserAuthService:
     # ---------------------------
     # User state management
     # ---------------------------
-    # async def _update_user(self, user_id: str, updates: dict) -> dict:
-    #     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    #     resp = self.supabase.table(self.table).update(updates).eq("id", user_id).execute()
-    #     if resp.error or not resp.data:
-    #         raise HTTPException(
-    #             status_code=status.HTTP_400_BAD_REQUEST,
-    #             detail={"status": "error", "message": f"Update failed: {getattr(resp.error,'message', 'unknown')}"},
-    #         )
-    #     return resp.data[0]
-    
-    # async def reset_user_state(
-    #     self,
-    #     user: User, 
-    #     session: AsyncSession,
-    #     *,
-    #     # clear_otp: bool = True,
-    #     log_action: bool = True,
-    # ) -> None:
-    #     # Fetch current to compute transition logs
-    #     user = await self.get_user_by_id(user_id, include_inactive=True)
-    #     if not user:
-    #         raise HTTPException(
-    #             status_code=status.HTTP_404_NOT_FOUND,
-    #             detail={"status": "error", "message": "User not found"},
-    #         )
-
-    #     previous_status = user.get("account_status")
-    #     updates = {
-    #         "failed_login_attempts": 0,
-    #         "last_failed_login": None,
-    #     }
-    #     if clear_otp:
-    #         updates["otp"] = ""
-    #         updates["otp_expiry_time"] = None
-    #     if user.get("account_status") == AccountStatusSchema.LOCKED:
-    #         updates["account_status"] = AccountStatusSchema.ACTIVE
-
-    #     updated = await self._update_user(user["id"], updates)
-
-    #     if log_action and previous_status != updated.get("account_status"):
-    #         logger.info(
-    #             f"User {updated.get('email')} state reset: {previous_status} -> {updated.get('account_status')}"
-    #         )
-    #     return updated
+   
     
     async def reset_user_state(
         self, user: User, session: AsyncSession, *, log_action: bool = True, #clear_otp: bool = True,
@@ -246,33 +201,33 @@ class UserAuthService:
             },
         )
 
-#   async def increment_failed_login_attempts(
-#         self,
-#         user: User,
-#         session: AsyncSession,
-#     ) -> None:
-#         user.failed_login_attempts += 1
+    async def increment_failed_login_attempts(
+        self,
+        user: User,
+        session: AsyncSession,
+    ) -> None:
+        user.failed_login_attempts += 1
 
-#         current_time = datetime.now(timezone.utc)
-#         user.last_failed_login = current_time
+        current_time = datetime.now(timezone.utc)
+        user.last_failed_login = current_time
 
-#         if user.failed_login_attempts >= settings.LOGIN_ATTEMPTS:
-#             user.account_status = AccountStatusSchema.LOCKED
+        if user.failed_login_attempts >= settings.LOGIN_ATTEMPTS:
+            user.account_status = AccountStatusSchema.LOCKED
 
-#             try:
-#                 await send_account_lockout_email(user.email, current_time)
-#                 logger.info(f"Account lockout notification email sent to {user.email}")
+            try:
+                await send_account_lockout_email(user.email, current_time)
+                logger.info(f"Account lockout notification email sent to {user.email}")
 
-#             except Exception as e:
-#                 logger.error(
-#                     f"Failed to send account lockout email to {user.email}: {e}"
-#                 )
-#             logger.warning(
-#                 f"User {user.email} has been locked out due to too many failed login attempts"
-#             )
-#         await session.commit()
+            except Exception as e:
+                logger.error(
+                    f"Failed to send account lockout email to {user.email}: {e}"
+                )
+            logger.warning(
+                f"User {user.email} has been locked out due to too many failed login attempts"
+            )
+        await session.commit()
 
-#         await session.refresh(user)
+        await session.refresh(user)
 
     # ---------------------------
     # Registration and activation
