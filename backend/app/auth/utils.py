@@ -182,20 +182,3 @@ def create_password_reset_token(id: uuid.UUID) -> str:
 #         algorithm=settings.JWT_ALGORITHM
 #     )
 
-# def create_password_reset_token(user_id: uuid.UUID) -> str:
-#     """
-#     Create JWT token for password reset flow.
-#     Token expires after 1 hour.
-#     """
-#     payload = {
-#         "id": str(user_id),
-#         "type": "password_reset",
-#         "exp": datetime.now(timezone.utc) + timedelta(hours=1),
-#         "iat": datetime.now(timezone.utc),
-#     }
-    
-#     return jwt.encode(
-#         payload,
-#         settings.JWT_SECRET_KEY,
-#         algorithm=settings.JWT_ALGORITHM
-#     )
