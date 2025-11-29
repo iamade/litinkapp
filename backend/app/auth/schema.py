@@ -84,31 +84,6 @@ class UserLoginRequestSchema(SQLModel):
         max_length=40,
     )
     
-# class OTPVerifyRequestSchema(BaseModel):
-#     email: EmailStr
-#     otp: str = Field(
-#         min_length=6,
-#         max_length=6,
-#     )
-    
-# class UserUpdateSchema(SQLModel):
-#     display_name: Optional[str] = None
-#     avatar_url: Optional[str] = None
-#     bio: Optional[str] = None
-
-
-# class UserSchema(UserBaseSchema):
-#     id: str
-#     is_active: bool
-#     is_verified: bool
-#     email_verified: bool
-#     email_verified_at: Optional[datetime] = None
-#     created_at: datetime
-#     updated_at: datetime
-    
-#     class Config:
-#         from_attributes = True
-
 class AddRoleRequestSchema(SQLModel):
     role: str = Field(..., description="Role to add: 'creator' or 'explorer'")
 
@@ -117,27 +92,43 @@ class RemoveRoleRequestSchema(SQLModel):
     role: str = Field(..., description="Role to remove: 'creator' or 'explorer'")
   
 
-# class TokenSchema(SQLModel):
-#     access_token: str
-#     token_type: str
-#     refresh_token: str
-
 class TokenDataSchema(SQLModel):
     user_id: Optional[str] = None
 
-# class UserRegisterSchema(BaseModel):
-#     email: EmailStr
-#     password: str
-#     display_name: Optional[str] = None
-#     role: str = "explorer"
-    
+
 class PasswordResetRequestSchema(SQLModel):
     email: EmailStr
 
 
 class PasswordResetConfirmSchema(SQLModel):
-    email: EmailStr
-    token: str
-    new_password: str = Field(min_length=8, max_length=40)
+    new_password: str = Field(
+        ...,
+        min_length=8,
+        max_length=40,
+    )
+    
+    confirm_password: str = Field(
+        ...,
+        min_length=8,
+        max_length=40
+    )
+    
+    @field_validator("confirm_password")
+    def validate_password_match(
+        cls,
+        v,
+        values
+    ):
+        if "new_password" in values.data and v != values.data["new_password"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "error",
+                    "message": "Passwords do not match",
+                    "action": "Please ensure that the passwords you entered match",
+                },
+            )
+        
+        return v
 
 

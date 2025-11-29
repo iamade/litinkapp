@@ -1,46 +1,80 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
-from app.auth.schema import PasswordResetRequestSchema, PasswordResetConfirmSchema, SecurityQuestionsSchema
-# from app.auth.utils import create_password_reset_token, verify_password
-from app.api.services.user_auth import UserAuthService, user_auth_service
+from sqlmodel.ext.asyncio.session import AsyncSession
+from app.auth.schema import PasswordResetRequestSchema, PasswordResetConfirmSchema
+
+from app.core.database import get_session
+from app.api.services.user_auth import user_auth_service
+from app.core.services.password_reset import send_password_reset_email
+
 from app.core.logging import get_logger
-import uuid
 
 logger = get_logger()
-router = APIRouter()
+router = APIRouter(prefix="/auth")
 
-class SecurityAnswerVerifySchema(BaseModel):
-    email: EmailStr
-    security_answer: str
 
-@router.post("/password-reset/request", status_code=status.HTTP_200_OK)
+@router.post("/request-password-reset", status_code=status.HTTP_200_OK)
 async def request_password_reset(
-    request: PasswordResetRequestSchema,
-    auth_service: UserAuthService = Depends(lambda: user_auth_service)
+    reset_data: PasswordResetRequestSchema,
+    session: AsyncSession = Depends(get_session)
 ):
-    """
-    Step 1: Request password reset - Returns security question
-    """
-    email = request.email
-
-    # Check if user exists
-    user = await auth_service.get_user_by_email(email, include_inactive=True)
-
-    # Always return success to prevent email enumeration
-    if not user:
-        logger.warning(f"Password reset requested for non-existent email: {email}")
+    try:
+        user = await user_auth_service.get_user_by_email(
+            reset_data.email,
+            session,
+            include_inactive=True
+        )
+        
+        if user:
+            await send_password_reset_email(user.email, user.id)
+            
         return {
-            "status": "success",
-            "message": "If the email exists, you will receive password reset instructions",
-            "security_question": None
+            "message": "If an account exists with this email,"
+            "you will receive password reset instruction shortly"
         }
+        
+    except Exception as e:
+        logger.error(f"Password reset request failed: {e}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "error",
+                "message": "Failed to process password reset request.",
+                "action": "Please try again later",
+            },
+        )
+        
 
-    # Return security question
-    security_question = user.get("security_question", "mother_maiden_name")
-    security_question_text = SecurityQuestionsSchema.get_description(
-        SecurityQuestionsSchema(security_question)
-    )
 
-    logger.info(f"Password reset requested for {email}")
-
-    return
+@router.post("/reset-password/{token}", status_code=status.HTTP_200_OK)
+async def reset_password(
+    token: str,
+    reset_data: PasswordResetConfirmSchema,
+    session: AsyncSession = Depends(get_session)
+):
+    try:
+        await user_auth_service.reset_password(
+            token,
+            reset_data.new_password,
+            session,
+        )
+        return {"message":"Password has been reset successfully"}
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "status": "error",
+                "message": str(e),
+                "action": "Please request a new password reset link."
+            }
+        )
+    except Exception as e:
+        logger.error(f"Password reset failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "error",
+                "message": "Failed to reset password.",
+                "action": "Please try again later."
+            }
+        )
