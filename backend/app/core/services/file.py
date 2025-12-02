@@ -10,7 +10,7 @@ from app.core.config import settings
 import re
 from supabase import create_client, Client
 from app.core.services.ai import AIService
-from app.schemas.book import BookCreate, ChapterCreate, BookUpdate
+from app.books.schemas import BookCreate, ChapterCreate, BookUpdate
 import tempfile
 import math
 import hashlib

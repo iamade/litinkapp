@@ -11,15 +11,15 @@ from fastapi import (
     BackgroundTasks,
 )
 from fastapi.responses import StreamingResponse
-from app.merge.schemas import (
-    MergeManualRequest,
-    MergeManualResponse,
-    MergeStatusResponse,
+from app.merges.schemas import (
+    MergeRequest,
+    MergeResponse,
+    MergeStatus,
+    MergeHistoryResponse,
     MergePreviewRequest,
     MergePreviewResponse,
-    MergeDownloadResponse,
+    MergeConflictResolution,
     MergeOperation,
-    MergeStatus,
     MergeError,
 )
 from app.core.database import get_supabase

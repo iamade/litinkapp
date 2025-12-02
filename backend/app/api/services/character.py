@@ -14,7 +14,7 @@ from app.core.services.modelslab_v7_image import ModelsLabV7ImageService
 from app.plots.models import Character, PlotOverview, CharacterArchetype
 from app.books.models import Book
 from app.videos.models import Script, ImageGeneration
-from app.schemas.plot import (
+from app.plots.schemas import (
     CharacterResponse,
     CharacterCreate,
     CharacterUpdate,
@@ -1016,8 +1016,7 @@ Return a JSON array of matches sorted by confidence:
         """
         Update character record with image metadata.
         """
-        Update character with image generation metadata.
-        """
+
         try:
             image_url = image_data.get("image_url")
             update_data = {
@@ -1071,7 +1070,9 @@ Return a JSON array of matches sorted by confidence:
         Get all archetypes from database, falling back to defaults if empty.
         """
         try:
-            stmt = select(CharacterArchetype).where(CharacterArchetype.is_active == True)
+            stmt = select(CharacterArchetype).where(
+                CharacterArchetype.is_active == True
+            )
             result = await self.session.exec(stmt)
             archetypes = result.all()
 
@@ -1332,47 +1333,49 @@ Return a JSON array of matches sorted by confidence:
 
         role_context = f"\nRole: {role}" if role else ""
 
-        prompt = f"""You are an expert character development analyst. Based on the book content below, generate detailed character information for "{character_name}".
+        prompt_parts = [
+            f'You are an expert character development analyst. Based on the book content below, generate detailed character information for "{character_name}".',
+            "",
+            "BOOK INFORMATION:",
+            f"Title: {book['title']}",
+            f"Author: {book.get('author', 'Unknown')}",
+            f"Genre: {book.get('genre', 'Unknown')}",
+            f"Description: {book.get('description', '')}",
+            "",
+            "CHAPTER CONTENT:",
+            f"{chapters_summary}",
+            "",
+            "CHARACTER TO ANALYZE:",
+            f"Name: {character_name}{role_context}",
+            "",
+            "TASK:",
+            f'Analyze the book content and generate comprehensive character details for "{character_name}". If the character appears in the book, extract their details. If not mentioned, infer appropriate details that would fit the book\'s world and tone.',
+            "",
+            "Provide the following information:",
+            "1. Physical Description: Appearance, age, distinctive features (2-3 sentences)",
+            "2. Personality: Core personality traits, behavior patterns, temperament (2-3 sentences)",
+            "3. Character Arc: How they grow or change throughout the story (1-2 sentences)",
+            "4. Want: External goal or desire (1 sentence)",
+            "5. Need: Internal emotional need (1 sentence)",
+            "6. Lie They Believe: False belief holding them back (1 sentence)",
+            "7. Ghost (Past Trauma): Past wound or trauma affecting them (1 sentence)",
+            "",
+            "RESPONSE FORMAT:",
+            "Return ONLY a valid JSON object with these exact keys:",
+            "{",
+            '    "physical_description": "string",',
+            '    "personality": "string",',
+            '    "character_arc": "string",',
+            '    "want": "string",',
+            '    "need": "string",',
+            '    "lie": "string",',
+            '    "ghost": "string"',
+            "}",
+            "",
+            "IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make the character unique and interesting.",
+        ]
 
-BOOK INFORMATION:
-Title: {book['title']}
-Author: {book.get('author', 'Unknown')}
-Genre: {book.get('genre', 'Unknown')}
-Description: {book.get('description', '')}
-
-CHAPTER CONTENT:
-{chapters_summary}
-
-CHARACTER TO ANALYZE:
-Name: {character_name}{role_context}
-
-TASK:
-Analyze the book content and generate comprehensive character details for "{character_name}". If the character appears in the book, extract their details. If not mentioned, infer appropriate details that would fit the book's world and tone.
-
-Provide the following information:
-1. Physical Description: Appearance, age, distinctive features (2-3 sentences)
-2. Personality: Core personality traits, behavior patterns, temperament (2-3 sentences)
-3. Character Arc: How they grow or change throughout the story (1-2 sentences)
-4. Want: External goal or desire (1 sentence)
-5. Need: Internal emotional need (1 sentence)
-6. Lie They Believe: False belief holding them back (1 sentence)
-7. Ghost (Past Trauma): Past wound or trauma affecting them (1 sentence)
-
-RESPONSE FORMAT:
-Return ONLY a valid JSON object with these exact keys:
-{{
-    "physical_description": "string",
-    "personality": "string",
-    "character_arc": "string",
-    "want": "string",
-    "need": "string",
-    "lie": "string",
-    "ghost": "string"
-}}
-
-IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make the character unique and interesting."""
-
-        return prompt.strip()
+        return "\n".join(prompt_parts)
 
     def _parse_character_details_response(
         self, ai_response: str, character_name: str, role: Optional[str] = None

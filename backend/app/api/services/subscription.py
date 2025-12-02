@@ -65,12 +65,14 @@ class SubscriptionManager:
         """
         tiers = []
         for tier, limits in self.TIER_LIMITS.items():
-            tiers.append({
-                "tier": tier.value,
-                "name": tier.value.title(),
-                "price_monthly": limits["price_monthly"],
-                "features": limits
-            })
+            tiers.append(
+                {
+                    "tier": tier.value,
+                    "name": tier.value.title(),
+                    "price_monthly": limits["price_monthly"],
+                    "features": limits,
+                }
+            )
         return tiers
 
     def __init__(self, session: AsyncSession):
@@ -103,6 +105,9 @@ class SubscriptionManager:
                     f"User {user_id} has no active subscription, defaulting to FREE tier"
                 )
                 return SubscriptionTier.FREE
+        except Exception as e:
+            logger.error(f"Error getting user tier for {user_id}: {e}")
+            return SubscriptionTier.FREE
 
     async def get_subscription(self, user_id: uuid.UUID) -> Optional[UserSubscription]:
         """
@@ -112,7 +117,9 @@ class SubscriptionManager:
         result = await self.session.exec(statement)
         return result.first()
 
-    async def cancel_subscription(self, user_id: uuid.UUID, cancel_at_period_end: bool = True) -> Dict[str, Any]:
+    async def cancel_subscription(
+        self, user_id: uuid.UUID, cancel_at_period_end: bool = True
+    ) -> Dict[str, Any]:
         """
         Cancel user's subscription
         """
@@ -129,7 +136,7 @@ class SubscriptionManager:
         subscription.cancel_at_period_end = cancel_result["cancel_at_period_end"]
         subscription.updated_at = datetime.now()
         if cancel_at_period_end:
-            # If cancelling at period end, we don't set cancelled_at yet? 
+            # If cancelling at period end, we don't set cancelled_at yet?
             # Or maybe we do? The original code sets it if cancel_at_period_end is True?
             # Original: if cancel_data.cancel_at_period_end: update_data["cancelled_at"] = "now()"
             # Wait, usually cancelled_at is when it's fully cancelled.
@@ -142,17 +149,17 @@ class SubscriptionManager:
             subscription.cancelled_at = datetime.now()
 
         self.session.add(subscription)
-        
+
         # Log history
         history = SubscriptionHistory(
             user_id=user_id,
             event_type="cancelled",
             from_status=subscription.status,
             to_status="cancelled" if not cancel_at_period_end else subscription.status,
-            metadata={"reason": "User requested cancellation"}
+            metadata={"reason": "User requested cancellation"},
         )
         self.session.add(history)
-        
+
         await self.session.commit()
         await self.session.refresh(subscription)
 
@@ -181,8 +188,10 @@ class SubscriptionManager:
         subscription.cancel_at_period_end = False
         subscription.cancelled_at = None
         subscription.updated_at = datetime.now()
-        subscription.status = SubscriptionStatus.ACTIVE # Assuming reactivation makes it active
-        
+        subscription.status = (
+            SubscriptionStatus.ACTIVE
+        )  # Assuming reactivation makes it active
+
         self.session.add(subscription)
 
         # Log history
@@ -191,14 +200,13 @@ class SubscriptionManager:
             event_type="reactivated",
             from_status=old_status,
             to_status=reactivate_result["status"],
-            metadata={"reason": "User reactivated subscription"}
+            metadata={"reason": "User reactivated subscription"},
         )
         self.session.add(history)
-        
-        await self.session.commit()
-        
-        return {"message": "Subscription reactivated successfully"}
 
+        await self.session.commit()
+
+        return {"message": "Subscription reactivated successfully"}
 
     async def check_usage_limits(
         self, user_id: uuid.UUID, resource_type: str = "video"

@@ -14,7 +14,7 @@ from app.ai.schemas import (
     QuizGenerationRequest,
     AnalyzeChapterSafetyRequest,
 )
-from app.user_profile.schemas import User
+
 from app.core.services.ai import AIService
 from app.core.services.voice import VoiceService
 from app.api.services.video import VideoService

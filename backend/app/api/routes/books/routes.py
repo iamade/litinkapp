@@ -23,12 +23,12 @@ from fastapi.responses import Response
 import io
 
 from app.core.auth import get_current_user, get_current_author, get_current_active_user
-from app.core.auth import get_current_user, get_current_author, get_current_active_user
-from app.core.database import get_session
+from app.core.database import get_session, get_supabase
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, update, delete, col, or_
+from sqlmodel import select, update, delete, col, or_, text
+from sqlalchemy import func
 from app.books.models import Book, Chapter, Section, LearningContent
-from app.user_profile.models import User as UserModel
+from app.auth.models import User, User as UserModel
 from app.books.schemas import (
     Book,
     BookCreate,
@@ -38,7 +38,6 @@ from app.books.schemas import (
     SectionInput,
     BookWithSections,
 )
-from app.user_profile.schemas import User
 from app.books.schemas import (
     Book as BookSchema,
     BookPreview,
@@ -96,8 +95,88 @@ async def get_structure_types():
 
     return {"structure_types": structure_types, "default": "flat"}
 
+    return {"structure_types": structure_types, "default": "flat"}
 
-@router.get("/superadmin-learning-books", response_model=List[BookWithChapters])
+
+@router.get("/search", response_model=Dict[str, List[Any]])
+async def search_content(
+    query: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: dict = Depends(get_current_active_user),
+):
+    """
+    Search books and chapters using full-text search.
+    Returns a dictionary with 'books' and 'chapters' lists.
+    """
+    if not query or len(query.strip()) < 3:
+        return {"books": [], "chapters": []}
+
+    search_query = query.strip()
+
+    try:
+        # Prepare TS Query
+        ts_query = func.plainto_tsquery("english", search_query)
+
+        # Search Books
+        # We search title, description, author_name
+        # Using coalesce to handle NULLs
+        book_stmt = (
+            select(Book)
+            .where(
+                Book.user_id == current_user["id"],
+                or_(
+                    func.to_tsvector("english", func.coalesce(Book.title, "")).op("@@")(
+                        ts_query
+                    ),
+                    func.to_tsvector("english", func.coalesce(Book.description, "")).op(
+                        "@@"
+                    )(ts_query),
+                    func.to_tsvector("english", func.coalesce(Book.author_name, "")).op(
+                        "@@"
+                    )(ts_query),
+                ),
+            )
+            .limit(20)
+        )
+
+        book_result = await session.exec(book_stmt)
+        books = book_result.all()
+
+        # Search Chapters
+        # We search title, content
+        # We need to join with Book to ensure user ownership/access
+        chapter_stmt = (
+            select(Chapter)
+            .join(Book)
+            .where(
+                Book.user_id == current_user["id"],
+                or_(
+                    func.to_tsvector("english", func.coalesce(Chapter.title, "")).op(
+                        "@@"
+                    )(ts_query),
+                    func.to_tsvector("english", func.coalesce(Chapter.content, "")).op(
+                        "@@"
+                    )(ts_query),
+                ),
+            )
+            .limit(20)
+        )
+
+        chapter_result = await session.exec(chapter_stmt)
+        chapters = chapter_result.all()
+
+        return {
+            "books": [book.model_dump() for book in books],
+            "chapters": [chapter.model_dump() for chapter in chapters],
+        }
+
+    except Exception as e:
+        print(f"Search error: {e}")
+        # Fallback to simple ILIKE if TSVector fails (e.g. if not on Postgres or other issues)
+        # or just return empty/error
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
 async def get_superadmin_learning_books(
     session: AsyncSession = Depends(get_session),
 ):
@@ -683,7 +762,7 @@ async def upload_book(
     description: Optional[str] = Form(None),
     book_type: str = Form(...),
     session: AsyncSession = Depends(get_session),
-    supabase_client: Client = Depends(get_supabase), # For storage
+    supabase_client: Client = Depends(get_supabase),  # For storage
     current_user: dict = Depends(get_current_user),
 ):
     """Upload book file - PREVIEW MODE (doesn't save chapters yet)"""
@@ -710,7 +789,7 @@ async def upload_book(
             description=description,
             book_type=book_type.lower().strip(),
             user_id=uuid.UUID(current_user["id"]),
-            status="PROCESSING", # Initial status
+            status="PROCESSING",  # Initial status
         )
         session.add(book)
         await session.commit()
@@ -807,7 +886,7 @@ async def upload_book(
                 await session.delete(book)
                 await session.commit()
             except:
-                pass # Ignore error during cleanup
+                pass  # Ignore error during cleanup
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
@@ -822,19 +901,19 @@ async def get_book_status(
         stmt = select(Book).where(Book.id == book_id)
         result = await session.exec(stmt)
         book = result.first()
-        
+
         if not book:
             raise HTTPException(
                 status_code=404, detail="Book not found or you don't have access."
             )
-        
+
         # Check ownership? Original code didn't check ownership explicitly but used single() which might fail if RLS was on?
         # But here I should probably check if it's the user's book.
         # The original code: .eq("id", book_id).single().execute()
         # It didn't filter by user_id in the query, but maybe RLS handled it.
         # I'll add ownership check for safety.
         if str(book.user_id) != current_user["id"]:
-             raise HTTPException(status_code=403, detail="Not authorized")
+            raise HTTPException(status_code=403, detail="Not authorized")
 
         import datetime
         from datetime import timezone
@@ -843,13 +922,15 @@ async def get_book_status(
         # Track QUEUED timestamp
         now_utc = datetime.datetime.now(timezone.utc)
         updated = False
-        
+
         # Note: book.status is an Enum in model, so compare with value or Enum member
-        if book.status == "QUEUED": # Assuming string comparison works with Enum or it's a string in DB
+        if (
+            book.status == "QUEUED"
+        ):  # Assuming string comparison works with Enum or it's a string in DB
             if not book.queued_at:
                 book.queued_at = now_utc
                 updated = True
-        
+
         # If book is READY and has queued_at, calculate processing time
         processing_time_seconds = None
         if book.status == "READY" and book.queued_at:
@@ -860,13 +941,13 @@ async def get_book_status(
                     book.ready_at = now_utc
                     ready_at = now_utc
                     updated = True
-                
+
                 # Calculate diff
                 # Ensure both are datetime objects (SQLAlchemy returns datetime)
                 processing_time_seconds = int((ready_at - queued_at).total_seconds())
             except Exception:
                 processing_time_seconds = None
-        
+
         if updated:
             session.add(book)
             await session.commit()
@@ -876,25 +957,33 @@ async def get_book_status(
         # We need to construct the response manually or attach it
         # BookWithChapters schema might not have processing_time_seconds?
         # Let's check schema later if needed, but for now I'll use model_dump and add it.
-        
+
         book_dict = book.model_dump()
         if processing_time_seconds is not None:
             book_dict["processing_time_seconds"] = processing_time_seconds
-            
+
         # Get chapters
-        stmt = select(Chapter).where(Chapter.book_id == book_id).order_by(Chapter.chapter_number)
+        stmt = (
+            select(Chapter)
+            .where(Chapter.book_id == book_id)
+            .order_by(Chapter.chapter_number)
+        )
         result = await session.exec(stmt)
         chapters = result.all()
         chapters_data = [c.model_dump() for c in chapters]
-        
+
         sections_data = []
         if book.has_sections and book.structure_type != "flat":
-             # Fetch sections
-             # I need Section model. It was imported.
-             stmt = select(Section).where(Section.book_id == book_id).order_by(Section.order_index)
-             result = await session.exec(stmt)
-             sections = result.all()
-             sections_data = [s.model_dump() for s in sections]
+            # Fetch sections
+            # I need Section model. It was imported.
+            stmt = (
+                select(Section)
+                .where(Section.book_id == book_id)
+                .order_by(Section.order_index)
+            )
+            result = await session.exec(stmt)
+            sections = result.all()
+            sections_data = [s.model_dump() for s in sections]
 
         # Create enhanced book response with structure data
         book_response = {
@@ -933,7 +1022,7 @@ async def regenerate_chapters(
     if not book or str(book.user_id) != current_user["id"]:
         raise HTTPException(status_code=403, detail="Not authorized or book not found")
 
-    # content is not in Book model? 
+    # content is not in Book model?
     # Wait, if content is not in Book model, how did original code work?
     # book.get("content")
     # Maybe I missed the content field in Book model?
@@ -947,7 +1036,7 @@ async def regenerate_chapters(
     # Original code: content = book.get("content")
     # If it's in the DB, it should be in the model.
     # I'll try to access it. If it fails, I'll know.
-    
+
     # For now, I'll assume it's missing and I might need to add it or it's 'description' or something.
     # But 'content' usually implies the full text.
     # I'll use getattr(book, "content", None) to be safe, but if it's not in model, it won't be in the object.
@@ -955,13 +1044,13 @@ async def regenerate_chapters(
     # But wait, if I can't find it, I can't implement this.
     # I'll check the model file in the next step.
     # For now, I'll write the code assuming it might be there or I'll fix it.
-    
+
     content = getattr(book, "content", None)
-    
+
     if not content:
-         # Fallback: maybe it's in a file?
-         # For now, raise error.
-         raise HTTPException(
+        # Fallback: maybe it's in a file?
+        # For now, raise error.
+        raise HTTPException(
             status_code=400,
             detail="Book content not found (or not in DB), cannot regenerate chapters.",
         )
@@ -974,7 +1063,9 @@ async def regenerate_chapters(
     await session.commit()
 
     # 3. Regenerate chapters
-    ai_chapters = await ai_service.generate_chapters_from_content(content, book.book_type)
+    ai_chapters = await ai_service.generate_chapters_from_content(
+        content, book.book_type
+    )
     chapters = [
         {"title": ch.get("title", ""), "content": ch.get("content", "")}
         for ch in ai_chapters
@@ -998,12 +1089,14 @@ async def retry_book_processing(
         stmt = select(Book).where(Book.id == book_id)
         result = await session.exec(stmt)
         book = result.first()
-        
+
         if not book:
             raise HTTPException(status_code=404, detail="Book not found")
 
         if str(book.user_id) != current_user["id"]:
-             raise HTTPException(status_code=404, detail="Book not found") # mimic 404 for unauthorized
+            raise HTTPException(
+                status_code=404, detail="Book not found"
+            )  # mimic 404 for unauthorized
 
         # Only allow retry for failed books
         if book.status != UserBookStatus.FAILED:
@@ -1014,7 +1107,7 @@ async def retry_book_processing(
         book.error_message = None
         book.progress = 0
         book.progress_message = "Restarting book processing..."
-        
+
         session.add(book)
         await session.commit()
         await session.refresh(book)
@@ -1031,11 +1124,6 @@ async def retry_book_processing(
                 status_code=400,
                 detail="Book content not found, cannot retry processing",
             )
-        # I'll skip this one for now and do it in the next batch after reading the rest.
-        pass # Placeholder to indicate I'm skipping this chunk in this tool call.
-        
-    except Exception as e:
-         raise HTTPException(status_code=400, detail=str(e))
 
         # Add the processing task to the background
         background_tasks.add_task(
@@ -1049,15 +1137,7 @@ async def retry_book_processing(
             book_id_to_update=book_id,
         )
 
-        # Return the updated book
-        updated_response = (
-            supabase_client.table("books")
-            .select("*")
-            .eq("id", book_id)
-            .single()
-            .execute()
-        )
-        return updated_response.data
+        return {"message": "Book processing restarted successfully", "book_id": book_id}
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1067,7 +1147,7 @@ async def retry_book_processing(
 async def delete_book(
     book_id: str,
     session: AsyncSession = Depends(get_session),
-    supabase_client: Client = Depends(get_supabase), # Kept for storage operations
+    supabase_client: Client = Depends(get_supabase),  # Kept for storage operations
     current_user: dict = Depends(get_current_active_user),
 ):
     # 1. Get the book record to find the storage path and verify ownership
@@ -1075,16 +1155,16 @@ async def delete_book(
         stmt = select(Book).where(Book.id == book_id)
         result = await session.exec(stmt)
         book = result.first()
-        
+
         if not book:
             raise HTTPException(status_code=404, detail="Book not found")
-            
+
         # 2. Only allow the owner to delete
         if str(book.user_id) != current_user["id"]:
             raise HTTPException(
                 status_code=403, detail="Not authorized to delete this book"
             )
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1191,7 +1271,7 @@ async def delete_book(
         # But we might need to delete videos manually if no cascade
         # Let's assume cascade handles it or we delete book and it works.
         # If we need to be explicit:
-        
+
         # Delete book (should cascade)
         session.delete(book)
         await session.commit()
@@ -1212,7 +1292,7 @@ async def search_books(query: str, session: AsyncSession = Depends(get_session))
         stmt = select(Book).where(
             or_(
                 col(Book.title).ilike(f"%{query}%"),
-                col(Book.description).ilike(f"%{query}%")
+                col(Book.description).ilike(f"%{query}%"),
             )
         )
         result = await session.exec(stmt)
@@ -1242,7 +1322,7 @@ async def extract_cover_from_page(
     book_id: str,
     page: int,
     session: AsyncSession = Depends(get_session),
-    supabase_client: Client = Depends(get_supabase), # For storage
+    supabase_client: Client = Depends(get_supabase),  # For storage
     current_user: dict = Depends(get_current_active_user),
 ):
     # Get book record
@@ -1250,21 +1330,21 @@ async def extract_cover_from_page(
         stmt = select(Book).where(Book.id == book_id)
         result = await session.exec(stmt)
         book = result.first()
-        
+
         if not book:
-             raise HTTPException(status_code=404, detail="Book not found")
+            raise HTTPException(status_code=404, detail="Book not found")
 
         if str(book.user_id) != current_user["id"]:
             raise HTTPException(
                 status_code=403, detail="Not authorized to modify this book"
             )
-            
+
         file_path = os.path.join(settings.UPLOAD_DIR, book.title)
         if not os.path.exists(file_path):
             # Try to find it in temp dir or maybe we need to download it?
             # Original code assumed it's on server.
             raise HTTPException(status_code=404, detail="Book file not found on server")
-            
+
         doc = fitz.open(file_path)
         if page < 1 or page > len(doc):
             raise HTTPException(status_code=400, detail="Invalid page number")
@@ -1290,12 +1370,12 @@ async def extract_cover_from_page(
         cover_url = supabase_client.storage.from_(
             settings.SUPABASE_BUCKET_NAME
         ).get_public_url(storage_path)
-        
+
         book.cover_image_url = cover_url
         session.add(book)
         await session.commit()
         await session.refresh(book)
-        
+
         return {"cover_image_url": cover_url}
     except HTTPException:
         raise
@@ -1308,7 +1388,7 @@ async def upload_cover_image(
     book_id: str,
     cover_image: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    supabase_client: Client = Depends(get_supabase), # For storage
+    supabase_client: Client = Depends(get_supabase),  # For storage
     current_user: dict = Depends(get_current_active_user),
 ):
     # Get book record
@@ -1316,7 +1396,7 @@ async def upload_cover_image(
         stmt = select(Book).where(Book.id == book_id)
         result = await session.exec(stmt)
         book = result.first()
-        
+
         if not book:
             raise HTTPException(status_code=404, detail="Book not found")
 
@@ -1324,24 +1404,26 @@ async def upload_cover_image(
             raise HTTPException(
                 status_code=403, detail="Not authorized to modify this book"
             )
-            
+
         # Read file into memory
         img_bytes = await cover_image.read()
         user_id = current_user["id"]
         storage_path = f"users/{user_id}/covers/cover_{book_id}_upload.png"
         supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
-            path=storage_path, file=img_bytes, file_options={"content-type": "image/png"}
+            path=storage_path,
+            file=img_bytes,
+            file_options={"content-type": "image/png"},
         )
         # Get the correct public URL from Supabase
         cover_url = supabase_client.storage.from_(
             settings.SUPABASE_BUCKET_NAME
         ).get_public_url(storage_path)
-        
+
         book.cover_image_url = cover_url
         session.add(book)
         await session.commit()
         await session.refresh(book)
-        
+
         return {"cover_image_url": cover_url}
     except HTTPException:
         raise
@@ -1368,12 +1450,12 @@ async def save_book_structure(
         stmt = select(Book).where(Book.id == book_id)
         result = await session.exec(stmt)
         book = result.first()
-        
+
         if not book:
             raise HTTPException(status_code=404, detail="Book not found")
 
         if str(book.user_id) != current_user["id"]:
-             raise HTTPException(status_code=404, detail="Book not found")
+            raise HTTPException(status_code=404, detail="Book not found")
 
         # Extract confirmed chapters from structure_data
         confirmed_chapters = structure_data.get("chapters", [])

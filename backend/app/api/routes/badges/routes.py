@@ -3,7 +3,7 @@ from typing import List
 from supabase import Client
 
 from app.badges.schemas import Badge, BadgeCreate
-from app.user_profile.schemas import User
+
 from app.core.database import get_supabase
 from app.core.auth import get_current_active_user
 
