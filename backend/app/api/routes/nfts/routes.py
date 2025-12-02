@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List
-from supabase import Client
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.nfts.schemas import NFT, NFTCreate
-from app.core.database import get_supabase
+from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.core.services.blockchain import BlockchainService
 
@@ -14,7 +14,7 @@ blockchain_service = BlockchainService()
 @router.post("/", response_model=NFT, status_code=201)
 async def create_nft(
     nft_create: NFTCreate,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Mint a new NFT (e.g., for completing a book)"""
@@ -50,7 +50,7 @@ async def create_nft(
 
 
 @router.get("/user/{user_id}", response_model=List[NFT])
-async def get_user_nfts(user_id: str, supabase_client: Client = Depends(get_supabase)):
+async def get_user_nfts(user_id: str, session: AsyncSession = Depends(get_session)):
     """Get all NFTs owned by a specific user"""
     response = (
         supabase_client.table("nfts").select("*").eq("owner_id", user_id).execute()
@@ -62,7 +62,7 @@ async def get_user_nfts(user_id: str, supabase_client: Client = Depends(get_supa
 
 @router.get("/{asset_id}", response_model=NFT)
 async def get_nft_details(
-    asset_id: int, supabase_client: Client = Depends(get_supabase)
+    asset_id: int, session: AsyncSession = Depends(get_session)
 ):
     """Get details for a specific NFT by its asset ID"""
     response = (
@@ -80,10 +80,10 @@ async def get_nft_details(
 # from typing import List
 # from fastapi import APIRouter, Depends, HTTPException, status
 # from sqlalchemy.ext.asyncio import AsyncSession
-# from supabase import Client
+# from sqlmodel.ext.asyncio.session import AsyncSession
 
 # from app.core.auth import get_current_user
-# from app.core.database import get_supabase
+# from app.core.database import get_session
 # from app.models.user import User
 # from app.models.nft import NFTCollectible, UserCollectible
 # from app.schemas.nft import NFTCollectible as NFTSchema, UserCollectible as UserCollectibleSchema
@@ -176,7 +176,7 @@ async def get_nft_details(
 # @router.post("/", response_model=NFT, status_code=201)
 # async def create_nft(
 #     nft_create: NFTCreate,
-#     supabase_client: Client = Depends(get_supabase),
+#     session: AsyncSession = Depends(get_session),
 #     current_user: dict = Depends(get_current_active_user)
 # ):
 #     """Mint a new NFT (e.g., for completing a book)"""
@@ -211,7 +211,7 @@ async def get_nft_details(
 # @router.get("/user/{user_id}", response_model=List[NFT])
 # async def get_user_nfts(
 #     user_id: str,
-#     supabase_client: Client = Depends(get_supabase)
+#     session: AsyncSession = Depends(get_session)
 # ):
 #     """Get all NFTs owned by a specific user"""
 #     response = supabase_client.table('nfts').select('*').eq('owner_id', user_id).execute()
@@ -223,7 +223,7 @@ async def get_nft_details(
 # @router.get("/{asset_id}", response_model=NFT)
 # async def get_nft_details(
 #     asset_id: int,
-#     supabase_client: Client = Depends(get_supabase)
+#     session: AsyncSession = Depends(get_session)
 # ):
 #     """Get details for a specific NFT by its asset ID"""
 #     response = supabase_client.table('nfts').select('*').eq('asset_id', asset_id).single().execute()

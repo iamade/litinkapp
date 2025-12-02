@@ -12,20 +12,19 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from app.merges.schemas import (
-    MergeRequest,
-    MergeResponse,
+    MergeManualRequest,
+    MergeManualResponse,
     MergeStatus,
-    MergeHistoryResponse,
+    MergeStatusResponse,
     MergePreviewRequest,
     MergePreviewResponse,
-    MergeConflictResolution,
     MergeOperation,
     MergeError,
 )
-from app.core.database import get_supabase
+from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.core.config import settings
-from supabase import Client
+from sqlmodel.ext.asyncio.session import AsyncSession
 import json
 import os
 import mimetypes
@@ -106,7 +105,7 @@ def validate_file_upload(file: UploadFile) -> None:
 async def start_manual_merge(
     request: MergeManualRequest,
     background_tasks: BackgroundTasks,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Start a manual merge operation with user-controlled parameters"""
@@ -184,7 +183,7 @@ async def start_manual_merge(
 async def generate_merge_preview(
     request: MergePreviewRequest,
     background_tasks: BackgroundTasks,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Generate a preview of the merge operation without full processing"""
@@ -217,7 +216,7 @@ async def generate_merge_preview(
 @router.get("/status/{merge_id}", response_model=MergeStatusResponse)
 async def get_merge_status(
     merge_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Check the status and progress of a merge operation"""
@@ -302,7 +301,7 @@ async def get_merge_status(
 @router.get("/{merge_id}/download")
 async def download_merge_result(
     merge_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Download the completed merge result"""
@@ -471,7 +470,7 @@ async def upload_file_to_supabase(
 async def upload_merge_file(
     file: UploadFile = File(...),
     file_type: str = Form(..., description="Type of file: video or audio"),
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Upload a file for use in merge operations"""

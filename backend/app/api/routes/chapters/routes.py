@@ -1,9 +1,9 @@
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from supabase import Client
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.auth import get_current_active_user
-from app.core.database import get_supabase
+from app.core.database import get_session
 from app.core.services.standalone_image import StandaloneImageService
 from app.core.services.elevenlabs import ElevenLabsService
 from app.core.services.modelslab_v7_audio import ModelsLabV7AudioService
@@ -136,7 +136,7 @@ def get_character_info_from_chapter(
 @router.get("/{chapter_id}/images", response_model=ChapterImagesResponse)
 async def list_chapter_images(
     chapter_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """List all images associated with a chapter"""
@@ -185,7 +185,7 @@ async def generate_scene_image(
     chapter_id: str,
     scene_number: int,
     request: SceneImageRequest,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Generate an image for a specific scene in the chapter (asynchronous)"""
@@ -328,7 +328,7 @@ async def generate_scene_image(
 async def generate_character_image(
     chapter_id: str,
     request: CharacterImageRequest,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Generate an image for a character in the chapter (asynchronous)"""
@@ -413,7 +413,7 @@ async def generate_character_image(
 async def link_character_image(
     chapter_id: str,
     request: Dict[str, Any],
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Link an existing character image (e.g., from plot overview) to a script"""
@@ -477,7 +477,7 @@ async def link_character_image(
 async def delete_scene_image(
     chapter_id: str,
     scene_number: int,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Delete a scene image for the chapter"""
@@ -533,7 +533,7 @@ async def delete_scene_image(
 async def delete_character_image(
     chapter_id: str,
     character_name: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Delete a character image for the chapter"""
@@ -586,7 +586,7 @@ async def delete_character_image(
 async def batch_generate_images(
     chapter_id: str,
     request: BatchImageRequest,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Generate multiple images for a chapter in batch"""
@@ -708,7 +708,7 @@ async def batch_generate_images(
 async def get_batch_status(
     chapter_id: str,
     batch_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Get status of a batch image generation (placeholder - batch tracking not implemented)"""
@@ -741,7 +741,7 @@ async def get_batch_status(
 async def get_image_generation_status(
     chapter_id: str,
     record_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Get the status of an image generation by record ID"""
@@ -817,7 +817,7 @@ async def get_image_generation_status(
 async def get_scene_image_status(
     chapter_id: str,
     scene_number: int,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Get the status of a scene image generation by chapter ID and scene number"""
@@ -939,7 +939,7 @@ async def get_scene_image_status(
 @router.get("/{chapter_id}/audio", response_model=ChapterAudioResponse)
 async def list_chapter_audio(
     chapter_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """List all audio files associated with a chapter"""
@@ -988,7 +988,7 @@ async def generate_chapter_audio(
     audio_type: str,
     scene_number: int,
     request: AudioGenerationRequest,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Generate audio for a specific type and scene in the chapter (asynchronous)"""
@@ -1152,7 +1152,7 @@ async def generate_chapter_audio(
 async def delete_chapter_audio(
     chapter_id: str,
     audio_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Delete an audio file for the chapter"""
@@ -1206,7 +1206,7 @@ async def delete_chapter_audio(
 async def export_chapter_audio_mix(
     chapter_id: str,
     request: AudioExportRequest,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Export a mixed audio file for the chapter (asynchronous)"""
@@ -1313,7 +1313,7 @@ async def export_chapter_audio_mix(
 async def get_audio_generation_status(
     chapter_id: str,
     record_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Get the status of an audio generation by record ID"""

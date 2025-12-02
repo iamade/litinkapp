@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from supabase import Client
+from sqlmodel.ext.asyncio.session import AsyncSession
 import stripe
 import os
 from typing import Dict, Any
 import logging
 
-from app.core.database import get_supabase
+from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.core.config import settings
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 @router.post("/create-book-upload-checkout-session")
 async def create_book_upload_checkout_session(
     book_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user)
 ):
     """Create a Stripe Checkout Session for book upload payment"""
@@ -78,7 +78,7 @@ async def create_book_upload_checkout_session(
 @router.post("/webhook")
 async def stripe_webhook(
     request: Request,
-    supabase_client: Client = Depends(get_supabase)
+    session: AsyncSession = Depends(get_session)
 ):
     """Handle Stripe webhook events"""
     payload = await request.body()
@@ -140,7 +140,7 @@ async def stripe_webhook(
 @router.get("/check-payment-status/{book_id}")
 async def check_payment_status(
     book_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user)
 ):
     """Check the payment status of a book"""
@@ -166,7 +166,7 @@ async def check_payment_status(
 
 @router.get("/user-book-count")
 async def get_user_book_count(
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user)
 ):
     """Get the count of books uploaded by the current user"""

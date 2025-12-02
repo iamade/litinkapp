@@ -66,3 +66,15 @@ async def get_current_author(
     # For now, we assume any active user can be an author.
     # You can add role checks here if needed.
     return current_user
+
+
+async def get_current_superadmin(
+    current_user: User = Depends(get_current_active_user),
+) -> User:
+    """Verify that the current user has superadmin privileges"""
+    # Check if user has superadmin role
+    if not hasattr(current_user, "is_superadmin") or not current_user.is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required"
+        )
+    return current_user

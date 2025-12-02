@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List
-from supabase import Client
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.quizzes.schemas import Quiz, QuizCreate, QuizAttempt, QuizAttemptCreate
 
-from app.core.database import get_supabase
+from app.core.database import get_session
 from app.core.auth import get_current_active_user
 
 # from app.services.badge_service import BadgeService
@@ -15,7 +15,7 @@ router = APIRouter()
 @router.post("/", response_model=Quiz, status_code=201)
 async def create_quiz(
     quiz_data: QuizCreate,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Create a new quiz, usually linked to a book"""
@@ -29,7 +29,7 @@ async def create_quiz(
 
 @router.get("/book/{book_id}", response_model=List[Quiz])
 async def get_quizzes_for_book(
-    book_id: int, supabase_client: Client = Depends(get_supabase)
+    book_id: int, session: AsyncSession = Depends(get_session)
 ):
     """Get all quizzes associated with a book"""
     response = (
@@ -41,7 +41,7 @@ async def get_quizzes_for_book(
 
 
 @router.get("/{quiz_id}", response_model=Quiz)
-async def get_quiz(quiz_id: int, supabase_client: Client = Depends(get_supabase)):
+async def get_quiz(quiz_id: int, session: AsyncSession = Depends(get_session)):
     """Get a specific quiz by its ID"""
     response = (
         supabase_client.table("quizzes")
@@ -58,7 +58,7 @@ async def get_quiz(quiz_id: int, supabase_client: Client = Depends(get_supabase)
 @router.post("/attempt", response_model=QuizAttempt, status_code=201)
 async def submit_quiz_attempt(
     attempt: QuizAttemptCreate,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Submit a user's attempt at a quiz"""
@@ -77,7 +77,7 @@ async def submit_quiz_attempt(
 
 @router.get("/attempts/user/{user_id}", response_model=List[QuizAttempt])
 async def get_user_quiz_attempts(
-    user_id: int, supabase_client: Client = Depends(get_supabase)
+    user_id: int, session: AsyncSession = Depends(get_session)
 ):
     """Get all quiz attempts for a specific user"""
     response = (

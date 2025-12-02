@@ -10,8 +10,9 @@ from fastapi import (
     BackgroundTasks,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.services.embeddings import EmbeddingsService
 from supabase import Client
+from app.core.services.embeddings import EmbeddingsService
+from sqlmodel.ext.asyncio.session import AsyncSession
 from postgrest.exceptions import APIError
 from enum import Enum
 import shutil
@@ -661,7 +662,7 @@ async def get_chapters(
 #     title: str = Form(...),
 #     description: Optional[str] = Form(None),
 #     book_type: str = Form(...),
-#     supabase_client: Client = Depends(get_supabase),  # FIX: Add missing dependency
+#     session: AsyncSession = Depends(get_session),  # FIX: Add missing dependency
 #     current_user: User = Depends(get_current_user)
 # ):
 #     """Upload book file - PREVIEW MODE (doesn't save chapters yet)"""
@@ -1487,7 +1488,7 @@ async def save_book_structure(
 # async def save_user_chapters(
 #     book_id: str,
 #     chapters: List[ChapterInput],
-#     supabase_client: Client = Depends(get_supabase),
+#     session: AsyncSession = Depends(get_session),
 #     current_user: dict = Depends(get_current_active_user)
 # ):
 #     # Check book ownership
@@ -1523,7 +1524,7 @@ async def save_book_structure(
 # async def save_book_structure(
 #     book_id: str,
 #     structure_data: BookStructureInput,
-#     supabase_client: Client = Depends(get_supabase),
+#     session: AsyncSession = Depends(get_session),
 #     current_user: dict = Depends(get_current_active_user)
 # ):
 #     """Save the book structure (sections and chapters) after user review"""

@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List
-from supabase import Client
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.badges.schemas import Badge, BadgeCreate
 
-from app.core.database import get_supabase
+from app.core.database import get_session
 from app.core.auth import get_current_active_user
 
 router = APIRouter()
@@ -13,7 +13,7 @@ router = APIRouter()
 @router.post("/", response_model=Badge, status_code=201)
 async def create_badge(
     badge: BadgeCreate,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Create a new badge (admin-only in a real app)"""
@@ -24,7 +24,7 @@ async def create_badge(
 
 
 @router.get("/", response_model=List[Badge])
-async def get_all_badges(supabase_client: Client = Depends(get_supabase)):
+async def get_all_badges(session: AsyncSession = Depends(get_session)):
     """Get all available badges"""
     response = supabase_client.table("badges").select("*").execute()
     if response.error:
@@ -33,7 +33,7 @@ async def get_all_badges(supabase_client: Client = Depends(get_supabase)):
 
 
 @router.get("/{badge_id}", response_model=Badge)
-async def get_badge(badge_id: int, supabase_client: Client = Depends(get_supabase)):
+async def get_badge(badge_id: int, session: AsyncSession = Depends(get_session)):
     """Get a badge by its ID"""
     response = (
         supabase_client.table("badges")
@@ -51,7 +51,7 @@ async def get_badge(badge_id: int, supabase_client: Client = Depends(get_supabas
 async def award_badge_to_user(
     user_id: str,
     badge_id: int,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """Award a badge to a user (admin-only in a real app)"""
@@ -68,7 +68,7 @@ async def award_badge_to_user(
 
 @router.get("/user/{user_id}", response_model=List[Badge])
 async def get_user_badges(
-    user_id: str, supabase_client: Client = Depends(get_supabase)
+    user_id: str, session: AsyncSession = Depends(get_session)
 ):
     """Get all badges for a specific user"""
     response = (

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from supabase import Client
+from sqlmodel.ext.asyncio.session import AsyncSession
 from typing import List, Optional
 
 from app.plots.schemas import (
@@ -10,7 +10,7 @@ from app.plots.schemas import (
     ImageGenerationRequest,
 )
 from app.api.services.character import CharacterService
-from app.core.database import get_supabase
+from app.core.database import get_session
 from app.core.auth import get_current_active_user
 
 router = APIRouter()
@@ -19,7 +19,7 @@ router = APIRouter()
 @router.get("/{character_id}", response_model=CharacterResponse)
 async def get_character(
     character_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -28,7 +28,7 @@ async def get_character(
     - **character_id**: ID of the character to retrieve
     """
     try:
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         character = await character_service.get_character_by_id(
             character_id, current_user["id"]
         )
@@ -50,7 +50,7 @@ async def get_character(
 async def update_character(
     character_id: str,
     updates: CharacterUpdate,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -60,7 +60,7 @@ async def update_character(
     - **updates**: Fields to update
     """
     try:
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         updated_character = await character_service.update_character(
             character_id=character_id, user_id=current_user["id"], updates=updates
         )
@@ -78,7 +78,7 @@ async def update_character(
 @router.delete("/{character_id}")
 async def delete_character(
     character_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -87,7 +87,7 @@ async def delete_character(
     - **character_id**: ID of the character to delete
     """
     try:
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         success = await character_service.delete_character(
             character_id, current_user["id"]
         )
@@ -108,7 +108,7 @@ async def delete_character(
 @router.post("/bulk-delete")
 async def bulk_delete_characters(
     character_ids: List[str],
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -120,7 +120,7 @@ async def bulk_delete_characters(
         if not character_ids:
             raise HTTPException(status_code=400, detail="No character IDs provided")
 
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         deleted_count = 0
         failed_count = 0
 
@@ -156,7 +156,7 @@ async def generate_character_details_with_ai(
     character_name: str,
     book_id: str,
     role: Optional[str] = None,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -174,7 +174,7 @@ async def generate_character_details_with_ai(
         if not character_name or not character_name.strip():
             raise HTTPException(status_code=400, detail="Character name is required")
 
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
 
         character_details = (
             await character_service.generate_character_details_from_book(
@@ -203,7 +203,7 @@ async def generate_character_details_with_ai(
 async def create_character(
     plot_overview_id: str,
     character_data: CharacterCreate,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -213,7 +213,7 @@ async def create_character(
     - **character_data**: Character information
     """
     try:
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         character = await character_service.create_character(
             plot_overview_id=plot_overview_id,
             user_id=current_user["id"],
@@ -233,7 +233,7 @@ async def create_character(
 @router.get("/plot/{plot_overview_id}", response_model=List[CharacterResponse])
 async def get_characters_by_plot(
     plot_overview_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -242,7 +242,7 @@ async def get_characters_by_plot(
     - **plot_overview_id**: ID of the plot overview
     """
     try:
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         characters = await character_service.get_characters_by_plot(
             plot_overview_id, current_user["id"]
         )
@@ -260,7 +260,7 @@ async def get_characters_by_plot(
 @router.post("/{character_id}/analyze-archetypes")
 async def analyze_character_archetypes(
     character_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -270,7 +270,7 @@ async def analyze_character_archetypes(
     """
     try:
         # Get character data first
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         character = await character_service.get_character_by_id(
             character_id, current_user["id"]
         )
@@ -309,7 +309,7 @@ async def analyze_character_archetypes(
 async def generate_character_image(
     character_id: str,
     request: ImageGenerationRequest,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -327,7 +327,7 @@ async def generate_character_image(
     - estimated_time_seconds: Estimated completion time
     """
     try:
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
 
         style = getattr(request, "style", "realistic")
         aspect_ratio = getattr(request, "aspect_ratio", "3:4")
@@ -354,7 +354,7 @@ async def generate_character_image(
 @router.get("/{character_id}/image-status")
 async def get_character_image_status(
     character_id: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -369,7 +369,7 @@ async def get_character_image_status(
     - **character_id**: ID of the character
     """
     try:
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         status = await character_service.get_character_image_status(
             character_id=character_id, user_id=current_user["id"]
         )
@@ -386,14 +386,14 @@ async def get_character_image_status(
 
 @router.get("/archetypes", response_model=List[CharacterArchetypeResponse])
 async def get_all_archetypes(
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
     Get all available character archetypes.
     """
     try:
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         archetypes = await character_service.get_all_archetypes()
 
         return archetypes
@@ -409,7 +409,7 @@ async def get_all_archetypes(
 )
 async def get_archetypes_by_category(
     category: str,
-    supabase_client: Client = Depends(get_supabase),
+    session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
     """
@@ -418,7 +418,7 @@ async def get_archetypes_by_category(
     - **category**: Archetype category (e.g., "Ego", "Shadow", "Soul", "Self")
     """
     try:
-        character_service = CharacterService(supabase_client)
+        character_service = CharacterService(session)
         archetypes = await character_service.get_archetypes_by_category(category)
 
         return archetypes

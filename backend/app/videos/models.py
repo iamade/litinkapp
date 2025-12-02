@@ -78,6 +78,9 @@ class VideoGeneration(SQLModel, table=True):
     video_url: Optional[str] = Field(default=None)
     audio_task_id: Optional[str] = Field(default=None)
 
+    can_resume: bool = Field(default=False)
+    retry_count: int = Field(default=0)
+
     # JSON fields
     task_meta: Dict[str, Any] = Field(
         default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
@@ -352,3 +355,45 @@ class VideoSegment(SQLModel, table=True):
 
     # Relationships
     video_generation: VideoGeneration = Relationship(back_populates="video_segments")
+
+
+class PipelineStepModel(SQLModel, table=True):
+    __tablename__ = "pipeline_steps"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    video_generation_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id"),
+            nullable=False,
+            index=True,
+        )
+    )
+    step_name: str = Field(nullable=False)
+    step_order: int = Field(nullable=False)
+    status: str = Field(default="pending")
+
+    started_at: Optional[datetime] = Field(default=None)
+    completed_at: Optional[datetime] = Field(default=None)
+    error_message: Optional[str] = Field(default=None)
+    retry_count: int = Field(default=0)
+
+    step_data: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
