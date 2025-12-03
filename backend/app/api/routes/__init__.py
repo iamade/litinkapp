@@ -18,7 +18,7 @@ from .admin import router as admin_router
 
 api_router = APIRouter()
 
-api_router.include_router(auth_router, prefix="/auth", tags=["authentication"])
+api_router.include_router(auth_router, tags=["authentication"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(books_router, prefix="/books", tags=["books"])
 api_router.include_router(ai_router, prefix="/ai", tags=["ai"])
