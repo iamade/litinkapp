@@ -453,7 +453,6 @@ class CostTracker:
 
     def __init__(self):
         self.redis_client = None  # Initialize with Redis connection
-        self.supabase_client = None  # Initialize with Supabase connection
 
     async def track(
         self,

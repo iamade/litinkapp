@@ -11,7 +11,7 @@ from app.books.models import Chapter
 from app.core.database import get_session
 from app.core.auth import get_current_active_user
 
-# from app.services.badge_service import BadgeService
+from app.api.services.badge import BadgeService
 
 router = APIRouter()
 

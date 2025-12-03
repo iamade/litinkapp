@@ -1,14 +1,17 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select, func
 import stripe
 import os
+import uuid
 from typing import Dict, Any
 import logging
 
 from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.core.config import settings
+from app.books.models import Book
 
 # Configure Stripe
 stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -28,16 +31,20 @@ async def create_book_upload_checkout_session(
         user_roles = current_user.get('roles', [])
         if 'superadmin' in user_roles:
             raise HTTPException(status_code=400, detail="Superadmin does not require payment for book uploads.")
+            
         # Verify the book exists and belongs to the user
-        book_response = supabase_client.table('books').select('*').eq('id', book_id).eq('user_id', current_user['id']).single().execute()
+        stmt = select(Book).where(
+            Book.id == uuid.UUID(book_id),
+            Book.user_id == uuid.UUID(current_user['id'])
+        )
+        result = await session.exec(stmt)
+        book = result.first()
         
-        if not book_response.data:
+        if not book:
             raise HTTPException(status_code=404, detail="Book not found or not authorized")
         
-        book = book_response.data
-        
         # Verify the book is in PENDING_PAYMENT status
-        if book['status'] != 'PENDING_PAYMENT':
+        if book.status != 'PENDING_PAYMENT':
             raise HTTPException(status_code=400, detail="Book is not pending payment")
         
         # Create Stripe Checkout Session
@@ -59,9 +66,9 @@ async def create_book_upload_checkout_session(
         )
         
         # Store the checkout session ID in the book record for reference
-        supabase_client.table('books').update({
-            'stripe_checkout_session_id': checkout_session.id
-        }).eq('id', book_id).execute()
+        book.stripe_checkout_session_id = checkout_session.id
+        session.add(book)
+        await session.commit()
         
         return {
             "checkout_url": checkout_session.url,
@@ -98,24 +105,29 @@ async def stripe_webhook(
     
     # Handle the event
     if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
+        stripe_session = event['data']['object']
         
         # Extract metadata
-        book_id = session['metadata'].get('book_id')
-        user_id = session['metadata'].get('user_id')
-        payment_type = session['metadata'].get('type')
+        book_id = stripe_session['metadata'].get('book_id')
+        user_id = stripe_session['metadata'].get('user_id')
+        payment_type = stripe_session['metadata'].get('type')
         
         if payment_type == 'book_upload' and book_id:
             try:
                 # Update book status from PENDING_PAYMENT to QUEUED
-                update_response = supabase_client.table('books').update({
-                    'status': 'QUEUED',
-                    'stripe_payment_intent_id': session.get('payment_intent'),
-                    'stripe_customer_id': session.get('customer'),
-                    'payment_status': 'paid'
-                }).eq('id', book_id).execute()
+                stmt = select(Book).where(Book.id == uuid.UUID(book_id))
+                result = await session.exec(stmt)
+                book = result.first()
                 
-                if update_response.data:
+                if book:
+                    book.status = 'QUEUED'
+                    book.stripe_payment_intent_id = stripe_session.get('payment_intent')
+                    book.stripe_customer_id = stripe_session.get('customer')
+                    book.payment_status = 'paid'
+                    
+                    session.add(book)
+                    await session.commit()
+                    
                     logger.info(f"Successfully updated book {book_id} status to QUEUED after payment")
                     
                     # Trigger background processing
@@ -123,14 +135,14 @@ async def stripe_webhook(
                     # For now, the book will be picked up by any existing polling mechanisms
                     
                 else:
-                    logger.error(f"Failed to update book {book_id} after payment")
+                    logger.error(f"Failed to update book {book_id} after payment: Book not found")
                     
             except Exception as e:
                 logger.error(f"Error processing payment completion for book {book_id}: {e}")
     
     elif event['type'] == 'payment_intent.payment_failed':
-        session = event['data']['object']
-        logger.warning(f"Payment failed for session: {session.get('id')}")
+        stripe_session = event['data']['object']
+        logger.warning(f"Payment failed for session: {stripe_session.get('id')}")
         
     else:
         logger.info(f"Unhandled event type: {event['type']}")
@@ -146,18 +158,21 @@ async def check_payment_status(
     """Check the payment status of a book"""
     try:
         # Get book details
-        book_response = supabase_client.table('books').select('*').eq('id', book_id).eq('user_id', current_user['id']).single().execute()
+        stmt = select(Book).where(
+            Book.id == uuid.UUID(book_id),
+            Book.user_id == uuid.UUID(current_user['id'])
+        )
+        result = await session.exec(stmt)
+        book = result.first()
         
-        if not book_response.data:
+        if not book:
             raise HTTPException(status_code=404, detail="Book not found")
-        
-        book = book_response.data
         
         return {
             "book_id": book_id,
-            "status": book['status'],
-            "payment_status": book.get('payment_status', 'unpaid'),
-            "requires_payment": book['status'] == 'PENDING_PAYMENT'
+            "status": book.status,
+            "payment_status": book.payment_status,
+            "requires_payment": book.status == 'PENDING_PAYMENT'
         }
         
     except Exception as e:
@@ -172,9 +187,12 @@ async def get_user_book_count(
     """Get the count of books uploaded by the current user"""
     try:
         # Count books that are not in FAILED status
-        books_response = supabase_client.table('books').select('id', count='exact').eq('user_id', current_user['id']).neq('status', 'FAILED').execute()
-        
-        book_count = books_response.count or 0
+        stmt = select(func.count()).select_from(Book).where(
+            Book.user_id == uuid.UUID(current_user['id']),
+            Book.status != 'FAILED'
+        )
+        result = await session.exec(stmt)
+        book_count = result.one()
         
         return {
             "user_id": current_user['id'],

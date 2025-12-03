@@ -3,7 +3,6 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, col, or_
-from supabase import Client
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_session
@@ -39,7 +38,7 @@ from app.audio.schemas import (
     AudioStatusResponse,
 )
 from app.books.models import Book, Chapter
-from app.videos.models import ImageGeneration
+from app.videos.models import ImageGeneration, AudioGeneration, Script, AudioExport
 from app.api.services.subscription import SubscriptionManager
 
 router = APIRouter()
@@ -822,7 +821,7 @@ async def get_scene_image_status(
     """Get the status of a scene image generation by chapter ID and scene number"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], supabase_client)
+        await verify_chapter_access(chapter_id, current_user["id"], session)
 
         # Query for the scene image record
         # Primary filter: chapter_id and scene_number (root-level)
@@ -832,45 +831,49 @@ async def get_scene_image_status(
         )
 
         # Try root-level scene_number first
-        image_response = (
-            supabase_client.table("image_generations")
-            .select("*")
-            .eq("chapter_id", chapter_id)
-            .eq("scene_number", scene_number)
-            .order("created_at", desc=True)
+        stmt = (
+            select(ImageGeneration)
+            .where(
+                ImageGeneration.chapter_id == uuid.UUID(chapter_id),
+                ImageGeneration.scene_number == scene_number,
+            )
+            .order_by(col(ImageGeneration.created_at).desc())
             .limit(1)
-            .execute()
         )
 
+        result = await session.exec(stmt)
+        image_record = result.first()
+
         # If no results, try metadata-based scene_number as fallback
-        if not image_response.data:
+        if not image_record:
             print(
                 f"[DEBUG] [get_scene_image_status] No root-level scene_number match, trying metadata fallback"
             )
-            # Use PostgreSQL JSONB operator to extract scene_number from metadata
-            # Note: Supabase Python client doesn't support direct JSONB operations,
-            # so we'll fetch all records for this chapter and filter in Python
-            all_chapter_images = (
-                supabase_client.table("image_generations")
-                .select("*")
-                .eq("chapter_id", chapter_id)
-                .is_("scene_number", None)  # Only check records with NULL scene_number
-                .order("created_at", desc=True)
-                .execute()
+            # Fetch all records for this chapter with NULL scene_number and filter in Python
+            stmt = (
+                select(ImageGeneration)
+                .where(
+                    ImageGeneration.chapter_id == uuid.UUID(chapter_id),
+                    ImageGeneration.scene_number == None,
+                )
+                .order_by(col(ImageGeneration.created_at).desc())
             )
 
+            result = await session.exec(stmt)
+            all_chapter_images = result.all()
+
             # Filter by metadata scene_number in Python
-            for record in all_chapter_images.data or []:
-                metadata = record.get("metadata", {})
+            for record in all_chapter_images:
+                metadata = record.metadata or {}
                 metadata_scene_number = metadata.get("scene_number")
                 if metadata_scene_number == scene_number:
-                    image_response.data = [record]
+                    image_record = record
                     print(
                         f"[DEBUG] [get_scene_image_status] Found match via metadata scene_number"
                     )
                     break
 
-        if not image_response.data:
+        if not image_record:
             print(
                 f"[WARNING] [get_scene_image_status] No record found for chapter_id={chapter_id}, scene_number={scene_number}"
             )
@@ -879,22 +882,20 @@ async def get_scene_image_status(
                 detail=f"No image generation found for scene {scene_number}",
             )
 
-        image_record = image_response.data[0]
-
         # Verify the record belongs to the current user
-        if image_record.get("user_id") != current_user["id"]:
+        if str(image_record.user_id) != current_user["id"]:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this image generation"
             )
 
         # Extract scene_number from root-level or metadata
-        record_scene_number = image_record.get("scene_number")
+        record_scene_number = image_record.scene_number
         if record_scene_number is None:
-            metadata = image_record.get("metadata", {})
+            metadata = image_record.metadata or {}
             record_scene_number = metadata.get("scene_number")
 
         # Map status values
-        status = image_record.get("status", "pending")
+        status = image_record.status
         if status == "completed":
             status = "completed"
         elif status == "failed":
@@ -905,23 +906,21 @@ async def get_scene_image_status(
             status = "pending"
 
         # Extract retry_count safely (ensure it's an int)
-        retry_count = image_record.get("retry_count", 0)
-        if retry_count is None:
-            retry_count = 0
+        retry_count = image_record.retry_count or 0
         retry_count = int(retry_count)
 
         return ImageStatusResponse(
-            record_id=image_record.get("id"),
+            record_id=str(image_record.id),
             status=status,
-            image_url=image_record.get("image_url"),
-            prompt=image_record.get("prompt") or image_record.get("image_prompt"),
-            script_id=image_record.get("script_id"),
+            image_url=image_record.image_url,
+            prompt=image_record.prompt or image_record.image_prompt,
+            script_id=str(image_record.script_id) if image_record.script_id else None,
             scene_number=record_scene_number,
             retry_count=retry_count,
-            error_message=image_record.get("error_message"),
-            generation_time_seconds=image_record.get("generation_time_seconds"),
-            created_at=image_record.get("created_at"),
-            updated_at=image_record.get("updated_at"),
+            error_message=image_record.error_message,
+            generation_time_seconds=image_record.generation_time_seconds,
+            created_at=image_record.created_at,
+            updated_at=image_record.updated_at,
         )
 
     except HTTPException:
@@ -945,21 +944,38 @@ async def list_chapter_audio(
     try:
         # Verify chapter access
         chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], supabase_client
+            chapter_id, current_user["id"], session
         )
 
         # Get user's audio files for this chapter
         print(
             f"[DEBUG] Querying audio_generations for user_id: {current_user['id']}, chapter_id: {chapter_id}"
         )
-        audio_response = (
-            supabase_client.table("audio_generations")
-            .select("*")
-            .eq("user_id", current_user["id"])
-            .eq("chapter_id", chapter_id)
-            .execute()
+
+        stmt = select(AudioGeneration).where(
+            AudioGeneration.user_id == uuid.UUID(current_user["id"]),
+            AudioGeneration.chapter_id == uuid.UUID(chapter_id),
         )
-        chapter_audio = [AudioRecord(**audio) for audio in (audio_response.data or [])]
+        result = await session.exec(stmt)
+        chapter_audio_records = result.all()
+
+        chapter_audio = []
+        for r in chapter_audio_records:
+            # Manually map to AudioRecord schema to ensure compatibility
+            record_dict = r.model_dump()
+            record_dict["id"] = str(r.id)
+            record_dict["user_id"] = str(r.user_id) if r.user_id else None
+            record_dict["chapter_id"] = str(r.chapter_id) if r.chapter_id else None
+            record_dict["script_id"] = str(r.script_id) if r.script_id else None
+            record_dict["video_generation_id"] = (
+                str(r.video_generation_id) if r.video_generation_id else None
+            )
+            # Handle metadata rename
+            if hasattr(r, "audio_metadata"):
+                record_dict["metadata"] = r.audio_metadata
+
+            chapter_audio.append(AudioRecord(**record_dict))
+
         print(
             f"[DEBUG] Retrieved {len(chapter_audio)} audio records for chapter {chapter_id}"
         )
@@ -994,7 +1010,7 @@ async def generate_chapter_audio(
     try:
         # Verify chapter access
         chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], supabase_client
+            chapter_id, current_user["id"], session
         )
 
         # Validate audio type against old frontend enum values (for error message)
@@ -1033,17 +1049,18 @@ async def generate_chapter_audio(
         # Check script style validation for narrator audio
         if audio_type == "narrator":
             # Get the most recent script for this chapter
-            script_response = (
-                supabase_client.table("scripts")
-                .select("script_style")
-                .eq("chapter_id", chapter_id)
-                .order("created_at", desc=True)
+            stmt = (
+                select(Script)
+                .where(Script.chapter_id == uuid.UUID(chapter_id))
+                .order_by(col(Script.created_at).desc())
                 .limit(1)
-                .execute()
             )
 
-            if script_response.data:
-                script_style = script_response.data[0].get("script_style")
+            result = await session.exec(stmt)
+            script = result.first()
+
+            if script:
+                script_style = script.script_style
                 # Reject narrator audio generation for cinematic scripts (character dialogue)
                 if script_style == "cinematic":
                     raise HTTPException(
@@ -1084,14 +1101,15 @@ async def generate_chapter_audio(
         print(
             f"[DEBUG] Creating audio record with audio_type: {audio_type}, user_id: {current_user['id']}, chapter_id: {chapter_id}"
         )
-        audio_record_data = {
-            "user_id": current_user["id"],
-            "chapter_id": chapter_id,
-            "audio_type": audio_type,
-            "text_content": text_content,
-            "script_id": request.script_id,
-            "generation_status": "pending",
-            "metadata": {
+
+        audio_record = AudioGeneration(
+            user_id=uuid.UUID(current_user["id"]),
+            chapter_id=uuid.UUID(chapter_id),
+            audio_type=audio_type,
+            text_content=text_content,
+            script_id=uuid.UUID(request.script_id) if request.script_id else None,
+            status="pending",
+            audio_metadata={
                 "scene_number": scene_number,
                 "audio_type": audio_type,
                 "voice_id": request.voice_id,
@@ -1099,19 +1117,12 @@ async def generate_chapter_audio(
                 "speed": request.speed,
                 "duration": request.duration,
             },
-        }
-
-        record_result = (
-            supabase_client.table("audio_generations")
-            .insert(audio_record_data)
-            .execute()
         )
-        record_id = record_result.data[0]["id"] if record_result.data else None
 
-        if not record_id:
-            raise HTTPException(
-                status_code=500, detail="Failed to create audio generation record"
-            )
+        session.add(audio_record)
+        await session.commit()
+        await session.refresh(audio_record)
+        record_id = str(audio_record.id)
 
         print(f"[DEBUG] Created audio record {record_id} for user {current_user['id']}")
 
@@ -1157,40 +1168,44 @@ async def delete_chapter_audio(
     """Delete an audio file for the chapter"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], supabase_client)
+        await verify_chapter_access(chapter_id, current_user["id"], session)
 
         # Find the audio record
-        audio_response = (
-            supabase_client.table("audio_generations")
-            .select("*")
-            .eq("id", audio_id)
-            .single()
-            .execute()
-        )
+        stmt = select(AudioGeneration).where(AudioGeneration.id == uuid.UUID(audio_id))
+        result = await session.exec(stmt)
+        audio_record = result.first()
 
-        if not audio_response.data:
+        if not audio_record:
             raise HTTPException(status_code=404, detail="Audio file not found")
 
-        audio_record = audio_response.data
-
         # Verify the record belongs to the current user
-        if audio_record.get("user_id") != current_user["id"]:
+        if str(audio_record.user_id) != current_user["id"]:
             raise HTTPException(
                 status_code=403, detail="Not authorized to delete this audio file"
             )
 
         # Verify the record is associated with the chapter
-        metadata = audio_record.get("metadata", {})
-        if metadata.get("chapter_id") != chapter_id:
+        # Check direct field first, then metadata
+        record_chapter_id = (
+            str(audio_record.chapter_id) if audio_record.chapter_id else None
+        )
+        if not record_chapter_id:
+            metadata = audio_record.audio_metadata or {}
+            record_chapter_id = metadata.get("chapter_id")
+
+        if record_chapter_id != chapter_id:
             raise HTTPException(
-                status_code=403, detail="Audio file is not associated with this chapter"
+                status_code=400, detail="Audio file does not belong to this chapter"
             )
 
-        # Delete the audio record
-        supabase_client.table("audio_generations").delete().eq("id", audio_id).execute()
+        # Delete the record
+        await session.delete(audio_record)
+        await session.commit()
 
         return DeleteAudioResponse(
-            success=True, message="Audio file deleted successfully", record_id=audio_id
+            status="success",
+            message="Audio file deleted successfully",
+            audio_id=audio_id,
         )
 
     except HTTPException:
@@ -1212,18 +1227,16 @@ async def export_chapter_audio_mix(
     try:
         # Verify chapter access
         chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], supabase_client
+            chapter_id, current_user["id"], session
         )
 
         # Get all audio files for this chapter
-        audio_response = (
-            supabase_client.table("audio_generations")
-            .select("*")
-            .eq("user_id", current_user["id"])
-            .eq("chapter_id", chapter_id)
-            .execute()
+        stmt = select(AudioGeneration).where(
+            AudioGeneration.user_id == uuid.UUID(current_user["id"]),
+            AudioGeneration.chapter_id == uuid.UUID(chapter_id),
         )
-        chapter_audio = audio_response.data or []
+        result = await session.exec(stmt)
+        chapter_audio = result.all()
 
         if not chapter_audio:
             raise HTTPException(
@@ -1233,7 +1246,7 @@ async def export_chapter_audio_mix(
         # Filter audio by types based on request
         filtered_audio = []
         for audio in chapter_audio:
-            audio_type = audio.get("audio_type")
+            audio_type = audio.audio_type
             if (
                 (audio_type == "narrator" and request.include_narration)
                 or (
@@ -1252,14 +1265,14 @@ async def export_chapter_audio_mix(
             )
 
         # Create export record
-        export_record_data = {
-            "user_id": current_user["id"],
-            "chapter_id": chapter_id,
-            "export_format": request.format,
-            "status": "pending",
-            "audio_files": [audio["id"] for audio in filtered_audio],
-            "mix_settings": request.mix_settings or {},
-            "metadata": {
+        export_record = AudioExport(
+            user_id=uuid.UUID(current_user["id"]),
+            chapter_id=uuid.UUID(chapter_id),
+            export_format=request.format,
+            status="pending",
+            audio_files=[str(a.id) for a in filtered_audio],
+            mix_settings=request.mix_settings or {},
+            export_metadata={
                 "chapter_id": chapter_id,
                 "include_narration": request.include_narration,
                 "include_music": request.include_music,
@@ -1267,17 +1280,30 @@ async def export_chapter_audio_mix(
                 "include_ambiance": request.include_ambiance,
                 "include_dialogue": request.include_dialogue,
             },
-        }
-
-        export_result = (
-            supabase_client.table("audio_exports").insert(export_record_data).execute()
         )
-        export_id = export_result.data[0]["id"] if export_result.data else None
 
-        if not export_id:
-            raise HTTPException(
-                status_code=500, detail="Failed to create audio export record"
-            )
+        session.add(export_record)
+        await session.commit()
+        await session.refresh(export_record)
+        export_id = str(export_record.id)
+
+        # Prepare audio files data for task (convert to dicts with string UUIDs)
+        audio_files_data = []
+        for a in filtered_audio:
+            d = a.model_dump()
+            d["id"] = str(a.id)
+            if a.user_id:
+                d["user_id"] = str(a.user_id)
+            if a.chapter_id:
+                d["chapter_id"] = str(a.chapter_id)
+            if a.script_id:
+                d["script_id"] = str(a.script_id)
+            if a.video_generation_id:
+                d["video_generation_id"] = str(a.video_generation_id)
+            # Handle metadata rename for task compatibility if needed
+            if hasattr(a, "audio_metadata"):
+                d["metadata"] = a.audio_metadata
+            audio_files_data.append(d)
 
         # Queue the audio export task
         from app.tasks.audio_tasks import export_chapter_audio_mix_task
@@ -1286,7 +1312,7 @@ async def export_chapter_audio_mix(
             export_id=export_id,
             chapter_id=chapter_id,
             user_id=current_user["id"],
-            audio_files=filtered_audio,
+            audio_files=audio_files_data,
             export_format=request.format,
             mix_settings=request.mix_settings,
         )
@@ -1318,40 +1344,41 @@ async def get_audio_generation_status(
     """Get the status of an audio generation by record ID"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], supabase_client)
+        await verify_chapter_access(chapter_id, current_user["id"], session)
 
         # Get the audio record
-        audio_response = (
-            supabase_client.table("audio_generations")
-            .select("*")
-            .eq("id", record_id)
-            .single()
-            .execute()
-        )
+        stmt = select(AudioGeneration).where(AudioGeneration.id == uuid.UUID(record_id))
+        result = await session.exec(stmt)
+        audio_record = result.first()
 
-        if not audio_response.data:
+        if not audio_record:
             raise HTTPException(
                 status_code=404, detail="Audio generation record not found"
             )
 
-        audio_record = audio_response.data
-
         # Verify the record belongs to the current user
-        if audio_record.get("user_id") != current_user["id"]:
+        if str(audio_record.user_id) != current_user["id"]:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this audio generation"
             )
 
         # Verify the record is associated with the chapter
-        metadata = audio_record.get("metadata", {})
-        if metadata.get("chapter_id") != chapter_id:
+        # Check direct field first, then metadata
+        record_chapter_id = (
+            str(audio_record.chapter_id) if audio_record.chapter_id else None
+        )
+        if not record_chapter_id:
+            metadata = audio_record.audio_metadata or {}
+            record_chapter_id = metadata.get("chapter_id")
+
+        if record_chapter_id != chapter_id:
             raise HTTPException(
                 status_code=403,
                 detail="Audio generation is not associated with this chapter",
             )
 
         # Map status values
-        status = audio_record.get("generation_status", "pending")
+        status = audio_record.status
         if status == "completed":
             status = "completed"
         elif status == "failed":

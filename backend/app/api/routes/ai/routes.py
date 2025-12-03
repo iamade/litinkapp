@@ -1450,7 +1450,7 @@ async def evaluate_script(
             plot_context = chapter.content if chapter else None
 
         # Evaluate using DeepSeekScriptService
-        from app.services.deepseek_script_service import DeepSeekScriptService
+        from app.core.services.deepseek_script import DeepSeekScriptService
 
         deepseek = DeepSeekScriptService()
         result = await deepseek.evaluate_script(script, plot_context=plot_context)
@@ -4030,7 +4030,7 @@ async def retry_video_retrieval(
         print(f"🔄 Attempting video retrieval from URL: {video_url}")
 
         # Import and use the video service for retry
-        from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
+        from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
 
         video_service = ModelsLabV7VideoService()
 

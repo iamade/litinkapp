@@ -40,6 +40,12 @@ class Book(SQLModel, table=True):
     has_sections: bool = Field(default=False)
     structure_type: str = Field(default="flat")
 
+    # Payment fields
+    stripe_checkout_session_id: Optional[str] = Field(default=None)
+    stripe_payment_intent_id: Optional[str] = Field(default=None)
+    stripe_customer_id: Optional[str] = Field(default=None)
+    payment_status: str = Field(default="unpaid")
+
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(

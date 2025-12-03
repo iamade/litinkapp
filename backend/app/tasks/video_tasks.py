@@ -1059,7 +1059,7 @@ async def async_retry_video_retrieval_task(
             )
 
             # Import and use the video service for retry
-            from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
+            from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
 
             video_service = ModelsLabV7VideoService()
 
@@ -1282,7 +1282,7 @@ async def async_automatic_video_retry_task(video_generation_id: str):
             )
 
             # Import and use the video service for retry
-            from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
+            from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
 
             video_service = ModelsLabV7VideoService()
 

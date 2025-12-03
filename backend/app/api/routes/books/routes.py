@@ -447,18 +447,22 @@ async def create_book(
 ):
     """Create a new book"""
     file_service = FileService()
-    
+
     # Save uploaded file to temp
     import tempfile
     import shutil
     import os
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
+
+    with tempfile.NamedTemporaryFile(
+        delete=False, suffix=os.path.splitext(file.filename)[1]
+    ) as temp_file:
         shutil.copyfileobj(file.file, temp_file)
         temp_file_path = temp_file.name
-        
+
     try:
-        content = await file_service.process_book_file(temp_file_path, file.filename, str(current_user.id))
+        content = await file_service.process_book_file(
+            temp_file_path, file.filename, str(current_user.id)
+        )
     finally:
         if os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
@@ -1365,14 +1369,14 @@ async def extract_cover_from_page(
         img_buffer.seek(0)
         # Upload to local storage
         from app.core.services.storage import storage_service
-        
+
         user_id = current_user["id"]
         storage_path = f"users/{user_id}/covers/cover_{book_id}.png"
-        
+
         cover_url = await storage_service.upload(
             file_content=img_buffer.getvalue(),
             path=storage_path,
-            content_type="image/png"
+            content_type="image/png",
         )
 
         book.cover_image_url = cover_url
@@ -1392,6 +1396,11 @@ async def upload_custom_cover(
     book_id: str,
     cover_image: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        book_uuid = uuid.UUID(book_id)
+        stmt = select(Book).where(Book.id == book_uuid)
         result = await session.exec(stmt)
         book = result.first()
 
@@ -1407,13 +1416,12 @@ async def upload_custom_cover(
         img_bytes = await cover_image.read()
         user_id = current_user["id"]
         storage_path = f"users/{user_id}/covers/cover_{book_id}_upload.png"
-        
+
         # Upload to local storage
         from app.core.services.storage import storage_service
+
         cover_url = await storage_service.upload(
-            file_content=img_bytes,
-            path=storage_path,
-            content_type="image/png"
+            file_content=img_bytes, path=storage_path, content_type="image/png"
         )
 
         book.cover_image_url = cover_url

@@ -1726,26 +1726,26 @@ class FileService:
 
         # return self.structure_detector._extract_chapter_content(full_content, chapter_title, lines, start_line)
 
-    def process_book_file(
+    async def process_book_file(
         self, file_path: str, filename: str, user_id: str = None
     ) -> Dict[str, Any]:
         """Process different file types and extract content"""
         try:
             if filename.lower().endswith(".pdf"):
-                return self.process_pdf(file_path, user_id)
+                return await self.process_pdf(file_path, user_id)
             elif filename.lower().endswith(".docx"):
-                return self.process_docx(file_path, user_id)
+                return await self.process_docx(file_path, user_id)
             elif filename.lower().endswith(".txt"):
-                return self.process_txt(file_path, user_id)
+                return await self.process_txt(file_path, user_id)
             elif filename.lower().endswith(".epub"):
-                return self.process_epub(file_path, user_id)
+                return await self.process_epub(file_path, user_id)
             else:
                 raise ValueError(f"Unsupported file type: {filename}")
         except Exception as e:
             print(f"Error processing file {filename}: {e}")
             raise
 
-    def process_pdf(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
+    async def process_pdf(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
         """Extract text, metadata, and cover image from PDF"""
         try:
             doc = fitz.open(file_path)
@@ -1846,7 +1846,7 @@ class FileService:
             print(f"Error processing PDF: {e}")
             raise
 
-    def process_docx(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
+    async def process_docx(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
         """Extract text and cover image from DOCX"""
         try:
             doc = docx.Document(file_path)
@@ -1900,7 +1900,7 @@ class FileService:
             print(f"Error processing DOCX: {e}")
             raise
 
-    def process_txt(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
+    async def process_txt(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
         """Extract text from TXT (no cover image)"""
         try:
             with open(file_path, "r", encoding="utf-8") as file:
@@ -2023,7 +2023,7 @@ class FileService:
             traceback.print_exc()
             return []
 
-    def process_epub(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
+    async def process_epub(self, file_path: str, user_id: str = None) -> Dict[str, Any]:
         """Extract text from EPUB file"""
         try:
             book = epub.read_epub(file_path)
@@ -5402,7 +5402,9 @@ class FileService:
                     raise ValueError(f"File not found in storage: {storage_path}")
                 temp_file.write(file_content)
                 temp_file_path = temp_file.name
-            extracted = self.process_book_file(temp_file_path, safe_filename, user_id)
+            extracted = await self.process_book_file(
+                temp_file_path, safe_filename, user_id
+            )
             os.unlink(temp_file_path)
             content = extracted.get("text", "")
             cover_image_url = extracted.get("cover_image_url")
@@ -5617,29 +5619,43 @@ class FileService:
         return return_data
 
     async def confirm_book_structure(
-        self, book_id: str, confirmed_chapters: List[Dict[str, Any]], user_id: str, session: AsyncSession
+        self,
+        book_id: str,
+        confirmed_chapters: List[Dict[str, Any]],
+        user_id: str,
+        session: AsyncSession,
     ) -> None:
         """Persist user-confirmed structure and create embeddings."""
         print(f"[STRUCTURE SAVE] Starting to save structure for book {book_id}")
         print(f"[STRUCTURE SAVE] Received {len(confirmed_chapters)} confirmed chapters")
 
         try:
-            from app.books.models import Book, Chapter, ChapterEmbedding, BookEmbedding, Section
+            from app.books.models import (
+                Book,
+                Chapter,
+                ChapterEmbedding,
+                BookEmbedding,
+                Section,
+            )
             from sqlmodel import select, delete
             import uuid
-            
+
             book_uuid = uuid.UUID(book_id)
-            
+
             # ✅ FIX: Clean old data in the CORRECT order to avoid foreign key violations
             print("[STRUCTURE SAVE] Cleaning existing data...")
 
             # 1. Delete chapter embeddings first (they reference chapters)
             try:
-                stmt = delete(ChapterEmbedding).where(ChapterEmbedding.book_id == book_uuid)
+                stmt = delete(ChapterEmbedding).where(
+                    ChapterEmbedding.book_id == book_uuid
+                )
                 await session.exec(stmt)
                 print("[STRUCTURE SAVE] Deleted chapter embeddings")
             except Exception as e:
-                print(f"[STRUCTURE SAVE] Warning: Failed to delete chapter embeddings: {e}")
+                print(
+                    f"[STRUCTURE SAVE] Warning: Failed to delete chapter embeddings: {e}"
+                )
 
             # 2. Delete book embeddings (they reference the book)
             try:
@@ -5647,7 +5663,9 @@ class FileService:
                 await session.exec(stmt)
                 print("[STRUCTURE SAVE] Deleted book embeddings")
             except Exception as e:
-                print(f"[STRUCTURE SAVE] Warning: Failed to delete book embeddings: {e}")
+                print(
+                    f"[STRUCTURE SAVE] Warning: Failed to delete book embeddings: {e}"
+                )
 
             # 3. Delete chapters (they reference sections and book)
             try:
@@ -5668,10 +5686,10 @@ class FileService:
             # Build sections (if present)
             section_id_map: Dict[str, uuid.UUID] = {}
             order = 0
-            
-            # We need to commit deletions before insertions? 
+
+            # We need to commit deletions before insertions?
             # SQLAlchemy handles transaction, so it should be fine within same transaction.
-            
+
             for ch in confirmed_chapters:
                 order += 1
                 section_id = None
@@ -5685,10 +5703,10 @@ class FileService:
                             title=ch["section_title"],
                             section_type=ch.get("section_type", ""),
                             section_number=ch.get("section_number", ""),
-                            order_index=ch.get("section_order", order)
+                            order_index=ch.get("section_order", order),
                         )
                         session.add(section)
-                        await session.flush() # Flush to get ID
+                        await session.flush()  # Flush to get ID
                         await session.refresh(section)
                         section_id = section.id
                         section_id_map[section_key] = section_id
@@ -5696,61 +5714,33 @@ class FileService:
                         section_id = section_id_map[section_key]
 
                 # Create chapter
-                            }
-                        )
-                        .execute()
-                    )
-                    chapter_id = chap_resp.data[0]["id"]
-                    print(f"[STRUCTURE SAVE] Created chapter with ID: {chapter_id}")
-                except Exception as e:
-                    print(f"[STRUCTURE SAVE] Failed to create chapter {order}: {e}")
-                    # Try with a different chapter number to avoid duplicates
-                    try:
-                        alt_chapter_num = (
-                            order + 1000
-                        )  # Use a high number to avoid conflicts
-                        chap_resp = (
-                            self.db.table("chapters")
-                            .insert(
-                                {
-                                    "book_id": book_id,
-                                    "section_id": section_id,
-                                    "chapter_number": alt_chapter_num,
-                                    "title": ch.get("title", f"Chapter {order}"),
-                                    "content": self._clean_text_content(
-                                        ch.get("content", "")
-                                    ),
-                                    "summary": self._clean_text_content(
-                                        ch.get("summary", "")
-                                    ),
-                                    "order_index": order,
-                                }
-                            )
-                            .execute()
-                        )
-                        chapter_id = chap_resp.data[0]["id"]
-                        print(
-                            f"[STRUCTURE SAVE] Created chapter with alternative ID: {chapter_id}"
-                        )
-                    except Exception as e2:
-                        print(
-                            f"[STRUCTURE SAVE] Failed to create chapter even with alternative number: {e2}"
-                        )
-                        continue
+                chapter = Chapter(
+                    book_id=book_uuid,
+                    section_id=section_id,
+                    chapter_number=order,
+                    title=ch.get("title", f"Chapter {order}"),
+                    content=self._clean_text_content(ch.get("content", "")),
+                    summary=self._clean_text_content(ch.get("summary", "")),
+                    order_index=order,
+                )
+                session.add(chapter)
+                await session.flush()
+                await session.refresh(chapter)
+                print(f"[STRUCTURE SAVE] Created chapter: {chapter.title}")
 
                 # Create embeddings (best-effort)
                 try:
                     from app.core.services.embeddings import EmbeddingsService
 
-                    es = EmbeddingsService(self.db)
+                    es = EmbeddingsService()
                     await es.create_chapter_embeddings(
-                        chapter_id, ch.get("content", "")
+                        str(chapter.id), ch.get("content", ""), session
                     )
                     print(
-                        f"[STRUCTURE SAVE] Created embeddings for chapter {chapter_id}"
+                        f"[STRUCTURE SAVE] Created embeddings for chapter {chapter.id}"
                     )
                 except Exception as e:
-                    print(f"[EMBEDDINGS] Failed for chapter {chapter_id}: {e}")
+                    print(f"[EMBEDDINGS] Failed for chapter {chapter.id}: {e}")
 
             # Update book metadata
             print(f"[STRUCTURE SAVE] Updating book metadata...")
@@ -5758,7 +5748,7 @@ class FileService:
                 stmt = select(Book).where(Book.id == book_uuid)
                 result = await session.exec(stmt)
                 book = result.first()
-                
+
                 if book:
                     book.has_sections = bool(section_id_map)
                     book.structure_type = "hierarchical" if section_id_map else "flat"
@@ -5766,7 +5756,7 @@ class FileService:
                     book.status = "READY"
                     book.progress = 100
                     book.progress_message = "Book structure saved successfully"
-                    
+
                     session.add(book)
                     await session.commit()
 
@@ -5782,8 +5772,6 @@ class FileService:
             print(f"[STRUCTURE SAVE] ❌ Error saving structure: {e}")
             print(f"[STRUCTURE SAVE] Full error: {traceback.format_exc()}")
             raise e
-
-
 
     async def _compare_with_toc_chapter(
         self, chapter_title: str, extracted_content: str, toc_reference: Dict

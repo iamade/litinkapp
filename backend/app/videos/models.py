@@ -148,13 +148,25 @@ class AudioGeneration(SQLModel, table=True):
         ),
         default_factory=uuid.uuid4,
     )
-    video_generation_id: uuid.UUID = Field(
+    video_generation_id: Optional[uuid.UUID] = Field(
+        default=None,
         sa_column=Column(
             pg.UUID(as_uuid=True),
             ForeignKey("video_generations.id"),
-            nullable=False,
+            nullable=True,
             index=True,
-        )
+        ),
+    )
+
+    # Additional foreign keys
+    user_id: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
+    )
+    chapter_id: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
+    )
+    script_id: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
     )
 
     audio_type: AudioType = Field(
@@ -168,6 +180,14 @@ class AudioGeneration(SQLModel, table=True):
     audio_url: Optional[str] = Field(default=None)
     duration_seconds: Optional[float] = Field(default=None)
     status: str = Field(default="pending")
+
+    # Additional fields for audio generation workflow
+    sequence_order: Optional[int] = Field(default=None)
+    model_id: Optional[str] = Field(default=None)
+    error_message: Optional[str] = Field(default=None)
+    audio_metadata: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -405,5 +425,59 @@ class PipelineStepModel(SQLModel, table=True):
             pg.TIMESTAMP(timezone=True),
             nullable=False,
             server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+
+
+class AudioExport(SQLModel, table=True):
+    __tablename__ = "audio_exports"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(pg.UUID(as_uuid=True), nullable=False, index=True)
+    )
+    chapter_id: uuid.UUID = Field(
+        sa_column=Column(pg.UUID(as_uuid=True), nullable=False, index=True)
+    )
+    export_format: str = Field(nullable=False)
+    status: str = Field(default="pending")
+
+    # Store list of audio file IDs included in the export
+    audio_files: List[str] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+
+    mix_settings: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    export_metadata: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+
+    export_url: Optional[str] = Field(default=None)
+    error_message: Optional[str] = Field(default=None)
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
         ),
     )
