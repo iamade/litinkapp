@@ -11,6 +11,9 @@ from fastapi import (
     BackgroundTasks,
 )
 from fastapi.responses import StreamingResponse
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select
+
 from app.merges.schemas import (
     MergeManualRequest,
     MergeManualResponse,
@@ -18,13 +21,15 @@ from app.merges.schemas import (
     MergeStatusResponse,
     MergePreviewRequest,
     MergePreviewResponse,
-    MergeOperation,
+    MergeOperation as MergeOperationSchema,
     MergeError,
 )
+from app.merges.models import MergeOperation
+from app.videos.models import VideoGeneration
 from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.core.config import settings
-from sqlmodel.ext.asyncio.session import AsyncSession
+from app.core.services.storage import storage_service
 import json
 import os
 import mimetypes
@@ -116,48 +121,49 @@ async def start_manual_merge(
 
         # If video_generation_id is provided, verify access
         if request.video_generation_id:
-            video_gen = (
-                supabase_client.table("video_generations")
-                .select("*")
-                .eq("id", request.video_generation_id)
-                .eq("user_id", current_user["id"])
-                .single()
-                .execute()
+            stmt = select(VideoGeneration).where(
+                VideoGeneration.id == uuid.UUID(request.video_generation_id),
+                VideoGeneration.user_id == uuid.UUID(current_user["id"]),
             )
+            result = await session.exec(stmt)
+            video_gen = result.first()
 
-            if not video_gen.data:
+            if not video_gen:
                 raise HTTPException(
                     status_code=404,
                     detail="Video generation not found or access denied",
                 )
 
         # Generate merge ID
-        merge_id = str(uuid.uuid4())
+        merge_id = uuid.uuid4()
 
         # Create merge operation record
-        merge_data = {
-            "id": merge_id,
-            "user_id": current_user["id"],
-            "video_generation_id": request.video_generation_id,
-            "merge_status": "PENDING",
-            "progress": 0,
-            "input_sources": [source.dict() for source in request.input_sources],
-            "quality_tier": request.quality_tier.value,
-            "output_format": request.output_format.value,
-            "ffmpeg_params": (
+        merge_op = MergeOperation(
+            id=merge_id,
+            user_id=uuid.UUID(current_user["id"]),
+            video_generation_id=(
+                uuid.UUID(request.video_generation_id)
+                if request.video_generation_id
+                else None
+            ),
+            merge_status="PENDING",
+            progress=0,
+            input_sources=[source.dict() for source in request.input_sources],
+            quality_tier=request.quality_tier.value,
+            output_format=request.output_format.value,
+            ffmpeg_params=(
                 request.ffmpeg_params.dict() if request.ffmpeg_params else None
             ),
-            "merge_name": request.merge_name,
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-        }
+            merge_name=request.merge_name,
+        )
 
-        # Store in database
-        supabase_client.table("merge_operations").insert(merge_data).execute()
+        session.add(merge_op)
+        await session.commit()
+        await session.refresh(merge_op)
 
         # Start background merge task
         background_tasks.add_task(
-            process_manual_merge, merge_id, request, current_user["id"]
+            process_manual_merge, str(merge_id), request, current_user["id"]
         )
 
         # Estimate processing time based on input sources
@@ -166,7 +172,7 @@ async def start_manual_merge(
         )  # Rough estimate: 30s per source
 
         return MergeManualResponse(
-            merge_id=merge_id,
+            merge_id=str(merge_id),
             status=MergeStatus.PENDING,
             message="Manual merge operation started",
             estimated_duration=estimated_duration,
@@ -226,21 +232,17 @@ async def get_merge_status(
         )
 
         # Query merge operation from database
-        merge_result = (
-            supabase_client.table("merge_operations")
-            .select("*")
-            .eq("id", merge_id)
-            .eq("user_id", current_user["id"])
-            .single()
-            .execute()
+        stmt = select(MergeOperation).where(
+            MergeOperation.id == uuid.UUID(merge_id),
+            MergeOperation.user_id == uuid.UUID(current_user["id"]),
         )
+        result = await session.exec(stmt)
+        merge_op = result.first()
 
-        if not merge_result.data:
+        if not merge_op:
             raise HTTPException(
                 status_code=404, detail="Merge operation not found or access denied"
             )
-
-        merge_data = merge_result.data
 
         # Map database status to enum
         status_map = {
@@ -250,14 +252,12 @@ async def get_merge_status(
             "FAILED": MergeStatus.FAILED,
         }
 
-        status = status_map.get(
-            merge_data.get("merge_status", "PENDING"), MergeStatus.PENDING
-        )
+        status = status_map.get(merge_op.merge_status, MergeStatus.PENDING)
 
         # Determine current step based on status and progress
         current_step = "Initializing"
         if status == MergeStatus.PROCESSING:
-            progress = merge_data.get("progress", 0)
+            progress = merge_op.progress
             if progress < 25:
                 current_step = "Preparing input files"
             elif progress < 50:
@@ -272,20 +272,16 @@ async def get_merge_status(
             current_step = "Failed"
 
         response = MergeStatusResponse(
-            merge_id=merge_id,
+            merge_id=str(merge_op.id),
             status=status,
-            progress_percentage=float(merge_data.get("progress", 0)),
+            progress_percentage=merge_op.progress,
             current_step=current_step,
-            output_url=merge_data.get("output_file_url"),
-            preview_url=merge_data.get("preview_url"),
-            error_message=merge_data.get("error_message"),
-            processing_stats=merge_data.get("processing_stats", {}),
-            created_at=datetime.fromisoformat(
-                merge_data.get("created_at", datetime.now().isoformat())
-            ),
-            updated_at=datetime.fromisoformat(
-                merge_data.get("updated_at", datetime.now().isoformat())
-            ),
+            output_url=merge_op.output_file_url,
+            preview_url=merge_op.preview_url,
+            error_message=merge_op.error_message,
+            processing_stats=merge_op.processing_stats or {},
+            created_at=merge_op.created_at,
+            updated_at=merge_op.updated_at,
         )
 
         print(f"[MERGE STATUS] Response: {response.dict()}")
@@ -317,75 +313,48 @@ async def download_merge_result(
             raise HTTPException(status_code=400, detail="Invalid merge ID format")
 
         # Query merge operation from database
-        merge_result = (
-            supabase_client.table("merge_operations")
-            .select("*")
-            .eq("id", merge_id)
-            .eq("user_id", current_user["id"])
-            .single()
-            .execute()
+        stmt = select(MergeOperation).where(
+            MergeOperation.id == uuid.UUID(merge_id),
+            MergeOperation.user_id == uuid.UUID(current_user["id"]),
         )
+        result = await session.exec(stmt)
+        merge_op = result.first()
 
-        if not merge_result.data:
+        if not merge_op:
             raise HTTPException(
                 status_code=404, detail="Merge operation not found or access denied"
             )
 
-        merge_data = merge_result.data
-
         # Check if merge operation is completed
-        if merge_data.get("merge_status") != "COMPLETED":
+        if merge_op.merge_status != "COMPLETED":
             raise HTTPException(
                 status_code=400,
-                detail=f"Merge operation is not completed. Current status: {merge_data.get('merge_status')}",
+                detail=f"Merge operation is not completed. Current status: {merge_op.merge_status}",
             )
 
         # Get output file URL
-        output_file_url = merge_data.get("output_file_url")
+        output_file_url = merge_op.output_file_url
         if not output_file_url:
             raise HTTPException(
                 status_code=404,
                 detail="Output file URL not found for completed merge operation",
             )
 
-        # Extract storage path from Supabase URL
-        # Supabase URLs typically look like: https://[project].supabase.co/storage/v1/object/public/[bucket]/[path]
+        # Extract storage path from URL
+        # URL format: /static/[path]
+        if output_file_url.startswith("/static/"):
+            storage_path = output_file_url[8:]  # Remove /static/
+        else:
+            # Fallback for old URLs or full URLs
+            storage_path = os.path.basename(output_file_url)
+
+        # Download file from Local Storage
         try:
-            # Parse the URL to extract the file path
-            from urllib.parse import urlparse
-
-            parsed_url = urlparse(output_file_url)
-            path_parts = parsed_url.path.split("/")
-
-            # Find the bucket name and extract the path after it
-            bucket_index = -1
-            for i, part in enumerate(path_parts):
-                if part == settings.SUPABASE_BUCKET_NAME:
-                    bucket_index = i
-                    break
-
-            if bucket_index == -1:
-                raise ValueError("Bucket name not found in URL")
-
-            storage_path = "/".join(path_parts[bucket_index + 1 :])
-
-        except Exception as e:
-            print(
-                f"[MERGE DOWNLOAD] Error parsing storage path from URL {output_file_url}: {str(e)}"
-            )
-            raise HTTPException(
-                status_code=500, detail="Invalid output file URL format"
-            )
-
-        # Download file from Supabase Storage
-        try:
-            file_content = supabase_client.storage.from_(
-                settings.SUPABASE_BUCKET_NAME
-            ).download(storage_path)
+            file_content = await storage_service.download(storage_path)
             if file_content is None:
                 raise HTTPException(status_code=404, detail="File not found in storage")
         except Exception as e:
-            print(f"[MERGE DOWNLOAD] Error downloading from Supabase Storage: {str(e)}")
+            print(f"[MERGE DOWNLOAD] Error downloading from storage: {str(e)}")
             raise HTTPException(
                 status_code=500, detail="Failed to download file from storage"
             )
@@ -421,10 +390,10 @@ async def download_merge_result(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def upload_file_to_supabase(
-    file: UploadFile, file_type: str, user_id: str, supabase_client: Client
+async def upload_file_to_storage(
+    file: UploadFile, file_type: str, user_id: str
 ) -> tuple[str, int]:
-    """Upload file to Supabase Storage and return public URL and file size"""
+    """Upload file to Storage and return public URL and file size"""
     try:
         # Read file content
         file_content = await file.read()
@@ -446,23 +415,16 @@ async def upload_file_to_supabase(
         unique_filename = f"{uuid.uuid4()}{file_extension}"
         storage_path = f"users/{user_id}/merge/{folder}/{unique_filename}"
 
-        # Upload to Supabase Storage
-        supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
-            path=storage_path,
-            file=file_content,
-            file_options={"content-type": content_type},
+        # Upload to Storage
+        public_url = await storage_service.upload(
+            file_content, storage_path, content_type
         )
 
-        # Get public URL
-        public_url = supabase_client.storage.from_(
-            settings.SUPABASE_BUCKET_NAME
-        ).get_public_url(storage_path)
-
-        print(f"[FILE UPLOAD] File uploaded to Supabase: {public_url}")
+        print(f"[FILE UPLOAD] File uploaded to storage: {public_url}")
         return public_url, file_size
 
     except Exception as e:
-        print(f"[FILE UPLOAD ERROR] Failed to upload to Supabase: {str(e)}")
+        print(f"[FILE UPLOAD ERROR] Failed to upload to storage: {str(e)}")
         raise
 
 
@@ -489,33 +451,36 @@ async def upload_merge_file(
         validate_file_upload(file)
         print(f"[FILE UPLOAD] File validation passed")
 
-        # Upload file to Supabase Storage
-        file_url, file_size = await upload_file_to_supabase(
-            file, file_type, current_user["id"], supabase_client
+        # Upload file to Storage
+        file_url, file_size = await upload_file_to_storage(
+            file, file_type, current_user["id"]
         )
 
         # Create merge operation record
-        merge_id = str(uuid.uuid4())
-        merge_data = {
-            "id": merge_id,
-            "user_id": current_user["id"],
-            "merge_status": "PENDING",
-            "progress": 0,
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-        }
+        merge_id = uuid.uuid4()
+
+        merge_op = MergeOperation(
+            id=merge_id,
+            user_id=uuid.UUID(current_user["id"]),
+            merge_status="PENDING",
+            progress=0,
+            quality_tier="web",  # Default
+            output_format="mp4",  # Default
+        )
 
         # Set the appropriate file URL based on type
         if file_type == "video":
-            merge_data["video_file_url"] = file_url
+            merge_op.video_file_url = file_url
         elif file_type == "audio":
-            merge_data["audio_file_url"] = file_url
+            merge_op.audio_file_url = file_url
 
         # Insert merge operation record
-        supabase_client.table("merge_operations").insert(merge_data).execute()
+        session.add(merge_op)
+        await session.commit()
+        await session.refresh(merge_op)
 
         response = {
-            "merge_id": merge_id,
+            "merge_id": str(merge_id),
             "file_url": file_url,
             "file_type": file_type,
             "file_size": file_size,
@@ -545,21 +510,8 @@ async def process_manual_merge(
 
         print(f"Processing manual merge {merge_id} for user {user_id}")
 
-        # Prepare merge data
-        merge_data = {
-            "input_sources": [source.dict() for source in request.input_sources],
-            "quality_tier": request.quality_tier.value,
-            "output_format": request.output_format.value,
-            "ffmpeg_params": (
-                request.ffmpeg_params.dict() if request.ffmpeg_params else None
-            ),
-            "merge_name": request.merge_name,
-        }
-
         # Call the actual merge task
         task_process_manual_merge.delay(merge_id, user_id)
-
-        # TODO: Store merge_data in database for the task to retrieve
 
     except Exception as e:
         print(f"Error processing manual merge {merge_id}: {str(e)}")
@@ -577,20 +529,8 @@ async def process_merge_preview(
 
         print(f"Processing merge preview {preview_id} for user {user_id}")
 
-        # Prepare preview data
-        preview_data = {
-            "input_sources": [source.dict() for source in request.input_sources],
-            "quality_tier": request.quality_tier.value,
-            "preview_duration": request.preview_duration,
-            "ffmpeg_params": (
-                request.ffmpeg_params.dict() if request.ffmpeg_params else None
-            ),
-        }
-
         # Call the actual preview task
         task_process_merge_preview.delay(preview_id, user_id)
-
-        # TODO: Store preview_data in database for the task to retrieve
 
     except Exception as e:
         print(f"Error processing merge preview {preview_id}: {str(e)}")

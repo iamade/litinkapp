@@ -1,6 +1,9 @@
 from typing import Any, Dict, List, Optional
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select, col, or_
+from supabase import Client
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_session
@@ -35,36 +38,41 @@ from app.audio.schemas import (
     DeleteAudioResponse,
     AudioStatusResponse,
 )
+from app.books.models import Book, Chapter
+from app.videos.models import ImageGeneration
+from app.api.services.subscription import SubscriptionManager
 
 router = APIRouter()
 
 
 async def verify_chapter_access(
-    chapter_id: str, user_id: str, supabase_client: Client
+    chapter_id: str, user_id: str, session: AsyncSession
 ) -> Dict[str, Any]:
     """Verify user has access to the chapter and return chapter data"""
     try:
         # Get chapter with book info
-        chapter_response = (
-            supabase_client.table("chapters")
-            .select("*, books(*)")
-            .eq("id", chapter_id)
-            .single()
-            .execute()
-        )
+        stmt = select(Chapter, Book).join(Book).where(Chapter.id == chapter_id)
+        result = await session.exec(stmt)
+        chapter_book = result.first()
 
-        if not chapter_response.data:
+        if not chapter_book:
             raise HTTPException(status_code=404, detail="Chapter not found")
 
-        chapter_data = chapter_response.data
-        book_data = chapter_data.get("books", {})
+        chapter, book = chapter_book
 
         # Check access permissions (published books or owned by user)
-        if book_data.get("status") != "READY" and book_data.get("user_id") != user_id:
+        if book.status != "READY" and str(book.user_id) != user_id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
 
+        # Convert to dict for compatibility with existing code
+        chapter_data = chapter.model_dump()
+        # Add book data if needed, or just return chapter_data
+        # The original code returned chapter_data with nested books
+        # We can simulate that or update callers.
+        # Callers use: chapter_data.get("ai_generated_content")
+        # So model_dump is fine.
         return chapter_data
 
     except HTTPException:
@@ -79,7 +87,7 @@ def get_scene_description_from_chapter(
     chapter_data: Dict[str, Any], scene_number: int
 ) -> str:
     """Extract scene description from chapter AI content"""
-    ai_content = chapter_data.get("ai_generated_content", {})
+    ai_content = chapter_data.get("ai_generated_content", {}) or {}
 
     # Look for scene descriptions in AI content
     for key, content in ai_content.items():
@@ -97,7 +105,7 @@ def get_character_info_from_chapter(
     chapter_data: Dict[str, Any], character_name: str
 ) -> Optional[Dict[str, str]]:
     """Extract character information from chapter AI content"""
-    ai_content = chapter_data.get("ai_generated_content", {})
+    ai_content = chapter_data.get("ai_generated_content", {}) or {}
 
     # Look for characters in AI content
     for key, content in ai_content.items():
@@ -142,19 +150,22 @@ async def list_chapter_images(
     """List all images associated with a chapter"""
     try:
         # Verify chapter access
-        chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], supabase_client
-        )
+        await verify_chapter_access(chapter_id, current_user["id"], session)
 
         # Get user's standalone images
-        image_service = StandaloneImageService(supabase_client)
+        image_service = StandaloneImageService(session)
         user_images = await image_service.get_user_images(current_user["id"])
 
         # Filter images associated with this chapter (check both metadata and root-level chapter_id)
         chapter_images = []
         for img in user_images:
-            metadata = img.get("metadata", {})
+            metadata = img.get("metadata", {}) or {}
+            # Check root-level chapter_id (if added to model) or metadata
             root_chapter_id = img.get("chapter_id")
+
+            # Convert UUID to str for comparison if needed
+            if root_chapter_id:
+                root_chapter_id = str(root_chapter_id)
 
             # Check both metadata.chapter_id and root-level chapter_id field
             if (
@@ -192,7 +203,7 @@ async def generate_scene_image(
     try:
         # Verify chapter access
         chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], supabase_client
+            chapter_id, current_user["id"], session
         )
 
         # Get scene description
@@ -209,44 +220,40 @@ async def generate_scene_image(
             scene_description = request.scene_description
 
         # Get user tier for model selection
-        from app.api.services.subscription import SubscriptionManager
-
-        subscription_manager = SubscriptionManager(supabase_client)
+        subscription_manager = SubscriptionManager(session)
         usage_check = await subscription_manager.check_usage_limits(
-            current_user["id"], "image"
+            uuid.UUID(current_user["id"]), "image"
         )
         user_tier = usage_check["tier"]
 
         # Create pending record in database
-        record_data = {
-            "user_id": current_user["id"],
-            "image_type": "scene",
-            "scene_description": scene_description,
-            "scene_number": scene_number,
+        # We use ImageGeneration model directly via session
+        metadata = {
             "chapter_id": chapter_id,
+            "scene_number": scene_number,
             "script_id": request.script_id,
-            "status": "pending",
-            "progress": 0,
-            "metadata": {
-                "chapter_id": chapter_id,
-                "scene_number": scene_number,
-                "script_id": request.script_id,
-                "image_type": "scene",
-                "style": request.style,
-                "aspect_ratio": request.aspect_ratio,
-            },
+            "image_type": "scene",
+            "style": request.style,
+            "aspect_ratio": request.aspect_ratio,
         }
 
-        try:
-            record_result = (
-                supabase_client.table("image_generations").insert(record_data).execute()
-            )
-            record_id = record_result.data[0]["id"] if record_result.data else None
+        record = ImageGeneration(
+            user_id=uuid.UUID(current_user["id"]),
+            image_type="scene",
+            scene_description=scene_description,
+            scene_number=scene_number,
+            chapter_id=uuid.UUID(chapter_id),
+            script_id=uuid.UUID(request.script_id) if request.script_id else None,
+            status="pending",
+            progress=0,
+            meta=metadata,
+        )
 
-            if not record_id:
-                raise HTTPException(
-                    status_code=500, detail="Failed to create image generation record"
-                )
+        try:
+            session.add(record)
+            await session.commit()
+            await session.refresh(record)
+            record_id = str(record.id)
 
         except Exception as db_error:
             raise HTTPException(
@@ -291,18 +298,12 @@ async def generate_scene_image(
             print(
                 f"[ERROR] [generate_scene_image] Failed to queue task: {str(task_error)}"
             )
-            print(f"[ERROR] [generate_scene_image] Task error type: {type(task_error)}")
-            import traceback
-
-            print(f"[ERROR] [generate_scene_image] Traceback: {traceback.format_exc()}")
 
             try:
-                supabase_client.table("image_generations").update(
-                    {
-                        "status": "failed",
-                        "error_message": f"Failed to queue task: {str(task_error)}",
-                    }
-                ).eq("id", record_id).execute()
+                record.status = "failed"
+                record.error_message = f"Failed to queue task: {str(task_error)}"
+                session.add(record)
+                await session.commit()
             except Exception as update_error:
                 print(
                     f"[ERROR] [generate_scene_image] Failed to update DB record: {str(update_error)}"
@@ -335,7 +336,7 @@ async def generate_character_image(
     try:
         # Verify chapter access
         chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], supabase_client
+            chapter_id, current_user["id"], session
         )
 
         # Get character info from chapter
@@ -355,30 +356,27 @@ async def generate_character_image(
             character_info["description"] = request.character_description
 
         # Create initial record in database
-        image_service = StandaloneImageService(supabase_client)
-        record_data = {
-            "user_id": current_user["id"],
-            "image_type": "character",
+        metadata = {
+            "chapter_id": chapter_id,
             "character_name": character_info["name"],
-            "scene_description": character_info["description"],
-            "script_id": request.script_id,
-            "status": "pending",
-            "metadata": {
-                "chapter_id": chapter_id,
-                "character_name": character_info["name"],
-                "image_type": "character",
-            },
+            "image_type": "character",
         }
 
-        record_result = (
-            supabase_client.table("image_generations").insert(record_data).execute()
+        record = ImageGeneration(
+            user_id=uuid.UUID(current_user["id"]),
+            image_type="character",
+            character_name=character_info["name"],
+            scene_description=character_info["description"],
+            script_id=uuid.UUID(request.script_id) if request.script_id else None,
+            chapter_id=uuid.UUID(chapter_id),
+            status="pending",
+            meta=metadata,
         )
-        record_id = record_result.data[0]["id"] if record_result.data else None
 
-        if not record_id:
-            raise HTTPException(
-                status_code=500, detail="Failed to create image generation record"
-            )
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
+        record_id = str(record.id)
 
         # Queue the character image generation task
         task = generate_character_image_task.delay(
@@ -419,7 +417,7 @@ async def link_character_image(
     """Link an existing character image (e.g., from plot overview) to a script"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], supabase_client)
+        await verify_chapter_access(chapter_id, current_user["id"], session)
 
         character_name = request.get("character_name")
         image_url = request.get("image_url")
@@ -432,34 +430,33 @@ async def link_character_image(
             )
 
         # Create record in database
-        record_data = {
-            "user_id": current_user["id"],
-            "image_type": "character",
+        metadata = {
+            "chapter_id": chapter_id,
             "character_name": character_name,
-            "image_url": image_url,
+            "image_type": "character",
             "image_prompt": prompt,
-            "script_id": script_id,
-            "status": "completed",
-            "metadata": {
-                "chapter_id": chapter_id,
-                "character_name": character_name,
-                "image_type": "character",
-                "image_prompt": prompt,
-                "linked_from_plot": True,
-            },
+            "linked_from_plot": True,
         }
 
-        record_result = (
-            supabase_client.table("image_generations").insert(record_data).execute()
+        record = ImageGeneration(
+            user_id=uuid.UUID(current_user["id"]),
+            image_type="character",
+            character_name=character_name,
+            image_url=image_url,
+            image_prompt=prompt,
+            script_id=uuid.UUID(script_id) if script_id else None,
+            chapter_id=uuid.UUID(chapter_id),
+            status="completed",
+            meta=metadata,
         )
-        record_id = record_result.data[0]["id"] if record_result.data else None
 
-        if not record_id:
-            raise HTTPException(status_code=500, detail="Failed to create image record")
+        session.add(record)
+        await session.commit()
+        await session.refresh(record)
 
         return {
             "success": True,
-            "record_id": record_id,
+            "record_id": str(record.id),
             "message": "Character image linked successfully",
         }
 
@@ -483,19 +480,29 @@ async def delete_scene_image(
     """Delete a scene image for the chapter"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], supabase_client)
+        await verify_chapter_access(chapter_id, current_user["id"], session)
 
         # Find the image record
-        image_service = StandaloneImageService(supabase_client)
+        image_service = StandaloneImageService(session)
         user_images = await image_service.get_user_images(current_user["id"])
 
         target_record = None
         for img in user_images:
-            metadata = img.get("metadata", {})
+            metadata = img.get("metadata", {}) or {}
+            root_chapter_id = img.get("chapter_id")
+            if root_chapter_id:
+                root_chapter_id = str(root_chapter_id)
+
             if (
-                metadata.get("chapter_id") == chapter_id
-                and metadata.get("scene_number") == scene_number
-                and metadata.get("image_type") == "scene"
+                (
+                    metadata.get("chapter_id") == chapter_id
+                    or root_chapter_id == chapter_id
+                )
+                and (
+                    metadata.get("scene_number") == scene_number
+                    or img.get("scene_number") == scene_number
+                )
+                and img.get("image_type") == "scene"
             ):
                 target_record = img
                 break
@@ -539,19 +546,29 @@ async def delete_character_image(
     """Delete a character image for the chapter"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], supabase_client)
+        await verify_chapter_access(chapter_id, current_user["id"], session)
 
         # Find the image record
-        image_service = StandaloneImageService(supabase_client)
+        image_service = StandaloneImageService(session)
         user_images = await image_service.get_user_images(current_user["id"])
 
         target_record = None
         for img in user_images:
-            metadata = img.get("metadata", {})
+            metadata = img.get("metadata", {}) or {}
+            root_chapter_id = img.get("chapter_id")
+            if root_chapter_id:
+                root_chapter_id = str(root_chapter_id)
+
             if (
-                metadata.get("chapter_id") == chapter_id
-                and metadata.get("character_name") == character_name
-                and metadata.get("image_type") == "character"
+                (
+                    metadata.get("chapter_id") == chapter_id
+                    or root_chapter_id == chapter_id
+                )
+                and (
+                    metadata.get("character_name") == character_name
+                    or img.get("character_name") == character_name
+                )
+                and img.get("image_type") == "character"
             ):
                 target_record = img
                 break
@@ -593,13 +610,21 @@ async def batch_generate_images(
     try:
         # Verify chapter access
         chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], supabase_client
+            chapter_id, current_user["id"], session
         )
 
         # Prepare batch requests
         batch_requests = []
         for img_request in request.images:
             img_type = img_request.get("type", "scene")
+
+            # Common fields
+            req_data = {
+                "chapter_id": chapter_id,  # Pass chapter_id for metadata
+                "style": img_request.get("style"),
+                "aspect_ratio": img_request.get("aspect_ratio"),
+                "custom_prompt": img_request.get("custom_prompt"),
+            }
 
             if img_type == "scene":
                 scene_num = img_request.get("scene_number")
@@ -611,13 +636,13 @@ async def batch_generate_images(
                 if img_request.get("description"):
                     scene_desc = img_request.get("description")
 
-                batch_requests.append(
+                req_data.update(
                     {
                         "type": "scene",
                         "scene_description": scene_desc,
+                        "scene_number": scene_num,
                         "style": img_request.get("style", "cinematic"),
                         "aspect_ratio": img_request.get("aspect_ratio", "16:9"),
-                        "custom_prompt": img_request.get("custom_prompt"),
                     }
                 )
 
@@ -633,20 +658,19 @@ async def batch_generate_images(
                 if img_request.get("description"):
                     char_desc = img_request.get("description")
 
-                batch_requests.append(
+                req_data.update(
                     {
                         "type": "character",
                         "character_name": char_name,
                         "character_description": char_desc,
                         "style": img_request.get("style", "realistic"),
                         "aspect_ratio": img_request.get("aspect_ratio", "3:4"),
-                        "custom_prompt": img_request.get("custom_prompt"),
                     }
                 )
 
             else:
                 # General image
-                batch_requests.append(
+                req_data.update(
                     {
                         "type": "general",
                         "prompt": img_request.get(
@@ -657,36 +681,13 @@ async def batch_generate_images(
                     }
                 )
 
+            batch_requests.append(req_data)
+
         # Generate batch
-        image_service = StandaloneImageService(supabase_client)
+        image_service = StandaloneImageService(session)
         batch_results = await image_service.batch_generate_images(
             image_requests=batch_requests, user_id=current_user["id"]
         )
-
-        # Update metadata for successful generations to include chapter_id
-        for i, result in enumerate(batch_results):
-            if result.get("status") == "success" and result.get("record_id"):
-                metadata_update = {"chapter_id": chapter_id, "batch_index": i}
-
-                img_request = request.images[i]
-                if img_request.get("type") == "scene":
-                    metadata_update.update(
-                        {
-                            "image_type": "scene",
-                            "scene_number": img_request.get("scene_number"),
-                        }
-                    )
-                elif img_request.get("type") == "character":
-                    metadata_update.update(
-                        {
-                            "image_type": "character",
-                            "character_name": img_request.get("character_name"),
-                        }
-                    )
-
-                supabase_client.table("image_generations").update(
-                    {"metadata": metadata_update}
-                ).eq("id", result["record_id"]).execute()
 
         successful_count = sum(1 for r in batch_results if r.get("status") == "success")
 
@@ -714,7 +715,7 @@ async def get_batch_status(
     """Get status of a batch image generation (placeholder - batch tracking not implemented)"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], supabase_client)
+        await verify_chapter_access(chapter_id, current_user["id"], session)
 
         # For now, return a placeholder response since batch tracking isn't implemented
         # In a real implementation, you'd track batches with IDs
@@ -747,40 +748,38 @@ async def get_image_generation_status(
     """Get the status of an image generation by record ID"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], supabase_client)
+        await verify_chapter_access(chapter_id, current_user["id"], session)
 
         # Get the image record
-        image_response = (
-            supabase_client.table("image_generations")
-            .select("*")
-            .eq("id", record_id)
-            .single()
-            .execute()
-        )
+        stmt = select(ImageGeneration).where(ImageGeneration.id == record_id)
+        result = await session.exec(stmt)
+        image_record = result.first()
 
-        if not image_response.data:
+        if not image_record:
             raise HTTPException(
                 status_code=404, detail="Image generation record not found"
             )
 
-        image_record = image_response.data
-
         # Verify the record belongs to the current user
-        if image_record.get("user_id") != current_user["id"]:
+        if str(image_record.user_id) != current_user["id"]:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this image generation"
             )
 
         # Verify the record is associated with the chapter
-        metadata = image_record.get("metadata", {})
-        if metadata.get("chapter_id") != chapter_id:
+        metadata = image_record.meta or {}
+        root_chapter_id = (
+            str(image_record.chapter_id) if image_record.chapter_id else None
+        )
+
+        if metadata.get("chapter_id") != chapter_id and root_chapter_id != chapter_id:
             raise HTTPException(
                 status_code=403,
                 detail="Image generation is not associated with this chapter",
             )
 
         # Map status values
-        status = image_record.get("status", "pending")
+        status = image_record.status
         if status == "completed":
             status = "completed"
         elif status == "failed":
@@ -793,11 +792,11 @@ async def get_image_generation_status(
         return ImageStatusResponse(
             record_id=record_id,
             status=status,
-            image_url=image_record.get("image_url"),
-            prompt=image_record.get("prompt") or image_record.get("image_prompt"),
-            script_id=image_record.get("script_id"),
-            error_message=image_record.get("error_message"),
-            generation_time_seconds=image_record.get("generation_time_seconds"),
+            image_url=image_record.image_url,
+            prompt=image_record.image_prompt or image_record.text_prompt,
+            script_id=str(image_record.script_id) if image_record.script_id else None,
+            error_message=image_record.error_message,
+            generation_time_seconds=image_record.generation_time_seconds,
             created_at=image_record.get("created_at"),
             updated_at=image_record.get("updated_at"),
         )

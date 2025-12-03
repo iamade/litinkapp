@@ -9,8 +9,6 @@ from sqlalchemy import text
 
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 
-from supabase import create_client, Client
-
 
 logger = get_logger()
 
@@ -78,6 +76,3 @@ async def init_db() -> None:
         logger.error(f"Database initializtion failed: {e}")
         raise
     
-def get_supabase() -> Client:
-    """Get Supabase client instance"""
-    return None

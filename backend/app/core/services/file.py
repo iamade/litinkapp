@@ -8,8 +8,8 @@ import docx
 import fitz  # PyMuPDF
 from app.core.config import settings
 import re
-from supabase import create_client, Client
 from app.core.services.ai import AIService
+from sqlmodel.ext.asyncio.session import AsyncSession
 from app.books.schemas import BookCreate, ChapterCreate, BookUpdate
 import tempfile
 import math
@@ -1526,10 +1526,6 @@ class FileService:
 
     def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
-        # Initialize a new Supabase client with the service role key for backend operations
-        self.db = create_client(
-            settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY
-        )
         self.ai_service = AIService()
         self.structure_detector = BookStructureDetector()
         os.makedirs(self.upload_dir, exist_ok=True)
@@ -1790,16 +1786,14 @@ class FileService:
                         storage_path = (
                             f"users/{user_id}/covers/cover_{int(time.time())}.png"
                         )
-                        self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
-                            path=storage_path,
-                            file=img_buffer.getvalue(),
-                            file_options={"content-type": "image/png"},
-                        )
 
                         # Get the public URL
-                        cover_image_url = self.db.storage.from_(
-                            settings.SUPABASE_BUCKET_NAME
-                        ).get_public_url(storage_path)
+                        # Get the public URL
+                        from app.core.services.storage import storage_service
+
+                        cover_image_url = await storage_service.upload(
+                            img_buffer.getvalue(), storage_path, "image/png"
+                        )
                         print(
                             f"[COVER EXTRACTION] Cover image uploaded: {cover_image_url}"
                         )
@@ -1825,15 +1819,11 @@ class FileService:
                             storage_path = (
                                 f"users/{user_id}/covers/cover_{int(time.time())}.png"
                             )
-                            self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
-                                path=storage_path,
-                                file=img_buffer.getvalue(),
-                                file_options={"content-type": "image/png"},
-                            )
+                            from app.core.services.storage import storage_service
 
-                            cover_image_url = self.db.storage.from_(
-                                settings.SUPABASE_BUCKET_NAME
-                            ).get_public_url(storage_path)
+                            cover_image_url = await storage_service.upload(
+                                img_buffer.getvalue(), storage_path, "image/png"
+                            )
                             print(
                                 f"[COVER EXTRACTION] Fallback cover image uploaded: {cover_image_url}"
                             )
@@ -1892,19 +1882,13 @@ class FileService:
                                 img_data = image_file.read()
 
                                 # Upload to Supabase Storage under user folder
+                                # Upload to Local Storage under user folder
                                 storage_path = f"users/{user_id}/covers/cover_{int(time.time())}.png"
-                                self.db.storage.from_(
-                                    settings.SUPABASE_BUCKET_NAME
-                                ).upload(
-                                    path=storage_path,
-                                    file=img_data,
-                                    file_options={"content-type": "image/png"},
-                                )
+                                from app.core.services.storage import storage_service
 
-                                # Get the public URL
-                                cover_image_url = self.db.storage.from_(
-                                    settings.SUPABASE_BUCKET_NAME
-                                ).get_public_url(storage_path)
+                                cover_image_url = await storage_service.upload(
+                                    img_data, storage_path, "image/png"
+                                )
                                 print(
                                     f"[COVER EXTRACTION] Cover image uploaded: {cover_image_url}"
                                 )
@@ -5390,6 +5374,7 @@ class FileService:
         book_type: str,
         user_id: str,
         book_id_to_update: str,
+        session: AsyncSession,
     ) -> Dict[str, Any]:
         """Process upload and return a PREVIEW with proper structure handling"""
         # Add comprehensive null safety at the start
@@ -5407,14 +5392,15 @@ class FileService:
             cover_image_url = None
             author_name = None
         elif storage_path and safe_filename:
+            from app.core.services.storage import storage_service
+
             with tempfile.NamedTemporaryFile(
                 delete=False, suffix=safe_filename
             ) as temp_file:
-                temp_file.write(
-                    self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(
-                        storage_path
-                    )
-                )
+                file_content = await storage_service.download(storage_path)
+                if file_content is None:
+                    raise ValueError(f"File not found in storage: {storage_path}")
+                temp_file.write(file_content)
                 temp_file_path = temp_file.name
             extracted = self.process_book_file(temp_file_path, safe_filename, user_id)
             os.unlink(temp_file_path)
@@ -5586,20 +5572,35 @@ class FileService:
             }
 
         # 4) Update book record with complete structure information
+        # 4) Update book record with complete structure information
         try:
-            self.db.table("books").update(
-                {
-                    "content": self._clean_text_content(content),
-                    "title": safe_filename,
-                    "cover_image_url": cover_image_url,
-                    "author_name": author_name,
-                    "status": "READY",
-                    "structure_type": structure_data["structure_type"],
-                    "has_sections": structure_data["has_sections"],
-                    "total_chapters": return_data["total_chapters"],
-                }
-            ).eq("id", book_id_to_update).execute()
-            print(f"[PREVIEW] Successfully updated book record {book_id_to_update}")
+            from app.books.models import Book
+            from sqlmodel import select
+            import uuid
+
+            stmt = select(Book).where(Book.id == uuid.UUID(book_id_to_update))
+            result = await session.exec(stmt)
+            book = result.first()
+
+            if book:
+                book.content = self._clean_text_content(content)
+                book.title = safe_filename
+                if cover_image_url:
+                    book.cover_image_url = cover_image_url
+                if author_name:
+                    book.author_name = author_name
+                book.status = "READY"
+                book.structure_type = structure_data["structure_type"]
+                book.has_sections = structure_data["has_sections"]
+                book.total_chapters = return_data["total_chapters"]
+
+                session.add(book)
+                await session.commit()
+                await session.refresh(book)
+                print(f"[PREVIEW] Successfully updated book record {book_id_to_update}")
+            else:
+                print(f"[PREVIEW] Book {book_id_to_update} not found for update")
+
         except Exception as e:
             print(f"[PREVIEW] Failed to update book record: {e}")
 
@@ -5616,147 +5617,85 @@ class FileService:
         return return_data
 
     async def confirm_book_structure(
-        self, book_id: str, confirmed_chapters: List[Dict[str, Any]], user_id: str
+        self, book_id: str, confirmed_chapters: List[Dict[str, Any]], user_id: str, session: AsyncSession
     ) -> None:
         """Persist user-confirmed structure and create embeddings."""
         print(f"[STRUCTURE SAVE] Starting to save structure for book {book_id}")
         print(f"[STRUCTURE SAVE] Received {len(confirmed_chapters)} confirmed chapters")
 
         try:
+            from app.books.models import Book, Chapter, ChapterEmbedding, BookEmbedding, Section
+            from sqlmodel import select, delete
+            import uuid
+            
+            book_uuid = uuid.UUID(book_id)
+            
             # ✅ FIX: Clean old data in the CORRECT order to avoid foreign key violations
             print("[STRUCTURE SAVE] Cleaning existing data...")
 
             # 1. Delete chapter embeddings first (they reference chapters)
             try:
-                embed_result = (
-                    self.db.table("chapter_embeddings")
-                    .delete()
-                    .eq("book_id", book_id)
-                    .execute()
-                )
-                print(
-                    f"[STRUCTURE SAVE] Deleted {len(embed_result.data) if embed_result.data else 0} chapter embeddings"
-                )
+                stmt = delete(ChapterEmbedding).where(ChapterEmbedding.book_id == book_uuid)
+                await session.exec(stmt)
+                print("[STRUCTURE SAVE] Deleted chapter embeddings")
             except Exception as e:
-                print(
-                    f"[STRUCTURE SAVE] Warning: Failed to delete chapter embeddings: {e}"
-                )
+                print(f"[STRUCTURE SAVE] Warning: Failed to delete chapter embeddings: {e}")
 
             # 2. Delete book embeddings (they reference the book)
             try:
-                book_embed_result = (
-                    self.db.table("book_embeddings")
-                    .delete()
-                    .eq("book_id", book_id)
-                    .execute()
-                )
-                print(
-                    f"[STRUCTURE SAVE] Deleted {len(book_embed_result.data) if book_embed_result.data else 0} book embeddings"
-                )
+                stmt = delete(BookEmbedding).where(BookEmbedding.book_id == book_uuid)
+                await session.exec(stmt)
+                print("[STRUCTURE SAVE] Deleted book embeddings")
             except Exception as e:
-                print(
-                    f"[STRUCTURE SAVE] Warning: Failed to delete book embeddings: {e}"
-                )
+                print(f"[STRUCTURE SAVE] Warning: Failed to delete book embeddings: {e}")
 
-            # 3. Delete chapters (they might reference book_sections)
+            # 3. Delete chapters (they reference sections and book)
             try:
-                chapters_result = (
-                    self.db.table("chapters").delete().eq("book_id", book_id).execute()
-                )
-                print(
-                    f"[STRUCTURE SAVE] Deleted {len(chapters_result.data) if chapters_result.data else 0} chapters"
-                )
+                stmt = delete(Chapter).where(Chapter.book_id == book_uuid)
+                await session.exec(stmt)
+                print("[STRUCTURE SAVE] Deleted chapters")
             except Exception as e:
                 print(f"[STRUCTURE SAVE] Warning: Failed to delete chapters: {e}")
 
-            # 4. Delete sections last (they're referenced by chapters, but chapters are now gone)
+            # 4. Delete sections (they reference book)
             try:
-                sections_result = (
-                    self.db.table("book_sections")
-                    .delete()
-                    .eq("book_id", book_id)
-                    .execute()
-                )
-                print(
-                    f"[STRUCTURE SAVE] Deleted {len(sections_result.data) if sections_result.data else 0} book sections"
-                )
+                stmt = delete(Section).where(Section.book_id == book_uuid)
+                await session.exec(stmt)
+                print("[STRUCTURE SAVE] Deleted sections")
             except Exception as e:
-                print(f"[STRUCTURE SAVE] Warning: Failed to delete book sections: {e}")
-
-            # ✅ ADD: Additional safety check - try to delete any remaining chapters
-            try:
-                print("[STRUCTURE SAVE] Safety check - ensuring no chapters remain...")
-                remaining_chapters = (
-                    self.db.table("chapters").delete().eq("book_id", book_id).execute()
-                )
-                if remaining_chapters.data:
-                    print(
-                        f"[STRUCTURE SAVE] Cleaned up {len(remaining_chapters.data)} remaining chapters"
-                    )
-            except Exception as e:
-                print(f"[STRUCTURE SAVE] Safety check failed: {e}")
+                print(f"[STRUCTURE SAVE] Warning: Failed to delete sections: {e}")
 
             # Build sections (if present)
-            section_id_map: Dict[str, str] = {}
+            section_id_map: Dict[str, uuid.UUID] = {}
             order = 0
-
+            
+            # We need to commit deletions before insertions? 
+            # SQLAlchemy handles transaction, so it should be fine within same transaction.
+            
             for ch in confirmed_chapters:
                 order += 1
                 section_id = None
-
-                # Create sections if chapter has section data
                 if ch.get("section_title"):
-                    key = f"{ch.get('section_title')}|{ch.get('section_type')}|{ch.get('section_number')}"
-                    if key not in section_id_map:
-                        print(
-                            f"[STRUCTURE SAVE] Creating section: {ch.get('section_title')}"
+                    section_key = f"{ch.get('section_title','')}|{ch.get('section_type','')}|{ch.get('section_number','')}"
+
+                    if section_key not in section_id_map:
+                        # Create new section
+                        section = Section(
+                            book_id=book_uuid,
+                            title=ch["section_title"],
+                            section_type=ch.get("section_type", ""),
+                            section_number=ch.get("section_number", ""),
+                            order_index=ch.get("section_order", order)
                         )
-
-                        try:
-                            sec_resp = (
-                                self.db.table("book_sections")
-                                .insert(
-                                    {
-                                        "book_id": book_id,
-                                        "title": ch.get("section_title"),
-                                        "section_type": ch.get("section_type", "part"),
-                                        "section_number": ch.get("section_number", ""),
-                                        "order_index": len(section_id_map) + 1,
-                                    }
-                                )
-                                .execute()
-                            )
-                            section_id_map[key] = sec_resp.data[0]["id"]
-                            print(
-                                f"[STRUCTURE SAVE] Created section with ID: {sec_resp.data[0]['id']}"
-                            )
-                        except Exception as e:
-                            print(f"[STRUCTURE SAVE] Failed to create section: {e}")
-                            continue
-
-                    section_id = section_id_map[key]
+                        session.add(section)
+                        await session.flush() # Flush to get ID
+                        await session.refresh(section)
+                        section_id = section.id
+                        section_id_map[section_key] = section_id
+                    else:
+                        section_id = section_id_map[section_key]
 
                 # Create chapter
-                print(
-                    f"[STRUCTURE SAVE] Creating chapter {order}: {ch.get('title', 'Untitled')}"
-                )
-
-                try:
-                    chap_resp = (
-                        self.db.table("chapters")
-                        .insert(
-                            {
-                                "book_id": book_id,
-                                "section_id": section_id,
-                                "chapter_number": ch.get("chapter_number", order),
-                                "title": ch.get("title", f"Chapter {order}"),
-                                "content": self._clean_text_content(
-                                    ch.get("content", "")
-                                ),
-                                "summary": self._clean_text_content(
-                                    ch.get("summary", "")
-                                ),
-                                "order_index": order,
                             }
                         )
                         .execute()
@@ -5816,16 +5755,20 @@ class FileService:
             # Update book metadata
             print(f"[STRUCTURE SAVE] Updating book metadata...")
             try:
-                self.db.table("books").update(
-                    {
-                        "has_sections": bool(section_id_map),
-                        "structure_type": "hierarchical" if section_id_map else "flat",
-                        "total_chapters": order,
-                        "status": "READY",
-                        "progress": 100,
-                        "progress_message": "Book structure saved successfully",
-                    }
-                ).eq("id", book_id).execute()
+                stmt = select(Book).where(Book.id == book_uuid)
+                result = await session.exec(stmt)
+                book = result.first()
+                
+                if book:
+                    book.has_sections = bool(section_id_map)
+                    book.structure_type = "hierarchical" if section_id_map else "flat"
+                    book.total_chapters = order
+                    book.status = "READY"
+                    book.progress = 100
+                    book.progress_message = "Book structure saved successfully"
+                    
+                    session.add(book)
+                    await session.commit()
 
                 print(
                     f"[STRUCTURE SAVE] ✅ Successfully saved structure for book {book_id}"
@@ -5840,65 +5783,7 @@ class FileService:
             print(f"[STRUCTURE SAVE] Full error: {traceback.format_exc()}")
             raise e
 
-    # async def confirm_book_structure(
-    #     self,
-    #     book_id: str,
-    #     confirmed_chapters: List[Dict[str, Any]],
-    #     user_id: str
-    # ) -> None:
-    #     """Persist user-confirmed structure and create embeddings."""
-    #     # Clean old data
-    #     self.db.table("chapter_embeddings").delete().eq("book_id", book_id).execute()
-    #     self.db.table("chapters").delete().eq("book_id", book_id).execute()
-    #     self.db.table("book_sections").delete().eq("book_id", book_id).execute()
 
-    #     # Build sections (if present)
-    #     section_id_map: Dict[str, str] = {}
-    #     order = 0
-    #     for ch in confirmed_chapters:
-    #         order += 1
-    #         section_id = None
-    #         if ch.get("section_title"):
-    #             key = f"{ch.get('section_title')}|{ch.get('section_type')}|{ch.get('section_number')}"
-    #             if key not in section_id_map:
-    #                 sec_resp = self.db.table("book_sections").insert({
-    #                     "book_id": book_id,
-    #                     "title": ch.get("section_title"),
-    #                     "section_type": ch.get("section_type", "part"),
-    #                     "section_number": ch.get("section_number", ""),
-    #                     "order_index": len(section_id_map) + 1,
-    #                 }).execute()
-    #                 section_id_map[key] = sec_resp.data[0]["id"]
-    #             section_id = section_id_map[key]
-
-    #         chap_resp = self.db.table("chapters").insert({
-    #             "book_id": book_id,
-    #             "section_id": section_id,
-    #             "chapter_number": ch.get("chapter_number", order),
-    #             "title": ch.get("title", f"Chapter {order}"),
-    #             "content": self._clean_text_content(ch.get("content", "")),
-    #             "summary": self._clean_text_content(ch.get("summary", "")),
-    #             "order_index": order,
-    #         }).execute()
-    #         chapter_id = chap_resp.data[0]["id"]
-
-    #         # best-effort embeddings
-    #         try:
-    #             from app.core.services.embeddings import EmbeddingsService
-    #             es = EmbeddingsService(self.db)
-    #             await es.create_chapter_embeddings(chapter_id, ch.get("content",""))
-    #         except Exception as e:
-    #             print(f"[EMBEDDINGS] Failed for chapter {chapter_id}: {e}")
-
-    #     # Update book meta
-    #     self.db.table("books").update({
-    #         "has_sections": bool(section_id_map),
-    #         "structure_type": "hierarchical" if section_id_map else "flat",
-    #         "total_chapters": order,
-    #         "status": "READY",
-    #         "progress": 100,
-    #         "progress_message": "Book structure saved successfully"
-    #     }).eq("id", book_id).execute()
 
     async def _compare_with_toc_chapter(
         self, chapter_title: str, extracted_content: str, toc_reference: Dict
@@ -6288,12 +6173,14 @@ Chapters:
 
             print("[EPUB EXTRACTION] Attempting EPUB chapter extraction...")
             try:
+                from app.core.services.storage import storage_service
+
                 with tempfile.NamedTemporaryFile(
                     delete=False, suffix=".epub"
                 ) as temp_file:
-                    file_content = self.db.storage.from_(
-                        settings.SUPABASE_BUCKET_NAME
-                    ).download(path=storage_path)
+                    file_content = await storage_service.download(storage_path)
+                    if file_content is None:
+                        raise ValueError(f"File not found in storage: {storage_path}")
                     temp_file.write(file_content)
                     temp_file_path = temp_file.name
 
@@ -6336,12 +6223,14 @@ Chapters:
 
             print("[TOC EXTRACTION] Attempting PDF TOC extraction...")
             try:
+                from app.core.services.storage import storage_service
+
                 with tempfile.NamedTemporaryFile(
                     delete=False, suffix=safe_filename
                 ) as temp_file:
-                    file_content = self.db.storage.from_(
-                        settings.SUPABASE_BUCKET_NAME
-                    ).download(path=storage_path)
+                    file_content = await storage_service.download(storage_path)
+                    if file_content is None:
+                        raise ValueError(f"File not found in storage: {storage_path}")
                     temp_file.write(file_content)
                     temp_file_path = temp_file.name
 
@@ -6936,32 +6825,27 @@ Chapters:
         return TextSanitizer.sanitize_text(content)
 
     async def upload_file(self, local_path: str, remote_path: str) -> Optional[str]:
-        """Upload file to Supabase storage"""
-
+        """Upload file to Local storage"""
         try:
+            from app.core.services.storage import storage_service
+
             # Read file
             async with aiofiles.open(local_path, "rb") as f:
                 file_data = await f.read()
 
-            # Upload to Supabase storage
-            bucket_name = "video-files"  # Make sure this bucket exists
+            # Upload to Local storage
+            # Determine content type based on extension
+            import mimetypes
 
-            result = self.supabase.storage.from_(bucket_name).upload(
-                remote_path, file_data, file_options={"content-type": "video/mp4"}
+            content_type, _ = mimetypes.guess_type(local_path)
+
+            public_url = await storage_service.upload(
+                file_data, remote_path, content_type
             )
 
-            if result.error:
-                print(f"[FILE UPLOAD ERROR] {result.error}")
-                return None
-
-            # Get public URL
-            public_url_result = self.supabase.storage.from_(bucket_name).get_public_url(
-                remote_path
-            )
-
-            if public_url_result:
-                print(f"[FILE UPLOAD SUCCESS] {remote_path} -> {public_url_result}")
-                return public_url_result
+            if public_url:
+                print(f"[FILE UPLOAD SUCCESS] {remote_path} -> {public_url}")
+                return public_url
             else:
                 print(f"[FILE UPLOAD ERROR] Failed to get public URL for {remote_path}")
                 return None

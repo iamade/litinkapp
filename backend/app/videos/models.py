@@ -230,6 +230,16 @@ class ImageGeneration(SQLModel, table=True):
     status: str = Field(default="pending")
     error_message: Optional[str] = Field(default=None)
 
+    # Added fields to match DB schema
+    script_id: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
+    )
+    chapter_id: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
+    )
+    scene_number: Optional[int] = Field(default=None)
+    progress: int = Field(default=0)
+
     meta: Dict[str, Any] = Field(
         default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
     )

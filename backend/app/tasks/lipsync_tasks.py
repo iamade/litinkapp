@@ -2,154 +2,173 @@ from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List, Optional
 from app.core.services.modelslab_image import ModelsLabImageService
-from app.core.database import get_supabase
+from app.core.database import async_session
+from sqlalchemy import text
 import json
 
 
 @celery_app.task(bind=True)
 def apply_lip_sync_to_generation(self, video_generation_id: str):
     """Main task to apply lip sync to all character dialogue in a video generation"""
+    return asyncio.run(async_apply_lip_sync_to_generation(video_generation_id))
 
-    try:
-        print(
-            f"[LIP SYNC] Starting lip sync processing for video: {video_generation_id}"
-        )
 
-        # Get video generation data
-        supabase = get_supabase()
-        video_data = (
-            supabase.table("video_generations")
-            .select("*")
-            .eq("id", video_generation_id)
-            .single()
-            .execute()
-        )
-
-        if not video_data.data:
-            raise Exception(f"Video generation {video_generation_id} not found")
-
-        video_gen = video_data.data
-
-        # Check if merge is completed (or allow parallel processing)
-        current_status = video_gen.get("generation_status")
-        if current_status not in ["merging_audio", "completed"]:
+async def async_apply_lip_sync_to_generation(video_generation_id: str):
+    """Async implementation of lip sync task"""
+    async with async_session() as session:
+        try:
             print(
-                f"[LIP SYNC] Current status: {current_status}. Waiting for merge completion or running in parallel..."
+                f"[LIP SYNC] Starting lip sync processing for video: {video_generation_id}"
             )
-            # Could wait or run in parallel - for now, we'll proceed if we have scene videos
 
-        # Update status
-        supabase.table("video_generations").update(
-            {"generation_status": "applying_lipsync"}
-        ).eq("id", video_generation_id).execute()
+            # Get video generation data
+            query = text("SELECT * FROM video_generations WHERE id = :id")
+            result = await session.execute(query, {"id": video_generation_id})
+            video_gen_record = result.mappings().first()
 
-        # Get necessary data
-        audio_files = video_gen.get("audio_files", {})
-        video_data_obj = video_gen.get("video_data", {})
-        scene_videos = video_data_obj.get("scene_videos", [])
-        character_images = video_gen.get("image_data", {}).get("character_images", [])
-        quality_tier = video_gen.get("quality_tier", "premium")
+            if not video_gen_record:
+                raise Exception(f"Video generation {video_generation_id} not found")
 
-        print(f"[LIP SYNC] Processing:")
-        print(f"- Scene videos: {len(scene_videos)}")
-        print(f"- Character dialogue: {len(audio_files.get('characters', []))}")
-        print(f"- Character images: {len(character_images)}")
-        print(f"- Quality tier: {quality_tier}")
+            video_gen = dict(video_gen_record)
 
-        # Apply lip sync
-        modelslab_service = ModelsLabImageService()
+            # Check if merge is completed (or allow parallel processing)
+            current_status = video_gen.get("generation_status")
+            if current_status not in ["merging_audio", "completed"]:
+                print(
+                    f"[LIP SYNC] Current status: {current_status}. Waiting for merge completion or running in parallel..."
+                )
+                # Could wait or run in parallel - for now, we'll proceed if we have scene videos
 
-        lipsync_results = asyncio.run(
-            apply_lip_sync_to_scenes(
+            # Update status
+            status_update = text(
+                """
+                UPDATE video_generations 
+                SET generation_status = 'applying_lipsync' 
+                WHERE id = :id
+            """
+            )
+            await session.execute(status_update, {"id": video_generation_id})
+            await session.commit()
+
+            # Get necessary data
+            audio_files = video_gen.get("audio_files", {})
+            video_data_obj = video_gen.get("video_data", {})
+            scene_videos = video_data_obj.get("scene_videos", [])
+            character_images = video_gen.get("image_data", {}).get(
+                "character_images", []
+            )
+            quality_tier = video_gen.get("quality_tier", "premium")
+
+            print(f"[LIP SYNC] Processing:")
+            print(f"- Scene videos: {len(scene_videos)}")
+            print(f"- Character dialogue: {len(audio_files.get('characters', []))}")
+            print(f"- Character images: {len(character_images)}")
+            print(f"- Quality tier: {quality_tier}")
+
+            # Apply lip sync
+            modelslab_service = ModelsLabImageService()
+
+            lipsync_results = await apply_lip_sync_to_scenes(
                 modelslab_service,
                 video_generation_id,
                 scene_videos,
                 audio_files,
                 character_images,
                 quality_tier,
+                session,
             )
-        )
 
-        # Calculate statistics
-        total_scenes_processed = len([r for r in lipsync_results if r is not None])
-        characters_lip_synced = len(
-            set(
-                [
-                    r.get("character_name")
-                    for r in lipsync_results
-                    if r is not None and r.get("character_name")
-                ]
+            # Calculate statistics
+            total_scenes_processed = len([r for r in lipsync_results if r is not None])
+            characters_lip_synced = len(
+                set(
+                    [
+                        r.get("character_name")
+                        for r in lipsync_results
+                        if r is not None and r.get("character_name")
+                    ]
+                )
             )
-        )
 
-        # Update video generation with lip sync data
-        lipsync_data_result = {
-            "lip_synced_scenes": lipsync_results,
-            "statistics": {
-                "total_scenes_processed": total_scenes_processed,
-                "characters_lip_synced": characters_lip_synced,
-                "scenes_with_lipsync": len(
-                    [r for r in lipsync_results if r and r.get("has_lipsync")]
-                ),
-                "processing_method": "modelslab_lipsync",
-            },
-        }
+            # Update video generation with lip sync data
+            lipsync_data_result = {
+                "lip_synced_scenes": lipsync_results,
+                "statistics": {
+                    "total_scenes_processed": total_scenes_processed,
+                    "characters_lip_synced": characters_lip_synced,
+                    "scenes_with_lipsync": len(
+                        [r for r in lipsync_results if r and r.get("has_lipsync")]
+                    ),
+                    "processing_method": "modelslab_lipsync",
+                },
+            }
 
-        # Update final status
-        final_status = (
-            "completed" if current_status == "completed" else "lipsync_completed"
-        )
+            # Update final status
+            final_status = (
+                "completed" if current_status == "completed" else "lipsync_completed"
+            )
 
-        supabase.table("video_generations").update(
-            {"lipsync_data": lipsync_data_result, "generation_status": final_status}
-        ).eq("id", video_generation_id).execute()
+            final_update = text(
+                """
+                UPDATE video_generations 
+                SET lipsync_data = :lipsync_data, 
+                    generation_status = :status 
+                WHERE id = :id
+            """
+            )
+            await session.execute(
+                final_update,
+                {
+                    "lipsync_data": json.dumps(lipsync_data_result),
+                    "status": final_status,
+                    "id": video_generation_id,
+                },
+            )
+            await session.commit()
 
-        success_message = f"Lip sync completed! Characters now speak naturally"
-        print(f"[LIP SYNC SUCCESS] {success_message}")
+            success_message = f"Lip sync completed! Characters now speak naturally"
+            print(f"[LIP SYNC SUCCESS] {success_message}")
 
-        # Log detailed breakdown
-        print(f"[LIP SYNC STATISTICS]")
-        print(f"- Scenes processed: {total_scenes_processed}")
-        print(f"- Characters with lip sync: {characters_lip_synced}")
-        print(f"- Audio-visual synchronization accuracy: 95%")
+            # Log detailed breakdown
+            print(f"[LIP SYNC STATISTICS]")
+            print(f"- Scenes processed: {total_scenes_processed}")
+            print(f"- Characters with lip sync: {characters_lip_synced}")
+            print(f"- Audio-visual synchronization accuracy: 95%")
 
-        # TODO: Send WebSocket update to frontend
-        # send_websocket_update(video_generation_id, {
-        #     'step': 'lipsync_completed',
-        #     'status': 'completed',
-        #     'message': success_message,
-        #     'progress': 100,
-        #     'statistics': lipsync_data_result['statistics']
-        # })
+            # TODO: Send WebSocket update to frontend
 
-        return {
-            "status": "success",
-            "message": success_message,
-            "statistics": lipsync_data_result["statistics"],
-            "lipsync_results": lipsync_results,
-        }
+            return {
+                "status": "success",
+                "message": success_message,
+                "statistics": lipsync_data_result["statistics"],
+                "lipsync_results": lipsync_results,
+            }
 
-    except Exception as e:
-        error_message = f"Lip sync failed: {str(e)}"
-        print(f"[LIP SYNC ERROR] {error_message}")
+        except Exception as e:
+            error_message = f"Lip sync failed: {str(e)}"
+            print(f"[LIP SYNC ERROR] {error_message}")
 
-        # Update status to failed
-        try:
-            supabase = get_supabase()
-            supabase.table("video_generations").update(
-                {"generation_status": "lipsync_failed", "error_message": error_message}
-            ).eq("id", video_generation_id).execute()
-        except:
-            pass
+            # Update status to failed
+            try:
+                error_update = text(
+                    """
+                    UPDATE video_generations 
+                    SET generation_status = 'lipsync_failed', 
+                        error_message = :error_message 
+                    WHERE id = :id
+                """
+                )
+                await session.execute(
+                    error_update,
+                    {"error_message": error_message, "id": video_generation_id},
+                )
+                await session.commit()
+            except:
+                pass
 
-        # TODO: Send error to frontend
-        # send_websocket_update(video_generation_id, {
-        #     'step': 'lipsync_failed',
-        #     'status': 'failed',
-        #     'message': error_message
-        # })
+            # TODO: Send error to frontend
 
-        raise Exception(error_message)
+            raise Exception(error_message)
 
 
 async def apply_lip_sync_to_scenes(
@@ -159,12 +178,12 @@ async def apply_lip_sync_to_scenes(
     audio_files: Dict[str, Any],
     character_images: List[Dict[str, Any]],
     quality_tier: str,
+    session,
 ) -> List[Dict[str, Any]]:
     """Apply lip sync to scenes that have character dialogue"""
 
     print(f"[SCENE LIP SYNC] Processing scene lip sync...")
     lipsync_results = []
-    supabase = get_supabase()
 
     # Filter valid scene videos
     valid_scene_videos = [
@@ -204,6 +223,7 @@ async def apply_lip_sync_to_scenes(
                 scene_character_audio,
                 character_images,
                 lipsync_model,
+                session,
             )
 
             lipsync_results.append(lipsync_result)
@@ -247,6 +267,7 @@ async def apply_lip_sync_to_single_scene(
     character_audio: List[Dict[str, Any]],
     character_images: List[Dict[str, Any]],
     lipsync_model: str,
+    session,
 ) -> Optional[Dict[str, Any]]:
     """Apply lip sync to a single scene with character dialogue"""
 
@@ -257,8 +278,6 @@ async def apply_lip_sync_to_single_scene(
         return None
 
     try:
-        supabase = get_supabase()
-
         # Step 1: Detect faces in the video
         print(f"[SINGLE SCENE LIP SYNC] Detecting faces in scene {scene_id}")
         face_detection_result = await modelslab_service.detect_faces_in_video(video_url)
@@ -357,38 +376,49 @@ async def apply_lip_sync_to_single_scene(
         final_lipsync_url = best_result["lipsync_video_url"]
 
         # Store in database
-        lipsync_record = (
-            supabase.table("video_segments")
-            .insert(
-                {
-                    "video_generation_id": video_gen_id,
-                    "scene_id": scene_id,
-                    "scene_description": f"Lip-synced version of {scene_id}",
-                    "video_url": final_lipsync_url,
-                    "duration_seconds": scene_video.get("duration", 3.0),
-                    "width": 512,
-                    "height": 288,
-                    "fps": 24,
-                    "generation_method": "lip_sync",
-                    "status": "completed",
-                    "processing_service": "modelslab",
-                    "processing_model": lipsync_model,
-                    "metadata": {
-                        "original_video_url": video_url,
-                        "characters_processed": [
-                            r["character_name"] for r in lipsync_results
-                        ],
-                        "faces_detected": len(detected_faces),
-                        "lipsync_model": lipsync_model,
-                        "processing_method": "face_detection_and_lipsync",
-                    },
-                }
-            )
-            .execute()
+        insert_query = text(
+            """
+            INSERT INTO video_segments (
+                video_generation_id, scene_id, scene_description, video_url, duration_seconds,
+                width, height, fps, generation_method, status, processing_service, processing_model, metadata
+            ) VALUES (
+                :video_generation_id, :scene_id, :scene_description, :video_url, :duration_seconds,
+                :width, :height, :fps, :generation_method, :status, :processing_service, :processing_model, :metadata
+            ) RETURNING id
+        """
         )
 
+        metadata = {
+            "original_video_url": video_url,
+            "characters_processed": [r["character_name"] for r in lipsync_results],
+            "faces_detected": len(detected_faces),
+            "lipsync_model": lipsync_model,
+            "processing_method": "face_detection_and_lipsync",
+        }
+
+        result = await session.execute(
+            insert_query,
+            {
+                "video_generation_id": video_gen_id,
+                "scene_id": scene_id,
+                "scene_description": f"Lip-synced version of {scene_id}",
+                "video_url": final_lipsync_url,
+                "duration_seconds": scene_video.get("duration", 3.0),
+                "width": 512,
+                "height": 288,
+                "fps": 24,
+                "generation_method": "lip_sync",
+                "status": "completed",
+                "processing_service": "modelslab",
+                "processing_model": lipsync_model,
+                "metadata": json.dumps(metadata),
+            },
+        )
+        await session.commit()
+        record_id = result.scalar()
+
         return {
-            "id": lipsync_record.data[0]["id"],
+            "id": record_id,
             "scene_id": scene_id,
             "original_video_url": video_url,
             "lipsync_video_url": final_lipsync_url,
@@ -404,8 +434,20 @@ async def apply_lip_sync_to_single_scene(
 
         # Store failed record
         try:
-            supabase = get_supabase()
-            supabase.table("video_segments").insert(
+            fail_insert_query = text(
+                """
+                INSERT INTO video_segments (
+                    video_generation_id, scene_id, scene_description, generation_method,
+                    status, error_message, processing_service, processing_model, metadata
+                ) VALUES (
+                    :video_generation_id, :scene_id, :scene_description, :generation_method,
+                    :status, :error_message, :processing_service, :processing_model, :metadata
+                )
+            """
+            )
+
+            await session.execute(
+                fail_insert_query,
                 {
                     "video_generation_id": video_gen_id,
                     "scene_id": scene_id,
@@ -415,12 +457,15 @@ async def apply_lip_sync_to_single_scene(
                     "error_message": str(e),
                     "processing_service": "modelslab",
                     "processing_model": lipsync_model,
-                    "metadata": {
-                        "original_video_url": video_url,
-                        "error_type": "lip_sync_generation_failed",
-                    },
-                }
-            ).execute()
+                    "metadata": json.dumps(
+                        {
+                            "original_video_url": video_url,
+                            "error_type": "lip_sync_generation_failed",
+                        }
+                    ),
+                },
+            )
+            await session.commit()
         except:
             pass
 

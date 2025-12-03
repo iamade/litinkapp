@@ -5,33 +5,32 @@ Monitors system metrics and creates alerts when thresholds are exceeded
 
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
-from supabase import Client
+from sqlmodel import select, func, col, desc
+from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.services.metrics import MetricsService
 from app.core.services.cost_tracker import CostTrackerService
+from app.admin.models import AdminSetting, AdminAlert
 import asyncio
 
 
 class AlertService:
     """Service for monitoring and alerting on system metrics"""
 
-    def __init__(self, supabase: Client):
-        self.supabase = supabase
-        self.metrics_service = MetricsService(supabase)
-        self.cost_tracker_service = CostTrackerService(supabase)
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.metrics_service = MetricsService(session)
+        self.cost_tracker_service = CostTrackerService(session)
 
     async def get_alert_settings(self) -> Dict[str, Any]:
         """Get current alert threshold settings"""
-        query = (
-            self.supabase.table("admin_settings")
-            .select("*")
-            .eq("setting_key", "alert_thresholds")
-            .maybeSingle()
+        stmt = select(AdminSetting).where(
+            AdminSetting.setting_key == "alert_thresholds"
         )
+        result = await self.session.exec(stmt)
+        setting = result.first()
 
-        response = query.execute()
-
-        if response.data:
-            return response.data["setting_value"]
+        if setting:
+            return setting.setting_value
 
         # Return defaults if not found
         return {
@@ -223,41 +222,37 @@ class AlertService:
     async def create_alert(self, alert_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new alert in the database"""
         # Check if similar alert already exists and is unacknowledged
-        existing_query = (
-            self.supabase.table("admin_alerts")
-            .select("*")
-            .eq("alert_type", alert_data["alert_type"])
-            .is_("acknowledged_at", "null")
-            .gte("created_at", (datetime.now() - timedelta(hours=1)).isoformat())
+        one_hour_ago = datetime.now() - timedelta(hours=1)
+        stmt = select(AdminAlert).where(
+            AdminAlert.alert_type == alert_data["alert_type"],
+            AdminAlert.acknowledged_at == None,
+            AdminAlert.created_at >= one_hour_ago,
         )
-
-        existing_response = existing_query.execute()
+        result = await self.session.exec(stmt)
+        existing_alerts = result.all()
 
         # If similar unacknowledged alert exists from last hour, don't create duplicate
-        if existing_response.data:
-            for existing in existing_response.data:
-                if existing.get("metadata", {}).get("service") == alert_data.get(
-                    "metadata", {}
-                ).get("service"):
-                    return existing
+        for existing in existing_alerts:
+            # Check metadata equality carefully
+            existing_meta = existing.metadata or {}
+            new_meta = alert_data.get("metadata", {})
+            if existing_meta.get("service") == new_meta.get("service"):
+                return existing.model_dump()
 
         # Create new alert
-        insert_response = (
-            self.supabase.table("admin_alerts")
-            .insert(
-                {
-                    "alert_type": alert_data["alert_type"],
-                    "severity": alert_data["severity"],
-                    "message": alert_data["message"],
-                    "metric_value": alert_data.get("metric_value"),
-                    "threshold_value": alert_data.get("threshold_value"),
-                    "metadata": alert_data.get("metadata", {}),
-                }
-            )
-            .execute()
+        new_alert = AdminAlert(
+            alert_type=alert_data["alert_type"],
+            severity=alert_data["severity"],
+            message=alert_data["message"],
+            metric_value=alert_data.get("metric_value"),
+            threshold_value=alert_data.get("threshold_value"),
+            metadata=alert_data.get("metadata", {}),
         )
+        self.session.add(new_alert)
+        await self.session.commit()
+        await self.session.refresh(new_alert)
 
-        return insert_response.data[0] if insert_response.data else {}
+        return new_alert.model_dump()
 
     async def get_recent_alerts(
         self, hours: int = 24, acknowledged: Optional[bool] = None
@@ -265,62 +260,65 @@ class AlertService:
         """Get recent alerts"""
         cutoff = datetime.now() - timedelta(hours=hours)
 
-        query = (
-            self.supabase.table("admin_alerts")
-            .select("*")
-            .gte("created_at", cutoff.isoformat())
-            .order("created_at", desc=True)
-        )
+        stmt = select(AdminAlert).where(AdminAlert.created_at >= cutoff)
 
         if acknowledged is not None:
             if acknowledged:
-                query = query.not_.is_("acknowledged_at", "null")
+                stmt = stmt.where(AdminAlert.acknowledged_at != None)
             else:
-                query = query.is_("acknowledged_at", "null")
+                stmt = stmt.where(AdminAlert.acknowledged_at == None)
 
-        response = query.execute()
-        return response.data
+        stmt = stmt.order_by(desc(AdminAlert.created_at))
+
+        result = await self.session.exec(stmt)
+        alerts = result.all()
+
+        return [alert.model_dump() for alert in alerts]
 
     async def acknowledge_alert(self, alert_id: str, user_id: str) -> Dict[str, Any]:
         """Acknowledge an alert"""
-        update_response = (
-            self.supabase.table("admin_alerts")
-            .update(
-                {
-                    "acknowledged_at": datetime.now().isoformat(),
-                    "acknowledged_by": user_id,
-                }
-            )
-            .eq("id", alert_id)
-            .execute()
-        )
+        stmt = select(AdminAlert).where(AdminAlert.id == alert_id)
+        result = await self.session.exec(stmt)
+        alert = result.first()
 
-        return update_response.data[0] if update_response.data else {}
+        if alert:
+            alert.acknowledged_at = datetime.now()
+            # Assuming user_id is UUID string
+            import uuid
+
+            try:
+                alert.acknowledged_by = uuid.UUID(user_id)
+            except ValueError:
+                pass  # Or handle error
+
+            self.session.add(alert)
+            await self.session.commit()
+            await self.session.refresh(alert)
+            return alert.model_dump()
+
+        return {}
 
     async def get_alert_statistics(self, days: int = 7) -> Dict[str, Any]:
         """Get alert statistics for the specified period"""
         cutoff = datetime.now() - timedelta(days=days)
 
-        query = (
-            self.supabase.table("admin_alerts")
-            .select("*")
-            .gte("created_at", cutoff.isoformat())
-        )
+        stmt = select(AdminAlert).where(AdminAlert.created_at >= cutoff)
+        result = await self.session.exec(stmt)
+        alerts = result.all()
 
-        response = query.execute()
-
-        total_alerts = len(response.data)
+        total_alerts = len(alerts)
         by_severity = {"info": 0, "warning": 0, "critical": 0}
         by_type = {}
         acknowledged_count = 0
 
-        for alert in response.data:
-            by_severity[alert["severity"]] += 1
+        for alert in alerts:
+            if alert.severity in by_severity:
+                by_severity[alert.severity] += 1
 
-            alert_type = alert["alert_type"]
+            alert_type = alert.alert_type
             by_type[alert_type] = by_type.get(alert_type, 0) + 1
 
-            if alert["acknowledged_at"]:
+            if alert.acknowledged_at:
                 acknowledged_count += 1
 
         return {
@@ -337,18 +335,34 @@ class AlertService:
     ) -> Dict[str, Any]:
         """Update alert threshold settings"""
         # Update or insert settings
-        upsert_response = (
-            self.supabase.table("admin_settings")
-            .upsert(
-                {
-                    "setting_key": "alert_thresholds",
-                    "setting_value": settings,
-                    "description": "Threshold values for triggering alerts",
-                    "updated_at": datetime.now().isoformat(),
-                    "updated_by": user_id,
-                }
-            )
-            .execute()
+        stmt = select(AdminSetting).where(
+            AdminSetting.setting_key == "alert_thresholds"
         )
+        result = await self.session.exec(stmt)
+        setting = result.first()
 
-        return upsert_response.data[0] if upsert_response.data else {}
+        import uuid
+
+        try:
+            uid = uuid.UUID(user_id)
+        except ValueError:
+            uid = None
+
+        if setting:
+            setting.setting_value = settings
+            setting.updated_at = datetime.now()
+            setting.updated_by = uid
+        else:
+            setting = AdminSetting(
+                setting_key="alert_thresholds",
+                setting_value=settings,
+                description="Threshold values for triggering alerts",
+                updated_at=datetime.now(),
+                updated_by=uid,
+            )
+            self.session.add(setting)
+
+        await self.session.commit()
+        await self.session.refresh(setting)
+
+        return setting.model_dump()

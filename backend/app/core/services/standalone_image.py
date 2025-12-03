@@ -614,6 +614,10 @@ class StandaloneImageService:
                 character_name=character_name,
                 status="pending",
                 meta=metadata,
+                # Set root-level fields now that model is updated
+                script_id=uuid.UUID(script_id) if script_id else None,
+                chapter_id=uuid.UUID(chapter_id) if chapter_id else None,
+                scene_number=scene_number,
             )
 
             # Note: ImageGeneration model doesn't have script_id, chapter_id, scene_number as root fields

@@ -2,22 +2,24 @@
 Metrics Service
 Aggregates and analyzes model performance metrics, fallback rates, and system health
 """
+
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
-from supabase import Client
 from collections import defaultdict
+from sqlmodel import select, func, col
+from sqlmodel.ext.asyncio.session import AsyncSession
+from app.plots.models import PlotOverview
+from app.videos.models import VideoSegment, AudioGeneration, ImageGeneration
 
 
 class MetricsService:
     """Service for tracking and analyzing model performance metrics"""
 
-    def __init__(self, supabase: Client):
-        self.supabase = supabase
+    def __init__(self, session: AsyncSession):
+        self.session = session
 
     async def get_fallback_rates(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """Get fallback rates by tier and service"""
         if not start_date:
@@ -26,10 +28,18 @@ class MetricsService:
             end_date = datetime.now()
 
         fallback_data = {
-            "script_generation": await self._get_script_fallback_rates(start_date, end_date),
-            "image_generation": await self._get_image_fallback_rates(start_date, end_date),
-            "video_generation": await self._get_video_fallback_rates(start_date, end_date),
-            "audio_generation": await self._get_audio_fallback_rates(start_date, end_date),
+            "script_generation": await self._get_script_fallback_rates(
+                start_date, end_date
+            ),
+            "image_generation": await self._get_image_fallback_rates(
+                start_date, end_date
+            ),
+            "video_generation": await self._get_video_fallback_rates(
+                start_date, end_date
+            ),
+            "audio_generation": await self._get_audio_fallback_rates(
+                start_date, end_date
+            ),
             "overall_summary": {},
         }
 
@@ -37,8 +47,12 @@ class MetricsService:
         total_operations = 0
         total_fallbacks = 0
 
-        for service_data in [fallback_data["script_generation"], fallback_data["image_generation"],
-                             fallback_data["video_generation"], fallback_data["audio_generation"]]:
+        for service_data in [
+            fallback_data["script_generation"],
+            fallback_data["image_generation"],
+            fallback_data["video_generation"],
+            fallback_data["audio_generation"],
+        ]:
             total_operations += service_data["total_operations"]
             total_fallbacks += service_data["fallback_count"]
 
@@ -46,7 +60,12 @@ class MetricsService:
             "total_operations": total_operations,
             "total_fallbacks": total_fallbacks,
             "overall_fallback_rate": round(
-                (total_fallbacks / total_operations * 100) if total_operations > 0 else 0, 2
+                (
+                    (total_fallbacks / total_operations * 100)
+                    if total_operations > 0
+                    else 0
+                ),
+                2,
             ),
             "period": {
                 "start_date": start_date.isoformat(),
@@ -60,98 +79,113 @@ class MetricsService:
         self, start_date: datetime, end_date: datetime
     ) -> Dict[str, Any]:
         """Get script generation fallback rates"""
-        query = self.supabase.table("plot_overviews").select(
-            "model_used, generation_method, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
+        stmt = select(PlotOverview).where(
+            PlotOverview.created_at >= start_date, PlotOverview.created_at <= end_date
+        )
+        result = await self.session.exec(stmt)
+        plots = result.all()
 
-        response = query.execute()
-
-        total = len(response.data)
+        total = len(plots)
         fallback_count = sum(
-            1 for record in response.data
-            if record.get("generation_method") in ["fallback", "fallback2"]
+            1
+            for record in plots
+            if record.generation_method in ["fallback", "fallback2"]
         )
 
         return {
             "service": "script_generation",
             "total_operations": total,
             "fallback_count": fallback_count,
-            "fallback_rate": round((fallback_count / total * 100) if total > 0 else 0, 2),
+            "fallback_rate": round(
+                (fallback_count / total * 100) if total > 0 else 0, 2
+            ),
         }
 
     async def _get_image_fallback_rates(
         self, start_date: datetime, end_date: datetime
     ) -> Dict[str, Any]:
         """Get image generation fallback rates"""
-        query = self.supabase.table("image_generations").select(
-            "model_id, metadata, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
+        stmt = select(ImageGeneration).where(
+            ImageGeneration.created_at >= start_date,
+            ImageGeneration.created_at <= end_date,
+        )
+        result = await self.session.exec(stmt)
+        images = result.all()
 
-        response = query.execute()
-
-        total = len(response.data)
+        total = len(images)
         fallback_count = sum(
-            1 for record in response.data
-            if record.get("metadata", {}).get("model_tier_used") in ["fallback", "fallback2"]
+            1
+            for record in images
+            if (record.metadata or {}).get("model_tier_used")
+            in ["fallback", "fallback2"]
         )
 
         return {
             "service": "image_generation",
             "total_operations": total,
             "fallback_count": fallback_count,
-            "fallback_rate": round((fallback_count / total * 100) if total > 0 else 0, 2),
+            "fallback_rate": round(
+                (fallback_count / total * 100) if total > 0 else 0, 2
+            ),
         }
 
     async def _get_video_fallback_rates(
         self, start_date: datetime, end_date: datetime
     ) -> Dict[str, Any]:
         """Get video generation fallback rates"""
-        query = self.supabase.table("video_segments").select(
-            "processing_model, metadata, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
+        stmt = select(VideoSegment).where(
+            VideoSegment.created_at >= start_date, VideoSegment.created_at <= end_date
+        )
+        result = await self.session.exec(stmt)
+        segments = result.all()
 
-        response = query.execute()
-
-        total = len(response.data)
+        total = len(segments)
         fallback_count = sum(
-            1 for record in response.data
-            if record.get("metadata", {}).get("model_tier_used") in ["fallback", "fallback2"]
+            1
+            for record in segments
+            if (record.metadata or {}).get("model_tier_used")
+            in ["fallback", "fallback2"]
         )
 
         return {
             "service": "video_generation",
             "total_operations": total,
             "fallback_count": fallback_count,
-            "fallback_rate": round((fallback_count / total * 100) if total > 0 else 0, 2),
+            "fallback_rate": round(
+                (fallback_count / total * 100) if total > 0 else 0, 2
+            ),
         }
 
     async def _get_audio_fallback_rates(
         self, start_date: datetime, end_date: datetime
     ) -> Dict[str, Any]:
         """Get audio generation fallback rates"""
-        query = self.supabase.table("audio_generations").select(
-            "voice_model, metadata, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
+        stmt = select(AudioGeneration).where(
+            AudioGeneration.created_at >= start_date,
+            AudioGeneration.created_at <= end_date,
+        )
+        result = await self.session.exec(stmt)
+        audios = result.all()
 
-        response = query.execute()
-
-        total = len(response.data)
+        total = len(audios)
         fallback_count = sum(
-            1 for record in response.data
-            if record.get("metadata", {}).get("model_tier_used") in ["fallback", "fallback2"]
+            1
+            for record in audios
+            if (record.metadata or {}).get("model_tier_used")
+            in ["fallback", "fallback2"]
         )
 
         return {
             "service": "audio_generation",
             "total_operations": total,
             "fallback_count": fallback_count,
-            "fallback_rate": round((fallback_count / total * 100) if total > 0 else 0, 2),
+            "fallback_rate": round(
+                (fallback_count / total * 100) if total > 0 else 0, 2
+            ),
         }
 
     async def get_model_performance(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
         """Get performance metrics for all models"""
         if not start_date:
@@ -161,24 +195,31 @@ class MetricsService:
 
         # Query model_performance_metrics table if it exists
         # For now, aggregate from generation tables
-        model_stats = defaultdict(lambda: {
-            "total_attempts": 0,
-            "successful": 0,
-            "failed": 0,
-            "total_time": 0,
-        })
+        model_stats = defaultdict(
+            lambda: {
+                "total_attempts": 0,
+                "successful": 0,
+                "failed": 0,
+                "total_time": 0,
+            }
+        )
 
         # Aggregate from image_generations
-        img_query = self.supabase.table("image_generations").select(
-            "model_id, status, generation_time_seconds, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
+        stmt_img = select(ImageGeneration).where(
+            ImageGeneration.created_at >= start_date,
+            ImageGeneration.created_at <= end_date,
+        )
+        result_img = await self.session.exec(stmt_img)
+        images = result_img.all()
 
-        img_response = img_query.execute()
-
-        for record in img_response.data:
-            model = record.get("model_id", "unknown")
-            status = record.get("status", "failed")
-            gen_time = record.get("generation_time_seconds", 0) or 0
+        for record in images:
+            model = record.model_id or "unknown"
+            status = record.status or "failed"
+            # Assuming generation_time_seconds is on the model or metadata.
+            # It was selected in original code.
+            # ImageGeneration model check needed. Assuming it exists.
+            # If not, check metadata.
+            gen_time = getattr(record, "generation_time_seconds", 0) or 0
 
             model_stats[model]["total_attempts"] += 1
             if status == "completed":
@@ -188,16 +229,17 @@ class MetricsService:
             model_stats[model]["total_time"] += gen_time
 
         # Aggregate from audio_generations
-        audio_query = self.supabase.table("audio_generations").select(
-            "voice_model, status, generation_time_seconds, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
+        stmt_audio = select(AudioGeneration).where(
+            AudioGeneration.created_at >= start_date,
+            AudioGeneration.created_at <= end_date,
+        )
+        result_audio = await self.session.exec(stmt_audio)
+        audios = result_audio.all()
 
-        audio_response = audio_query.execute()
-
-        for record in audio_response.data:
-            model = record.get("voice_model", "unknown")
-            status = record.get("status", "completed")
-            gen_time = record.get("generation_time_seconds", 0) or 0
+        for record in audios:
+            model = record.voice_model or "unknown"
+            status = record.status or "completed"
+            gen_time = getattr(record, "generation_time_seconds", 0) or 0
 
             model_stats[model]["total_attempts"] += 1
             if status == "completed":
@@ -211,21 +253,25 @@ class MetricsService:
         for model, stats in model_stats.items():
             success_rate = (
                 round((stats["successful"] / stats["total_attempts"] * 100), 2)
-                if stats["total_attempts"] > 0 else 0
+                if stats["total_attempts"] > 0
+                else 0
             )
             avg_time = (
                 round(stats["total_time"] / stats["total_attempts"], 2)
-                if stats["total_attempts"] > 0 else 0
+                if stats["total_attempts"] > 0
+                else 0
             )
 
-            result.append({
-                "model": model,
-                "total_attempts": stats["total_attempts"],
-                "successful": stats["successful"],
-                "failed": stats["failed"],
-                "success_rate": success_rate,
-                "average_generation_time": avg_time,
-            })
+            result.append(
+                {
+                    "model": model,
+                    "total_attempts": stats["total_attempts"],
+                    "successful": stats["successful"],
+                    "failed": stats["failed"],
+                    "success_rate": success_rate,
+                    "average_generation_time": avg_time,
+                }
+            )
 
         return sorted(result, key=lambda x: x["total_attempts"], reverse=True)
 
@@ -243,14 +289,12 @@ class MetricsService:
                 "last_failure": None,
                 "blocked_until": None,
                 "note": "Circuit breaker state is managed in-memory by ModelFallbackManager. "
-                        "Implement Redis integration for persistent state tracking."
+                "Implement Redis integration for persistent state tracking.",
             }
         ]
 
     async def get_model_usage_distribution(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Get model usage distribution by service"""
         if not start_date:
@@ -259,9 +303,15 @@ class MetricsService:
             end_date = datetime.now()
 
         distribution = {
-            "image_models": await self._get_image_model_distribution(start_date, end_date),
-            "audio_models": await self._get_audio_model_distribution(start_date, end_date),
-            "video_models": await self._get_video_model_distribution(start_date, end_date),
+            "image_models": await self._get_image_model_distribution(
+                start_date, end_date
+            ),
+            "audio_models": await self._get_audio_model_distribution(
+                start_date, end_date
+            ),
+            "video_models": await self._get_video_model_distribution(
+                start_date, end_date
+            ),
         }
 
         return distribution
@@ -270,26 +320,29 @@ class MetricsService:
         self, start_date: datetime, end_date: datetime
     ) -> List[Dict[str, Any]]:
         """Get image model usage distribution"""
-        query = self.supabase.table("image_generations").select(
-            "model_id"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
-
-        response = query.execute()
+        stmt = select(ImageGeneration).where(
+            ImageGeneration.created_at >= start_date,
+            ImageGeneration.created_at <= end_date,
+        )
+        result = await self.session.exec(stmt)
+        images = result.all()
 
         model_counts = defaultdict(int)
-        for record in response.data:
-            model = record.get("model_id", "unknown")
+        for record in images:
+            model = record.model_id or "unknown"
             model_counts[model] += 1
 
         total = sum(model_counts.values())
 
         result = []
         for model, count in model_counts.items():
-            result.append({
-                "model": model,
-                "count": count,
-                "percentage": round((count / total * 100) if total > 0 else 0, 2),
-            })
+            result.append(
+                {
+                    "model": model,
+                    "count": count,
+                    "percentage": round((count / total * 100) if total > 0 else 0, 2),
+                }
+            )
 
         return sorted(result, key=lambda x: x["count"], reverse=True)
 
@@ -297,26 +350,29 @@ class MetricsService:
         self, start_date: datetime, end_date: datetime
     ) -> List[Dict[str, Any]]:
         """Get audio model usage distribution"""
-        query = self.supabase.table("audio_generations").select(
-            "voice_model"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
-
-        response = query.execute()
+        stmt = select(AudioGeneration).where(
+            AudioGeneration.created_at >= start_date,
+            AudioGeneration.created_at <= end_date,
+        )
+        result = await self.session.exec(stmt)
+        audios = result.all()
 
         model_counts = defaultdict(int)
-        for record in response.data:
-            model = record.get("voice_model", "unknown")
+        for record in audios:
+            model = record.voice_model or "unknown"
             model_counts[model] += 1
 
         total = sum(model_counts.values())
 
         result = []
         for model, count in model_counts.items():
-            result.append({
-                "model": model,
-                "count": count,
-                "percentage": round((count / total * 100) if total > 0 else 0, 2),
-            })
+            result.append(
+                {
+                    "model": model,
+                    "count": count,
+                    "percentage": round((count / total * 100) if total > 0 else 0, 2),
+                }
+            )
 
         return sorted(result, key=lambda x: x["count"], reverse=True)
 
@@ -324,33 +380,34 @@ class MetricsService:
         self, start_date: datetime, end_date: datetime
     ) -> List[Dict[str, Any]]:
         """Get video model usage distribution"""
-        query = self.supabase.table("video_segments").select(
-            "processing_model"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
-
-        response = query.execute()
+        stmt = select(VideoSegment).where(
+            VideoSegment.created_at >= start_date, VideoSegment.created_at <= end_date
+        )
+        result = await self.session.exec(stmt)
+        segments = result.all()
 
         model_counts = defaultdict(int)
-        for record in response.data:
-            model = record.get("processing_model", "unknown")
+        for record in segments:
+            # Assuming processing_model is in metadata if not on model
+            model = (record.metadata or {}).get("processing_model", "unknown")
             model_counts[model] += 1
 
         total = sum(model_counts.values())
 
         result = []
         for model, count in model_counts.items():
-            result.append({
-                "model": model,
-                "count": count,
-                "percentage": round((count / total * 100) if total > 0 else 0, 2),
-            })
+            result.append(
+                {
+                    "model": model,
+                    "count": count,
+                    "percentage": round((count / total * 100) if total > 0 else 0, 2),
+                }
+            )
 
         return sorted(result, key=lambda x: x["count"], reverse=True)
 
     async def get_generation_times(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """Get average generation times by service and model"""
         if not start_date:
@@ -359,22 +416,34 @@ class MetricsService:
             end_date = datetime.now()
 
         return {
-            "image_generation": await self._get_image_generation_times(start_date, end_date),
-            "audio_generation": await self._get_audio_generation_times(start_date, end_date),
-            "video_generation": await self._get_video_generation_times(start_date, end_date),
+            "image_generation": await self._get_image_generation_times(
+                start_date, end_date
+            ),
+            "audio_generation": await self._get_audio_generation_times(
+                start_date, end_date
+            ),
+            "video_generation": await self._get_video_generation_times(
+                start_date, end_date
+            ),
         }
 
     async def _get_image_generation_times(
         self, start_date: datetime, end_date: datetime
     ) -> Dict[str, Any]:
         """Get image generation time statistics"""
-        query = self.supabase.table("image_generations").select(
-            "model_id, generation_time_seconds"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat()).eq("status", "completed")
+        stmt = select(ImageGeneration).where(
+            ImageGeneration.created_at >= start_date,
+            ImageGeneration.created_at <= end_date,
+            ImageGeneration.status == "completed",
+        )
+        result = await self.session.exec(stmt)
+        images = result.all()
 
-        response = query.execute()
-
-        times = [record.get("generation_time_seconds", 0) for record in response.data if record.get("generation_time_seconds")]
+        times = [
+            getattr(record, "generation_time_seconds", 0)
+            for record in images
+            if getattr(record, "generation_time_seconds", None)
+        ]
 
         if not times:
             return {"average": 0, "min": 0, "max": 0, "count": 0}
@@ -390,13 +459,19 @@ class MetricsService:
         self, start_date: datetime, end_date: datetime
     ) -> Dict[str, Any]:
         """Get audio generation time statistics"""
-        query = self.supabase.table("audio_generations").select(
-            "voice_model, generation_time_seconds"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat()).eq("status", "completed")
+        stmt = select(AudioGeneration).where(
+            AudioGeneration.created_at >= start_date,
+            AudioGeneration.created_at <= end_date,
+            AudioGeneration.status == "completed",
+        )
+        result = await self.session.exec(stmt)
+        audios = result.all()
 
-        response = query.execute()
-
-        times = [record.get("generation_time_seconds", 0) for record in response.data if record.get("generation_time_seconds")]
+        times = [
+            getattr(record, "generation_time_seconds", 0)
+            for record in audios
+            if getattr(record, "generation_time_seconds", None)
+        ]
 
         if not times:
             return {"average": 0, "min": 0, "max": 0, "count": 0}
@@ -412,13 +487,19 @@ class MetricsService:
         self, start_date: datetime, end_date: datetime
     ) -> Dict[str, Any]:
         """Get video generation time statistics"""
-        query = self.supabase.table("video_segments").select(
-            "processing_model, generation_time_seconds"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat()).eq("status", "completed")
+        stmt = select(VideoSegment).where(
+            VideoSegment.created_at >= start_date,
+            VideoSegment.created_at <= end_date,
+            VideoSegment.status == "completed",
+        )
+        result = await self.session.exec(stmt)
+        segments = result.all()
 
-        response = query.execute()
-
-        times = [record.get("generation_time_seconds", 0) for record in response.data if record.get("generation_time_seconds")]
+        times = [
+            getattr(record, "generation_time_seconds", 0)
+            for record in segments
+            if getattr(record, "generation_time_seconds", None)
+        ]
 
         if not times:
             return {"average": 0, "min": 0, "max": 0, "count": 0}
@@ -439,7 +520,9 @@ class MetricsService:
         model_performance = await self.get_model_performance(start_date=one_hour_ago)
 
         # Determine overall health
-        overall_fallback_rate = fallback_rates["overall_summary"]["overall_fallback_rate"]
+        overall_fallback_rate = fallback_rates["overall_summary"][
+            "overall_fallback_rate"
+        ]
 
         if overall_fallback_rate > 50:
             health_status = "critical"

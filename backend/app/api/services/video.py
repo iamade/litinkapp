@@ -12,7 +12,7 @@ import tempfile
 import aiofiles
 import aiohttp
 from pathlib import Path
-from supabase.client import create_client, Client
+from pathlib import Path
 import base64
 import jwt
 import json
@@ -26,24 +26,15 @@ from app.books.models import Chapter, Book, LearningContent
 class VideoService:
     """Video generation service using Tavus API with RAG and ElevenLabs integration"""
 
-    def __init__(self, session: AsyncSession, supabase_client=None):
+    def __init__(self, session: AsyncSession):
         self.session = session
         self.api_key = settings.TAVUS_API_KEY
         self.base_url = "https://tavusapi.com/v2"
         self.kling_access_key_id = settings.KLINGAI_ACCESS_KEY_ID
         self.kling_access_key_secret = settings.KLINGAI_ACCESS_KEY_SECRET
 
-        # Initialize Supabase client for storage (files), not DB
-        if supabase_client:
-            self.supabase = supabase_client
-        else:
-            self.supabase = create_client(
-                settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY
-            )
-        self.supabase_service = self.supabase  # Alias for compatibility
-
         self.rag_service = RAGService(self.session)
-        self.elevenlabs_service = ElevenLabsService(self.supabase)
+        self.elevenlabs_service = ElevenLabsService()
 
     async def generate_video_from_chapter(
         self,
@@ -1061,7 +1052,7 @@ class VideoService:
                 filename = f"mock_video_{int(time.time())}.mp4"
 
                 # Upload to Supabase Storage and get public URL
-                video_url = await self._serve_video_from_supabase(video_path, filename)
+                video_url = await self._serve_video_from_storage(video_path, filename)
 
                 if video_url:
                     return {
@@ -1263,7 +1254,7 @@ class VideoService:
                 print(f"[FRAME EXTRACTION] Frame extracted to: {frame_temp_path}")
 
                 # Upload frame to Supabase Storage
-                frame_url = await self._serve_video_from_supabase(
+                frame_url = await self._serve_video_from_storage(
                     frame_temp_path, output_filename, user_id
                 )
 
@@ -1398,7 +1389,7 @@ class VideoService:
                 filename = f"merged_video_{int(time.time())}.mp4"
 
                 # Upload to Supabase Storage and get public URL
-                video_url = await self._serve_video_from_supabase(
+                video_url = await self._serve_video_from_storage(
                     str(output_path), filename
                 )
 
@@ -1423,14 +1414,16 @@ class VideoService:
             print(f"Error merging real video and audio: {e}")
             return None
 
-    async def _upload_to_supabase_storage(
+    async def _upload_to_storage(
         self, file_path: str, filename: str, folder: str = "videos"
     ) -> Optional[str]:
-        """Upload file to Supabase Storage and return public URL"""
+        """Upload file to Local Storage and return public URL"""
         try:
             if not os.path.exists(file_path):
                 print(f"File not found: {file_path}")
                 return None
+
+            from app.core.services.storage import storage_service
 
             # Read file content
             with open(file_path, "rb") as f:
@@ -1439,30 +1432,25 @@ class VideoService:
             # Create storage path
             storage_path = f"{folder}/{filename}"
 
-            # Upload to Supabase Storage
-            self.supabase.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
-                path=storage_path,
-                file=file_content,
-                file_options={"content-type": "video/mp4"},
+            # Upload to Local Storage
+            public_url = await storage_service.upload(
+                file_content, storage_path, "video/mp4"
             )
 
-            # Get public URL
-            public_url = self.supabase.storage.from_(
-                settings.SUPABASE_BUCKET_NAME
-            ).get_public_url(storage_path)
-
-            print(f"Uploaded video to Supabase: {public_url}")
+            print(f"Uploaded video to Storage: {public_url}")
             return public_url
 
         except Exception as e:
-            print(f"Error uploading to Supabase Storage: {e}")
+            print(f"Error uploading to Storage: {e}")
             return None
 
-    async def _serve_video_from_supabase(
+    async def _serve_video_from_storage(
         self, file_path: str, filename: str, user_id: str = None
     ) -> str:
-        """Upload video to Supabase Storage and return public URL"""
+        """Upload video to Local Storage and return public URL"""
         try:
+            from app.core.services.storage import storage_service
+
             # Read the file
             with open(file_path, "rb") as f:
                 file_content = f.read()
@@ -1473,23 +1461,17 @@ class VideoService:
             else:
                 storage_path = f"videos/{filename}"
 
-            # Upload to Supabase Storage
-            self.supabase.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
-                path=storage_path,
-                file=file_content,
-                file_options={"content-type": "video/mp4"},
+            # Upload to Local Storage
+            public_url = await storage_service.upload(
+                file_content, storage_path, "video/mp4"
             )
 
-            # Get public URL
-            public_url = self.supabase.storage.from_(
-                settings.SUPABASE_BUCKET_NAME
-            ).get_public_url(storage_path)
             print(f"[VIDEO UPLOAD] Video uploaded to: {public_url}")
 
             return public_url
 
         except Exception as e:
-            print(f"Error uploading video to Supabase: {e}")
+            print(f"Error uploading video to Storage: {e}")
             raise
 
     async def _generate_learning_script(
@@ -1673,7 +1655,7 @@ Return as JSON with: script, character_details, scene_prompt
                 return {"error": "Merged video not found"}
 
             # Upload merged video to Supabase
-            merged_video_url = await self._serve_video_from_supabase(
+            merged_video_url = await self._serve_video_from_storage(
                 merged_path, f"merged_video_{int(time.time())}.mp4", user_id
             )
 
@@ -3378,7 +3360,7 @@ Return as JSON with: script, character_details, scene_prompt
             print(f"✅ Video downloaded to: {temp_path}")
 
             # Upload to Supabase Storage
-            supabase_url = await self._serve_video_from_supabase(
+            supabase_url = await self._serve_video_from_storage(
                 temp_path, filename, user_id
             )
 
@@ -3463,7 +3445,7 @@ Return as JSON with: script, character_details, scene_prompt
             print(f"✅ Videos combined successfully: {output_path}")
 
             # Upload combined video to Supabase
-            supabase_url = await self._serve_video_from_supabase(
+            supabase_url = await self._serve_video_from_storage(
                 output_path, output_filename, user_id
             )
 
@@ -3803,7 +3785,7 @@ Return as JSON with: script, character_details, scene_prompt
             print(f"✅ Video downloaded to: {video_path}")
 
             # Upload the combined video to Supabase Storage
-            combined_video_url = await self._serve_video_from_supabase(
+            combined_video_url = await self._serve_video_from_storage(
                 video_path, video_filename, str(content_record.user_id)
             )
 

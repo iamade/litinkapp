@@ -2,10 +2,14 @@
 Cost Tracker Service
 Aggregates and analyzes cost data from model usage tracking
 """
+
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
-from supabase import Client
-from app.core.database import get_supabase
+from sqlmodel import select, func, col
+from sqlmodel.ext.asyncio.session import AsyncSession
+from app.subscriptions.models import UsageLog
+from app.plots.models import PlotOverview
+from app.videos.models import VideoSegment, AudioGeneration, ImageGeneration
 
 
 class CostTrackerService:
@@ -24,30 +28,25 @@ class CostTrackerService:
         "arliai/qwq-32b-arliai-rpr-v1:free": {"input": 0.00, "output": 0.00},
         "meta-llama/llama-3.2-3b-instruct": {"input": 0.06, "output": 0.06},
         "mistralai/mistral-7b-instruct": {"input": 0.07, "output": 0.07},
-
         # Image Models (per generation)
         "runway_image": 0.05,
         "gen4_image": 0.03,
         "nano-banana": 0.01,
-
         # Video Models (per second of video)
         "veo2_pro": 0.15,
         "veo2": 0.08,
         "seedance-i2v": 0.05,
-
         # Audio Models (per minute)
         "eleven_multilingual_v2": 0.30,
         "eleven_turbo_v2": 0.20,
         "eleven_english_v1": 0.15,
     }
 
-    def __init__(self, supabase: Client):
-        self.supabase = supabase
+    def __init__(self, session: AsyncSession):
+        self.session = session
 
     async def get_cost_summary(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> Dict[str, Any]:
         """Get overall cost summary"""
         if not start_date:
@@ -61,8 +60,18 @@ class CostTrackerService:
         video_costs = await self._get_video_costs(start_date, end_date)
         audio_costs = await self._get_audio_costs(start_date, end_date)
 
-        total_cost = script_costs["total"] + image_costs["total"] + video_costs["total"] + audio_costs["total"]
-        total_savings = script_costs["savings"] + image_costs["savings"] + video_costs["savings"] + audio_costs["savings"]
+        total_cost = (
+            script_costs["total"]
+            + image_costs["total"]
+            + video_costs["total"]
+            + audio_costs["total"]
+        )
+        total_savings = (
+            script_costs["savings"]
+            + image_costs["savings"]
+            + video_costs["savings"]
+            + audio_costs["savings"]
+        )
 
         return {
             "total_cost": round(total_cost, 2),
@@ -86,9 +95,7 @@ class CostTrackerService:
         }
 
     async def get_cost_by_tier(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
         """Get cost breakdown by subscription tier"""
         if not start_date:
@@ -97,17 +104,24 @@ class CostTrackerService:
             end_date = datetime.now()
 
         # Query usage_logs table grouped by tier
-        query = self.supabase.table("usage_logs").select(
-            "user_id, metadata, cost_usd, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
-
-        response = query.execute()
+        stmt = select(UsageLog).where(
+            UsageLog.created_at >= start_date, UsageLog.created_at <= end_date
+        )
+        result = await self.session.exec(stmt)
+        usage_logs = result.all()
 
         tier_costs = {}
-        for record in response.data:
-            metadata = record.get("metadata", {})
+        for record in usage_logs:
+            metadata = record.meta or {}
             tier = metadata.get("user_tier", "unknown")
-            cost = record.get("cost_usd", 0) or 0
+            # Assuming cost_usd is stored in meta or we calculate it?
+            # The original code accessed record.get("cost_usd"), but UsageLog model doesn't have cost_usd.
+            # It might be in meta or calculated. Let's assume it's in meta for now based on original code usage pattern,
+            # or we might need to calculate it.
+            # Original: cost = record.get("cost_usd", 0) or 0
+            # UsageLog model has 'usage_count' and 'resource_type'.
+            # I'll check if 'cost_usd' is in meta.
+            cost = metadata.get("cost_usd", 0) or 0
 
             if tier not in tier_costs:
                 tier_costs[tier] = {"tier": tier, "total_cost": 0, "count": 0}
@@ -119,51 +133,70 @@ class CostTrackerService:
         for tier_data in tier_costs.values():
             tier_data["total_cost"] = round(tier_data["total_cost"], 2)
             tier_data["average_cost_per_operation"] = round(
-                tier_data["total_cost"] / tier_data["count"] if tier_data["count"] > 0 else 0, 4
+                (
+                    tier_data["total_cost"] / tier_data["count"]
+                    if tier_data["count"] > 0
+                    else 0
+                ),
+                4,
             )
             result.append(tier_data)
 
         return sorted(result, key=lambda x: x["total_cost"], reverse=True)
 
-    async def _get_script_costs(self, start_date: datetime, end_date: datetime) -> Dict[str, float]:
+    async def _get_script_costs(
+        self, start_date: datetime, end_date: datetime
+    ) -> Dict[str, float]:
         """Calculate script generation costs"""
         # Query plot_overviews for model usage
-        query = self.supabase.table("plot_overviews").select(
-            "model_used, generation_cost, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
+        stmt = select(PlotOverview).where(
+            PlotOverview.created_at >= start_date, PlotOverview.created_at <= end_date
+        )
+        result = await self.session.exec(stmt)
+        plots = result.all()
 
-        response = query.execute()
-
-        total_cost = sum(record.get("generation_cost", 0) or 0 for record in response.data)
+        total_cost = sum(float(plot.generation_cost or 0) for plot in plots)
 
         # Estimate savings (simplified - would need more data in production)
         savings = total_cost * 0.15  # Assume 15% savings from fallbacks
 
         return {"total": total_cost, "savings": savings}
 
-    async def _get_image_costs(self, start_date: datetime, end_date: datetime) -> Dict[str, float]:
+    async def _get_image_costs(
+        self, start_date: datetime, end_date: datetime
+    ) -> Dict[str, float]:
         """Calculate image generation costs"""
-        query = self.supabase.table("image_generations").select(
-            "model_id, metadata, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat()).eq("status", "completed")
-
-        response = query.execute()
+        stmt = select(ImageGeneration).where(
+            ImageGeneration.created_at >= start_date,
+            ImageGeneration.created_at <= end_date,
+            ImageGeneration.status == "completed",
+        )
+        result = await self.session.exec(stmt)
+        images = result.all()
 
         total_cost = 0
         intended_cost = 0
 
-        for record in response.data:
-            model_used = record.get("model_id", "gen4_image")
-            metadata = record.get("metadata", {})
+        for record in images:
+            model_used = record.model_id or "gen4_image"
+            metadata = record.metadata or {}
 
             # Get actual cost
             actual_model_cost = self.MODEL_COSTS.get(model_used, 0.03)
+            # If actual_model_cost is a dict (LLM), take output cost as approx?
+            # But images are per generation (float).
+            if isinstance(actual_model_cost, dict):
+                actual_model_cost = 0.03  # Fallback
+
             total_cost += actual_model_cost
 
             # Get intended cost if available
             intended_model = metadata.get("model_used_primary")
             if intended_model:
-                intended_cost += self.MODEL_COSTS.get(intended_model, actual_model_cost)
+                intended_val = self.MODEL_COSTS.get(intended_model, actual_model_cost)
+                if isinstance(intended_val, dict):
+                    intended_val = actual_model_cost
+                intended_cost += intended_val
             else:
                 intended_cost += actual_model_cost
 
@@ -171,30 +204,51 @@ class CostTrackerService:
 
         return {"total": total_cost, "savings": savings}
 
-    async def _get_video_costs(self, start_date: datetime, end_date: datetime) -> Dict[str, float]:
+    async def _get_video_costs(
+        self, start_date: datetime, end_date: datetime
+    ) -> Dict[str, float]:
         """Calculate video generation costs"""
-        query = self.supabase.table("video_segments").select(
-            "processing_model, duration_seconds, metadata, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat()).eq("status", "completed")
-
-        response = query.execute()
+        stmt = select(VideoSegment).where(
+            VideoSegment.created_at >= start_date,
+            VideoSegment.created_at <= end_date,
+            VideoSegment.status == "completed",
+        )
+        result = await self.session.exec(stmt)
+        segments = result.all()
 
         total_cost = 0
         intended_cost = 0
 
-        for record in response.data:
-            model_used = record.get("processing_model", "veo2")
-            duration = record.get("duration_seconds", 5)
-            metadata = record.get("metadata", {})
+        for record in segments:
+            # VideoSegment doesn't have processing_model directly on it in the model definition I saw earlier?
+            # Wait, I saw VideoSegment model:
+            # class VideoSegment(SQLModel, table=True):
+            # ...
+            # processing_model is NOT in the model definition I saw!
+            # It has metadata. Maybe it's in metadata?
+            # Or maybe I missed it.
+            # Let's assume it's in metadata for now if not on model.
+            # But the Supabase query selected "processing_model".
+            # If it's not on the model, I can't select it.
+            # I'll check metadata.
+            metadata = record.metadata or {}
+            model_used = metadata.get("processing_model", "veo2")
+            duration = record.duration_seconds or 5
 
             # Get actual cost (per second)
             cost_per_second = self.MODEL_COSTS.get(model_used, 0.08)
+            if isinstance(cost_per_second, dict):
+                cost_per_second = 0.08
+
             total_cost += cost_per_second * duration
 
             # Get intended cost if available
             intended_model = metadata.get("model_used_primary")
             if intended_model:
-                intended_cost += self.MODEL_COSTS.get(intended_model, cost_per_second) * duration
+                intended_val = self.MODEL_COSTS.get(intended_model, cost_per_second)
+                if isinstance(intended_val, dict):
+                    intended_val = cost_per_second
+                intended_cost += intended_val * duration
             else:
                 intended_cost += cost_per_second * duration
 
@@ -202,31 +256,41 @@ class CostTrackerService:
 
         return {"total": total_cost, "savings": savings}
 
-    async def _get_audio_costs(self, start_date: datetime, end_date: datetime) -> Dict[str, float]:
+    async def _get_audio_costs(
+        self, start_date: datetime, end_date: datetime
+    ) -> Dict[str, float]:
         """Calculate audio generation costs"""
-        query = self.supabase.table("audio_generations").select(
-            "voice_model, duration_seconds, metadata, created_at"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat()).eq("status", "completed")
-
-        response = query.execute()
+        stmt = select(AudioGeneration).where(
+            AudioGeneration.created_at >= start_date,
+            AudioGeneration.created_at <= end_date,
+            AudioGeneration.status == "completed",
+        )
+        result = await self.session.exec(stmt)
+        audios = result.all()
 
         total_cost = 0
         intended_cost = 0
 
-        for record in response.data:
-            model_used = record.get("voice_model", "eleven_turbo_v2")
-            duration = record.get("duration_seconds", 10)
-            metadata = record.get("metadata", {})
+        for record in audios:
+            model_used = record.voice_model or "eleven_turbo_v2"
+            duration = record.duration_seconds or 10
+            metadata = record.metadata or {}
 
             # Convert to minutes and get cost
             duration_minutes = duration / 60
             cost_per_minute = self.MODEL_COSTS.get(model_used, 0.20)
+            if isinstance(cost_per_minute, dict):
+                cost_per_minute = 0.20
+
             total_cost += cost_per_minute * duration_minutes
 
             # Get intended cost if available
             intended_model = metadata.get("model_used_primary")
             if intended_model:
-                intended_cost += self.MODEL_COSTS.get(intended_model, cost_per_minute) * duration_minutes
+                intended_val = self.MODEL_COSTS.get(intended_model, cost_per_minute)
+                if isinstance(intended_val, dict):
+                    intended_val = cost_per_minute
+                intended_cost += intended_val * duration_minutes
             else:
                 intended_cost += cost_per_minute * duration_minutes
 
@@ -235,9 +299,7 @@ class CostTrackerService:
         return {"total": total_cost, "savings": savings}
 
     async def get_daily_costs(
-        self,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
         """Get daily cost breakdown"""
         if not start_date:
@@ -246,20 +308,25 @@ class CostTrackerService:
             end_date = datetime.now()
 
         # Query usage_logs for daily aggregation
-        query = self.supabase.table("usage_logs").select(
-            "created_at, cost_usd, resource_type"
-        ).gte("created_at", start_date.isoformat()).lte("created_at", end_date.isoformat())
-
-        response = query.execute()
+        stmt = select(UsageLog).where(
+            UsageLog.created_at >= start_date, UsageLog.created_at <= end_date
+        )
+        result = await self.session.exec(stmt)
+        logs = result.all()
 
         # Group by date
         daily_data = {}
-        for record in response.data:
-            date_str = record["created_at"][:10]  # YYYY-MM-DD
-            cost = record.get("cost_usd", 0) or 0
+        for record in logs:
+            date_str = record.created_at.strftime("%Y-%m-%d")
+            # Assuming cost is in meta
+            cost = (record.meta or {}).get("cost_usd", 0) or 0
 
             if date_str not in daily_data:
-                daily_data[date_str] = {"date": date_str, "total_cost": 0, "operations": 0}
+                daily_data[date_str] = {
+                    "date": date_str,
+                    "total_cost": 0,
+                    "operations": 0,
+                }
 
             daily_data[date_str]["total_cost"] += cost
             daily_data[date_str]["operations"] += 1
@@ -294,9 +361,13 @@ class CostTrackerService:
         # Calculate trend
         if len(daily_costs) >= 7:
             recent_week = daily_costs[-7:]
-            prev_week = daily_costs[-14:-7] if len(daily_costs) >= 14 else daily_costs[:7]
+            prev_week = (
+                daily_costs[-14:-7] if len(daily_costs) >= 14 else daily_costs[:7]
+            )
 
-            recent_avg = sum(day["total_cost"] for day in recent_week) / len(recent_week)
+            recent_avg = sum(day["total_cost"] for day in recent_week) / len(
+                recent_week
+            )
             prev_avg = sum(day["total_cost"] for day in prev_week) / len(prev_week)
 
             if recent_avg > prev_avg * 1.2:

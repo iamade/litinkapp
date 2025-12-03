@@ -20,7 +20,6 @@ from app.books.models import (
     Book,
     Chapter,
     LearningContent,
-    PlotOverview,
 )
 from app.plots.models import PlotOverview
 import time

@@ -10,7 +10,6 @@ from fastapi import (
     BackgroundTasks,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
-from supabase import Client
 from app.core.services.embeddings import EmbeddingsService
 from sqlmodel.ext.asyncio.session import AsyncSession
 from postgrest.exceptions import APIError
@@ -24,7 +23,7 @@ from fastapi.responses import Response
 import io
 
 from app.core.auth import get_current_user, get_current_author, get_current_active_user
-from app.core.database import get_session, get_supabase
+from app.core.database import get_session
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, update, delete, col, or_, text
 from sqlalchemy import func
@@ -763,7 +762,6 @@ async def upload_book(
     description: Optional[str] = Form(None),
     book_type: str = Form(...),
     session: AsyncSession = Depends(get_session),
-    supabase_client: Client = Depends(get_supabase),  # For storage
     current_user: dict = Depends(get_current_user),
 ):
     """Upload book file - PREVIEW MODE (doesn't save chapters yet)"""
@@ -805,11 +803,9 @@ async def upload_book(
             original_filename = file.filename
             storage_path = f"users/{current_user['id']}/{original_filename}"
 
-            supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
-                path=storage_path,
-                file=file_content,
-                file_options={"content-type": file.content_type},
-            )
+            from app.core.services.storage import storage_service
+
+            await storage_service.upload(file_content, storage_path, file.content_type)
 
             # Update book with storage info
             book.original_file_storage_path = storage_path
@@ -826,6 +822,7 @@ async def upload_book(
             book_type=book_type,
             user_id=str(current_user["id"]),
             book_id_to_update=str(book.id),
+            session=session,
         )
 
         # ✅ FIX: Handle both sectioned and flat structures properly
@@ -1469,6 +1466,7 @@ async def save_book_structure(
             book_id=book_id,
             confirmed_chapters=confirmed_chapters,
             user_id=str(current_user["id"]),
+            session=session,
         )
 
         # Return updated book

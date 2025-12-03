@@ -3,7 +3,11 @@ import asyncio
 from typing import Dict, Any, List, Optional
 from app.core.services.modelslab_video import ModelsLabVideoService
 from app.api.services.video import VideoService
-from app.core.database import get_supabase
+from app.core.database import async_session, engine
+from sqlmodel import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from app.videos.models import VideoGeneration, VideoSegment
 import json
 
 from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
@@ -21,6 +25,7 @@ async def extract_scene_dialogue_and_generate_audio(
     scene_description: str,
     script_data: Dict[str, Any],
     user_id: str = None,
+    session: AsyncSession = None,
 ) -> Dict[str, Any]:
     """Extract dialogue for a specific scene and generate audio"""
 
@@ -37,7 +42,9 @@ async def extract_scene_dialogue_and_generate_audio(
         scene_descriptions = script_data.get("scene_descriptions", [])
 
         # Initialize video service for dialogue extraction
-        video_service = VideoService()
+        if not session:
+             raise Exception("Session required for extract_scene_dialogue_and_generate_audio")
+        video_service = VideoService(session)
 
         # Extract dialogue per scene
         dialogue_data = await video_service.extract_dialogue_per_scene(
@@ -56,30 +63,44 @@ async def extract_scene_dialogue_and_generate_audio(
         )
 
         # Store dialogue audio in database for tracking
-        supabase = get_supabase()
+        # Store dialogue audio in database for tracking
+        # supabase = get_supabase()
         for audio_file in scene_audio_files:
             try:
-                supabase.table("video_segments").insert(
-                    {
-                        "video_generation_id": video_gen_id,
-                        "scene_id": scene_id,
-                        "segment_index": scene_number,
-                        "scene_description": scene_description,
-                        "audio_url": audio_file.get("audio_url"),
-                        "character_name": audio_file.get("character"),
-                        "dialogue_text": audio_file.get("text"),
-                        "generation_method": "character_dialogue_audio",
-                        "status": "completed",
-                        "processing_service": "elevenlabs",
-                        "metadata": {
-                            "character_profile": audio_file.get(
-                                "character_profile", {}
-                            ),
-                            "scene_number": scene_number,
-                            "dialogue_type": "character_voice",
-                        },
-                    }
-                ).execute()
+                # Using raw SQL for insert if VideoSegment model usage is complex or to match existing pattern
+                # But better to use model if possible.
+                # Let's use raw SQL insert for now to be safe with existing schema
+                
+                insert_query = text(\"""
+                    INSERT INTO video_segments (
+                        video_generation_id, scene_id, segment_index, scene_description,
+                        audio_url, character_name, dialogue_text, generation_method,
+                        status, processing_service, metadata
+                    ) VALUES (
+                        :video_generation_id, :scene_id, :segment_index, :scene_description,
+                        :audio_url, :character_name, :dialogue_text, :generation_method,
+                        :status, :processing_service, :metadata
+                    )
+                \""")
+                
+                await session.execute(insert_query, {
+                    "video_generation_id": video_gen_id,
+                    "scene_id": scene_id,
+                    "segment_index": scene_number,
+                    "scene_description": scene_description,
+                    "audio_url": audio_file.get("audio_url"),
+                    "character_name": audio_file.get("character"),
+                    "dialogue_text": audio_file.get("text"),
+                    "generation_method": "character_dialogue_audio",
+                    "status": "completed",
+                    "processing_service": "elevenlabs",
+                    "metadata": json.dumps({
+                        "character_profile": audio_file.get("character_profile", {}),
+                        "scene_number": scene_number,
+                        "dialogue_type": "character_voice",
+                    })
+                })
+                await session.commit()
             except Exception as db_error:
                 print(f"[DIALOGUE EXTRACTION] Error storing dialogue audio: {db_error}")
 
@@ -203,23 +224,33 @@ async def generate_scene_videos(
             print(f"[SCENE VIDEOS V7] ❌ Failed {scene_id}: {str(e)}")
 
             # Store failed record
+            # Store failed record
             try:
-                supabase.table("video_segments").insert(
-                    {
-                        "video_generation_id": video_gen_id,
-                        "scene_id": scene_id,
-                        "segment_index": i + 1,
-                        "scene_description": scene_description,
-                        "generation_method": "veo2_image_to_video",
-                        "status": "failed",
-                        "error_message": str(e),
-                        "processing_service": "modelslab_v7",
-                        "processing_model": model_id,
-                        "metadata": {"service": "modelslab_v7", "veo2_enhanced": False},
-                    }
-                ).execute()
-            except:
-                pass
+                fail_insert_query = text(\"""
+                    INSERT INTO video_segments (
+                        video_generation_id, scene_id, segment_index, scene_description,
+                        generation_method, status, error_message, processing_service, processing_model, metadata
+                    ) VALUES (
+                        :video_generation_id, :scene_id, :segment_index, :scene_description,
+                        :generation_method, :status, :error_message, :processing_service, :processing_model, :metadata
+                    )
+                \""")
+                
+                await session.execute(fail_insert_query, {
+                    "video_generation_id": video_gen_id,
+                    "scene_id": scene_id,
+                    "segment_index": i + 1,
+                    "scene_description": scene_description,
+                    "generation_method": "veo2_image_to_video_sequential",
+                    "status": "failed",
+                    "error_message": str(e),
+                    "processing_service": "modelslab_v7",
+                    "processing_model": model_id,
+                    "metadata": json.dumps({"service": "modelslab_v7", "veo2_enhanced": False})
+                })
+                await session.commit()
+            except Exception as insert_err:
+                print(f"[SCENE VIDEOS V7] Error inserting failed record: {insert_err}")
 
             video_results.append(None)
 
@@ -258,34 +289,42 @@ def find_scene_audio(
     return None
 
 
-def update_pipeline_step(
-    video_generation_id: str, step_name: str, status: str, error_message: str = None
+async def update_pipeline_step(
+    video_generation_id: str, step_name: str, status: str, error_message: str = None, session: AsyncSession = None
 ):
     """Update pipeline step status"""
     try:
-        supabase = get_supabase()
+        if not session:
+             print(f"[PIPELINE ERROR] No session provided for update_pipeline_step {step_name}")
+             return
 
         update_data = {
             "status": status,
-            # ✅ FIX: Remove 'updated_at' field since it's not in schema
+            "video_generation_id": video_generation_id,
+            "step_name": step_name
         }
-
+        
+        set_clauses = ["status = :status"]
+        
         if status == "processing":
-            update_data["started_at"] = "now()"
+            set_clauses.append("started_at = NOW()")
         elif status in ["completed", "failed"]:
-            update_data["completed_at"] = "now()"
+            set_clauses.append("completed_at = NOW()")
 
         if error_message:
+            set_clauses.append("error_message = :error_message")
             update_data["error_message"] = error_message
 
-        # ✅ FIX: Only update existing columns
-        result = (
-            supabase.table("pipeline_steps")
-            .update(update_data)
-            .eq("video_generation_id", video_generation_id)
-            .eq("step_name", step_name)
-            .execute()
-        )
+        set_clause_str = ", ".join(set_clauses)
+        
+        update_query = text(f\"""
+            UPDATE pipeline_steps 
+            SET {set_clause_str}
+            WHERE video_generation_id = :video_generation_id AND step_name = :step_name
+        \""")
+        
+        await session.execute(update_query, update_data)
+        await session.commit()
 
         print(f"[PIPELINE] Updated step {step_name} to {status}")
 
@@ -296,43 +335,43 @@ def update_pipeline_step(
 @celery_app.task(bind=True)
 def generate_all_videos_for_generation(self, video_generation_id: str):
     """Main task to generate all videos for a video generation with automatic retry"""
+    return asyncio.run(async_generate_all_videos_for_generation(video_generation_id))
 
-    try:
-        print(
-            f"[VIDEO GENERATION] Starting video generation for: {video_generation_id}"
-        )
+async def async_generate_all_videos_for_generation(video_generation_id: str):
+    """Async implementation of video generation task"""
+    async with async_session() as session:
+        try:
+            print(
+                f"[VIDEO GENERATION] Starting video generation for: {video_generation_id}"
+            )
 
-        # ✅ Update pipeline step to processing
-        update_pipeline_step(video_generation_id, "video_generation", "processing")
+            # ✅ Update pipeline step to processing
+            await update_pipeline_step(video_generation_id, "video_generation", "processing", session=session)
 
-        # Get video generation data
-        supabase = get_supabase()
-        video_data = (
-            supabase.table("video_generations")
-            .select("*")
-            .eq("id", video_generation_id)
-            .single()
-            .execute()
-        )
+            # Get video generation data
+            # Using raw SQL
+            query = text("SELECT * FROM video_generations WHERE id = :id")
+            result = await session.execute(query, {"id": video_generation_id})
+            video_gen_record = result.mappings().first()
 
-        if not video_data.data:
-            raise Exception(f"Video generation {video_generation_id} not found")
+            if not video_gen_record:
+                raise Exception(f"Video generation {video_generation_id} not found")
+            
+            # Convert to dict for easier access (and compatibility with existing code)
+            video_gen = dict(video_gen_record)
+            user_id = video_gen.get("user_id")
 
-        video_gen = video_data.data
-        user_id = video_gen.get("user_id")  # Get user_id from video generation record
-
-        # For split workflow, video generation can proceed without image generation
-        # Character images will be queried from database
-
-        # Update status and initialize retry tracking
-        supabase.table("video_generations").update(
-            {
-                "generation_status": "generating_video",
-                "retry_count": 0,  # Initialize retry count
-                "can_resume": True,  # Enable retry capability
-                "last_retry_at": None,
-            }
-        ).eq("id", video_generation_id).execute()
+            # Update status and initialize retry tracking
+            update_query = text(\"""
+                UPDATE video_generations 
+                SET generation_status = 'generating_video', 
+                    retry_count = 0, 
+                    can_resume = true, 
+                    last_retry_at = NULL 
+                WHERE id = :id
+            \""")
+            await session.execute(update_query, {"id": video_generation_id})
+            await session.commit()
 
         # Get script data and generated assets
         script_data = video_gen.get("script_data", {})
@@ -352,15 +391,11 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         )
 
         # Query existing character images from database
-        character_images = asyncio.run(
-            query_existing_character_images(user_id, characters)
-        )
+        character_images = await query_existing_character_images(user_id, characters)
         print(f"- Character Images: {len(character_images)} found in database")
 
         # Query existing scene images from database
-        scene_images = asyncio.run(
-            query_existing_scene_images(user_id, scene_descriptions)
-        )
+        scene_images = await query_existing_scene_images(user_id, scene_descriptions)
         print(f"- Scene Images: {len(scene_images)} found in database")
 
         # For split workflow, prioritize scene images over character images
@@ -435,8 +470,8 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         modelslab_service = ModelsLabV7VideoService()
 
         # Generate scene videos sequentially with key scene shots
-        video_results = asyncio.run(
-            generate_scene_videos(
+        # Generate scene videos sequentially with key scene shots
+        video_results = await generate_scene_videos(
                 modelslab_service,
                 video_generation_id,
                 scene_descriptions,
@@ -445,8 +480,8 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
                 video_style,
                 script_data,
                 user_id,
+                session=session
             )
-        )
 
         # Compile results
         successful_videos = len([r for r in video_results if r is not None])
@@ -471,12 +506,20 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
             },
         }
 
-        supabase.table("video_generations").update(
-            {"video_data": video_data_result, "generation_status": "video_completed"}
-        ).eq("id", video_generation_id).execute()
+        update_query = text(\"""
+            UPDATE video_generations 
+            SET video_data = :video_data, 
+                generation_status = 'video_completed' 
+            WHERE id = :id
+        \""")
+        await session.execute(update_query, {
+            "video_data": json.dumps(video_data_result),
+            "id": video_generation_id
+        })
+        await session.commit()
 
         # ✅ Update pipeline step to completed
-        update_pipeline_step(video_generation_id, "video_generation", "completed")
+        await update_pipeline_step(video_generation_id, "video_generation", "completed", session=session)
 
         success_message = f"Video generation completed! {successful_videos} videos created for {total_scenes} scenes"
         print(f"[VIDEO GENERATION SUCCESS] {success_message}")
@@ -506,8 +549,8 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
         print(f"[VIDEO GENERATION ERROR] {error_message}")
 
         # ✅ Update pipeline step to failed
-        update_pipeline_step(
-            video_generation_id, "video_generation", "failed", error_message
+        await update_pipeline_step(
+            video_generation_id, "video_generation", "failed", error_message, session=session
         )
 
         # Check if this is a video retrieval failure that can be retried
@@ -529,15 +572,20 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
             )
 
             # Update status to indicate retry will be attempted
+            # Update status to indicate retry will be attempted
             try:
-                supabase = get_supabase()
-                supabase.table("video_generations").update(
-                    {
-                        "generation_status": "retrieval_failed",
-                        "error_message": f"Video retrieval failed, automatic retry scheduled: {str(e)}",
-                        "can_resume": True,
-                    }
-                ).eq("id", video_generation_id).execute()
+                update_query = text(\"""
+                    UPDATE video_generations 
+                    SET generation_status = 'retrieval_failed', 
+                        error_message = :error_message, 
+                        can_resume = true 
+                    WHERE id = :id
+                \""")
+                await session.execute(update_query, {
+                    "error_message": f"Video retrieval failed, automatic retry scheduled: {str(e)}",
+                    "id": video_generation_id
+                })
+                await session.commit()
 
                 # Schedule automatic retry with initial delay
                 automatic_video_retry_task.apply_async(
@@ -563,10 +611,17 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
 
         # Regular error handling for non-retrieval failures
         try:
-            supabase = get_supabase()
-            supabase.table("video_generations").update(
-                {"generation_status": "failed", "error_message": error_message}
-            ).eq("id", video_generation_id).execute()
+            update_query = text(\"""
+                UPDATE video_generations 
+                SET generation_status = 'failed', 
+                    error_message = :error_message 
+                WHERE id = :id
+            \""")
+            await session.execute(update_query, {
+                "error_message": error_message,
+                "id": video_generation_id
+            })
+            await session.commit()
         except:
             pass
 
@@ -582,6 +637,7 @@ async def generate_scene_videos(
     video_style: str,
     script_data: Dict[str, Any] = None,
     user_id: str = None,
+    session: AsyncSession = None,
 ) -> List[Dict[str, Any]]:
     """Generate videos for each scene using V7 Veo 2 image-to-video with sequential processing and key scene shots"""
 
@@ -589,7 +645,8 @@ async def generate_scene_videos(
         f"[SCENE VIDEOS V7] Generating scene videos sequentially with key scene shots..."
     )
     video_results = []
-    supabase = get_supabase()
+    if not session:
+        raise Exception("Session required for generate_scene_videos")
 
     scene_images = image_data.get("scene_images", [])  # Fixed key mismatch
     model_id = modelslab_service.get_video_model_for_style(video_style)
@@ -673,7 +730,7 @@ async def generate_scene_videos(
 
             # Extract dialogue for this scene and generate audio
             scene_dialogue_data = await extract_scene_dialogue_and_generate_audio(
-                video_gen_id, scene_id, scene_description, script_data or {}, user_id
+                video_gen_id, scene_id, scene_description, script_data or {}, user_id, session=session
             )
 
             # Find audio for lip sync (legacy support)
@@ -711,7 +768,7 @@ async def generate_scene_videos(
                     try:
                         from app.api.services.video import VideoService
 
-                        video_service = VideoService()
+                        video_service = VideoService(session)
                         frame_filename = f"key_scene_shot_{video_gen_id}_{scene_id}.jpg"
                         key_scene_shot_url = (
                             await video_service.extract_last_frame_from_video(
@@ -736,46 +793,55 @@ async def generate_scene_videos(
                         )
 
                     # Store in database
-                    video_record = (
-                        supabase.table("video_segments")
-                        .insert(
-                            {
-                                "video_generation_id": video_gen_id,
-                                "scene_id": scene_id,
-                                "segment_index": i + 1,
-                                "scene_description": scene_description,
-                                "source_image_url": starting_image_url,
-                                "video_url": video_url,
-                                "key_scene_shot_url": key_scene_shot_url,
-                                "duration_seconds": 5.0,  # Veo 2 default
-                                "generation_method": "veo2_image_to_video_sequential",
-                                "status": "completed",
-                                "processing_service": "modelslab_v7",
-                                "processing_model": model_id,
-                                "metadata": {
-                                    "model_id": model_id,
-                                    "video_style": video_style,
-                                    "service": "modelslab_v7",
-                                    "has_lipsync": has_lipsync,
-                                    "veo2_enhanced": True,
-                                    "dialogue_audio_count": len(
-                                        scene_dialogue_data.get("dialogue_audio", [])
-                                    ),
-                                    "character_dialogue_integrated": True,
-                                    "sequential_processing": True,
-                                    "scene_sequence": i + 1,
-                                    "used_previous_key_scene": i > 0,
-                                    "key_scene_extraction_success": key_scene_shot_url
-                                    is not None,
-                                },
-                            }
-                        )
-                        .execute()
-                    )
+                    try:
+                        insert_query = text(\"""
+                            INSERT INTO video_segments (
+                                video_generation_id, scene_id, segment_index, scene_description,
+                                source_image_url, video_url, key_scene_shot_url, duration_seconds,
+                                generation_method, status, processing_service, processing_model, metadata
+                            ) VALUES (
+                                :video_generation_id, :scene_id, :segment_index, :scene_description,
+                                :source_image_url, :video_url, :key_scene_shot_url, :duration_seconds,
+                                :generation_method, :status, :processing_service, :processing_model, :metadata
+                            ) RETURNING id
+                        \""")
+                        
+                        result = await session.execute(insert_query, {
+                            "video_generation_id": video_gen_id,
+                            "scene_id": scene_id,
+                            "segment_index": i + 1,
+                            "scene_description": scene_description,
+                            "source_image_url": starting_image_url,
+                            "video_url": video_url,
+                            "key_scene_shot_url": key_scene_shot_url,
+                            "duration_seconds": 5.0,
+                            "generation_method": "veo2_image_to_video_sequential",
+                            "status": "completed",
+                            "processing_service": "modelslab_v7",
+                            "processing_model": model_id,
+                            "metadata": json.dumps({
+                                "model_id": model_id,
+                                "video_style": video_style,
+                                "service": "modelslab_v7",
+                                "has_lipsync": has_lipsync,
+                                "veo2_enhanced": True,
+                                "dialogue_audio_count": len(scene_dialogue_data.get("dialogue_audio", [])),
+                                "character_dialogue_integrated": True,
+                                "sequential_processing": True,
+                                "scene_sequence": i + 1,
+                                "used_previous_key_scene": i > 0,
+                                "key_scene_extraction_success": key_scene_shot_url is not None,
+                            })
+                        })
+                        await session.commit()
+                        video_record_id = result.scalar()
+                    except Exception as e:
+                        print(f"[SCENE VIDEOS V7] Error inserting video segment: {e}")
+                        video_record_id = None
 
                     video_results.append(
                         {
-                            "id": video_record.data[0]["id"],
+                            "id": video_record_id,
                             "scene_id": scene_id,
                             "video_url": video_url,
                             "key_scene_shot_url": key_scene_shot_url,
@@ -803,27 +869,38 @@ async def generate_scene_videos(
 
             # Store failed record
             try:
-                supabase.table("video_segments").insert(
-                    {
-                        "video_generation_id": video_gen_id,
-                        "scene_id": scene_id,
-                        "segment_index": i + 1,
-                        "scene_description": scene_description,
-                        "generation_method": "veo2_image_to_video_sequential",
-                        "status": "failed",
-                        "error_message": str(e),
-                        "processing_service": "modelslab_v7",
-                        "processing_model": model_id,
-                        "metadata": {
-                            "service": "modelslab_v7",
-                            "veo2_enhanced": False,
-                            "sequential_processing": True,
-                            "scene_sequence": i + 1,
-                        },
-                    }
-                ).execute()
-            except:
-                pass
+            # Store failed record
+            try:
+                fail_insert_query = text(\"""
+                    INSERT INTO video_segments (
+                        video_generation_id, scene_id, segment_index, scene_description,
+                        generation_method, status, error_message, processing_service, processing_model, metadata
+                    ) VALUES (
+                        :video_generation_id, :scene_id, :segment_index, :scene_description,
+                        :generation_method, :status, :error_message, :processing_service, :processing_model, :metadata
+                    )
+                \""")
+                
+                await session.execute(fail_insert_query, {
+                    "video_generation_id": video_gen_id,
+                    "scene_id": scene_id,
+                    "segment_index": i + 1,
+                    "scene_description": scene_description,
+                    "generation_method": "veo2_image_to_video_sequential",
+                    "status": "failed",
+                    "error_message": str(e),
+                    "processing_service": "modelslab_v7",
+                    "processing_model": model_id,
+                    "metadata": json.dumps({
+                        "service": "modelslab_v7",
+                        "veo2_enhanced": False,
+                        "sequential_processing": True
+                    })
+                })
+                await session.commit()
+            except Exception as insert_err:
+                print(f"[SCENE VIDEOS V7] Error inserting failed record: {insert_err}")
+
 
             video_results.append(None)
 
@@ -1166,313 +1243,362 @@ def create_video_prompt(scene_description: str, style: str) -> str:
 @celery_app.task(bind=True)
 def retry_video_retrieval_task(self, video_generation_id: str, video_url: str = None):
     """Celery task to retry video retrieval for a failed video generation"""
-    try:
-        print(
-            f"[VIDEO RETRY TASK] Starting video retrieval retry for: {video_generation_id}"
-        )
+    return asyncio.run(async_retry_video_retrieval_task(video_generation_id, video_url))
 
-        # Get video generation data
-        supabase = get_supabase()
-        video_data = (
-            supabase.table("video_generations")
-            .select("*")
-            .eq("id", video_generation_id)
-            .single()
-            .execute()
-        )
-
-        if not video_data.data:
-            raise Exception(f"Video generation {video_generation_id} not found")
-
-        video_gen = video_data.data
-        user_id = video_gen.get("user_id")
-        current_status = video_gen.get("generation_status")
-
-        # Check if this task is eligible for retry
-        if current_status not in ["video_completed", "failed", "retrieval_failed"]:
-            raise Exception(
-                f"Cannot retry video retrieval. Current status: {current_status}"
+async def async_retry_video_retrieval_task(video_generation_id: str, video_url: str = None):
+    """Async implementation of retry video retrieval task"""
+    async with async_session() as session:
+        try:
+            print(
+                f"[VIDEO RETRY TASK] Starting video retrieval retry for: {video_generation_id}"
             )
 
-        # Check retry count
-        retry_count = video_gen.get("retry_count", 0)
-        max_retries = 3
+            # Get video generation data
+            # Using raw SQL
+            query = text("SELECT * FROM video_generations WHERE id = :id")
+            result = await session.execute(query, {"id": video_generation_id})
+            video_gen_record = result.mappings().first()
 
-        if retry_count >= max_retries:
-            raise Exception(f"Maximum retry attempts ({max_retries}) exceeded")
+            if not video_gen_record:
+                raise Exception(f"Video generation {video_generation_id} not found")
+            
+            video_gen = dict(video_gen_record)
+            user_id = video_gen.get("user_id")
+            current_status = video_gen.get("generation_status")
 
-        # Get video URL from parameter or task data
-        if not video_url:
+            # Check if this task is eligible for retry
+            if current_status not in ["video_completed", "failed", "retrieval_failed"]:
+                raise Exception(
+                    f"Cannot retry video retrieval. Current status: {current_status}"
+                )
+
+            # Check retry count
+            retry_count = video_gen.get("retry_count", 0)
+            max_retries = 3
+
+            if retry_count >= max_retries:
+                raise Exception(f"Maximum retry attempts ({max_retries}) exceeded")
+
+            # Get video URL from parameter or task data
+            if not video_url:
+                task_metadata = video_gen.get("task_metadata", {})
+                video_url = task_metadata.get("future_links_url") or task_metadata.get(
+                    "video_url"
+                )
+
+                if not video_url:
+                    raise Exception("No video URL available for retry")
+
+            print(f"[VIDEO RETRY TASK] Attempting video retrieval from URL: {video_url}")
+
+            # Import and use the video service for retry
+            from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
+
+            video_service = ModelsLabV7VideoService()
+
+            # Attempt video retrieval
+            retry_result = await video_service.retry_video_retrieval(video_url)
+
+            if not retry_result.get("success"):
+                # Update retry count and status
+                new_retry_count = retry_count + 1
+                
+                update_query = text(\"""
+                    UPDATE video_generations 
+                    SET retry_count = :retry_count, 
+                        last_retry_at = NOW(), 
+                        generation_status = :status, 
+                        error_message = :error_message, 
+                        can_resume = :can_resume 
+                    WHERE id = :id
+                \""")
+                
+                status = "retrieval_failed" if new_retry_count < max_retries else "failed"
+                
+                await session.execute(update_query, {
+                    "retry_count": new_retry_count,
+                    "status": status,
+                    "error_message": retry_result.get("error", "Video retrieval failed"),
+                    "can_resume": new_retry_count < max_retries,
+                    "id": video_generation_id
+                })
+                await session.commit()
+
+                raise Exception(
+                    f"Video retrieval failed: {retry_result.get('error', 'Unknown error')}"
+                )
+
+            # Success - update task with video URL and mark as completed
+            video_url = retry_result.get("video_url")
+            video_duration = retry_result.get("duration", 0)
+
+            task_metadata = video_gen.get("task_metadata", {})
+            task_metadata.update({
+                "retry_success": True,
+                "retry_video_url": video_url,
+                "video_duration": video_duration,
+                "final_retrieval_time": "now()",
+            })
+
+            update_query = text(\"""
+                UPDATE video_generations 
+                SET generation_status = 'completed', 
+                    video_url = :video_url, 
+                    retry_count = :retry_count, 
+                    last_retry_at = NOW(), 
+                    error_message = NULL, 
+                    can_resume = false, 
+                    task_metadata = :task_metadata 
+                WHERE id = :id
+            \""")
+            
+            await session.execute(update_query, {
+                "video_url": video_url,
+                "retry_count": retry_count + 1,
+                "task_metadata": json.dumps(task_metadata),
+                "id": video_generation_id
+            })
+            await session.commit()
+
+            print(
+                f"[VIDEO RETRY TASK] ✅ Video retrieval retry successful for: {video_generation_id}"
+            )
+
+            return {
+                "status": "success",
+                "message": "Video retrieval successful",
+                "video_url": video_url,
+                "duration": video_duration,
+                "retry_count": retry_count + 1,
+                "video_generation_id": video_generation_id,
+            }
+
+        except Exception as e:
+            error_message = f"Video retrieval retry failed: {str(e)}"
+            print(f"[VIDEO RETRY TASK] ❌ {error_message}")
+
+            # Update status to failed
+            try:
+                update_query = text(\"""
+                    UPDATE video_generations 
+                    SET generation_status = 'failed', 
+                        error_message = :error_message 
+                    WHERE id = :id
+                \""")
+                await session.execute(update_query, {
+                    "error_message": error_message,
+                    "id": video_generation_id
+                })
+                await session.commit()
+            except:
+                pass
+
+            raise Exception(error_message)
+
+
+@celery_app.task(bind=True)
+def automatic_video_retry_task(self, video_generation_id: str):
+    """Automatic retry task with exponential backoff for failed video retrievals"""
+    return asyncio.run(async_automatic_video_retry_task(video_generation_id))
+
+async def async_automatic_video_retry_task(video_generation_id: str):
+    """Async implementation of automatic retry task"""
+    async with async_session() as session:
+        try:
+            print(f"[AUTO RETRY TASK] Starting automatic retry for: {video_generation_id}")
+
+            # Get video generation data
+            query = text("SELECT * FROM video_generations WHERE id = :id")
+            result = await session.execute(query, {"id": video_generation_id})
+            video_gen_record = result.mappings().first()
+
+            if not video_gen_record:
+                raise Exception(f"Video generation {video_generation_id} not found")
+            
+            video_gen = dict(video_gen_record)
+            current_status = video_gen.get("generation_status")
+
+            # Only retry if in a retryable state
+            if current_status not in ["video_completed", "failed", "retrieval_failed"]:
+                print(
+                    f"[AUTO RETRY TASK] Skipping - current status {current_status} not retryable"
+                )
+                return {
+                    "status": "skipped",
+                    "message": f"Current status {current_status} not eligible for automatic retry",
+                }
+
+            # Check retry count
+            retry_count = video_gen.get("retry_count", 0)
+            max_automatic_retries = (
+                2  # Maximum automatic retries before manual intervention
+            )
+
+            if retry_count >= max_automatic_retries:
+                print(
+                    f"[AUTO RETRY TASK] Maximum automatic retries ({max_automatic_retries}) reached"
+                )
+                # Update status to indicate manual retry is needed
+                update_query = text(\"""
+                    UPDATE video_generations 
+                    SET generation_status = 'retrieval_failed', 
+                        can_resume = true, 
+                        error_message = :error_message 
+                    WHERE id = :id
+                \""")
+                await session.execute(update_query, {
+                    "error_message": f"Automatic retries exhausted. Please try manual retry.",
+                    "id": video_generation_id
+                })
+                await session.commit()
+
+                return {
+                    "status": "max_retries_reached",
+                    "message": f"Maximum automatic retries ({max_automatic_retries}) reached",
+                }
+
+            # Calculate exponential backoff delay
+            base_delay = 30  # 30 seconds
+            exponential_delay = base_delay * (2**retry_count)  # 30s, 60s, 120s, etc.
+            max_delay = 300  # 5 minutes maximum
+
+            actual_delay = min(exponential_delay, max_delay)
+
+            print(
+                f"[AUTO RETRY TASK] Retry {retry_count + 1}/{max_automatic_retries}, waiting {actual_delay}s"
+            )
+
+            # Wait for exponential backoff
+            await asyncio.sleep(actual_delay)
+
+            # Get video URL from task metadata
             task_metadata = video_gen.get("task_metadata", {})
             video_url = task_metadata.get("future_links_url") or task_metadata.get(
                 "video_url"
             )
 
             if not video_url:
-                raise Exception("No video URL available for retry")
-
-        print(f"[VIDEO RETRY TASK] Attempting video retrieval from URL: {video_url}")
-
-        # Import and use the video service for retry
-        from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
-
-        video_service = ModelsLabV7VideoService()
-
-        # Attempt video retrieval
-        retry_result = asyncio.run(video_service.retry_video_retrieval(video_url))
-
-        if not retry_result.get("success"):
-            # Update retry count and status
-            new_retry_count = retry_count + 1
-            supabase.table("video_generations").update(
-                {
-                    "retry_count": new_retry_count,
-                    "last_retry_at": "now()",
-                    "generation_status": (
-                        "retrieval_failed"
-                        if new_retry_count < max_retries
-                        else "failed"
-                    ),
-                    "error_message": retry_result.get(
-                        "error", "Video retrieval failed"
-                    ),
-                    "can_resume": new_retry_count < max_retries,
+                print(f"[AUTO RETRY TASK] No video URL available for retry")
+                return {
+                    "status": "no_url",
+                    "message": "No video URL available for automatic retry",
                 }
-            ).eq("id", video_generation_id).execute()
 
-            raise Exception(
-                f"Video retrieval failed: {retry_result.get('error', 'Unknown error')}"
-            )
-
-        # Success - update task with video URL and mark as completed
-        video_url = retry_result.get("video_url")
-        video_duration = retry_result.get("duration", 0)
-
-        supabase.table("video_generations").update(
-            {
-                "generation_status": "completed",
-                "video_url": video_url,
-                "retry_count": retry_count + 1,
-                "last_retry_at": "now()",
-                "error_message": None,
-                "can_resume": False,
-                "task_metadata": {
-                    **video_gen.get("task_metadata", {}),
-                    "retry_success": True,
-                    "retry_video_url": video_url,
-                    "video_duration": video_duration,
-                    "final_retrieval_time": "now()",
-                },
-            }
-        ).eq("id", video_generation_id).execute()
-
-        print(
-            f"[VIDEO RETRY TASK] ✅ Video retrieval retry successful for: {video_generation_id}"
-        )
-
-        return {
-            "status": "success",
-            "message": "Video retrieval successful",
-            "video_url": video_url,
-            "duration": video_duration,
-            "retry_count": retry_count + 1,
-            "video_generation_id": video_generation_id,
-        }
-
-    except Exception as e:
-        error_message = f"Video retrieval retry failed: {str(e)}"
-        print(f"[VIDEO RETRY TASK] ❌ {error_message}")
-
-        # Update status to failed
-        try:
-            supabase = get_supabase()
-            supabase.table("video_generations").update(
-                {"generation_status": "failed", "error_message": error_message}
-            ).eq("id", video_generation_id).execute()
-        except:
-            pass
-
-        raise Exception(error_message)
-
-
-@celery_app.task(bind=True)
-def automatic_video_retry_task(self, video_generation_id: str):
-    """Automatic retry task with exponential backoff for failed video retrievals"""
-    try:
-        print(f"[AUTO RETRY TASK] Starting automatic retry for: {video_generation_id}")
-
-        # Get video generation data
-        supabase = get_supabase()
-        video_data = (
-            supabase.table("video_generations")
-            .select("*")
-            .eq("id", video_generation_id)
-            .single()
-            .execute()
-        )
-
-        if not video_data.data:
-            raise Exception(f"Video generation {video_generation_id} not found")
-
-        video_gen = video_data.data
-        current_status = video_gen.get("generation_status")
-
-        # Only retry if in a retryable state
-        if current_status not in ["video_completed", "failed", "retrieval_failed"]:
             print(
-                f"[AUTO RETRY TASK] Skipping - current status {current_status} not retryable"
+                f"[AUTO RETRY TASK] Attempting automatic video retrieval from URL: {video_url}"
             )
-            return {
-                "status": "skipped",
-                "message": f"Current status {current_status} not eligible for automatic retry",
-            }
 
-        # Check retry count
-        retry_count = video_gen.get("retry_count", 0)
-        max_automatic_retries = (
-            2  # Maximum automatic retries before manual intervention
-        )
+            # Import and use the video service for retry
+            from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
 
-        if retry_count >= max_automatic_retries:
-            print(
-                f"[AUTO RETRY TASK] Maximum automatic retries ({max_automatic_retries}) reached"
-            )
-            # Update status to indicate manual retry is needed
-            supabase.table("video_generations").update(
-                {
-                    "generation_status": "retrieval_failed",
-                    "can_resume": True,
-                    "error_message": f"Automatic retries exhausted. Please try manual retry.",
-                }
-            ).eq("id", video_generation_id).execute()
+            video_service = ModelsLabV7VideoService()
 
-            return {
-                "status": "max_retries_reached",
-                "message": f"Maximum automatic retries ({max_automatic_retries}) reached",
-            }
+            # Attempt video retrieval
+            retry_result = await video_service.retry_video_retrieval(video_url)
 
-        # Calculate exponential backoff delay
-        base_delay = 30  # 30 seconds
-        exponential_delay = base_delay * (2**retry_count)  # 30s, 60s, 120s, etc.
-        max_delay = 300  # 5 minutes maximum
-
-        actual_delay = min(exponential_delay, max_delay)
-
-        print(
-            f"[AUTO RETRY TASK] Retry {retry_count + 1}/{max_automatic_retries}, waiting {actual_delay}s"
-        )
-
-        # Wait for exponential backoff
-        import time
-
-        time.sleep(actual_delay)
-
-        # Get video URL from task metadata
-        task_metadata = video_gen.get("task_metadata", {})
-        video_url = task_metadata.get("future_links_url") or task_metadata.get(
-            "video_url"
-        )
-
-        if not video_url:
-            print(f"[AUTO RETRY TASK] No video URL available for retry")
-            return {
-                "status": "no_url",
-                "message": "No video URL available for automatic retry",
-            }
-
-        print(
-            f"[AUTO RETRY TASK] Attempting automatic video retrieval from URL: {video_url}"
-        )
-
-        # Import and use the video service for retry
-        from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
-
-        video_service = ModelsLabV7VideoService()
-
-        # Attempt video retrieval
-        retry_result = asyncio.run(video_service.retry_video_retrieval(video_url))
-
-        if not retry_result.get("success"):
-            # Update retry count and status
-            new_retry_count = retry_count + 1
-            supabase.table("video_generations").update(
-                {
+            if not retry_result.get("success"):
+                # Update retry count and status
+                new_retry_count = retry_count + 1
+                
+                update_query = text(\"""
+                    UPDATE video_generations 
+                    SET retry_count = :retry_count, 
+                        last_retry_at = NOW(), 
+                        generation_status = :status, 
+                        error_message = :error_message, 
+                        can_resume = :can_resume 
+                    WHERE id = :id
+                \""")
+                
+                status = "retrieval_failed" if new_retry_count < max_automatic_retries else "failed"
+                
+                await session.execute(update_query, {
                     "retry_count": new_retry_count,
-                    "last_retry_at": "now()",
-                    "generation_status": (
-                        "retrieval_failed"
-                        if new_retry_count < max_automatic_retries
-                        else "failed"
-                    ),
-                    "error_message": retry_result.get(
-                        "error", "Video retrieval failed"
-                    ),
+                    "status": status,
+                    "error_message": retry_result.get("error", "Video retrieval failed"),
                     "can_resume": new_retry_count < max_automatic_retries,
+                    "id": video_generation_id
+                })
+                await session.commit()
+
+                # Schedule next automatic retry if we haven't reached max
+                if new_retry_count < max_automatic_retries:
+                    print(f"[AUTO RETRY TASK] Scheduling next automatic retry")
+                    automatic_video_retry_task.apply_async(
+                        args=[video_generation_id],
+                        countdown=actual_delay * 2,  # Double the delay for next retry
+                    )
+
+                return {
+                    "status": "failed",
+                    "message": f'Automatic retry failed: {retry_result.get("error", "Unknown error")}',
+                    "retry_count": new_retry_count,
+                    "next_retry_scheduled": new_retry_count < max_automatic_retries,
                 }
-            ).eq("id", video_generation_id).execute()
 
-            # Schedule next automatic retry if we haven't reached max
-            if new_retry_count < max_automatic_retries:
-                print(f"[AUTO RETRY TASK] Scheduling next automatic retry")
-                automatic_video_retry_task.apply_async(
-                    args=[video_generation_id],
-                    countdown=actual_delay * 2,  # Double the delay for next retry
-                )
+            # Success - update task with video URL and mark as completed
+            video_url = retry_result.get("video_url")
+            video_duration = retry_result.get("duration", 0)
 
-            return {
-                "status": "failed",
-                "message": f'Automatic retry failed: {retry_result.get("error", "Unknown error")}',
-                "retry_count": new_retry_count,
-                "next_retry_scheduled": new_retry_count < max_automatic_retries,
-            }
+            task_metadata = video_gen.get("task_metadata", {})
+            task_metadata.update({
+                "retry_success": True,
+                "retry_video_url": video_url,
+                "video_duration": video_duration,
+                "final_retrieval_time": "now()",
+            })
 
-        # Success - update task with video URL and mark as completed
-        video_url = retry_result.get("video_url")
-        video_duration = retry_result.get("duration", 0)
-
-        supabase.table("video_generations").update(
-            {
-                "generation_status": "completed",
+            update_query = text(\"""
+                UPDATE video_generations 
+                SET generation_status = 'completed', 
+                    video_url = :video_url, 
+                    retry_count = :retry_count, 
+                    last_retry_at = NOW(), 
+                    error_message = NULL, 
+                    can_resume = false, 
+                    task_metadata = :task_metadata 
+                WHERE id = :id
+            \""")
+            
+            await session.execute(update_query, {
                 "video_url": video_url,
                 "retry_count": retry_count + 1,
-                "last_retry_at": "now()",
-                "error_message": None,
-                "can_resume": False,
-                "task_metadata": {
-                    **video_gen.get("task_metadata", {}),
-                    "retry_success": True,
-                    "retry_video_url": video_url,
-                    "video_duration": video_duration,
-                    "final_retrieval_time": "now()",
-                    "automatic_retry_used": True,
-                },
+                "task_metadata": json.dumps(task_metadata),
+                "id": video_generation_id
+            })
+            await session.commit()
+
+            print(
+                f"[AUTO RETRY TASK] ✅ Automatic video retrieval successful for: {video_generation_id}"
+            )
+
+            return {
+                "status": "success",
+                "message": "Automatic video retrieval successful",
+                "video_url": video_url,
+                "duration": video_duration,
+                "retry_count": retry_count + 1,
+                "video_generation_id": video_generation_id,
             }
-        ).eq("id", video_generation_id).execute()
 
-        print(
-            f"[AUTO RETRY TASK] ✅ Automatic video retrieval successful for: {video_generation_id}"
-        )
+        except Exception as e:
+            error_message = f"Automatic retry failed: {str(e)}"
+            print(f"[AUTO RETRY TASK] ❌ {error_message}")
 
-        return {
-            "status": "success",
-            "message": "Automatic video retrieval successful",
-            "video_url": video_url,
-            "duration": video_duration,
-            "retry_count": retry_count + 1,
-            "video_generation_id": video_generation_id,
-        }
+            # Update status to failed
+            try:
+                update_query = text(\"""
+                    UPDATE video_generations 
+                    SET generation_status = 'failed', 
+                        error_message = :error_message 
+                    WHERE id = :id
+                \""")
+                await session.execute(update_query, {
+                    "error_message": error_message,
+                    "id": video_generation_id
+                })
+                await session.commit()
+            except:
+                pass
 
-    except Exception as e:
-        error_message = f"Automatic video retry failed: {str(e)}"
-        print(f"[AUTO RETRY TASK] ❌ {error_message}")
-
-        # Update status to failed
-        try:
-            supabase = get_supabase()
-            supabase.table("video_generations").update(
-                {"generation_status": "failed", "error_message": error_message}
-            ).eq("id", video_generation_id).execute()
-        except:
-            pass
-
-        raise Exception(error_message)
+            raise Exception(error_message)
