@@ -1665,7 +1665,7 @@ async def generate_video_avatar(
             )
 
         # Generate video avatar
-        video_service = VideoService(session, supabase_client)
+        video_service = VideoService(session)
         avatar_result = await video_service.generate_story_scene(
             scene_description=chapter_data.title,
             dialogue=chapter_data.content[:500],
@@ -1922,7 +1922,7 @@ async def generate_enhanced_speech(
 ):
     """Generate enhanced speech with emotion and speed control"""
     try:
-        elevenlabs_service = ElevenLabsService(supabase_client)
+        elevenlabs_service = ElevenLabsService()
         result = await elevenlabs_service.generate_enhanced_speech(
             text=text,
             voice_id=voice_id,
@@ -2037,7 +2037,7 @@ async def generate_audio_narration(
             )
 
         # Generate audio using ElevenLabs
-        elevenlabs_service = ElevenLabsService(supabase_client)
+        elevenlabs_service = ElevenLabsService()
 
         audio_result = await elevenlabs_service.create_audio_narration(
             text=tutorial_script,
@@ -2165,7 +2165,7 @@ async def generate_realistic_video(
         print(f"✅ Tutorial script generated ({len(tutorial_script)} characters)")
 
         # Generate video using Tavus
-        video_service = VideoService(session, supabase_client)
+        video_service = VideoService(session)
 
         # Store initial record with pending status
         initial_record = {
@@ -2329,7 +2329,7 @@ async def analyze_chapter_safety(
         chapter_title = chapter.title
 
         # Analyze content safety
-        video_service = VideoService(session, supabase_client)
+        video_service = VideoService(session)
         safety_analysis = video_service.analyze_chapter_content_safety(
             chapter_content, chapter_title
         )
@@ -2377,7 +2377,7 @@ async def check_video_status(
             }
         # If status is processing and we have a Tavus video ID, check its status
         if content_data.status == "processing" and content_data.tavus_video_id:
-            video_service = VideoService(session, supabase_client)
+            video_service = VideoService(session)
             tavus_status = await video_service._poll_video_status(
                 content_data.tavus_video_id, f"Video for content {content_id}"
             )
@@ -2511,7 +2511,7 @@ async def combine_videos(
                 status_code=400, detail="At least 2 video URLs are required"
             )
 
-        video_service = VideoService(session, supabase_client)
+        video_service = VideoService(session)
 
         # Combine videos using FFmpeg
         combined_video_url = await video_service._combine_videos_with_ffmpeg(
@@ -2576,7 +2576,7 @@ async def combine_tavus_videos(
         print(f"🌐 Tavus URL found: {tavus_url}")
 
         # Combine videos using the video service
-        video_service = VideoService(session, supabase_client)
+        video_service = VideoService(session)
         result = await video_service.combine_tavus_videos(content_id)
 
         if not result:

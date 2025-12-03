@@ -106,6 +106,15 @@ class Settings(BaseSettings):
     MAILGUN_DOMAIN: Optional[str] = None
     MAILGUN_SENDER_EMAIL: str = "noreply@litinkai.com"
     MAILGUN_SENDER_NAME: str = "Litink"
+    MAILGUN_SENDER_EMAIL: str = "noreply@litink.com"
+
+    # Legacy / FastAPI-Mail support
+    MAIL_FROM: str = "noreply@litink.com"
+    MAIL_FROM_NAME: str = "Litink"
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 1025
+
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # Stripe Configuration
     STRIPE_SECRET_KEY: Optional[str] = None

@@ -43,7 +43,9 @@ async def extract_scene_dialogue_and_generate_audio(
 
         # Initialize video service for dialogue extraction
         if not session:
-             raise Exception("Session required for extract_scene_dialogue_and_generate_audio")
+            raise Exception(
+                "Session required for extract_scene_dialogue_and_generate_audio"
+            )
         video_service = VideoService(session)
 
         # Extract dialogue per scene
@@ -64,14 +66,14 @@ async def extract_scene_dialogue_and_generate_audio(
 
         # Store dialogue audio in database for tracking
         # Store dialogue audio in database for tracking
-        # supabase = get_supabase()
         for audio_file in scene_audio_files:
             try:
                 # Using raw SQL for insert if VideoSegment model usage is complex or to match existing pattern
                 # But better to use model if possible.
                 # Let's use raw SQL insert for now to be safe with existing schema
-                
-                insert_query = text(\"""
+
+                insert_query = text(
+                    """
                     INSERT INTO video_segments (
                         video_generation_id, scene_id, segment_index, scene_description,
                         audio_url, character_name, dialogue_text, generation_method,
@@ -81,25 +83,33 @@ async def extract_scene_dialogue_and_generate_audio(
                         :audio_url, :character_name, :dialogue_text, :generation_method,
                         :status, :processing_service, :metadata
                     )
-                \""")
-                
-                await session.execute(insert_query, {
-                    "video_generation_id": video_gen_id,
-                    "scene_id": scene_id,
-                    "segment_index": scene_number,
-                    "scene_description": scene_description,
-                    "audio_url": audio_file.get("audio_url"),
-                    "character_name": audio_file.get("character"),
-                    "dialogue_text": audio_file.get("text"),
-                    "generation_method": "character_dialogue_audio",
-                    "status": "completed",
-                    "processing_service": "elevenlabs",
-                    "metadata": json.dumps({
-                        "character_profile": audio_file.get("character_profile", {}),
-                        "scene_number": scene_number,
-                        "dialogue_type": "character_voice",
-                    })
-                })
+                """
+                )
+
+                await session.execute(
+                    insert_query,
+                    {
+                        "video_generation_id": video_gen_id,
+                        "scene_id": scene_id,
+                        "segment_index": scene_number,
+                        "scene_description": scene_description,
+                        "audio_url": audio_file.get("audio_url"),
+                        "character_name": audio_file.get("character"),
+                        "dialogue_text": audio_file.get("text"),
+                        "generation_method": "character_dialogue_audio",
+                        "status": "completed",
+                        "processing_service": "elevenlabs",
+                        "metadata": json.dumps(
+                            {
+                                "character_profile": audio_file.get(
+                                    "character_profile", {}
+                                ),
+                                "scene_number": scene_number,
+                                "dialogue_type": "character_voice",
+                            }
+                        ),
+                    },
+                )
                 await session.commit()
             except Exception as db_error:
                 print(f"[DIALOGUE EXTRACTION] Error storing dialogue audio: {db_error}")
@@ -131,7 +141,6 @@ async def generate_scene_videos(
 
     print(f"[SCENE VIDEOS V7] Generating scene videos with Veo 2...")
     video_results = []
-    supabase = get_supabase()
 
     scene_images = image_data.get("scene_images", [])  # Fixed key mismatch
     model_id = modelslab_service.get_video_model_for_style(video_style)
@@ -170,36 +179,50 @@ async def generate_scene_videos(
 
                 if video_url:
                     # Store in database
-                    video_record = (
-                        supabase.table("video_segments")
-                        .insert(
+                    video_record_data = {
+                        "video_generation_id": video_gen_id,
+                        "scene_id": scene_id,
+                        "segment_index": i + 1,
+                        "scene_description": scene_description,
+                        "source_image_url": scene_image["image_url"],
+                        "video_url": video_url,
+                        "duration_seconds": 5.0,  # Veo 2 default
+                        "generation_method": "veo2_image_to_video",
+                        "status": "completed",
+                        "processing_service": "modelslab_v7",
+                        "processing_model": model_id,
+                        "metadata": json.dumps(
                             {
-                                "video_generation_id": video_gen_id,
-                                "scene_id": scene_id,
-                                "segment_index": i + 1,
-                                "scene_description": scene_description,
-                                "source_image_url": scene_image["image_url"],
-                                "video_url": video_url,
-                                "duration_seconds": 5.0,  # Veo 2 default
-                                "generation_method": "veo2_image_to_video",
-                                "status": "completed",
-                                "processing_service": "modelslab_v7",
-                                "processing_model": model_id,
-                                "metadata": {
-                                    "model_id": model_id,
-                                    "video_style": video_style,
-                                    "service": "modelslab_v7",
-                                    "has_lipsync": has_lipsync,
-                                    "veo2_enhanced": True,
-                                },
+                                "model_id": model_id,
+                                "video_style": video_style,
+                                "service": "modelslab_v7",
+                                "has_lipsync": has_lipsync,
+                                "veo2_enhanced": True,
                             }
-                        )
-                        .execute()
+                        ),
+                    }
+
+                    insert_query = text(
+                        """
+                        INSERT INTO video_segments (
+                            video_generation_id, scene_id, segment_index, scene_description,
+                            source_image_url, video_url, duration_seconds, generation_method,
+                            status, processing_service, processing_model, metadata
+                        ) VALUES (
+                            :video_generation_id, :scene_id, :segment_index, :scene_description,
+                            :source_image_url, :video_url, :duration_seconds, :generation_method,
+                            :status, :processing_service, :processing_model, :metadata
+                        ) RETURNING id
+                    """
                     )
+
+                    db_result = await session.execute(insert_query, video_record_data)
+                    await session.commit()
+                    record_id = db_result.scalar()
 
                     video_results.append(
                         {
-                            "id": video_record.data[0]["id"],
+                            "id": record_id,
                             "scene_id": scene_id,
                             "video_url": video_url,
                             "duration": 5.0,
@@ -226,7 +249,8 @@ async def generate_scene_videos(
             # Store failed record
             # Store failed record
             try:
-                fail_insert_query = text(\"""
+                fail_insert_query = text(
+                    """
                     INSERT INTO video_segments (
                         video_generation_id, scene_id, segment_index, scene_description,
                         generation_method, status, error_message, processing_service, processing_model, metadata
@@ -234,20 +258,26 @@ async def generate_scene_videos(
                         :video_generation_id, :scene_id, :segment_index, :scene_description,
                         :generation_method, :status, :error_message, :processing_service, :processing_model, :metadata
                     )
-                \""")
-                
-                await session.execute(fail_insert_query, {
-                    "video_generation_id": video_gen_id,
-                    "scene_id": scene_id,
-                    "segment_index": i + 1,
-                    "scene_description": scene_description,
-                    "generation_method": "veo2_image_to_video_sequential",
-                    "status": "failed",
-                    "error_message": str(e),
-                    "processing_service": "modelslab_v7",
-                    "processing_model": model_id,
-                    "metadata": json.dumps({"service": "modelslab_v7", "veo2_enhanced": False})
-                })
+                """
+                )
+
+                await session.execute(
+                    fail_insert_query,
+                    {
+                        "video_generation_id": video_gen_id,
+                        "scene_id": scene_id,
+                        "segment_index": i + 1,
+                        "scene_description": scene_description,
+                        "generation_method": "veo2_image_to_video_sequential",
+                        "status": "failed",
+                        "error_message": str(e),
+                        "processing_service": "modelslab_v7",
+                        "processing_model": model_id,
+                        "metadata": json.dumps(
+                            {"service": "modelslab_v7", "veo2_enhanced": False}
+                        ),
+                    },
+                )
                 await session.commit()
             except Exception as insert_err:
                 print(f"[SCENE VIDEOS V7] Error inserting failed record: {insert_err}")
@@ -290,22 +320,28 @@ def find_scene_audio(
 
 
 async def update_pipeline_step(
-    video_generation_id: str, step_name: str, status: str, error_message: str = None, session: AsyncSession = None
+    video_generation_id: str,
+    step_name: str,
+    status: str,
+    error_message: str = None,
+    session: AsyncSession = None,
 ):
     """Update pipeline step status"""
     try:
         if not session:
-             print(f"[PIPELINE ERROR] No session provided for update_pipeline_step {step_name}")
-             return
+            print(
+                f"[PIPELINE ERROR] No session provided for update_pipeline_step {step_name}"
+            )
+            return
 
         update_data = {
             "status": status,
             "video_generation_id": video_generation_id,
-            "step_name": step_name
+            "step_name": step_name,
         }
-        
+
         set_clauses = ["status = :status"]
-        
+
         if status == "processing":
             set_clauses.append("started_at = NOW()")
         elif status in ["completed", "failed"]:
@@ -316,13 +352,15 @@ async def update_pipeline_step(
             update_data["error_message"] = error_message
 
         set_clause_str = ", ".join(set_clauses)
-        
-        update_query = text(f\"""
+
+        update_query = text(
+            f"""
             UPDATE pipeline_steps 
             SET {set_clause_str}
             WHERE video_generation_id = :video_generation_id AND step_name = :step_name
-        \""")
-        
+        """
+        )
+
         await session.execute(update_query, update_data)
         await session.commit()
 
@@ -337,6 +375,7 @@ def generate_all_videos_for_generation(self, video_generation_id: str):
     """Main task to generate all videos for a video generation with automatic retry"""
     return asyncio.run(async_generate_all_videos_for_generation(video_generation_id))
 
+
 async def async_generate_all_videos_for_generation(video_generation_id: str):
     """Async implementation of video generation task"""
     async with async_session() as session:
@@ -346,7 +385,9 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             )
 
             # ✅ Update pipeline step to processing
-            await update_pipeline_step(video_generation_id, "video_generation", "processing", session=session)
+            await update_pipeline_step(
+                video_generation_id, "video_generation", "processing", session=session
+            )
 
             # Get video generation data
             # Using raw SQL
@@ -356,122 +397,128 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
 
             if not video_gen_record:
                 raise Exception(f"Video generation {video_generation_id} not found")
-            
+
             # Convert to dict for easier access (and compatibility with existing code)
             video_gen = dict(video_gen_record)
             user_id = video_gen.get("user_id")
 
             # Update status and initialize retry tracking
-            update_query = text(\"""
+            update_query = text(
+                """
                 UPDATE video_generations 
                 SET generation_status = 'generating_video', 
                     retry_count = 0, 
                     can_resume = true, 
                     last_retry_at = NULL 
                 WHERE id = :id
-            \""")
+            """
+            )
             await session.execute(update_query, {"id": video_generation_id})
             await session.commit()
 
-        # Get script data and generated assets
-        script_data = video_gen.get("script_data", {})
-        audio_files = video_gen.get("audio_files", {})
-        image_data = video_gen.get("image_data", {})
+            # Get script data and generated assets
+            script_data = video_gen.get("script_data", {})
+            audio_files = video_gen.get("audio_files", {})
+            image_data = video_gen.get("image_data", {})
 
-        scene_descriptions = script_data.get("scene_descriptions", [])
-        characters = script_data.get("characters", [])
-        video_style = script_data.get("video_style", "realistic")
+            scene_descriptions = script_data.get("scene_descriptions", [])
+            characters = script_data.get("characters", [])
+            video_style = script_data.get("video_style", "realistic")
 
-        print(f"[VIDEO GENERATION] Processing:")
-        print(f"- Scenes: {len(scene_descriptions)}")
-        print(f"- Characters: {len(characters)}")
-        print(f"- Video Style: {video_style}")
-        print(
-            f"- Audio Files: {len(audio_files.get('narrator', [])) + len(audio_files.get('characters', []))}"
-        )
+            print(f"[VIDEO GENERATION] Processing:")
+            print(f"- Scenes: {len(scene_descriptions)}")
+            print(f"- Characters: {len(characters)}")
+            print(f"- Video Style: {video_style}")
+            print(
+                f"- Audio Files: {len(audio_files.get('narrator', [])) + len(audio_files.get('characters', []))}"
+            )
 
-        # Query existing character images from database
-        character_images = await query_existing_character_images(user_id, characters)
-        print(f"- Character Images: {len(character_images)} found in database")
+            # Query existing character images from database
+            character_images = await query_existing_character_images(
+                user_id, characters
+            )
+            print(f"- Character Images: {len(character_images)} found in database")
 
-        # Query existing scene images from database
-        scene_images = await query_existing_scene_images(user_id, scene_descriptions)
-        print(f"- Scene Images: {len(scene_images)} found in database")
+            # Query existing scene images from database
+            scene_images = await query_existing_scene_images(
+                user_id, scene_descriptions
+            )
+            print(f"- Scene Images: {len(scene_images)} found in database")
 
-        # For split workflow, prioritize scene images over character images
-        if not image_data.get("scene_images"):
-            image_data["scene_images"] = []
-            for i, scene_description in enumerate(scene_descriptions):
-                scene_image = None
+            # For split workflow, prioritize scene images over character images
+            if not image_data.get("scene_images"):
+                image_data["scene_images"] = []
+                for i, scene_description in enumerate(scene_descriptions):
+                    scene_image = None
 
-                # First, try to find a matching scene image for this specific scene
-                for scene_img in scene_images:
-                    if (
-                        scene_img.get("scene_description")
-                        and scene_description.lower()
-                        in scene_img["scene_description"].lower()
-                    ):
+                    # First, try to find a matching scene image for this specific scene
+                    for scene_img in scene_images:
+                        if (
+                            scene_img.get("scene_description")
+                            and scene_description.lower()
+                            in scene_img["scene_description"].lower()
+                        ):
+                            scene_image = {
+                                "image_url": scene_img.get("image_url"),
+                                "scene_description": scene_img.get("scene_description"),
+                                "image_type": scene_img.get("image_type", "scene"),
+                                "scene_number": i + 1,
+                            }
+                            print(
+                                f"[SCENE IMAGE SELECTION] Using scene image for scene_{i+1}: {scene_img.get('scene_description')}"
+                            )
+                            break
+
+                    # If no scene image found, fall back to character images
+                    if not scene_image and character_images:
+                        # Use character images in rotation for scenes
+                        char_image = character_images[i % len(character_images)]
                         scene_image = {
-                            "image_url": scene_img.get("image_url"),
-                            "scene_description": scene_img.get("scene_description"),
-                            "image_type": scene_img.get("image_type", "scene"),
+                            "image_url": char_image.get("image_url"),
+                            "character_name": char_image.get("name"),
+                            "image_type": "character_fallback",
                             "scene_number": i + 1,
                         }
                         print(
-                            f"[SCENE IMAGE SELECTION] Using scene image for scene_{i+1}: {scene_img.get('scene_description')}"
+                            f"[SCENE IMAGE SELECTION] ⚠️ Using character image as fallback for scene_{i+1}: {char_image.get('name')}"
                         )
-                        break
-
-                # If no scene image found, fall back to character images
-                if not scene_image and character_images:
-                    # Use character images in rotation for scenes
-                    char_image = character_images[i % len(character_images)]
-                    scene_image = {
-                        "image_url": char_image.get("image_url"),
-                        "character_name": char_image.get("name"),
-                        "image_type": "character_fallback",
-                        "scene_number": i + 1,
-                    }
-                    print(
-                        f"[SCENE IMAGE SELECTION] ⚠️ Using character image as fallback for scene_{i+1}: {char_image.get('name')}"
-                    )
 
                 # If no images available at all, will use text-to-video fallback
                 image_data["scene_images"].append(scene_image)
 
-        # Log the final image selection breakdown
-        scene_count = len(
-            [img for img in image_data.get("scene_images", []) if img is not None]
-        )
-        scene_type_count = len(
-            [
-                img
-                for img in image_data.get("scene_images", [])
-                if img and img.get("image_type") == "scene"
-            ]
-        )
-        character_fallback_count = len(
-            [
-                img
-                for img in image_data.get("scene_images", [])
-                if img and img.get("image_type") == "character_fallback"
-            ]
-        )
+            # Log the final image selection breakdown
+            scene_count = len(
+                [img for img in image_data.get("scene_images", []) if img is not None]
+            )
+            scene_type_count = len(
+                [
+                    img
+                    for img in image_data.get("scene_images", [])
+                    if img and img.get("image_type") == "scene"
+                ]
+            )
+            character_fallback_count = len(
+                [
+                    img
+                    for img in image_data.get("scene_images", [])
+                    if img and img.get("image_type") == "character_fallback"
+                ]
+            )
 
-        print(f"[IMAGE SELECTION SUMMARY]")
-        print(f"- Total scene images: {scene_count}")
-        print(f"- Scene images (proper): {scene_type_count}")
-        print(f"- Character fallback images: {character_fallback_count}")
-        print(
-            f"- No images (text-to-video fallback): {len(scene_descriptions) - scene_count}"
-        )
+            print(f"[IMAGE SELECTION SUMMARY]")
+            print(f"- Total scene images: {scene_count}")
+            print(f"- Scene images (proper): {scene_type_count}")
+            print(f"- Character fallback images: {character_fallback_count}")
+            print(
+                f"- No images (text-to-video fallback): {len(scene_descriptions) - scene_count}"
+            )
 
-        # Generate videos
-        modelslab_service = ModelsLabV7VideoService()
+            # Generate videos
+            modelslab_service = ModelsLabV7VideoService()
 
-        # Generate scene videos sequentially with key scene shots
-        # Generate scene videos sequentially with key scene shots
-        video_results = await generate_scene_videos(
+            # Generate scene videos sequentially with key scene shots
+            # Generate scene videos sequentially with key scene shots
+            video_results = await generate_scene_videos(
                 modelslab_service,
                 video_generation_id,
                 scene_descriptions,
@@ -480,147 +527,169 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
                 video_style,
                 script_data,
                 user_id,
-                session=session
+                session=session,
             )
 
-        # Compile results
-        successful_videos = len([r for r in video_results if r is not None])
-        total_scenes = len(scene_descriptions)
-        success_rate = (
-            (successful_videos / total_scenes * 100) if total_scenes > 0 else 0
-        )
+            # Compile results
+            successful_videos = len([r for r in video_results if r is not None])
+            total_scenes = len(scene_descriptions)
+            success_rate = (
+                (successful_videos / total_scenes * 100) if total_scenes > 0 else 0
+            )
 
-        # Calculate total video duration
-        total_duration = sum(
-            [v.get("duration", 0) for v in video_results if v is not None]
-        )
+            # Calculate total video duration
+            total_duration = sum(
+                [v.get("duration", 0) for v in video_results if v is not None]
+            )
 
-        # Update video generation with video data
-        video_data_result = {
-            "scene_videos": video_results,
-            "statistics": {
-                "total_scenes": total_scenes,
-                "videos_generated": successful_videos,
-                "total_duration": total_duration,
-                "success_rate": round(success_rate, 2),
-            },
-        }
+            # Update video generation with video data
+            video_data_result = {
+                "scene_videos": video_results,
+                "statistics": {
+                    "total_scenes": total_scenes,
+                    "videos_generated": successful_videos,
+                    "total_duration": total_duration,
+                    "success_rate": round(success_rate, 2),
+                },
+            }
 
-        update_query = text(\"""
-            UPDATE video_generations 
-            SET video_data = :video_data, 
-                generation_status = 'video_completed' 
-            WHERE id = :id
-        \""")
-        await session.execute(update_query, {
-            "video_data": json.dumps(video_data_result),
-            "id": video_generation_id
-        })
-        await session.commit()
+            update_query = text(
+                """
+                UPDATE video_generations 
+                SET video_data = :video_data, 
+                    generation_status = 'video_completed',
+                    error_message = NULL
+                WHERE id = :id
+            """
+            )
+            await session.execute(
+                update_query,
+                {
+                    "video_data": json.dumps(video_data_result),
+                    "id": video_generation_id,
+                },
+            )
+            await session.commit()
 
-        # ✅ Update pipeline step to completed
-        await update_pipeline_step(video_generation_id, "video_generation", "completed", session=session)
+            # ✅ Update pipeline step to completed
+            await update_pipeline_step(
+                video_generation_id, "video_generation", "completed", session=session
+            )
 
-        success_message = f"Video generation completed! {successful_videos} videos created for {total_scenes} scenes"
-        print(f"[VIDEO GENERATION SUCCESS] {success_message}")
+            success_message = f"Video generation completed! {successful_videos} videos created for {total_scenes} scenes"
+            print(f"[VIDEO GENERATION SUCCESS] {success_message}")
 
-        # Log detailed breakdown
-        print(f"[VIDEO STATISTICS]")
-        print(f"- Scene-by-scene generation status: {successful_videos}/{total_scenes}")
-        print(f"- Total video duration: {total_duration:.1f} seconds")
-        print(f"- Success rate: {success_rate:.1f}%")
-
-        # ✅ Trigger audio/video merge after video completion
-        print(f"[PIPELINE] Starting audio/video merge after video completion")
-        from app.tasks.merge_tasks import merge_audio_video_for_generation
-
-        merge_audio_video_for_generation.delay(video_generation_id)
-
-        return {
-            "status": "success",
-            "message": success_message + " - Starting audio/video merge...",
-            "statistics": video_data_result["statistics"],
-            "video_results": video_results,
-            "next_step": "audio_video_merge",
-        }
-
-    except Exception as e:
-        error_message = f"Video generation failed: {str(e)}"
-        print(f"[VIDEO GENERATION ERROR] {error_message}")
-
-        # ✅ Update pipeline step to failed
-        await update_pipeline_step(
-            video_generation_id, "video_generation", "failed", error_message, session=session
-        )
-
-        # Check if this is a video retrieval failure that can be retried
-        is_retrieval_failure = any(
-            keyword in str(e).lower()
-            for keyword in [
-                "retrieval",
-                "download",
-                "url",
-                "video_url",
-                "future_links",
-                "fetch_result",
-            ]
-        )
-
-        if is_retrieval_failure:
+            # Log detailed breakdown
+            print(f"[VIDEO STATISTICS]")
             print(
-                f"[VIDEO GENERATION] Video retrieval failure detected, scheduling automatic retry"
+                f"- Scene-by-scene generation status: {successful_videos}/{total_scenes}"
+            )
+            print(f"- Total video duration: {total_duration:.1f} seconds")
+            print(f"- Success rate: {success_rate:.1f}%")
+
+            # ✅ Trigger audio/video merge after video completion
+            print(f"[PIPELINE] Starting audio/video merge after video completion")
+            from app.tasks.merge_tasks import merge_audio_video_for_generation
+
+            merge_audio_video_for_generation.delay(video_generation_id)
+
+            return {
+                "status": "success",
+                "message": success_message + " - Starting audio/video merge...",
+                "statistics": video_data_result["statistics"],
+                "video_results": video_results,
+                "next_step": "audio_video_merge",
+            }
+
+        except Exception as e:
+            error_message = f"Video generation failed: {str(e)}"
+            print(f"[VIDEO GENERATION ERROR] {error_message}")
+
+            # ✅ Update pipeline step to failed
+            await update_pipeline_step(
+                video_generation_id,
+                "video_generation",
+                "failed",
+                error_message,
+                session=session,
             )
 
-            # Update status to indicate retry will be attempted
-            # Update status to indicate retry will be attempted
-            try:
-                update_query = text(\"""
-                    UPDATE video_generations 
-                    SET generation_status = 'retrieval_failed', 
-                        error_message = :error_message, 
-                        can_resume = true 
-                    WHERE id = :id
-                \""")
-                await session.execute(update_query, {
-                    "error_message": f"Video retrieval failed, automatic retry scheduled: {str(e)}",
-                    "id": video_generation_id
-                })
-                await session.commit()
+            # Check if this is a video retrieval failure that can be retried
+            is_retrieval_failure = any(
+                keyword in str(e).lower()
+                for keyword in [
+                    "retrieval",
+                    "download",
+                    "url",
+                    "video_url",
+                    "future_links",
+                    "fetch_result",
+                ]
+            )
 
-                # Schedule automatic retry with initial delay
-                automatic_video_retry_task.apply_async(
-                    args=[video_generation_id], countdown=30  # 30 seconds initial delay
-                )
-
+            if is_retrieval_failure:
                 print(
-                    f"[VIDEO GENERATION] ✅ Automatic retry scheduled for video generation {video_generation_id}"
+                    f"[VIDEO GENERATION] Video retrieval failure detected, scheduling automatic retry"
                 )
 
-                return {
-                    "status": "retry_scheduled",
-                    "message": "Video retrieval failed, automatic retry scheduled",
-                    "video_generation_id": video_generation_id,
-                    "retry_delay": 30,
-                }
+                # Update status to indicate retry will be attempted
+                # Update status to indicate retry will be attempted
+                try:
+                    update_query = text(
+                        """
+                        UPDATE video_generations 
+                        SET generation_status = 'retrieval_failed', 
+                            error_message = :error_message, 
+                            can_resume = true 
+                        WHERE id = :id
+                    """
+                    )
+                    await session.execute(
+                        update_query,
+                        {
+                            "error_message": f"Video retrieval failed, automatic retry scheduled: {str(e)}",
+                            "id": video_generation_id,
+                        },
+                    )
+                    await session.commit()
 
-            except Exception as retry_error:
-                print(
-                    f"[VIDEO GENERATION] Failed to schedule automatic retry: {retry_error}"
-                )
-                # Fall through to regular error handling
+                    # Schedule automatic retry with initial delay
+                    automatic_video_retry_task.apply_async(
+                        args=[video_generation_id],
+                        countdown=30,  # 30 seconds initial delay
+                    )
+
+                    print(
+                        f"[VIDEO GENERATION] ✅ Automatic retry scheduled for video generation {video_generation_id}"
+                    )
+
+                    return {
+                        "status": "retry_scheduled",
+                        "message": "Video retrieval failed, automatic retry scheduled",
+                        "video_generation_id": video_generation_id,
+                        "retry_delay": 30,
+                    }
+
+                except Exception as retry_error:
+                    print(
+                        f"[VIDEO GENERATION] Failed to schedule automatic retry: {retry_error}"
+                    )
+                    # Fall through to regular error handling
 
         # Regular error handling for non-retrieval failures
         try:
-            update_query = text(\"""
+            update_query = text(
+                """
                 UPDATE video_generations 
                 SET generation_status = 'failed', 
                     error_message = :error_message 
                 WHERE id = :id
-            \""")
-            await session.execute(update_query, {
-                "error_message": error_message,
-                "id": video_generation_id
-            })
+            """
+            )
+            await session.execute(
+                update_query,
+                {"error_message": error_message, "id": video_generation_id},
+            )
             await session.commit()
         except:
             pass
@@ -655,7 +724,7 @@ async def generate_scene_videos(
     parsed_components = None
     if script_data and script_data.get("script"):
         try:
-            from app.core.services.script_parser import ScriptParser
+            from app.api.services.script_parser import ScriptParser
 
             script_parser = ScriptParser()
             characters = script_data.get("characters", [])
@@ -730,7 +799,12 @@ async def generate_scene_videos(
 
             # Extract dialogue for this scene and generate audio
             scene_dialogue_data = await extract_scene_dialogue_and_generate_audio(
-                video_gen_id, scene_id, scene_description, script_data or {}, user_id, session=session
+                video_gen_id,
+                scene_id,
+                scene_description,
+                script_data or {},
+                user_id,
+                session=session,
             )
 
             # Find audio for lip sync (legacy support)
@@ -794,7 +868,8 @@ async def generate_scene_videos(
 
                     # Store in database
                     try:
-                        insert_query = text(\"""
+                        insert_query = text(
+                            """
                             INSERT INTO video_segments (
                                 video_generation_id, scene_id, segment_index, scene_description,
                                 source_image_url, video_url, key_scene_shot_url, duration_seconds,
@@ -804,35 +879,46 @@ async def generate_scene_videos(
                                 :source_image_url, :video_url, :key_scene_shot_url, :duration_seconds,
                                 :generation_method, :status, :processing_service, :processing_model, :metadata
                             ) RETURNING id
-                        \""")
-                        
-                        result = await session.execute(insert_query, {
-                            "video_generation_id": video_gen_id,
-                            "scene_id": scene_id,
-                            "segment_index": i + 1,
-                            "scene_description": scene_description,
-                            "source_image_url": starting_image_url,
-                            "video_url": video_url,
-                            "key_scene_shot_url": key_scene_shot_url,
-                            "duration_seconds": 5.0,
-                            "generation_method": "veo2_image_to_video_sequential",
-                            "status": "completed",
-                            "processing_service": "modelslab_v7",
-                            "processing_model": model_id,
-                            "metadata": json.dumps({
-                                "model_id": model_id,
-                                "video_style": video_style,
-                                "service": "modelslab_v7",
-                                "has_lipsync": has_lipsync,
-                                "veo2_enhanced": True,
-                                "dialogue_audio_count": len(scene_dialogue_data.get("dialogue_audio", [])),
-                                "character_dialogue_integrated": True,
-                                "sequential_processing": True,
-                                "scene_sequence": i + 1,
-                                "used_previous_key_scene": i > 0,
-                                "key_scene_extraction_success": key_scene_shot_url is not None,
-                            })
-                        })
+                        """
+                        )
+
+                        result = await session.execute(
+                            insert_query,
+                            {
+                                "video_generation_id": video_gen_id,
+                                "scene_id": scene_id,
+                                "segment_index": i + 1,
+                                "scene_description": scene_description,
+                                "source_image_url": starting_image_url,
+                                "video_url": video_url,
+                                "key_scene_shot_url": key_scene_shot_url,
+                                "duration_seconds": 5.0,
+                                "generation_method": "veo2_image_to_video_sequential",
+                                "status": "completed",
+                                "processing_service": "modelslab_v7",
+                                "processing_model": model_id,
+                                "metadata": json.dumps(
+                                    {
+                                        "model_id": model_id,
+                                        "video_style": video_style,
+                                        "service": "modelslab_v7",
+                                        "has_lipsync": has_lipsync,
+                                        "veo2_enhanced": True,
+                                        "dialogue_audio_count": len(
+                                            scene_dialogue_data.get(
+                                                "dialogue_audio", []
+                                            )
+                                        ),
+                                        "character_dialogue_integrated": True,
+                                        "sequential_processing": True,
+                                        "scene_sequence": i + 1,
+                                        "used_previous_key_scene": i > 0,
+                                        "key_scene_extraction_success": key_scene_shot_url
+                                        is not None,
+                                    }
+                                ),
+                            },
+                        )
                         await session.commit()
                         video_record_id = result.scalar()
                     except Exception as e:
@@ -868,10 +954,10 @@ async def generate_scene_videos(
             print(f"[SCENE VIDEOS V7] ❌ Failed {scene_id}: {str(e)}")
 
             # Store failed record
+
             try:
-            # Store failed record
-            try:
-                fail_insert_query = text(\"""
+                fail_insert_query = text(
+                    """
                     INSERT INTO video_segments (
                         video_generation_id, scene_id, segment_index, scene_description,
                         generation_method, status, error_message, processing_service, processing_model, metadata
@@ -879,28 +965,33 @@ async def generate_scene_videos(
                         :video_generation_id, :scene_id, :segment_index, :scene_description,
                         :generation_method, :status, :error_message, :processing_service, :processing_model, :metadata
                     )
-                \""")
-                
-                await session.execute(fail_insert_query, {
-                    "video_generation_id": video_gen_id,
-                    "scene_id": scene_id,
-                    "segment_index": i + 1,
-                    "scene_description": scene_description,
-                    "generation_method": "veo2_image_to_video_sequential",
-                    "status": "failed",
-                    "error_message": str(e),
-                    "processing_service": "modelslab_v7",
-                    "processing_model": model_id,
-                    "metadata": json.dumps({
-                        "service": "modelslab_v7",
-                        "veo2_enhanced": False,
-                        "sequential_processing": True
-                    })
-                })
+                """
+                )
+
+                await session.execute(
+                    fail_insert_query,
+                    {
+                        "video_generation_id": video_gen_id,
+                        "scene_id": scene_id,
+                        "segment_index": i + 1,
+                        "scene_description": scene_description,
+                        "generation_method": "veo2_image_to_video_sequential",
+                        "status": "failed",
+                        "error_message": str(e),
+                        "processing_service": "modelslab_v7",
+                        "processing_model": model_id,
+                        "metadata": json.dumps(
+                            {
+                                "service": "modelslab_v7",
+                                "veo2_enhanced": False,
+                                "sequential_processing": True,
+                            }
+                        ),
+                    },
+                )
                 await session.commit()
             except Exception as insert_err:
                 print(f"[SCENE VIDEOS V7] Error inserting failed record: {insert_err}")
-
 
             video_results.append(None)
 
@@ -911,341 +1002,15 @@ async def generate_scene_videos(
     return video_results
 
 
-async def generate_image_to_video_scene(
-    modelslab_service: ModelsLabVideoService,
-    video_gen_id: str,
-    scene_id: str,
-    scene_description: str,
-    scene_image: Dict[str, Any],
-    audio_files: Dict[str, Any],
-    video_style: str,
-    model_id: str,
-) -> Dict[str, Any]:
-    """Generate video from scene image using image-to-video"""
-
-    try:
-        supabase = get_supabase()
-
-        # Calculate video duration based on audio
-        all_audio = (
-            audio_files.get("narrator", [])
-            + audio_files.get("characters", [])
-            + audio_files.get("sound_effects", [])
-        )
-        video_duration = modelslab_service.calculate_video_duration_from_audio(
-            all_audio, scene_id
-        )
-
-        # Generate video from image with retry logic for rate limiting
-        max_retries = 3
-        retry_delay = 30  # seconds
-
-        for attempt in range(max_retries):
-            try:
-                result = await modelslab_service.generate_image_to_video(
-                    image_url=scene_image["image_url"],
-                    duration=video_duration,
-                    motion_strength=0.8,
-                    fps=24,
-                    width=512,
-                    height=288,
-                    model_id=model_id,
-                )
-
-                # Check for rate limiting
-                if (
-                    result.get("status") == "error"
-                    and "rate limit" in result.get("message", "").lower()
-                ):
-                    if attempt < max_retries - 1:
-                        print(
-                            f"[VIDEO] Rate limited, waiting {retry_delay}s before retry {attempt + 1}/{max_retries}"
-                        )
-                        await asyncio.sleep(retry_delay)
-                        continue
-                    else:
-                        raise Exception(
-                            f"Rate limit exceeded after {max_retries} attempts"
-                        )
-
-                # Handle successful response
-                if result.get("status") == "success":
-                    output = result.get("output", [])
-                    if output:
-                        video_url = (
-                            output[0]
-                            if isinstance(output[0], str)
-                            else output[0].get("video_url")
-                        )
-                    else:
-                        raise Exception("No video URL in success response")
-                elif result.get("status") == "processing":
-                    # Wait for completion
-                    request_id = result.get("id")
-                    if request_id:
-                        final_result = await modelslab_service.wait_for_completion(
-                            request_id
-                        )
-                        output = final_result.get("output", [])
-                        if output:
-                            video_url = (
-                                output[0]
-                                if isinstance(output[0], str)
-                                else output[0].get("video_url")
-                            )
-                        else:
-                            raise Exception("No video URL after completion")
-                    else:
-                        raise Exception("No request ID for async processing")
-                else:
-                    raise Exception(
-                        f"API error: {result.get('message', 'Unknown error')}"
-                    )
-
-                break  # Success, exit retry loop
-
-            except Exception as e:
-                if attempt < max_retries - 1 and "rate limit" in str(e).lower():
-                    print(f"[VIDEO] Retry {attempt + 1}/{max_retries} failed: {e}")
-                    await asyncio.sleep(retry_delay)
-                    continue
-                else:
-                    raise e
-
-        if not video_url:
-            raise Exception("No video URL returned from API")
-
-        # Store in database
-        video_record = (
-            supabase.table("video_segments")
-            .insert(
-                {
-                    "video_generation_id": video_gen_id,
-                    "scene_id": scene_id,
-                    "segment_index": (
-                        int(scene_id.split("_")[1]) if "_" in scene_id else 1
-                    ),
-                    "scene_description": scene_description,
-                    "source_image_url": scene_image["image_url"],
-                    "video_url": video_url,
-                    "fps": 24,
-                    "width": 512,
-                    "height": 288,
-                    "duration_seconds": video_duration,
-                    "generation_method": "image_to_video",
-                    "status": "completed",
-                    "processing_service": "modelslab",
-                    "processing_model": model_id,
-                    "metadata": {
-                        "model_id": model_id,
-                        "video_style": video_style,
-                        "service": "modelslab",
-                        "motion_strength": 0.8,
-                        "source_image_id": scene_image.get("id"),
-                    },
-                }
-            )
-            .execute()
-        )
-
-        return {
-            "id": video_record.data[0]["id"],
-            "scene_id": scene_id,
-            "video_url": video_url,
-            "duration": video_duration,
-            "source_image": scene_image["image_url"],
-            "method": "image_to_video",
-            "model": model_id,
-        }
-
-    except Exception as e:
-        print(f"[IMAGE_TO_VIDEO] ❌ Failed {scene_id}: {str(e)}")
-
-        # Store failed record
-        try:
-            supabase.table("video_segments").insert(
-                {
-                    "video_generation_id": video_gen_id,
-                    "scene_id": scene_id,
-                    "segment_index": (
-                        int(scene_id.split("_")[1]) if "_" in scene_id else 1
-                    ),
-                    "scene_description": scene_description,
-                    "source_image_url": scene_image.get("image_url"),
-                    "generation_method": "image_to_video",
-                    "status": "failed",
-                    "error_message": str(e),
-                    "processing_service": "modelslab",
-                    "processing_model": model_id,
-                    "metadata": {
-                        "model_id": model_id,
-                        "video_style": video_style,
-                        "service": "modelslab",
-                    },
-                }
-            ).execute()
-        except:
-            pass
-
-        return None
-
-
-async def generate_text_to_video_scene(
-    modelslab_service: ModelsLabVideoService,
-    video_gen_id: str,
-    scene_id: str,
-    scene_description: str,
-    audio_files: Dict[str, Any],
-    video_style: str,
-    model_id: str,
-) -> Dict[str, Any]:
-    """Generate video from text description using text-to-video (fallback)"""
-
-    try:
-        supabase = get_supabase()
-
-        # Calculate video duration based on audio
-        all_audio = (
-            audio_files.get("narrator", [])
-            + audio_files.get("characters", [])
-            + audio_files.get("sound_effects", [])
-        )
-        video_duration = modelslab_service.calculate_video_duration_from_audio(
-            all_audio, scene_id
-        )
-
-        # Create video prompt
-        video_prompt = create_video_prompt(scene_description, video_style)
-
-        # Generate video from text
-        result = await modelslab_service.generate_text_to_video(
-            prompt=video_prompt,
-            duration=video_duration,
-            fps=24,
-            width=512,
-            height=288,
-            model_id=model_id,
-        )
-
-        # Handle response
-        if result.get("status") == "success":
-            video_url = result.get("output", [{}])[0] if result.get("output") else None
-            if isinstance(video_url, dict):
-                video_url = video_url.get("url") or video_url.get("video_url")
-        else:
-            # Wait for completion if async
-            request_id = result.get("id")
-            if request_id:
-                final_result = await modelslab_service.wait_for_completion(
-                    request_id, max_wait_time=600
-                )  # 10 minutes
-                output = final_result.get("output", [])
-                video_url = output[0] if output else None
-                if isinstance(video_url, dict):
-                    video_url = video_url.get("url") or video_url.get("video_url")
-            else:
-                raise Exception("Failed to get video URL")
-
-        if not video_url:
-            raise Exception("No video URL returned from API")
-
-        # Store in database
-        video_record = (
-            supabase.table("video_segments")
-            .insert(
-                {
-                    "video_generation_id": video_gen_id,
-                    "scene_id": scene_id,
-                    "segment_index": (
-                        int(scene_id.split("_")[1]) if "_" in scene_id else 1
-                    ),  # ✅ Existing column
-                    "scene_description": scene_description,  # ✅ New column
-                    "video_url": video_url,
-                    "fps": 24,  # ✅ New column
-                    "width": 512,  # ✅ Existing column
-                    "height": 288,  # ✅ Existing column
-                    "duration_seconds": video_duration,
-                    "generation_method": "text_to_video",  # ✅ New column
-                    "status": "completed",
-                    "processing_service": "modelslab",  # ✅ Existing column
-                    "processing_model": model_id,  # ✅ Existing column
-                    "metadata": {
-                        "model_id": model_id,
-                        "video_style": video_style,
-                        "service": "modelslab",
-                        "video_prompt": video_prompt,
-                    },
-                }
-            )
-            .execute()
-        )
-
-        return {
-            "id": video_record.data[0]["id"],
-            "scene_id": scene_id,
-            "video_url": video_url,
-            "duration": video_duration,
-            "prompt": video_prompt,
-            "method": "text_to_video",
-            "model": model_id,
-        }
-
-    except Exception as e:
-        print(f"[TEXT_TO_VIDEO] ❌ Failed {scene_id}: {str(e)}")
-
-        # Store failed record
-        try:
-            supabase.table("video_segments").insert(
-                {
-                    "video_generation_id": video_gen_id,
-                    "scene_id": scene_id,
-                    "segment_index": (
-                        int(scene_id.split("_")[1]) if "_" in scene_id else 1
-                    ),
-                    "scene_description": scene_description,
-                    "generation_method": "text_to_video",
-                    "status": "failed",
-                    "error_message": str(e),
-                    "processing_service": "modelslab",
-                    "processing_model": model_id,
-                    "metadata": {
-                        "model_id": model_id,
-                        "video_style": video_style,
-                        "service": "modelslab",
-                    },
-                }
-            ).execute()
-        except:
-            pass
-
-        return None
-
-
-def create_video_prompt(scene_description: str, style: str) -> str:
-    """Create detailed prompt for video generation"""
-
-    style_modifiers = {
-        "realistic": "photorealistic video, natural movement, realistic physics",
-        "cinematic": "cinematic video, dramatic movement, film-like motion",
-        "animated": "animated video, stylized movement, cartoon animation",
-        "fantasy": "fantasy video, magical movement, mystical atmosphere",
-        "comic": "comic book style video, dynamic movement, superhero action",
-        "artistic": "artistic video, creative movement, artistic motion",
-    }
-
-    base_prompt = f"Video scene: {scene_description}, "
-    style_prompt = style_modifiers.get(style.lower(), style_modifiers["realistic"])
-    technical_prompt = ", 24fps, smooth motion, high quality, 16:9 aspect ratio"
-
-    return base_prompt + style_prompt + technical_prompt
-
-
 @celery_app.task(bind=True)
 def retry_video_retrieval_task(self, video_generation_id: str, video_url: str = None):
     """Celery task to retry video retrieval for a failed video generation"""
     return asyncio.run(async_retry_video_retrieval_task(video_generation_id, video_url))
 
-async def async_retry_video_retrieval_task(video_generation_id: str, video_url: str = None):
+
+async def async_retry_video_retrieval_task(
+    video_generation_id: str, video_url: str = None
+):
     """Async implementation of retry video retrieval task"""
     async with async_session() as session:
         try:
@@ -1261,7 +1026,7 @@ async def async_retry_video_retrieval_task(video_generation_id: str, video_url: 
 
             if not video_gen_record:
                 raise Exception(f"Video generation {video_generation_id} not found")
-            
+
             video_gen = dict(video_gen_record)
             user_id = video_gen.get("user_id")
             current_status = video_gen.get("generation_status")
@@ -1289,7 +1054,9 @@ async def async_retry_video_retrieval_task(video_generation_id: str, video_url: 
                 if not video_url:
                     raise Exception("No video URL available for retry")
 
-            print(f"[VIDEO RETRY TASK] Attempting video retrieval from URL: {video_url}")
+            print(
+                f"[VIDEO RETRY TASK] Attempting video retrieval from URL: {video_url}"
+            )
 
             # Import and use the video service for retry
             from app.services.modelslab_v7_video_service import ModelsLabV7VideoService
@@ -1302,8 +1069,9 @@ async def async_retry_video_retrieval_task(video_generation_id: str, video_url: 
             if not retry_result.get("success"):
                 # Update retry count and status
                 new_retry_count = retry_count + 1
-                
-                update_query = text(\"""
+
+                update_query = text(
+                    """
                     UPDATE video_generations 
                     SET retry_count = :retry_count, 
                         last_retry_at = NOW(), 
@@ -1311,17 +1079,25 @@ async def async_retry_video_retrieval_task(video_generation_id: str, video_url: 
                         error_message = :error_message, 
                         can_resume = :can_resume 
                     WHERE id = :id
-                \""")
-                
-                status = "retrieval_failed" if new_retry_count < max_retries else "failed"
-                
-                await session.execute(update_query, {
-                    "retry_count": new_retry_count,
-                    "status": status,
-                    "error_message": retry_result.get("error", "Video retrieval failed"),
-                    "can_resume": new_retry_count < max_retries,
-                    "id": video_generation_id
-                })
+                """
+                )
+
+                status = (
+                    "retrieval_failed" if new_retry_count < max_retries else "failed"
+                )
+
+                await session.execute(
+                    update_query,
+                    {
+                        "retry_count": new_retry_count,
+                        "status": status,
+                        "error_message": retry_result.get(
+                            "error", "Video retrieval failed"
+                        ),
+                        "can_resume": new_retry_count < max_retries,
+                        "id": video_generation_id,
+                    },
+                )
                 await session.commit()
 
                 raise Exception(
@@ -1333,14 +1109,17 @@ async def async_retry_video_retrieval_task(video_generation_id: str, video_url: 
             video_duration = retry_result.get("duration", 0)
 
             task_metadata = video_gen.get("task_metadata", {})
-            task_metadata.update({
-                "retry_success": True,
-                "retry_video_url": video_url,
-                "video_duration": video_duration,
-                "final_retrieval_time": "now()",
-            })
+            task_metadata.update(
+                {
+                    "retry_success": True,
+                    "retry_video_url": video_url,
+                    "video_duration": video_duration,
+                    "final_retrieval_time": "now()",
+                }
+            )
 
-            update_query = text(\"""
+            update_query = text(
+                """
                 UPDATE video_generations 
                 SET generation_status = 'completed', 
                     video_url = :video_url, 
@@ -1350,14 +1129,18 @@ async def async_retry_video_retrieval_task(video_generation_id: str, video_url: 
                     can_resume = false, 
                     task_metadata = :task_metadata 
                 WHERE id = :id
-            \""")
-            
-            await session.execute(update_query, {
-                "video_url": video_url,
-                "retry_count": retry_count + 1,
-                "task_metadata": json.dumps(task_metadata),
-                "id": video_generation_id
-            })
+            """
+            )
+
+            await session.execute(
+                update_query,
+                {
+                    "video_url": video_url,
+                    "retry_count": retry_count + 1,
+                    "task_metadata": json.dumps(task_metadata),
+                    "id": video_generation_id,
+                },
+            )
             await session.commit()
 
             print(
@@ -1379,16 +1162,18 @@ async def async_retry_video_retrieval_task(video_generation_id: str, video_url: 
 
             # Update status to failed
             try:
-                update_query = text(\"""
+                update_query = text(
+                    """
                     UPDATE video_generations 
                     SET generation_status = 'failed', 
                         error_message = :error_message 
                     WHERE id = :id
-                \""")
-                await session.execute(update_query, {
-                    "error_message": error_message,
-                    "id": video_generation_id
-                })
+                """
+                )
+                await session.execute(
+                    update_query,
+                    {"error_message": error_message, "id": video_generation_id},
+                )
                 await session.commit()
             except:
                 pass
@@ -1401,11 +1186,14 @@ def automatic_video_retry_task(self, video_generation_id: str):
     """Automatic retry task with exponential backoff for failed video retrievals"""
     return asyncio.run(async_automatic_video_retry_task(video_generation_id))
 
+
 async def async_automatic_video_retry_task(video_generation_id: str):
     """Async implementation of automatic retry task"""
     async with async_session() as session:
         try:
-            print(f"[AUTO RETRY TASK] Starting automatic retry for: {video_generation_id}")
+            print(
+                f"[AUTO RETRY TASK] Starting automatic retry for: {video_generation_id}"
+            )
 
             # Get video generation data
             query = text("SELECT * FROM video_generations WHERE id = :id")
@@ -1414,7 +1202,7 @@ async def async_automatic_video_retry_task(video_generation_id: str):
 
             if not video_gen_record:
                 raise Exception(f"Video generation {video_generation_id} not found")
-            
+
             video_gen = dict(video_gen_record)
             current_status = video_gen.get("generation_status")
 
@@ -1439,17 +1227,22 @@ async def async_automatic_video_retry_task(video_generation_id: str):
                     f"[AUTO RETRY TASK] Maximum automatic retries ({max_automatic_retries}) reached"
                 )
                 # Update status to indicate manual retry is needed
-                update_query = text(\"""
+                update_query = text(
+                    """
                     UPDATE video_generations 
                     SET generation_status = 'retrieval_failed', 
                         can_resume = true, 
                         error_message = :error_message 
                     WHERE id = :id
-                \""")
-                await session.execute(update_query, {
-                    "error_message": f"Automatic retries exhausted. Please try manual retry.",
-                    "id": video_generation_id
-                })
+                """
+                )
+                await session.execute(
+                    update_query,
+                    {
+                        "error_message": f"Automatic retries exhausted. Please try manual retry.",
+                        "id": video_generation_id,
+                    },
+                )
                 await session.commit()
 
                 return {
@@ -1499,8 +1292,9 @@ async def async_automatic_video_retry_task(video_generation_id: str):
             if not retry_result.get("success"):
                 # Update retry count and status
                 new_retry_count = retry_count + 1
-                
-                update_query = text(\"""
+
+                update_query = text(
+                    """
                     UPDATE video_generations 
                     SET retry_count = :retry_count, 
                         last_retry_at = NOW(), 
@@ -1508,17 +1302,27 @@ async def async_automatic_video_retry_task(video_generation_id: str):
                         error_message = :error_message, 
                         can_resume = :can_resume 
                     WHERE id = :id
-                \""")
-                
-                status = "retrieval_failed" if new_retry_count < max_automatic_retries else "failed"
-                
-                await session.execute(update_query, {
-                    "retry_count": new_retry_count,
-                    "status": status,
-                    "error_message": retry_result.get("error", "Video retrieval failed"),
-                    "can_resume": new_retry_count < max_automatic_retries,
-                    "id": video_generation_id
-                })
+                """
+                )
+
+                status = (
+                    "retrieval_failed"
+                    if new_retry_count < max_automatic_retries
+                    else "failed"
+                )
+
+                await session.execute(
+                    update_query,
+                    {
+                        "retry_count": new_retry_count,
+                        "status": status,
+                        "error_message": retry_result.get(
+                            "error", "Video retrieval failed"
+                        ),
+                        "can_resume": new_retry_count < max_automatic_retries,
+                        "id": video_generation_id,
+                    },
+                )
                 await session.commit()
 
                 # Schedule next automatic retry if we haven't reached max
@@ -1541,14 +1345,17 @@ async def async_automatic_video_retry_task(video_generation_id: str):
             video_duration = retry_result.get("duration", 0)
 
             task_metadata = video_gen.get("task_metadata", {})
-            task_metadata.update({
-                "retry_success": True,
-                "retry_video_url": video_url,
-                "video_duration": video_duration,
-                "final_retrieval_time": "now()",
-            })
+            task_metadata.update(
+                {
+                    "retry_success": True,
+                    "retry_video_url": video_url,
+                    "video_duration": video_duration,
+                    "final_retrieval_time": "now()",
+                }
+            )
 
-            update_query = text(\"""
+            update_query = text(
+                """
                 UPDATE video_generations 
                 SET generation_status = 'completed', 
                     video_url = :video_url, 
@@ -1558,14 +1365,18 @@ async def async_automatic_video_retry_task(video_generation_id: str):
                     can_resume = false, 
                     task_metadata = :task_metadata 
                 WHERE id = :id
-            \""")
-            
-            await session.execute(update_query, {
-                "video_url": video_url,
-                "retry_count": retry_count + 1,
-                "task_metadata": json.dumps(task_metadata),
-                "id": video_generation_id
-            })
+            """
+            )
+
+            await session.execute(
+                update_query,
+                {
+                    "video_url": video_url,
+                    "retry_count": retry_count + 1,
+                    "task_metadata": json.dumps(task_metadata),
+                    "id": video_generation_id,
+                },
+            )
             await session.commit()
 
             print(
@@ -1587,16 +1398,18 @@ async def async_automatic_video_retry_task(video_generation_id: str):
 
             # Update status to failed
             try:
-                update_query = text(\"""
+                update_query = text(
+                    """
                     UPDATE video_generations 
                     SET generation_status = 'failed', 
                         error_message = :error_message 
                     WHERE id = :id
-                \""")
-                await session.execute(update_query, {
-                    "error_message": error_message,
-                    "id": video_generation_id
-                })
+                """
+                )
+                await session.execute(
+                    update_query,
+                    {"error_message": error_message, "id": video_generation_id},
+                )
                 await session.commit()
             except:
                 pass

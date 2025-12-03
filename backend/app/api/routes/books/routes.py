@@ -447,7 +447,21 @@ async def create_book(
 ):
     """Create a new book"""
     file_service = FileService()
-    content = await file_service.process_book_file(file)
+    
+    # Save uploaded file to temp
+    import tempfile
+    import shutil
+    import os
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as temp_file:
+        shutil.copyfileobj(file.file, temp_file)
+        temp_file_path = temp_file.name
+        
+    try:
+        content = await file_service.process_book_file(temp_file_path, file.filename, str(current_user.id))
+    finally:
+        if os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
 
     try:
         book = Book(
@@ -1145,7 +1159,6 @@ async def retry_book_processing(
 async def delete_book(
     book_id: str,
     session: AsyncSession = Depends(get_session),
-    supabase_client: Client = Depends(get_supabase),  # Kept for storage operations
     current_user: dict = Depends(get_current_active_user),
 ):
     # 1. Get the book record to find the storage path and verify ownership
@@ -1170,72 +1183,69 @@ async def delete_book(
 
     user_id = current_user["id"]
 
-    # 3. Delete all user files from Supabase Storage
-    # Note: We still use supabase_client for storage as we haven't refactored storage yet
+    # 3. Delete all user files from Local Storage
+    from app.core.services.storage import storage_service
+
     try:
         # Delete covers
         try:
-            covers = supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).list(
-                path=f"users/{user_id}/covers"
-            )
+            covers = storage_service.list(f"users/{user_id}/covers")
             if covers:
                 cover_paths = [
                     f"users/{user_id}/covers/{item['name']}" for item in covers
                 ]
-                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove(
-                    cover_paths
-                )
+                await storage_service.remove_batch(cover_paths)
                 print(f"Deleted {len(cover_paths)} cover files for user {user_id}")
         except Exception as e:
             print(f"Warning: Could not delete cover files: {e}")
 
         # Delete audio files
         try:
-            audio_files = supabase_client.storage.from_(
-                settings.SUPABASE_BUCKET_NAME
-            ).list(path=f"users/{user_id}/audio")
+            audio_files = storage_service.list(f"users/{user_id}/audio")
             if audio_files:
                 audio_paths = [
                     f"users/{user_id}/audio/{item['name']}" for item in audio_files
                 ]
-                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove(
-                    audio_paths
-                )
+                await storage_service.remove_batch(audio_paths)
                 print(f"Deleted {len(audio_paths)} audio files for user {user_id}")
         except Exception as e:
             print(f"Warning: Could not delete audio files: {e}")
 
         # Delete video files
         try:
-            video_files = supabase_client.storage.from_(
-                settings.SUPABASE_BUCKET_NAME
-            ).list(path=f"users/{user_id}/videos")
+            video_files = storage_service.list(f"users/{user_id}/videos")
             if video_files:
                 video_paths = [
                     f"users/{user_id}/videos/{item['name']}" for item in video_files
                 ]
-                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove(
-                    video_paths
-                )
+                await storage_service.remove_batch(video_paths)
                 print(f"Deleted {len(video_paths)} video files for user {user_id}")
         except Exception as e:
             print(f"Warning: Could not delete video files: {e}")
+
+        # Delete image files
+        try:
+            image_files = storage_service.list(f"users/{user_id}/images")
+            if image_files:
+                image_paths = [
+                    f"users/{user_id}/images/{item['name']}" for item in image_files
+                ]
+                await storage_service.remove_batch(image_paths)
+                print(f"Deleted {len(image_paths)} image files for user {user_id}")
+        except Exception as e:
+            print(f"Warning: Could not delete image files: {e}")
 
         # Delete the specific book file from users folder
         try:
             original_file_storage_path = book.original_file_storage_path
             if original_file_storage_path:
-                supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).remove(
-                    [original_file_storage_path]
-                )
+                await storage_service.remove_batch([original_file_storage_path])
                 print(f"Deleted book file: {original_file_storage_path}")
             else:
                 # If no original_file_storage_path, try to find files in the user's folder
                 try:
                     # List all files in the user's root folder
-                    user_files = supabase_client.storage.from_(
-                        settings.SUPABASE_BUCKET_NAME
-                    ).list(path=f"users/{user_id}")
+                    user_files = storage_service.list(f"users/{user_id}")
                     if user_files:
                         # Filter out folders (covers, audio, videos)
                         book_files = [
@@ -1248,9 +1258,7 @@ async def delete_book(
                             file_paths = [
                                 f"users/{user_id}/{file['name']}" for file in book_files
                             ]
-                            supabase_client.storage.from_(
-                                settings.SUPABASE_BUCKET_NAME
-                            ).remove(file_paths)
+                            await storage_service.remove_batch(file_paths)
                             print(
                                 f"Deleted {len(file_paths)} book files for user {user_id}"
                             )
@@ -1320,7 +1328,6 @@ async def extract_cover_from_page(
     book_id: str,
     page: int,
     session: AsyncSession = Depends(get_session),
-    supabase_client: Client = Depends(get_supabase),  # For storage
     current_user: dict = Depends(get_current_active_user),
 ):
     # Get book record
@@ -1356,18 +1363,17 @@ async def extract_cover_from_page(
         img_buffer = io.BytesIO()
         pix.save(img_buffer, format="png")
         img_buffer.seek(0)
-        # Upload to Supabase Storage under user folder
+        # Upload to local storage
+        from app.core.services.storage import storage_service
+        
         user_id = current_user["id"]
         storage_path = f"users/{user_id}/covers/cover_{book_id}.png"
-        supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
+        
+        cover_url = await storage_service.upload(
+            file_content=img_buffer.getvalue(),
             path=storage_path,
-            file=img_buffer.getvalue(),
-            file_options={"content-type": "image/png"},
+            content_type="image/png"
         )
-        # Get the correct public URL from Supabase
-        cover_url = supabase_client.storage.from_(
-            settings.SUPABASE_BUCKET_NAME
-        ).get_public_url(storage_path)
 
         book.cover_image_url = cover_url
         session.add(book)
@@ -1382,16 +1388,10 @@ async def extract_cover_from_page(
 
 
 @router.post("/{book_id}/upload-cover")
-async def upload_cover_image(
+async def upload_custom_cover(
     book_id: str,
     cover_image: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    supabase_client: Client = Depends(get_supabase),  # For storage
-    current_user: dict = Depends(get_current_active_user),
-):
-    # Get book record
-    try:
-        stmt = select(Book).where(Book.id == book_id)
         result = await session.exec(stmt)
         book = result.first()
 
@@ -1407,15 +1407,14 @@ async def upload_cover_image(
         img_bytes = await cover_image.read()
         user_id = current_user["id"]
         storage_path = f"users/{user_id}/covers/cover_{book_id}_upload.png"
-        supabase_client.storage.from_(settings.SUPABASE_BUCKET_NAME).upload(
+        
+        # Upload to local storage
+        from app.core.services.storage import storage_service
+        cover_url = await storage_service.upload(
+            file_content=img_bytes,
             path=storage_path,
-            file=img_bytes,
-            file_options={"content-type": "image/png"},
+            content_type="image/png"
         )
-        # Get the correct public URL from Supabase
-        cover_url = supabase_client.storage.from_(
-            settings.SUPABASE_BUCKET_NAME
-        ).get_public_url(storage_path)
 
         book.cover_image_url = cover_url
         session.add(book)
@@ -1480,156 +1479,3 @@ async def save_book_structure(
         raise HTTPException(
             status_code=500, detail=f"Failed to save structure: {str(e)}"
         )
-
-
-# @router.post("/{book_id}/save-chapters")
-# async def save_user_chapters(
-#     book_id: str,
-#     chapters: List[ChapterInput],
-#     session: AsyncSession = Depends(get_session),
-#     current_user: dict = Depends(get_current_active_user)
-# ):
-#     # Check book ownership
-#     response = supabase_client.table("books").select("user_id").eq("id", book_id).single().execute()
-#     if not response.data or response.data["user_id"] != current_user["id"]:
-#         raise HTTPException(status_code=403, detail="Not authorized to modify this book")
-
-#      # Delete existing chapter embeddings for this book
-#     supabase_client.table('chapter_embeddings').delete().eq('book_id', book_id).execute()
-
-#     # Delete existing draft chapters for this book
-#     supabase_client.table('chapters').delete().eq('book_id', book_id).execute()
-#     # Insert new chapters and create embeddings
-#     embeddings_service = EmbeddingsService(supabase_client)
-#     for idx, chapter in enumerate(chapters, 1):
-#         chapter_data = {
-#             "book_id": book_id,
-#             "title": chapter.title,
-#             "content": chapter.content,
-#             "chapter_number": idx
-#         }
-#         insert_response = supabase_client.table('chapters').insert(chapter_data).execute()
-#         chapter_id = insert_response.data[0]['id']
-#         # Create embeddings for the new chapter
-#         await embeddings_service.create_chapter_embeddings(chapter_id, chapter.content)
-
-#     # Update total_chapters in books table
-#     supabase_client.table('books').update({"total_chapters": len(chapters)}).eq('id', book_id).execute()
-#     return {"message": "Chapters saved", "total_chapters": len(chapters)}
-
-
-# @router.post("/{book_id}/save-structure")
-# async def save_book_structure(
-#     book_id: str,
-#     structure_data: BookStructureInput,
-#     session: AsyncSession = Depends(get_session),
-#     current_user: dict = Depends(get_current_active_user)
-# ):
-#     """Save the book structure (sections and chapters) after user review"""
-#     try:
-#         # Convert to dict if needed
-#         if hasattr(structure_data, 'dict'):
-#             structure_dict = structure_data.dict()
-#         else:
-#             structure_dict = {
-#                 'sections': getattr(structure_data, 'sections', []),
-#                 'chapters': getattr(structure_data, 'chapters', [])
-#             }
-#         # Verify book ownership
-#         book_response = supabase_client.table('books').select('*').eq('id', book_id).eq('user_id', current_user['id']).execute()
-#         if not book_response.data:
-#             raise HTTPException(status_code=404, detail="Book not found or not authorized")
-
-#         book = book_response.data[0]
-
-#         # Extract chapters from structure_data
-#         chapters = structure_dict.get("chapters", [])
-#         sections = structure_dict.get("sections", [])
-
-#         if not chapters:
-#             raise HTTPException(status_code=400, detail="No chapters provided in structure data")
-
-#         # Delete existing chapter embeddings for this book
-#         supabase_client.table('chapter_embeddings').delete().eq('book_id', book_id).execute()
-#         print(f"Deleted existing chapter embeddings for book {book_id}")
-
-#         # Delete existing chapters for this book
-#         supabase_client.table('chapters').delete().eq('book_id', book_id).execute()
-#         print(f"Deleted existing chapters for book {book_id}")
-
-#         # Delete existing book sections for this book
-#         supabase_client.table('book_sections').delete().eq('book_id', book_id).execute()
-#         print(f"Deleted existing book sections for book {book_id}")
-
-#         # Create section_id mapping if there are sections
-#         section_id_map = {}
-#         if sections:
-#             for section in sections:
-#                 section_data = {
-#                     "book_id": book_id,
-#                     "title": section.get("title", ""),
-#                     "section_type": section.get("section_type", ""),
-#                     "section_number": section.get("section_number", ""),
-#                     "order_index": section.get("order_index", 0)
-#                 }
-#                 section_response = supabase_client.table('book_sections').insert(section_data).execute()
-#                 section_id = section_response.data[0]['id']
-#                 section_key = f"{section.get('title', '')}_{section.get('section_type', '')}"
-#                 section_id_map[section_key] = section_id
-
-#         # Insert new chapters and create embeddings
-#         embeddings_service = EmbeddingsService(supabase_client)
-
-#         for idx, chapter in enumerate(chapters, 1):
-#             # Prepare chapter data
-#             chapter_data = {
-#                 "book_id": book_id,
-#                 "title": chapter.get("title", f"Chapter {idx}"),
-#                 "content": chapter.get("content", ""),
-#                 "chapter_number": chapter.get("chapter_number", idx),
-#                 "summary": chapter.get("summary", ""),
-#                 "order_index": chapter.get("order_index", idx)
-#             }
-
-#             # Add section_id if chapter belongs to a section
-#             if chapter.get("section_title") and sections:
-#                 section_key = f"{chapter.get('section_title')}_{chapter.get('section_type', '')}"
-#                 if section_key in section_id_map:
-#                     chapter_data["section_id"] = section_id_map[section_key]
-
-#             # Insert chapter
-#             insert_response = supabase_client.table('chapters').insert(chapter_data).execute()
-#             chapter_id = insert_response.data[0]['id']
-#             print(f"Inserted chapter {idx}: {chapter_data['title']}")
-
-#             # Create embeddings for the new chapter
-#             if chapter_data["content"].strip():  # Only create embeddings if there's content
-#                 try:
-#                     await embeddings_service.create_chapter_embeddings(chapter_id, chapter_data["content"])
-#                     print(f"Created embeddings for chapter {chapter_id}")
-#                 except Exception as e:
-#                     print(f"Warning: Failed to create embeddings for chapter {chapter_id}: {e}")
-
-#         # Update book with structure information and final status
-#         book_update = {
-#             "has_sections": structure_dict.get("has_sections", False),
-#             "structure_type": structure_dict.get("structure_type", "flat"),
-#             "total_chapters": len(chapters),
-#             "status": "READY",
-#             "progress": 100,
-#             "progress_message": "Book structure saved successfully"
-#         }
-
-#         supabase_client.table('books').update(book_update).eq('id', book_id).execute()
-#         print(f"Updated book {book_id} with final status")
-
-#         return {
-#             "success": True,
-#             "message": "Book structure saved successfully",
-#             "chapters_created": len(chapters),
-#             "sections_created": len(sections)
-#         }
-
-#     except Exception as e:
-#         print(f"Error saving book structure: {e}")
-#         raise HTTPException(status_code=500, detail=f"Failed to save book structure: {str(e)}")

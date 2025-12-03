@@ -129,6 +129,21 @@ services:
 
 
 
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - litinkai_minio_data:/data
+    networks:
+      - litinkai_local_nw
+
 networks:
   litinkai_local_nw:
     external: true
@@ -139,3 +154,4 @@ volumes:
   litinkai_mailpit_data:
   litinkai_flower_data:
   litinkai_rabbitmq_data:
+  litinkai_minio_data:

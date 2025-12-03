@@ -52,7 +52,7 @@ class AdminAlert(SQLModel, table=True):
     message: str
     metric_value: Optional[float] = Field(default=None)
     threshold_value: Optional[float] = Field(default=None)
-    metadata: Dict[str, Any] = Field(
+    meta: Dict[str, Any] = Field(
         default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
     )
     acknowledged_at: Optional[datetime] = Field(

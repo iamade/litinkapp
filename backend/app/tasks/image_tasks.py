@@ -22,6 +22,7 @@ def generate_all_images_for_video(self, video_generation_id: str):
     """Main task to generate all images for a video generation with pipeline support"""
     return asyncio.run(async_generate_all_images_for_video(video_generation_id))
 
+
 async def async_generate_all_images_for_video(video_generation_id: str):
     """Async implementation of image generation task"""
     async with async_session() as session:
@@ -49,11 +50,15 @@ async def async_generate_all_images_for_video(video_generation_id: str):
             user_id = video_gen.get("user_id")
 
             if not user_id:
-                raise Exception(f"Video generation {video_generation_id} has no user_id")
+                raise Exception(
+                    f"Video generation {video_generation_id} has no user_id"
+                )
 
             # Get user tier for model selection
             subscription_manager = SubscriptionManager(session)
-            usage_check = await subscription_manager.check_usage_limits(user_id, "image")
+            usage_check = await subscription_manager.check_usage_limits(
+                user_id, "image"
+            )
             user_tier = usage_check["tier"]
 
             print(
@@ -62,12 +67,18 @@ async def async_generate_all_images_for_video(video_generation_id: str):
 
             # ✅ FIXED: Proper validation of existing images
             existing_image_data = video_gen.get("image_data") or {}
-            existing_character_images = existing_image_data.get("character_images") or []
+            existing_character_images = (
+                existing_image_data.get("character_images") or []
+            )
             existing_scene_images = existing_image_data.get("scene_images") or []
 
             # Count ACTUAL successful images with URLs
             successful_character_count = len(
-                [img for img in existing_character_images if img and img.get("image_url")]
+                [
+                    img
+                    for img in existing_character_images
+                    if img and img.get("image_url")
+                ]
             )
             successful_scene_count = len(
                 [img for img in existing_scene_images if img and img.get("image_url")]
@@ -94,8 +105,12 @@ async def async_generate_all_images_for_video(video_generation_id: str):
                 print(
                     f"  - Character images: {successful_character_count}/{needed_character_images}"
                 )
-                print(f"  - Scene images: {successful_scene_count}/{needed_scene_images}")
-                print(f"[IMAGE GENERATION] Skipping generation and proceeding to next step")
+                print(
+                    f"  - Scene images: {successful_scene_count}/{needed_scene_images}"
+                )
+                print(
+                    f"[IMAGE GENERATION] Skipping generation and proceeding to next step"
+                )
 
                 # Mark as completed and move to next step
                 pipeline_manager.mark_step_completed(
@@ -108,11 +123,13 @@ async def async_generate_all_images_for_video(video_generation_id: str):
                 )
 
                 # Update status and trigger next step
-                update_query = text(\"""
+                update_query = text(
+                    """
                     UPDATE video_generations 
                     SET generation_status = 'images_completed' 
                     WHERE id = :id
-                \""")
+                """
+                )
                 await session.execute(update_query, {"id": video_generation_id})
                 await session.commit()
 
@@ -145,11 +162,13 @@ async def async_generate_all_images_for_video(video_generation_id: str):
                 )
 
                 # Clear the partial data
-                clear_query = text(\"""
+                clear_query = text(
+                    """
                     UPDATE video_generations 
                     SET image_data = NULL 
                     WHERE id = :id
-                \""")
+                """
+                )
                 await session.execute(clear_query, {"id": video_generation_id})
                 await session.commit()
 
@@ -164,11 +183,13 @@ async def async_generate_all_images_for_video(video_generation_id: str):
                 )
 
             # Update status
-            status_query = text(\"""
+            status_query = text(
+                """
                 UPDATE video_generations 
                 SET generation_status = 'generating_images' 
                 WHERE id = :id
-            \""")
+            """
+            )
             await session.execute(status_query, {"id": video_generation_id})
             await session.commit()
 
@@ -178,7 +199,9 @@ async def async_generate_all_images_for_video(video_generation_id: str):
             print(f"- Video Style: {video_style}")
 
             if not scene_descriptions and not characters:
-                raise Exception("No scene descriptions or characters found in script data")
+                raise Exception(
+                    "No scene descriptions or characters found in script data"
+                )
 
             # ✅ FIXED: Generate images using asyncio.run() instead of await
             image_service = ModelsLabV7ImageService()
@@ -217,11 +240,15 @@ async def async_generate_all_images_for_video(video_generation_id: str):
             successful_character_images = len(
                 [img for img in character_images if img is not None]
             )
-            successful_scene_images = len([img for img in scene_images if img is not None])
+            successful_scene_images = len(
+                [img for img in scene_images if img is not None]
+            )
             total_images = successful_character_images + successful_scene_images
             total_needed = len(characters) + len(scene_descriptions)
 
-            success_rate = (total_images / total_needed * 100) if total_needed > 0 else 0
+            success_rate = (
+                (total_images / total_needed * 100) if total_needed > 0 else 0
+            )
 
             # ✅ CRITICAL: Ensure we have some successful images before proceeding
             if total_images == 0:
@@ -261,16 +288,18 @@ async def async_generate_all_images_for_video(video_generation_id: str):
                 else:
                     print(f"  - Scene {i+1}: NULL/FAILED")
 
-            final_update_query = text(\"""
+            final_update_query = text(
+                """
                 UPDATE video_generations 
                 SET image_data = :image_data, 
                     generation_status = 'images_completed' 
                 WHERE id = :id
-            \""")
-            await session.execute(final_update_query, {
-                "image_data": json.dumps(image_data),
-                "id": video_generation_id
-            })
+            """
+            )
+            await session.execute(
+                final_update_query,
+                {"image_data": json.dumps(image_data), "id": video_generation_id},
+            )
             await session.commit()
 
             # Mark step as completed
@@ -320,18 +349,20 @@ async def async_generate_all_images_for_video(video_generation_id: str):
 
             # Update status to failed
             try:
-                error_update_query = text(\"""
+                error_update_query = text(
+                    """
                     UPDATE video_generations 
                     SET generation_status = 'failed', 
                         error_message = :error_message, 
                         can_resume = true, 
                         failed_at_step = 'image_generation' 
                     WHERE id = :id
-                \""")
-                await session.execute(error_update_query, {
-                    "error_message": error_message,
-                    "id": video_generation_id
-                })
+                """
+                )
+                await session.execute(
+                    error_update_query,
+                    {"error_message": error_message, "id": video_generation_id},
+                )
                 await session.commit()
             except Exception as db_error:
                 print(f"[IMAGE GENERATION] Database update error: {str(db_error)}")
@@ -391,14 +422,17 @@ async def generate_character_images_optimized(
                     "aspect_ratio": "3:4",
                     "service_provider": "modelslab_v7",
                     "generation_time_seconds": result.get("generation_time", 0),
-                    "metadata": json.dumps({
-                        "service": "modelslab_v7",
-                        "model_used": result.get("model_used", "gen4_image"),
-                        "generation_time": result.get("generation_time", 0),
-                    }),
+                    "metadata": json.dumps(
+                        {
+                            "service": "modelslab_v7",
+                            "model_used": result.get("model_used", "gen4_image"),
+                            "generation_time": result.get("generation_time", 0),
+                        }
+                    ),
                 }
 
-                insert_query = text(\"""
+                insert_query = text(
+                    """
                     INSERT INTO image_generations (
                         video_generation_id, image_type, prompt, image_url, character_name, style, status,
                         sequence_order, model_id, aspect_ratio, service_provider, generation_time_seconds, metadata
@@ -406,8 +440,9 @@ async def generate_character_images_optimized(
                         :video_generation_id, :image_type, :prompt, :image_url, :character_name, :style, :status,
                         :sequence_order, :model_id, :aspect_ratio, :service_provider, :generation_time_seconds, :metadata
                     ) RETURNING id
-                \""")
-                
+                """
+                )
+
                 db_result = await session.execute(insert_query, image_record_data)
                 await session.commit()
                 record_id = db_result.scalar()
@@ -450,8 +485,9 @@ async def generate_character_images_optimized(
                 "service_provider": "modelslab_v7",
                 "metadata": json.dumps({"service": "modelslab_v7", "error": str(e)}),
             }
-            
-            fail_insert_query = text("""
+
+            fail_insert_query = text(
+                """
                 INSERT INTO image_generations (
                     video_generation_id, image_type, character_name, style, status, error_message,
                     sequence_order, prompt, model_id, aspect_ratio, service_provider, metadata
@@ -459,7 +495,8 @@ async def generate_character_images_optimized(
                     :video_generation_id, :image_type, :character_name, :style, :status, :error_message,
                     :sequence_order, :prompt, :model_id, :aspect_ratio, :service_provider, :metadata
                 )
-            """)
+            """
+            )
             await session.execute(fail_insert_query, failed_record_data)
             await session.commit()
 
@@ -531,14 +568,17 @@ async def generate_scene_images_optimized(
                     "aspect_ratio": "16:9",
                     "service_provider": "modelslab_v7",
                     "generation_time_seconds": result.get("generation_time", 0),
-                    "metadata": json.dumps({
-                        "service": "modelslab_v7",
-                        "model_used": result.get("model_used", "gen4_image"),
-                        "generation_time": result.get("generation_time", 0),
-                    }),
+                    "metadata": json.dumps(
+                        {
+                            "service": "modelslab_v7",
+                            "model_used": result.get("model_used", "gen4_image"),
+                            "generation_time": result.get("generation_time", 0),
+                        }
+                    ),
                 }
 
-                insert_query = text("""
+                insert_query = text(
+                    """
                     INSERT INTO image_generations (
                         video_generation_id, image_type, prompt, image_url, scene_number, style, status,
                         sequence_order, model_id, aspect_ratio, service_provider, generation_time_seconds, metadata
@@ -546,8 +586,9 @@ async def generate_scene_images_optimized(
                         :video_generation_id, :image_type, :prompt, :image_url, :scene_number, :style, :status,
                         :sequence_order, :model_id, :aspect_ratio, :service_provider, :generation_time_seconds, :metadata
                     ) RETURNING id
-                """)
-                
+                """
+                )
+
                 db_result = await session.execute(insert_query, image_record_data)
                 await session.commit()
                 record_id = db_result.scalar()
@@ -591,8 +632,9 @@ async def generate_scene_images_optimized(
                 "service_provider": "modelslab_v7",
                 "metadata": json.dumps({"service": "modelslab_v7", "error": str(e)}),
             }
-            
-            fail_insert_query = text("""
+
+            fail_insert_query = text(
+                """
                 INSERT INTO image_generations (
                     video_generation_id, image_type, scene_number, prompt, style, status, error_message,
                     sequence_order, model_id, aspect_ratio, service_provider, metadata
@@ -600,7 +642,8 @@ async def generate_scene_images_optimized(
                     :video_generation_id, :image_type, :scene_number, :prompt, :style, :status, :error_message,
                     :sequence_order, :model_id, :aspect_ratio, :service_provider, :metadata
                 )
-            """)
+            """
+            )
             await session.execute(fail_insert_query, failed_record_data)
             await session.commit()
 
@@ -619,206 +662,6 @@ async def generate_scene_images_optimized(
         f"[SCENE IMAGES OPTIMIZED] Completed: {successful_count}/{len(scene_descriptions)} scenes"
     )
     return scene_results
-
-
-# async def generate_character_images(
-#     image_service: ModelsLabV7ImageService,
-#     video_gen_id: str,
-#     characters: List[str],
-#     style: str = "realistic"
-# ) -> List[Dict[str, Any]]:
-#     """Generate character images using V7 service"""
-
-#     print(f"[CHARACTER IMAGES] Generating images for {len(characters)} characters...")
-#     character_results = []
-#     supabase = get_supabase()
-
-#     for i, character in enumerate(characters):
-#         try:
-#             print(f"[CHARACTER IMAGES] Processing character {i+1}/{len(characters)}: {character}")
-
-#             character_description = f"Detailed character portrait, {style} style, expressive features"
-
-#             result = await image_service.generate_character_image(
-#                 character_name=character,
-#                 character_description=character_description,
-#                 style=style,
-#                 aspect_ratio="3:4"
-#             )
-
-#             if result.get('status') == 'success':
-#                 image_url = result.get('image_url')
-
-#                 if not image_url:
-#                     raise Exception("No image URL in V7 response")
-
-#                 # ✅ FIXED: Use ALL available columns
-#                 image_record_data = {
-#                     'video_generation_id': video_gen_id,
-#                     'image_type': 'character',
-#                     'prompt': f"Character: {character}, {character_description}",
-#                     'image_url': image_url,
-#                     'character_name': character,
-#                     'style': style,
-#                     'status': 'completed',
-#                     'sequence_order': i + 1,
-#                     'model_id': result.get('model_used', 'gen4_image'),
-#                     'aspect_ratio': '3:4',
-#                     'service_provider': 'modelslab_v7',
-#                     'generation_time_seconds': result.get('generation_time', 0),
-#                     'metadata': {
-#                         'service': 'modelslab_v7',
-#                         'model_used': result.get('model_used', 'gen4_image'),
-#                         'generation_time': result.get('generation_time', 0)
-#                     }
-#                 }
-
-#                 db_result = supabase.table('image_generations').insert(image_record_data).execute()
-
-#                 character_results.append({
-#                     'id': db_result.data[0]['id'] if db_result.data else None,
-#                     'character': character,
-#                     'image_url': image_url,
-#                     'style': style,
-#                     'status': 'success'
-#                 })
-
-#                 print(f"[CHARACTER IMAGES] ✅ Generated {character}")
-
-#             else:
-#                 raise Exception(f"V7 Image generation failed: {result.get('error', 'Unknown error')}")
-
-#         except Exception as e:
-#             print(f"[CHARACTER IMAGES] ❌ Failed {character}: {str(e)}")
-
-#             # ✅ FIXED: Use ALL available columns for failed records too
-#             failed_record_data = {
-#                 'video_generation_id': video_gen_id,
-#                 'image_type': 'character',
-#                 'character_name': character,
-#                 'style': style,
-#                 'status': 'failed',
-#                 'error_message': str(e),
-#                 'sequence_order': i + 1,
-#                 'prompt': f"Character: {character}, {character_description}",
-#                 'model_id': 'gen4_image',
-#                 'aspect_ratio': '3:4',
-#                 'service_provider': 'modelslab_v7',
-#                 'metadata': {'service': 'modelslab_v7'}
-#             }
-#             supabase.table('image_generations').insert(failed_record_data).execute()
-
-#             character_results.append({
-#                 'character': character,
-#                 'status': 'failed',
-#                 'error': str(e)
-#             })
-
-#     print(f"[CHARACTER IMAGES] Completed: {len([r for r in character_results if r.get('status') == 'success'])}/{len(characters)} characters")
-#     return character_results
-
-
-# async def generate_scene_images(
-#     image_service: ModelsLabV7ImageService,
-#     video_gen_id: str,
-#     scene_descriptions: List[Dict[str, Any]],
-#     style: str = "cinematic"
-# ) -> List[Dict[str, Any]]:
-#     """Generate scene images using V7 service"""
-
-#     print(f"[SCENE IMAGES] Generating images for {len(scene_descriptions)} scenes...")
-#     scene_results = []
-#     supabase = get_supabase()
-
-#     for i, scene in enumerate(scene_descriptions):
-#         try:
-#             # Handle different scene description formats
-#             if isinstance(scene, dict):
-#                 scene_text = scene.get('description', scene.get('text', str(scene)))
-#                 scene_number = scene.get('scene_number', i + 1)
-#             else:
-#                 scene_text = str(scene)
-#                 scene_number = i + 1
-
-#             print(f"[SCENE IMAGES] Processing scene {i+1}/{len(scene_descriptions)}: {scene_text[:50]}...")
-
-#             result = await image_service.generate_scene_image(
-#                 scene_description=scene_text,
-#                 style=style,
-#                 aspect_ratio="16:9"
-#             )
-
-#             if result.get('status') == 'success':
-#                 image_url = result.get('image_url')
-
-#                 if not image_url:
-#                     raise Exception("No image URL in V7 response")
-
-#                 # ✅ FIXED: Use ALL available columns including scene_number
-#                 image_record_data = {
-#                     'video_generation_id': video_gen_id,
-#                     'image_type': 'scene',
-#                     'prompt': f"Scene: {scene_text}",
-#                     'image_url': image_url,
-#                     'scene_number': scene_number,  # ✅ Now this column exists
-#                     'style': style,
-#                     'status': 'completed',
-#                     'sequence_order': i + 1,
-#                     'model_id': result.get('model_used', 'gen4_image'),
-#                     'aspect_ratio': '16:9',
-#                     'service_provider': 'modelslab_v7',
-#                     'generation_time_seconds': result.get('generation_time', 0),
-#                     'metadata': {
-#                         'service': 'modelslab_v7',
-#                         'model_used': result.get('model_used', 'gen4_image'),
-#                         'generation_time': result.get('generation_time', 0)
-#                     }
-#                 }
-
-#                 db_result = supabase.table('image_generations').insert(image_record_data).execute()
-
-#                 scene_results.append({
-#                     'id': db_result.data[0]['id'] if db_result.data else None,
-#                     'scene_number': scene_number,
-#                     'image_url': image_url,
-#                     'description': scene_text,
-#                     'style': style,
-#                     'status': 'success'
-#                 })
-
-#                 print(f"[SCENE IMAGES] ✅ Generated scene {scene_number}")
-
-#             else:
-#                 raise Exception(f"V7 Image generation failed: {result.get('error', 'Unknown error')}")
-
-#         except Exception as e:
-#             print(f"[SCENE IMAGES] ❌ Failed scene {i+1}: {str(e)}")
-
-#             # ✅ FIXED: Use ALL available columns for failed records
-#             failed_record_data = {
-#                 'video_generation_id': video_gen_id,
-#                 'image_type': 'scene',
-#                 'scene_number': scene_number if 'scene_number' in locals() else i + 1,
-#                 'prompt': scene_text if 'scene_text' in locals() else 'Unknown scene',
-#                 'style': style,
-#                 'status': 'failed',
-#                 'error_message': str(e),
-#                 'sequence_order': i + 1,
-#                 'model_id': 'gen4_image',
-#                 'aspect_ratio': '16:9',
-#                 'service_provider': 'modelslab_v7',
-#                 'metadata': {'service': 'modelslab_v7'}
-#             }
-#             supabase.table('image_generations').insert(failed_record_data).execute()
-
-#             scene_results.append({
-#                 'scene_number': scene_number if 'scene_number' in locals() else i + 1,
-#                 'status': 'failed',
-#                 'error': str(e)
-#             })
-
-#     print(f"[SCENE IMAGES] Completed: {len([r for r in scene_results if r.get('status') == 'success'])}/{len(scene_descriptions)} scenes")
-#     return scene_results
 
 
 def create_character_image_prompt(character: str, style: str) -> str:
@@ -873,19 +716,22 @@ def generate_character_image_task(
     Returns:
         Dict containing task result with record_id and status
     """
-    return asyncio.run(async_generate_character_image_task(
-        self.request.id,
-        character_name,
-        character_description,
-        user_id,
-        chapter_id,
-        character_id,
-        style,
-        aspect_ratio,
-        custom_prompt,
-        record_id,
-        user_tier,
-    ))
+    return asyncio.run(
+        async_generate_character_image_task(
+            self.request.id,
+            character_name,
+            character_description,
+            user_id,
+            chapter_id,
+            character_id,
+            style,
+            aspect_ratio,
+            custom_prompt,
+            record_id,
+            user_tier,
+        )
+    )
+
 
 async def async_generate_character_image_task(
     task_id: str,
@@ -903,7 +749,9 @@ async def async_generate_character_image_task(
     """Async implementation of character image generation task"""
     async with async_session() as session:
         try:
-            logger.info(f"[CharacterImageTask] Starting generation for {character_name}")
+            logger.info(
+                f"[CharacterImageTask] Starting generation for {character_name}"
+            )
             logger.info(
                 f"[CharacterImageTask] Parameters: user={user_id}, chapter={chapter_id}, character={character_id}, record={record_id}, tier={user_tier}"
             )
@@ -911,14 +759,18 @@ async def async_generate_character_image_task(
             # Update character status to 'generating' if character_id provided
             if character_id:
                 try:
-                    update_query = text("""
+                    update_query = text(
+                        """
                         UPDATE characters
                         SET image_generation_status = 'generating',
                             image_generation_task_id = :task_id,
                             updated_at = NOW()
                         WHERE id = :id
-                    """)
-                    await session.execute(update_query, {"task_id": task_id, "id": character_id})
+                    """
+                    )
+                    await session.execute(
+                        update_query, {"task_id": task_id, "id": character_id}
+                    )
                     await session.commit()
                     logger.info(
                         f"[CharacterImageTask] Updated character {character_id} status to 'generating'"
@@ -947,7 +799,8 @@ async def async_generate_character_image_task(
             model_used = result.get("model_used", "gen4_image")
 
             # Update the image_generations record with the result
-            update_query = text("""
+            update_query = text(
+                """
                 UPDATE image_generations 
                 SET status = 'completed', 
                     image_url = :image_url, 
@@ -956,14 +809,18 @@ async def async_generate_character_image_task(
                     character_id = :character_id, 
                     model_id = :model_id 
                 WHERE id = :id
-            """)
-            await session.execute(update_query, {
-                "image_url": image_url,
-                "generation_time": generation_time,
-                "character_id": character_id,
-                "model_id": model_used,
-                "id": record_id
-            })
+            """
+            )
+            await session.execute(
+                update_query,
+                {
+                    "image_url": image_url,
+                    "generation_time": generation_time,
+                    "character_id": character_id,
+                    "model_id": model_used,
+                    "id": record_id,
+                },
+            )
             await session.commit()
             logger.info(
                 f"[CharacterImageTask] Updated image_generations record {record_id}"
@@ -982,7 +839,8 @@ async def async_generate_character_image_task(
                         "image_generation_record_id": record_id,
                     }
 
-                    char_update_query = text("""
+                    char_update_query = text(
+                        """
                         UPDATE characters 
                         SET image_url = :image_url, 
                             image_generation_status = 'completed', 
@@ -992,14 +850,22 @@ async def async_generate_character_image_task(
                             model_used = :model_used, 
                             updated_at = NOW() 
                         WHERE id = :id
-                    """)
-                    await session.execute(char_update_query, {
-                        "image_url": image_url,
-                        "prompt": result.get("prompt_used", custom_prompt or f"Character portrait: {character_name}"),
-                        "metadata": json.dumps(image_metadata),
-                        "model_used": model_used,
-                        "id": character_id
-                    })
+                    """
+                    )
+                    await session.execute(
+                        char_update_query,
+                        {
+                            "image_url": image_url,
+                            "prompt": result.get(
+                                "prompt_used",
+                                custom_prompt
+                                or f"Character portrait: {character_name}",
+                            ),
+                            "metadata": json.dumps(image_metadata),
+                            "model_used": model_used,
+                            "id": character_id,
+                        },
+                    )
                     await session.commit()
                     logger.info(
                         f"[CharacterImageTask] Updated character {character_id} with image URL: {image_url}"
@@ -1033,17 +899,19 @@ async def async_generate_character_image_task(
             # Update image_generations record with error
             try:
                 if record_id:
-                    error_update_query = text("""
+                    error_update_query = text(
+                        """
                         UPDATE image_generations 
                         SET status = 'failed', 
                             error_message = :error_message, 
                             updated_at = NOW() 
                         WHERE id = :id
-                    """)
-                    await session.execute(error_update_query, {
-                        "error_message": error_message,
-                        "id": record_id
-                    })
+                    """
+                    )
+                    await session.execute(
+                        error_update_query,
+                        {"error_message": error_message, "id": record_id},
+                    )
                     await session.commit()
             except Exception as db_error:
                 logger.error(
@@ -1053,12 +921,14 @@ async def async_generate_character_image_task(
             # Update character record with failed status if character_id provided
             try:
                 if character_id:
-                    char_error_query = text("""
+                    char_error_query = text(
+                        """
                         UPDATE characters 
                         SET image_generation_status = 'failed', 
                             updated_at = NOW() 
                         WHERE id = :id
-                    """)
+                    """
+                    )
                     await session.execute(char_error_query, {"id": character_id})
                     await session.commit()
             except Exception as char_error:
@@ -1121,19 +991,22 @@ def generate_scene_image_task(
         user_tier: User subscription tier for model selection
         retry_count: Current retry count for exponential backoff
     """
-    return asyncio.run(async_generate_scene_image_task(
-        record_id,
-        scene_description,
-        scene_number,
-        user_id,
-        chapter_id,
-        script_id,
-        style,
-        aspect_ratio,
-        custom_prompt,
-        user_tier,
-        retry_count,
-    ))
+    return asyncio.run(
+        async_generate_scene_image_task(
+            record_id,
+            scene_description,
+            scene_number,
+            user_id,
+            chapter_id,
+            script_id,
+            style,
+            aspect_ratio,
+            custom_prompt,
+            user_tier,
+            retry_count,
+        )
+    )
+
 
 async def async_generate_scene_image_task(
     record_id: str,
@@ -1154,7 +1027,9 @@ async def async_generate_scene_image_task(
 
     async with async_session() as session:
         try:
-            logger.info(f"[SceneImageTask] Starting generation for scene {scene_number}")
+            logger.info(
+                f"[SceneImageTask] Starting generation for scene {scene_number}"
+            )
             logger.info(
                 f"[SceneImageTask] Parameters: user={user_id}, chapter={chapter_id}, script={script_id}, record={record_id}, tier={user_tier}, retry={retry_count}"
             )
@@ -1173,19 +1048,24 @@ async def async_generate_scene_image_task(
 
             # Update status to in_progress with transaction safety
             try:
-                status_update_query = text("""
+                status_update_query = text(
+                    """
                     UPDATE image_generations 
                     SET status = 'in_progress', 
                         progress = 0, 
                         last_attempted_at = :last_attempted, 
                         retry_count = :retry_count 
                     WHERE id = :id
-                """)
-                await session.execute(status_update_query, {
-                    "last_attempted": datetime.utcnow().isoformat(),
-                    "retry_count": retry_count,
-                    "id": record_id
-                })
+                """
+                )
+                await session.execute(
+                    status_update_query,
+                    {
+                        "last_attempted": datetime.utcnow().isoformat(),
+                        "retry_count": retry_count,
+                        "id": record_id,
+                    },
+                )
                 await session.commit()
                 logger.info(
                     f"[SceneImageTask] Updated record {record_id} status to 'in_progress'"
@@ -1223,7 +1103,9 @@ async def async_generate_scene_image_task(
             # Prepare metadata with scene info
             existing_metadata = {}
             try:
-                meta_query = text("SELECT metadata FROM image_generations WHERE id = :id")
+                meta_query = text(
+                    "SELECT metadata FROM image_generations WHERE id = :id"
+                )
                 meta_result = await session.execute(meta_query, {"id": record_id})
                 meta_row = meta_result.mappings().first()
                 if meta_row and meta_row.get("metadata"):
@@ -1250,7 +1132,8 @@ async def async_generate_scene_image_task(
 
             # Update record with success data using transaction
             try:
-                success_update_query = text("""
+                success_update_query = text(
+                    """
                     UPDATE image_generations 
                     SET status = 'completed', 
                         progress = 100, 
@@ -1266,20 +1149,24 @@ async def async_generate_scene_image_task(
                         metadata = :metadata, 
                         retry_count = :retry_count 
                     WHERE id = :id
-                """)
-                
-                await session.execute(success_update_query, {
-                    "image_url": image_url,
-                    "updated_at": datetime.utcnow().isoformat(),
-                    "generation_time": generation_time,
-                    "model_id": model_used,
-                    "chapter_id": chapter_id,
-                    "script_id": script_id,
-                    "scene_number": scene_number,
-                    "metadata": json.dumps(merged_metadata),
-                    "retry_count": retry_count,
-                    "id": record_id
-                })
+                """
+                )
+
+                await session.execute(
+                    success_update_query,
+                    {
+                        "image_url": image_url,
+                        "updated_at": datetime.utcnow().isoformat(),
+                        "generation_time": generation_time,
+                        "model_id": model_used,
+                        "chapter_id": chapter_id,
+                        "script_id": script_id,
+                        "scene_number": scene_number,
+                        "metadata": json.dumps(merged_metadata),
+                        "retry_count": retry_count,
+                        "id": record_id,
+                    },
+                )
                 await session.commit()
                 logger.info(
                     f"[SceneImageTask] Successfully generated scene image: {record_id}"
@@ -1325,7 +1212,8 @@ async def async_generate_scene_image_task(
             elif "rate limit" in error_details.lower() or "429" in error_details:
                 error_code = "RATE_LIMIT_ERROR"
             elif (
-                "connection" in error_details.lower() or "network" in error_details.lower()
+                "connection" in error_details.lower()
+                or "network" in error_details.lower()
             ):
                 error_code = "NETWORK_ERROR"
             elif "503" in error_details or "504" in error_details:
@@ -1335,32 +1223,39 @@ async def async_generate_scene_image_task(
             try:
                 # Only set status to failed if not retryable or max retries exceeded
                 if not is_retryable or retry_count >= 3:
-                    error_update_query = text("""
+                    error_update_query = text(
+                        """
                         UPDATE image_generations 
                         SET error_message = :error_message, 
                             updated_at = :updated_at, 
                             retry_count = :retry_count, 
                             status = 'failed' 
                         WHERE id = :id
-                    """)
+                    """
+                    )
                     logger.info(
                         f"[SceneImageTask] Setting status to 'failed' (retryable={is_retryable}, retry_count={retry_count})"
                     )
                 else:
-                    error_update_query = text("""
+                    error_update_query = text(
+                        """
                         UPDATE image_generations 
                         SET error_message = :error_message, 
                             updated_at = :updated_at, 
                             retry_count = :retry_count 
                         WHERE id = :id
-                    """)
-                
-                await session.execute(error_update_query, {
-                    "error_message": error_message,
-                    "updated_at": datetime.utcnow().isoformat(),
-                    "retry_count": retry_count,
-                    "id": record_id
-                })
+                    """
+                    )
+
+                await session.execute(
+                    error_update_query,
+                    {
+                        "error_message": error_message,
+                        "updated_at": datetime.utcnow().isoformat(),
+                        "retry_count": retry_count,
+                        "id": record_id,
+                    },
+                )
                 await session.commit()
 
             except Exception as db_error:
@@ -1381,14 +1276,31 @@ async def async_generate_scene_image_task(
 
                 # Increment retry count in DB before retrying
                 try:
-                    retry_update_query = text("""
+                    retry_update_query = text(
+                        """
                         UPDATE image_generations 
                         SET retry_count = :retry_count, 
                             last_attempted_at = :last_attempted 
                         WHERE id = :id
-                    """)
-                    await session.execute(retry_update_query, {
-                        "retry_count": retry_count + 1,
+                    """
+                    )
+                    await session.execute(
+                        retry_update_query,
+                        {
+                            "retry_count": retry_count + 1,
+                            "last_attempted": datetime.utcnow(),
+                            "id": record_id,
+                        },
+                    )
+                    await session.commit()
+
+                    # Retry the task
+                    raise self.retry(exc=e, countdown=backoff_seconds)
+                except Exception as db_error:
+                    logger.error(f"Error updating retry count: {db_error}")
+                    # Still retry even if DB update fails
+                    raise self.retry(exc=e, countdown=backoff_seconds)
+
         logger.error(
             f"[SceneImageTask] Final failure for record {record_id}: {error_message}"
         )

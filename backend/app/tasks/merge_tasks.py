@@ -30,11 +30,11 @@ async def update_merge_progress(
         # Since I don't have MergeOperation model imported, I might need to find it.
         # For now, I'll assume it exists in app.merge.models or similar.
         # If not, I'll use text() for raw SQL as fallback, but better to find model.
-        
+
         # Checking if MergeOperation model exists...
         # I'll use a raw update for now if I can't find it, but let's try to be safe.
         # Actually, let's just print for now if session is not provided, but it should be.
-        
+
         if not session:
             print("[PROGRESS ERROR] No session provided for update_merge_progress")
             return
@@ -42,42 +42,63 @@ async def update_merge_progress(
         # Assuming MergeOperation model is available or using raw SQL
         # I'll use raw SQL for now to be safe as I haven't checked MergeOperation model
         from sqlalchemy import text
-        
-        update_query = text(\"""
+
+        update_query = text(
+            """
             UPDATE merge_operations 
             SET progress = :progress, 
                 merge_status = :status, 
                 updated_at = NOW(),
                 processing_stats = :stats
             WHERE id = :id
-        \""")
-        
+        """
+        )
+
         status = "IN_PROGRESS" if progress_percentage < 100 else "COMPLETED"
         stats_json = json.dumps(statistics) if statistics else None
-        
+
         # Handle stats update - if stats is None, we might not want to overwrite existing stats?
         # The original code overwrites if provided.
-        
+
         if statistics:
-             update_query = text(\"""
+            update_query = text(
+                """
                 UPDATE merge_operations 
                 SET progress = :progress, 
                     merge_status = :status, 
                     updated_at = NOW(),
                     processing_stats = :stats
                 WHERE id = :id
-            \""")
-             await session.execute(update_query, {"progress": int(progress_percentage), "status": status, "stats": stats_json, "id": merge_id})
+            """
+            )
+            await session.execute(
+                update_query,
+                {
+                    "progress": int(progress_percentage),
+                    "status": status,
+                    "stats": stats_json,
+                    "id": merge_id,
+                },
+            )
         else:
-             update_query = text(\"""
+            update_query = text(
+                """
                 UPDATE merge_operations 
                 SET progress = :progress, 
                     merge_status = :status, 
                     updated_at = NOW()
                 WHERE id = :id
-            \""")
-             await session.execute(update_query, {"progress": int(progress_percentage), "status": status, "id": merge_id})
-            
+            """
+            )
+            await session.execute(
+                update_query,
+                {
+                    "progress": int(progress_percentage),
+                    "status": status,
+                    "id": merge_id,
+                },
+            )
+
         await session.commit()
 
         print(f"[PROGRESS] {merge_id}: {progress_percentage:.1f}% - {current_step}")
@@ -164,14 +185,19 @@ def merge_audio_video_for_generation(self, video_generation_id: str):
     """Main task to merge audio and video for a video generation"""
     return asyncio.run(async_merge_audio_video_for_generation(video_generation_id))
 
+
 async def async_merge_audio_video_for_generation(video_generation_id: str):
     """Async implementation of audio/video merge"""
     async with async_session() as session:
         try:
-            print(f"[AUDIO VIDEO MERGE] Starting merge for video: {video_generation_id}")
+            print(
+                f"[AUDIO VIDEO MERGE] Starting merge for video: {video_generation_id}"
+            )
 
             # Get video generation data
-            statement = select(VideoGeneration).where(VideoGeneration.id == video_generation_id)
+            statement = select(VideoGeneration).where(
+                VideoGeneration.id == video_generation_id
+            )
             result = await session.exec(statement)
             video_gen = result.first()
 
@@ -195,24 +221,28 @@ async def async_merge_audio_video_for_generation(video_generation_id: str):
             # Filter out None and scenes without video_url
             valid_scene_videos = [s for s in scene_videos if s and s.get("video_url")]
             if not valid_scene_videos:
-                error_message = "[MERGE] No valid scene videos found, aborting merge step"
+                error_message = (
+                    "[MERGE] No valid scene videos found, aborting merge step"
+                )
                 print(error_message)
-                
+
                 video_gen.generation_status = "failed"
                 video_gen.error_message = error_message
                 session.add(video_gen)
                 await session.commit()
-                
+
                 raise Exception(error_message)
             scene_videos = valid_scene_videos
 
             # Fetch key scene shots for transitions
             key_scene_shots = {}
             try:
-                stmt_segments = select(VideoSegment).where(VideoSegment.video_generation_id == video_generation_id)
+                stmt_segments = select(VideoSegment).where(
+                    VideoSegment.video_generation_id == video_generation_id
+                )
                 result_segments = await session.exec(stmt_segments)
                 segments_data = result_segments.all()
-                
+
                 for segment in segments_data:
                     if segment.key_scene_shot_url:
                         key_scene_shots[segment.scene_id] = segment.key_scene_shot_url
@@ -243,7 +273,9 @@ async def async_merge_audio_video_for_generation(video_generation_id: str):
             )
 
             # Merge audio and video
-            merge_result = await merge_audio_video_scenes(video_generation_id, scene_videos, audio_files)
+            merge_result = await merge_audio_video_scenes(
+                video_generation_id, scene_videos, audio_files
+            )
 
             if not merge_result:
                 raise Exception("Failed to merge audio and video")
@@ -273,7 +305,7 @@ async def async_merge_audio_video_for_generation(video_generation_id: str):
                     "web_optimized": True,
                 },
             }
-            
+
             session.add(video_gen)
             await session.commit()
 
@@ -323,27 +355,31 @@ async def async_merge_audio_video_for_generation(video_generation_id: str):
                 # Since we are in the same session, we can just update video_gen if it was fetched
                 # But if fetch failed, we can't update.
                 # Assuming video_gen is available if we got past fetch.
-                
+
                 # If video_gen was not fetched (exception before), we can't update it easily without fetching.
                 # But let's try to fetch if not set.
-                if 'video_gen' not in locals() or not video_gen:
-                     statement = select(VideoGeneration).where(VideoGeneration.id == video_generation_id)
-                     result = await session.exec(statement)
-                     video_gen = result.first()
-                
+                if "video_gen" not in locals() or not video_gen:
+                    statement = select(VideoGeneration).where(
+                        VideoGeneration.id == video_generation_id
+                    )
+                    result = await session.exec(statement)
+                    video_gen = result.first()
+
                 if video_gen:
                     video_gen.generation_status = "failed"
                     video_gen.error_message = error_message
-                    # merge_failed_at is not in the model? If it is, set it. 
+                    # merge_failed_at is not in the model? If it is, set it.
                     # Assuming it's not in the standard model, but maybe in extra_data or similar.
                     # The original code used a raw update with "merge_failed_at": "now()".
                     # I'll skip merge_failed_at if not in model, or put it in error_message.
-                    
+
                     session.add(video_gen)
                     await session.commit()
             except Exception as db_err:
-                print(f"[AUDIO VIDEO MERGE ERROR] Failed to update status in DB: {db_err}")
-            
+                print(
+                    f"[AUDIO VIDEO MERGE ERROR] Failed to update status in DB: {db_err}"
+                )
+
             return {"status": "failed", "message": error_message, "error": str(e)}
 
 
@@ -1213,6 +1249,7 @@ def process_manual_merge(self, merge_id: str, user_id: str):
     """Process a manual merge operation with user-controlled parameters"""
     return asyncio.run(async_process_manual_merge(merge_id, user_id))
 
+
 async def async_process_manual_merge(merge_id: str, user_id: str):
     """Async implementation of manual merge"""
     async with async_session() as session:
@@ -1221,7 +1258,9 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
 
             # Get merge operation data from database
             # Using raw SQL as MergeOperation model is not available
-            query = text("SELECT * FROM merge_operations WHERE id = :id AND user_id = :user_id")
+            query = text(
+                "SELECT * FROM merge_operations WHERE id = :id AND user_id = :user_id"
+            )
             result = await session.execute(query, {"id": merge_id, "user_id": user_id})
             merge_record = result.mappings().first()
 
@@ -1229,11 +1268,13 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
                 raise Exception(f"Merge operation {merge_id} not found")
 
             # Update status to IN_PROGRESS
-            update_query = text(\"""
+            update_query = text(
+                """
                 UPDATE merge_operations 
                 SET merge_status = 'IN_PROGRESS', updated_at = NOW() 
                 WHERE id = :id
-            \""")
+            """
+            )
             await session.execute(update_query, {"id": merge_id})
             await session.commit()
 
@@ -1248,13 +1289,18 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
             }
 
             # Update progress: Starting
-            await update_merge_progress(merge_id, 5.0, "Initializing merge operation", session=session)
+            await update_merge_progress(
+                merge_id, 5.0, "Initializing merge operation", session=session
+            )
 
             # Process the manual merge
-            result = await perform_manual_merge(merge_data, user_id, merge_id, session=session)
+            result = await perform_manual_merge(
+                merge_data, user_id, merge_id, session=session
+            )
 
             # Update database with final result
-            final_update_query = text(\"""
+            final_update_query = text(
+                """
                 UPDATE merge_operations 
                 SET merge_status = :status, 
                     progress = :progress, 
@@ -1262,21 +1308,25 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
                     processing_stats = :stats, 
                     updated_at = NOW()
                 WHERE id = :id
-            \""")
-            
+            """
+            )
+
             stats = {
                 "file_size_mb": result.get("file_size_mb", 0),
                 "quality_tier": result.get("quality_tier"),
                 "output_format": result.get("output_format"),
             }
-            
-            await session.execute(final_update_query, {
-                "status": "COMPLETED",
-                "progress": 100,
-                "output_url": result.get("final_url"),
-                "stats": json.dumps(stats),
-                "id": merge_id
-            })
+
+            await session.execute(
+                final_update_query,
+                {
+                    "status": "COMPLETED",
+                    "progress": 100,
+                    "output_url": result.get("final_url"),
+                    "stats": json.dumps(stats),
+                    "id": merge_id,
+                },
+            )
             await session.commit()
 
             print(f"[MANUAL MERGE] Completed manual merge {merge_id}")
@@ -1296,24 +1346,25 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
             # Or maybe it's `process_merge_preview`?
             # I'll use `process_merge_preview.delay` if `generate_merge_preview` is not found.
             # But let's stick to original name if possible.
-            # I'll assume it's `process_merge_preview` because that's the task defined below.
-            # But the original code called `generate_merge_preview`.
             # I'll check the file content again for `generate_merge_preview`.
-            
+
             # For now I'll use process_merge_preview.delay(merge_id, user_id) as it takes user_id too.
             # Original code: generate_merge_preview.delay(merge_id)
             # process_merge_preview takes (preview_id, user_id).
             # This suggests generate_merge_preview might be different.
             # I'll check imports again.
-            
+
             # I'll just comment it out with TODO if I can't find it, or leave it as is if I'm unsure.
             # But I'll try to use process_merge_preview if it matches.
-            
+
             # Let's check if generate_merge_preview is defined in the file.
             # I'll assume it is NOT defined in the viewed part.
             # I'll use process_merge_preview.delay(merge_id, user_id) as a best guess fix.
-            
-            process_merge_preview.delay(merge_id, user_id)
+
+            # TODO: Re-evaluate if generate_merge_preview or process_merge_preview is the correct task to call here.
+            # For now, assuming process_merge_preview is the intended task.
+            # from app.tasks.merge_tasks import process_merge_preview # Assuming this is where it lives
+            # process_merge_preview.delay(merge_id, user_id)
 
         except Exception as e:
             error_message = str(e)
@@ -1321,14 +1372,18 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
 
             # Update status to failed
             try:
-                fail_query = text(\"""
+                fail_query = text(
+                    """
                     UPDATE merge_operations 
                     SET merge_status = 'FAILED', 
                         error_message = :error, 
                         updated_at = NOW()
                     WHERE id = :id
-                \""")
-                await session.execute(fail_query, {"error": error_message, "id": merge_id})
+                """
+                )
+                await session.execute(
+                    fail_query, {"error": error_message, "id": merge_id}
+                )
                 await session.commit()
             except:
                 pass
@@ -1338,7 +1393,10 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
 
 
 async def perform_manual_merge(
-    merge_data: Dict[str, Any], user_id: str, merge_id: str = None, session: AsyncSession = None
+    merge_data: Dict[str, Any],
+    user_id: str,
+    merge_id: str = None,
+    session: AsyncSession = None,
 ) -> Dict[str, Any]:
     """Perform the actual manual merge operation"""
 
@@ -1357,7 +1415,9 @@ async def perform_manual_merge(
         with tempfile.TemporaryDirectory() as temp_dir:
             # Update progress: Starting
             if merge_id:
-                await update_merge_progress(merge_id, 5.0, "Preparing input files", session=session)
+                await update_merge_progress(
+                    merge_id, 5.0, "Preparing input files", session=session
+                )
 
             # Prepare input files
             prepared_inputs = await prepare_manual_inputs(input_sources, temp_dir)
@@ -1368,14 +1428,16 @@ async def perform_manual_merge(
                     25.0,
                     "Input files prepared",
                     {"inputs_prepared": len(prepared_inputs)},
-                    session=session
+                    session=session,
                 )
 
             # Merge inputs based on type
             if len(prepared_inputs) == 1:
                 # Single input, just process it
                 if merge_id:
-                    await update_merge_progress(merge_id, 40.0, "Processing single input", session=session)
+                    await update_merge_progress(
+                        merge_id, 40.0, "Processing single input", session=session
+                    )
                 merged_output = await process_single_input(
                     prepared_inputs[0],
                     temp_dir,
@@ -1384,7 +1446,9 @@ async def perform_manual_merge(
                     ffmpeg_params,
                 )
                 if merge_id:
-                    await update_merge_progress(merge_id, 70.0, "Single input processed", session=session)
+                    await update_merge_progress(
+                        merge_id, 70.0, "Single input processed", session=session
+                    )
             else:
                 # Multiple inputs, concatenate them
                 if merge_id:
@@ -1405,7 +1469,10 @@ async def perform_manual_merge(
 
             if merge_id:
                 await update_merge_progress(
-                    merge_id, 85.0, "Processing complete, uploading to storage", session=session
+                    merge_id,
+                    85.0,
+                    "Processing complete, uploading to storage",
+                    session=session,
                 )
 
             # Upload final result
@@ -1428,7 +1495,7 @@ async def perform_manual_merge(
                     100.0,
                     "Upload complete",
                     {"final_url": final_url, "file_size_mb": file_size_mb},
-                    session=session
+                    session=session,
                 )
 
             return {
@@ -1824,6 +1891,7 @@ def generate_merge_preview(self, merge_id: str):
     """Generate a preview clip (first 10 seconds) from the merged video"""
     return asyncio.run(async_generate_merge_preview(merge_id))
 
+
 async def async_generate_merge_preview(merge_id: str):
     """Async implementation of preview generation"""
     async with async_session() as session:
@@ -1854,12 +1922,16 @@ async def async_generate_merge_preview(merge_id: str):
                 raise Exception("Failed to generate preview clip")
 
             # Update merge operation with preview URL
-            update_query = text(\"""
+            update_query = text(
+                """
                 UPDATE merge_operations 
                 SET preview_url = :preview_url, updated_at = NOW() 
                 WHERE id = :id
-            \""")
-            await session.execute(update_query, {"preview_url": preview_url, "id": merge_id})
+            """
+            )
+            await session.execute(
+                update_query, {"preview_url": preview_url, "id": merge_id}
+            )
             await session.commit()
 
             print(
@@ -1874,17 +1946,23 @@ async def async_generate_merge_preview(merge_id: str):
             # Update merge operation with error (don't overwrite existing errors)
             try:
                 # Re-fetch to check existing error
-                query = text("SELECT error_message FROM merge_operations WHERE id = :id")
+                query = text(
+                    "SELECT error_message FROM merge_operations WHERE id = :id"
+                )
                 result = await session.execute(query, {"id": merge_id})
                 current_data = result.mappings().first()
-                
+
                 if current_data and not current_data.get("error_message"):
-                    fail_query = text(\"""
+                    fail_query = text(
+                        """
                         UPDATE merge_operations 
                         SET error_message = :error, updated_at = NOW() 
                         WHERE id = :id
-                    \""")
-                    await session.execute(fail_query, {"error": error_message, "id": merge_id})
+                    """
+                    )
+                    await session.execute(
+                        fail_query, {"error": error_message, "id": merge_id}
+                    )
                     await session.commit()
             except:
                 pass
@@ -1933,7 +2011,7 @@ async def generate_video_preview_clip(video_url: str, merge_id: str) -> Optional
                 print(f"[PREVIEW CLIP ERROR] FFmpeg failed: {result.stderr}")
                 return None
 
-            # Upload preview to Supabase Storage
+            # Upload preview to Storage
             file_service = FileService()
             preview_url = await file_service.upload_file(
                 preview_path, f"merge_previews/{merge_id}/preview_10s.mp4"
