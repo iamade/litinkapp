@@ -47,12 +47,6 @@ class Settings(BaseSettings):
         else "https://www.litinkai.com"
     )
 
-    # Supabase Configuration (Primary Database)
-    # SUPABASE_URL: str = ""
-    # SUPABASE_SERVICE_ROLE_KEY: str =""
-    # SUPABASE_ANON_KEY: str = ""
-    # SUPABASE_BUCKET_NAME: str = "books"
-
     # Postgres Configuration
     DATABASE_URL: str = ""
 

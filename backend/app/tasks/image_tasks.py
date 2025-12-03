@@ -5,7 +5,7 @@ from app.core.database import async_session, engine
 import json
 import logging
 
-from app.core.services.modelslab_image import ModelsLabImageService
+# from app.core.services.modelslab_image import ModelsLabImageService
 from app.core.services.pipeline import PipelineManager, PipelineStep
 from app.core.services.modelslab_v7_image import ModelsLabV7ImageService
 from app.core.services.standalone_image import StandaloneImageService

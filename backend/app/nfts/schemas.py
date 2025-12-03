@@ -5,7 +5,7 @@ from datetime import datetime
 
 class NFT(BaseModel):
     id: int
-    owner_id: str  # This would be a UUID from Supabase Auth
+    owner_id: str
     name: str
     description: str
     asset_id: int

@@ -6,9 +6,9 @@ from app.core.auth import get_current_active_user
 from app.books.models import Book
 
 # Using imports as seen in badge.py, assuming they map correctly at runtime
-from app.models.progress import UserProgress
-from app.models.badge import UserBadge
-from app.models.quiz import QuizAttempt
+from app.books.models import UserProgress
+from app.badges.models import UserBadge
+from app.quizzes.models import QuizAttempt
 
 router = APIRouter()
 

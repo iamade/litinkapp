@@ -32,7 +32,8 @@ from app.ai.schemas import (
 )
 
 from app.core.services.ai import AIService
-from app.core.services.voice import VoiceService
+
+# from app.core.services.voice import VoiceService
 from app.api.services.video import VideoService
 from app.core.services.rag import RAGService
 from app.core.services.elevenlabs import ElevenLabsService
@@ -379,9 +380,14 @@ async def generate_voice(
     current_user: dict = Depends(get_current_active_user),
 ):
     """Generate voice using ElevenLabs service"""
-    voice_service = VoiceService()
-    voice_url = await voice_service.generate_voice(text, voice_id)
-    return {"voice_url": voice_url}
+    elevenlabs_service = ElevenLabsService()
+    # Use generate_enhanced_speech which returns a dict with audio_url
+    result = await elevenlabs_service.generate_enhanced_speech(text, voice_id)
+
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    return {"voice_url": result.get("audio_url")}
 
 
 # New RAG-based video generation endpoints

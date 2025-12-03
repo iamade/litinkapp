@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.badge import Badge, UserBadge
-from app.models.quiz import QuizAttempt
-from app.models.progress import UserProgress
+from app.badges.models import Badge, UserBadge
+from app.quizzes.models import QuizAttempt
+from app.books.models import UserProgress
 from app.core.services.blockchain import BlockchainService
 
 

@@ -28,7 +28,6 @@ services:
     environment:
       # These two variables are required by entrypoint.sh
       # All other config comes from .env.local file below
-      #   - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:litink123@db.vtuqaubejlzqjmieelyr.supabase.co:5432/litink}
       - DEBUG=${DEBUG:-false}
       - ENVIRONMENT=${ENVIRONMENT:-development}
     env_file:

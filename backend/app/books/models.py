@@ -298,3 +298,68 @@ class LearningContent(SQLModel, table=True):
             onupdate=func.current_timestamp(),
         ),
     )
+
+
+class UserProgress(SQLModel, table=True):
+    __tablename__ = "user_progress"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(pg.UUID(as_uuid=True), nullable=False, index=True)
+    )
+    book_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("books.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    current_chapter_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("chapters.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    completed_at: Optional[datetime] = Field(default=None)
+    time_spent: int = Field(default=0)  # In minutes
+    last_read_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+    # Relationships
+    # book: Book = Relationship() # Circular dependency if not careful, but string forward ref works
+    # current_chapter: Optional[Chapter] = Relationship()
