@@ -66,39 +66,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const checkUser = async () => {
-      const token = localStorage.getItem("authToken");
-      if (token) {
-        try {
-          const profile = await apiClient.get<User>("/users/me");
-          setUser(profile);
-        } catch (error) {
-          localStorage.removeItem("authToken");
-          localStorage.removeItem("refreshToken");
-        }
+      try {
+        // Just try to get the user. If cookies are valid, it will succeed.
+        const profile = await apiClient.get<User>("/users/me");
+        setUser(profile);
+      } catch (error) {
+        // If 401, we are not logged in. That's fine.
+        setUser(null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
     checkUser();
-    // Subscribe to token refreshes
+    
+    // Subscribe to token refreshes (optional now, but good for state sync)
     setOnTokenRefresh(async () => {
       try {
         const profile = await apiClient.get<User>("/users/me");
         setUser(profile);
       } catch {
         setUser(null);
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("refreshToken");
       }
     });
   }, []);
 
   const login = async (email: string, password: string) => {
-    const { access_token, refresh_token } = await apiClient.post<{
-      access_token: string;
-      refresh_token: string;
-    }>("/auth/login", { email, password });
-    localStorage.setItem("authToken", access_token);
-    localStorage.setItem("refreshToken", refresh_token);
+    await apiClient.post("/auth/login", { email, password });
+    // After login, cookies are set. Fetch user profile.
     const profile = await apiClient.get<User>("/users/me");
     setUser(profile);
   };
@@ -150,10 +144,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await apiClient.post("/auth/resend-verification", { email });
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await apiClient.post("/auth/logout", {});
+    } catch (e) {
+      // Ignore error on logout
+    }
     setUser(null);
-    localStorage.removeItem("authToken");
-    localStorage.removeItem("refreshToken");
   };
 
   return (

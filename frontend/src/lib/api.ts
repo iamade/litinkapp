@@ -2,50 +2,30 @@ const API_BASE_URL = import.meta.env.PROD
   ? "https://litinkapp.onrender.com/api/v1"
   : "http://localhost:8000/api/v1";
 
-const getAuthToken = (): string | null => {
-  return localStorage.getItem("authToken");
-};
-
-const getRefreshToken = (): string | null => {
-  return localStorage.getItem("refreshToken");
-};
-
-// Helper to update token in localStorage and notify listeners
+// Helper to notify listeners (still useful for UI updates, though token is in cookie)
 let onTokenRefresh: ((token: string) => void) | null = null;
 export function setOnTokenRefresh(cb: (token: string) => void) {
   onTokenRefresh = cb;
 }
 
-async function refreshToken(): Promise<string | null> {
-  const storedRefreshToken = getRefreshToken();
-  if (!storedRefreshToken) return null;
-
+async function refreshToken(): Promise<boolean> {
   try {
     const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ refresh_token: storedRefreshToken }),
+      credentials: "include", // Send cookies
     });
 
     if (!response.ok) {
-      // If refresh fails, log the user out by clearing tokens
-      localStorage.removeItem("authToken");
-      localStorage.removeItem("refreshToken");
-      return null;
+      return false;
     }
 
-    const data = await response.json();
-    if (data.access_token && data.refresh_token) {
-      localStorage.setItem("authToken", data.access_token);
-      localStorage.setItem("refreshToken", data.refresh_token);
-      if (onTokenRefresh) onTokenRefresh(data.access_token);
-      return data.access_token;
-    }
-    return null;
+    // Cookies are automatically updated by the response
+    return true;
   } catch (error) {
-    return null;
+    return false;
   }
 }
 
@@ -65,9 +45,6 @@ async function withLoading<T>(fn: () => Promise<T>): Promise<T> {
 
 export const apiClient = {
   async get<T>(endpoint: string): Promise<T> {
-    // Log image-related API requests for debugging
-    if (endpoint.includes('/chapters/') && endpoint.includes('/image')) {
-    }
     return withLoading(() => this.request<T>(endpoint, "GET"));
   },
 
@@ -85,28 +62,26 @@ export const apiClient = {
 
   async upload<T>(endpoint: string, formData: FormData): Promise<T> {
     return withLoading(async () => {
-      const token = getAuthToken();
-      const headers: HeadersInit = {};
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`;
-      }
       let response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "POST",
-        headers, // do not set Content-Type for FormData
+        headers: {}, // do not set Content-Type for FormData
         body: formData,
+        credentials: "include",
       });
+
       if (response.status === 401) {
         // Try refresh
-        const newToken = await refreshToken();
-        if (newToken) {
-          headers["Authorization"] = `Bearer ${newToken}`;
+        const refreshed = await refreshToken();
+        if (refreshed) {
           response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: "POST",
-            headers,
+            headers: {},
             body: formData,
+            credentials: "include",
           });
         }
       }
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.detail || "An API error occurred");
@@ -120,39 +95,31 @@ export const apiClient = {
     method: string,
     body?: unknown
   ): Promise<T> {
-    const token = getAuthToken();
     const headers: HeadersInit = {
       "Content-Type": "application/json",
     };
-
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
 
     let response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method,
       headers,
       body: body ? JSON.stringify(body) : null,
+      credentials: "include",
     });
 
     if (response.status === 401) {
       // Try refresh
-      const newToken = await refreshToken();
-      if (newToken) {
-        const retryHeaders: HeadersInit = {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${newToken}`,
-        };
+      const refreshed = await refreshToken();
+      if (refreshed) {
         response = await fetch(`${API_BASE_URL}${endpoint}`, {
           method,
-          headers: retryHeaders,
+          headers,
           body: body ? JSON.stringify(body) : null,
+          credentials: "include",
         });
       }
     }
 
     if (!response.ok) {
-      // Try to parse error JSON, but if 204, just throw a generic error
       let errorData: unknown = {};
       try {
         errorData = await response.json();
@@ -164,7 +131,6 @@ export const apiClient = {
       );
     }
 
-    // If 204 No Content, return true (or empty object)
     if (response.status === 204) {
       return true as T;
     }

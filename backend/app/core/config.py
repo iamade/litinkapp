@@ -193,6 +193,7 @@ class Settings(BaseSettings):
 
     COOKIE_HTTP_ONLY: bool = True
     COOKIE_SAMESITE: str = "lax"
+    COOKIE_DOMAIN: Optional[str] = None
     COOKIE_PATH: str = "/"
     SIGNING_KEY: str = ""
     PASSWORD_RESET_TOKEN_EXPIRATION_MINUTES: int = (
