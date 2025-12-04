@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useAuth, hasRole } from "../contexts/AuthContext";
+import { useAuth, hasAnyRole } from "../contexts/AuthContext";
 import { BookOpen, Film, Music, Sparkles, Wand2 } from "lucide-react";
 import { toast } from "react-hot-toast";
 
@@ -10,12 +10,12 @@ export default function CreatorMode() {
   const [videoPrompt, setVideoPrompt] = useState("");
   const [generating, setGenerating] = useState<string | null>(null);
 
-  if (!user || !hasRole(user, "author")) {
+  if (!user || !hasAnyRole(user, ["creator", "author"])) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <p className="text-xl text-gray-600 mb-4">Author access required for Creator Mode</p>
-          <p className="text-gray-500">Please add the author profile to your account to create content.</p>
+          <p className="text-xl text-gray-600 mb-4">Creator access required</p>
+          <p className="text-gray-500">Please add the creator profile to your account to create content.</p>
         </div>
       </div>
     );

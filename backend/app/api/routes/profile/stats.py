@@ -4,6 +4,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.books.models import Book
+from app.auth.models import User
 
 # Using imports as seen in badge.py, assuming they map correctly at runtime
 from app.books.models import UserProgress
@@ -16,10 +17,10 @@ router = APIRouter()
 @router.get("/me/stats", response_model=dict)
 async def get_user_stats(
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get aggregated statistics for the current user."""
-    user_id = current_user["id"]
+    user_id = current_user.id
 
     # Books Progress
     # Count books read (completed_at is not None)
@@ -44,7 +45,8 @@ async def get_user_stats(
     total_time_minutes = time_result.one() or 0
 
     # Badges earned
-    stmt_badges = select(func.count()).where(UserBadge.user_id == user_id)
+    # UserBadge uses string user_id
+    stmt_badges = select(func.count()).where(UserBadge.user_id == str(user_id))
     badges_result = await session.exec(stmt_badges)
     badges_earned = badges_result.one()
 

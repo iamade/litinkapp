@@ -104,7 +104,10 @@ export default function Navbar() {
                 {canAccessCreatorMode && canAccessExplorerMode && (
                   <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
                     <button
-                      onClick={() => switchMode('explorer')}
+                      onClick={async () => {
+                        await switchMode('explorer');
+                        navigate('/dashboard');
+                      }}
                       className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
                         mode === 'explorer'
                           ? 'bg-white dark:bg-gray-700 text-green-600 dark:text-green-400 shadow-sm'
@@ -115,7 +118,10 @@ export default function Navbar() {
                       <span>Explorer</span>
                     </button>
                     <button
-                      onClick={() => switchMode('creator')}
+                      onClick={async () => {
+                        await switchMode('creator');
+                        navigate('/creator');
+                      }}
                       className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
                         mode === 'creator'
                           ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
@@ -248,9 +254,10 @@ export default function Navbar() {
                       <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 px-2">Switch Mode</p>
                       <div className="flex space-x-2">
                         <button
-                          onClick={() => {
-                            switchMode('explorer');
+                          onClick={async () => {
+                            await switchMode('explorer');
                             setIsMenuOpen(false);
+                            navigate('/dashboard');
                           }}
                           className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                             mode === 'explorer'
@@ -262,9 +269,10 @@ export default function Navbar() {
                           <span>Explorer</span>
                         </button>
                         <button
-                          onClick={() => {
-                            switchMode('creator');
+                          onClick={async () => {
+                            await switchMode('creator');
                             setIsMenuOpen(false);
+                            navigate('/creator');
                           }}
                           className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                             mode === 'creator'

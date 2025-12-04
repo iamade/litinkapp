@@ -12,8 +12,8 @@ interface User {
   id: string;
   email: string;
   display_name: string;
-  roles: ("author" | "explorer")[];
-  role?: "author" | "explorer";
+  roles: ("author" | "explorer" | "creator" | "superadmin")[];
+  role?: "author" | "explorer" | "creator" | "superadmin";
   preferred_mode?: "explorer" | "creator";
   onboarding_completed?: {
     explorer?: boolean;
@@ -21,17 +21,17 @@ interface User {
   };
 }
 
-export const hasRole = (user: User | null, role: "author" | "explorer"): boolean => {
+export const hasRole = (user: User | null, role: "author" | "explorer" | "creator" | "superadmin"): boolean => {
   if (!user) return false;
   return user.roles?.includes(role) ?? false;
 };
 
-export const hasAllRoles = (user: User | null, roles: ("author" | "explorer")[]): boolean => {
+export const hasAllRoles = (user: User | null, roles: ("author" | "explorer" | "creator" | "superadmin")[]): boolean => {
   if (!user) return false;
   return roles.every(role => user.roles?.includes(role));
 };
 
-export const hasAnyRole = (user: User | null, roles: ("author" | "explorer")[]): boolean => {
+export const hasAnyRole = (user: User | null, roles: ("author" | "explorer" | "creator" | "superadmin")[]): boolean => {
   if (!user) return false;
   return roles.some(role => user.roles?.includes(role));
 };
