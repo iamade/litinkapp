@@ -5,6 +5,7 @@ import { userService } from "../services/userService";
 import { subscriptionService, SubscriptionUsageStats } from "../services/subscriptionService";
 import UsageIndicator from "../components/Subscription/UsageIndicator";
 import UpgradeBanner from "../components/Dashboard/UpgradeBanner";
+import ExplorerGenerator from "../components/Dashboard/ExplorerGenerator";
 import {
   Brain,
   Sparkles,
@@ -21,7 +22,7 @@ interface UserProfile {
   id: string;
   email: string;
   display_name: string;
-  roles: ("author" | "explorer")[];
+  roles: string[]; // Changed from strict union to string[] to match API response likely
   avatar_url?: string;
   bio?: string;
 }
@@ -195,8 +196,8 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* Upgrade Banner - Show only for users without creator role */}
-        {!hasRole(user, "author") && (
+        {/* Upgrade Banner - Show only for users without creator/author role */}
+        {!hasRole(user, "author") && !hasRole(user, "creator") && (
           <div className="mb-8">
             <UpgradeBanner />
           </div>

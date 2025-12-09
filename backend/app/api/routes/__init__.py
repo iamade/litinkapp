@@ -38,3 +38,6 @@ api_router.include_router(
 )
 api_router.include_router(admin_router, tags=["admin"])
 api_router.include_router(home_router, tags=["home"])
+from .projects import router as projects_router
+
+api_router.include_router(projects_router, prefix="/projects", tags=["projects"])
