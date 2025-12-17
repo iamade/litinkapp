@@ -5624,10 +5624,10 @@ class FileService:
         confirmed_chapters: List[Dict[str, Any]],
         user_id: str,
         session: AsyncSession,
-    ) -> None:
-        """Persist user-confirmed structure and create embeddings."""
-        print(f"[STRUCTURE SAVE] Starting to save structure for book {book_id}")
-        print(f"[STRUCTURE SAVE] Received {len(confirmed_chapters)} confirmed chapters")
+    ):
+        """Persist user-confirmed structure and create embeddings. Yields progress updates."""
+        yield f"Starting to save structure for book {book_id}"
+        yield f"Received {len(confirmed_chapters)} confirmed chapters"
 
         try:
             from app.books.models import (
@@ -5643,7 +5643,7 @@ class FileService:
             book_uuid = uuid.UUID(book_id)
 
             # ✅ FIX: Clean old data in the CORRECT order to avoid foreign key violations
-            print("[STRUCTURE SAVE] Cleaning existing data...")
+            yield "Cleaning existing data..."
 
             # 1. Delete chapter embeddings first (they reference chapters)
             try:
@@ -5651,7 +5651,7 @@ class FileService:
                     ChapterEmbedding.book_id == book_uuid
                 )
                 await session.exec(stmt)
-                print("[STRUCTURE SAVE] Deleted chapter embeddings")
+                yield "Deleted chapter embeddings"
             except Exception as e:
                 print(
                     f"[STRUCTURE SAVE] Warning: Failed to delete chapter embeddings: {e}"
@@ -5661,7 +5661,7 @@ class FileService:
             try:
                 stmt = delete(BookEmbedding).where(BookEmbedding.book_id == book_uuid)
                 await session.exec(stmt)
-                print("[STRUCTURE SAVE] Deleted book embeddings")
+                yield "Deleted book embeddings"
             except Exception as e:
                 print(
                     f"[STRUCTURE SAVE] Warning: Failed to delete book embeddings: {e}"
@@ -5671,7 +5671,7 @@ class FileService:
             try:
                 stmt = delete(Chapter).where(Chapter.book_id == book_uuid)
                 await session.exec(stmt)
-                print("[STRUCTURE SAVE] Deleted chapters")
+                yield "Deleted chapters"
             except Exception as e:
                 print(f"[STRUCTURE SAVE] Warning: Failed to delete chapters: {e}")
 
@@ -5679,7 +5679,7 @@ class FileService:
             try:
                 stmt = delete(Section).where(Section.book_id == book_uuid)
                 await session.exec(stmt)
-                print("[STRUCTURE SAVE] Deleted sections")
+                yield "Deleted sections"
             except Exception as e:
                 print(f"[STRUCTURE SAVE] Warning: Failed to delete sections: {e}")
 
@@ -5726,24 +5726,22 @@ class FileService:
                 session.add(chapter)
                 await session.flush()
                 await session.refresh(chapter)
-                print(f"[STRUCTURE SAVE] Created chapter: {chapter.title}")
+                yield f"Created chapter: {chapter.title}"
 
                 # Create embeddings (best-effort)
                 try:
                     from app.core.services.embeddings import EmbeddingsService
 
-                    es = EmbeddingsService()
+                    es = EmbeddingsService(session)
                     await es.create_chapter_embeddings(
-                        str(chapter.id), ch.get("content", ""), session
+                        chapter.id, ch.get("content", "")
                     )
-                    print(
-                        f"[STRUCTURE SAVE] Created embeddings for chapter {chapter.id}"
-                    )
+                    yield f"Created embeddings for chapter {chapter.id}"
                 except Exception as e:
                     print(f"[EMBEDDINGS] Failed for chapter {chapter.id}: {e}")
 
             # Update book metadata
-            print(f"[STRUCTURE SAVE] Updating book metadata...")
+            yield "Updating book metadata..."
             try:
                 stmt = select(Book).where(Book.id == book_uuid)
                 result = await session.exec(stmt)
@@ -5763,13 +5761,15 @@ class FileService:
                 print(
                     f"[STRUCTURE SAVE] ✅ Successfully saved structure for book {book_id}"
                 )
-                print(f"[STRUCTURE SAVE] - {len(section_id_map)} sections created")
-                print(f"[STRUCTURE SAVE] - {order} chapters created")
+                yield "Structure saved successfully"
+                yield f"- {len(section_id_map)} sections created"
+                yield f"- {order} chapters created"
             except Exception as e:
                 print(f"[STRUCTURE SAVE] Failed to update book metadata: {e}")
 
         except Exception as e:
             print(f"[STRUCTURE SAVE] ❌ Error saving structure: {e}")
+            yield f"Error saving structure: {str(e)}"
             print(f"[STRUCTURE SAVE] Full error: {traceback.format_exc()}")
             raise e
 

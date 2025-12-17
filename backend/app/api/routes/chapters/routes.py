@@ -40,6 +40,7 @@ from app.audio.schemas import (
 from app.books.models import Book, Chapter
 from app.videos.models import ImageGeneration, AudioGeneration, Script, AudioExport
 from app.api.services.subscription import SubscriptionManager
+from app.auth.models import User
 
 router = APIRouter()
 
@@ -144,16 +145,16 @@ def get_character_info_from_chapter(
 async def list_chapter_images(
     chapter_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """List all images associated with a chapter"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], session)
+        await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Get user's standalone images
         image_service = StandaloneImageService(session)
-        user_images = await image_service.get_user_images(current_user["id"])
+        user_images = await image_service.get_user_images(current_user.id)
 
         # Filter images associated with this chapter (check both metadata and root-level chapter_id)
         chapter_images = []
@@ -196,14 +197,12 @@ async def generate_scene_image(
     scene_number: int,
     request: SceneImageRequest,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate an image for a specific scene in the chapter (asynchronous)"""
     try:
         # Verify chapter access
-        chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], session
-        )
+        chapter_data = await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Get scene description
         scene_description = get_scene_description_from_chapter(
@@ -221,7 +220,7 @@ async def generate_scene_image(
         # Get user tier for model selection
         subscription_manager = SubscriptionManager(session)
         usage_check = await subscription_manager.check_usage_limits(
-            uuid.UUID(current_user["id"]), "image"
+            uuid.UUID(current_user.id), "image"
         )
         user_tier = usage_check["tier"]
 
@@ -237,7 +236,7 @@ async def generate_scene_image(
         }
 
         record = ImageGeneration(
-            user_id=uuid.UUID(current_user["id"]),
+            user_id=uuid.UUID(current_user.id),
             image_type="scene",
             scene_description=scene_description,
             scene_number=scene_number,
@@ -269,7 +268,7 @@ async def generate_scene_image(
                 record_id=record_id,
                 scene_description=scene_description,
                 scene_number=scene_number,
-                user_id=current_user["id"],
+                user_id=current_user.id,
                 chapter_id=chapter_id,
                 script_id=request.script_id,
                 style=request.style,
@@ -329,14 +328,12 @@ async def generate_character_image(
     chapter_id: str,
     request: CharacterImageRequest,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate an image for a character in the chapter (asynchronous)"""
     try:
         # Verify chapter access
-        chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], session
-        )
+        chapter_data = await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Get character info from chapter
         character_info = get_character_info_from_chapter(
@@ -362,7 +359,7 @@ async def generate_character_image(
         }
 
         record = ImageGeneration(
-            user_id=uuid.UUID(current_user["id"]),
+            user_id=uuid.UUID(current_user.id),
             image_type="character",
             character_name=character_info["name"],
             scene_description=character_info["description"],
@@ -381,7 +378,7 @@ async def generate_character_image(
         task = generate_character_image_task.delay(
             character_name=character_info["name"],
             character_description=character_info["description"],
-            user_id=current_user["id"],
+            user_id=current_user.id,
             chapter_id=chapter_id,
             style=request.style,
             aspect_ratio=request.aspect_ratio,
@@ -411,12 +408,12 @@ async def link_character_image(
     chapter_id: str,
     request: Dict[str, Any],
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Link an existing character image (e.g., from plot overview) to a script"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], session)
+        await verify_chapter_access(chapter_id, current_user.id, session)
 
         character_name = request.get("character_name")
         image_url = request.get("image_url")
@@ -438,7 +435,7 @@ async def link_character_image(
         }
 
         record = ImageGeneration(
-            user_id=uuid.UUID(current_user["id"]),
+            user_id=uuid.UUID(current_user.id),
             image_type="character",
             character_name=character_name,
             image_url=image_url,
@@ -474,16 +471,16 @@ async def delete_scene_image(
     chapter_id: str,
     scene_number: int,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Delete a scene image for the chapter"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], session)
+        await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Find the image record
         image_service = StandaloneImageService(session)
-        user_images = await image_service.get_user_images(current_user["id"])
+        user_images = await image_service.get_user_images(current_user.id)
 
         target_record = None
         for img in user_images:
@@ -511,7 +508,7 @@ async def delete_scene_image(
 
         # Delete the image
         success = await image_service.delete_image_record(
-            target_record["id"], current_user["id"]
+            target_record["id"], current_user.id
         )
 
         return DeleteImageResponse(
@@ -540,16 +537,16 @@ async def delete_character_image(
     chapter_id: str,
     character_name: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Delete a character image for the chapter"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], session)
+        await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Find the image record
         image_service = StandaloneImageService(session)
-        user_images = await image_service.get_user_images(current_user["id"])
+        user_images = await image_service.get_user_images(current_user.id)
 
         target_record = None
         for img in user_images:
@@ -577,7 +574,7 @@ async def delete_character_image(
 
         # Delete the image
         success = await image_service.delete_image_record(
-            target_record["id"], current_user["id"]
+            target_record["id"], current_user.id
         )
 
         return DeleteImageResponse(
@@ -603,14 +600,12 @@ async def batch_generate_images(
     chapter_id: str,
     request: BatchImageRequest,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate multiple images for a chapter in batch"""
     try:
         # Verify chapter access
-        chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], session
-        )
+        chapter_data = await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Prepare batch requests
         batch_requests = []
@@ -685,7 +680,7 @@ async def batch_generate_images(
         # Generate batch
         image_service = StandaloneImageService(session)
         batch_results = await image_service.batch_generate_images(
-            image_requests=batch_requests, user_id=current_user["id"]
+            image_requests=batch_requests, user_id=current_user.id
         )
 
         successful_count = sum(1 for r in batch_results if r.get("status") == "success")
@@ -709,12 +704,12 @@ async def get_batch_status(
     chapter_id: str,
     batch_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get status of a batch image generation (placeholder - batch tracking not implemented)"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], session)
+        await verify_chapter_access(chapter_id, current_user.id, session)
 
         # For now, return a placeholder response since batch tracking isn't implemented
         # In a real implementation, you'd track batches with IDs
@@ -742,12 +737,12 @@ async def get_image_generation_status(
     chapter_id: str,
     record_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get the status of an image generation by record ID"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], session)
+        await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Get the image record
         stmt = select(ImageGeneration).where(ImageGeneration.id == record_id)
@@ -760,7 +755,7 @@ async def get_image_generation_status(
             )
 
         # Verify the record belongs to the current user
-        if str(image_record.user_id) != current_user["id"]:
+        if str(image_record.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this image generation"
             )
@@ -816,12 +811,12 @@ async def get_scene_image_status(
     chapter_id: str,
     scene_number: int,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get the status of a scene image generation by chapter ID and scene number"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], session)
+        await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Query for the scene image record
         # Primary filter: chapter_id and scene_number (root-level)
@@ -883,7 +878,7 @@ async def get_scene_image_status(
             )
 
         # Verify the record belongs to the current user
-        if str(image_record.user_id) != current_user["id"]:
+        if str(image_record.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this image generation"
             )
@@ -938,14 +933,12 @@ async def get_scene_image_status(
 async def list_chapter_audio(
     chapter_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """List all audio files associated with a chapter"""
     try:
         # Verify chapter access
-        chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], session
-        )
+        chapter_data = await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Get user's audio files for this chapter
         print(
@@ -953,7 +946,7 @@ async def list_chapter_audio(
         )
 
         stmt = select(AudioGeneration).where(
-            AudioGeneration.user_id == uuid.UUID(current_user["id"]),
+            AudioGeneration.user_id == uuid.UUID(current_user.id),
             AudioGeneration.chapter_id == uuid.UUID(chapter_id),
         )
         result = await session.exec(stmt)
@@ -1004,14 +997,12 @@ async def generate_chapter_audio(
     scene_number: int,
     request: AudioGenerationRequest,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate audio for a specific type and scene in the chapter (asynchronous)"""
     try:
         # Verify chapter access
-        chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], session
-        )
+        chapter_data = await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Validate audio type against old frontend enum values (for error message)
         old_valid_types = [
@@ -1103,7 +1094,7 @@ async def generate_chapter_audio(
         )
 
         audio_record = AudioGeneration(
-            user_id=uuid.UUID(current_user["id"]),
+            user_id=uuid.UUID(current_user.id),
             chapter_id=uuid.UUID(chapter_id),
             audio_type=audio_type,
             text_content=text_content,
@@ -1132,7 +1123,7 @@ async def generate_chapter_audio(
         task = generate_chapter_audio_task.delay(
             audio_type=audio_type,
             text_content=text_content,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             chapter_id=chapter_id,
             scene_number=scene_number,
             voice_id=request.voice_id,
@@ -1163,12 +1154,12 @@ async def delete_chapter_audio(
     chapter_id: str,
     audio_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Delete an audio file for the chapter"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], session)
+        await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Find the audio record
         stmt = select(AudioGeneration).where(AudioGeneration.id == uuid.UUID(audio_id))
@@ -1179,7 +1170,7 @@ async def delete_chapter_audio(
             raise HTTPException(status_code=404, detail="Audio file not found")
 
         # Verify the record belongs to the current user
-        if str(audio_record.user_id) != current_user["id"]:
+        if str(audio_record.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to delete this audio file"
             )
@@ -1221,18 +1212,16 @@ async def export_chapter_audio_mix(
     chapter_id: str,
     request: AudioExportRequest,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Export a mixed audio file for the chapter (asynchronous)"""
     try:
         # Verify chapter access
-        chapter_data = await verify_chapter_access(
-            chapter_id, current_user["id"], session
-        )
+        chapter_data = await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Get all audio files for this chapter
         stmt = select(AudioGeneration).where(
-            AudioGeneration.user_id == uuid.UUID(current_user["id"]),
+            AudioGeneration.user_id == uuid.UUID(current_user.id),
             AudioGeneration.chapter_id == uuid.UUID(chapter_id),
         )
         result = await session.exec(stmt)
@@ -1266,7 +1255,7 @@ async def export_chapter_audio_mix(
 
         # Create export record
         export_record = AudioExport(
-            user_id=uuid.UUID(current_user["id"]),
+            user_id=uuid.UUID(current_user.id),
             chapter_id=uuid.UUID(chapter_id),
             export_format=request.format,
             status="pending",
@@ -1311,7 +1300,7 @@ async def export_chapter_audio_mix(
         task = export_chapter_audio_mix_task.delay(
             export_id=export_id,
             chapter_id=chapter_id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             audio_files=audio_files_data,
             export_format=request.format,
             mix_settings=request.mix_settings,
@@ -1339,12 +1328,12 @@ async def get_audio_generation_status(
     chapter_id: str,
     record_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get the status of an audio generation by record ID"""
     try:
         # Verify chapter access
-        await verify_chapter_access(chapter_id, current_user["id"], session)
+        await verify_chapter_access(chapter_id, current_user.id, session)
 
         # Get the audio record
         stmt = select(AudioGeneration).where(AudioGeneration.id == uuid.UUID(record_id))
@@ -1357,7 +1346,7 @@ async def get_audio_generation_status(
             )
 
         # Verify the record belongs to the current user
-        if str(audio_record.user_id) != current_user["id"]:
+        if str(audio_record.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this audio generation"
             )

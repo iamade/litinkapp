@@ -5,6 +5,7 @@ from datetime import datetime
 
 # Add these after the existing schemas, before the end of the file
 
+
 class SectionBase(BaseModel):
     title: str
     section_type: str  # "part", "tablet", "book", "section"
@@ -33,7 +34,7 @@ class ChapterInput(BaseModel):
     chapter_number: Optional[int] = None
     summary: Optional[str] = ""
     order_index: Optional[int] = None
-    
+
     # Section-related fields for hierarchical books
     section_title: Optional[str] = None
     section_type: Optional[str] = None  # "part", "tablet", "book", "section"
@@ -47,7 +48,7 @@ class SectionInput(BaseModel):
     section_number: str  # "1", "I", "III", etc.
     order_index: int
     description: Optional[str] = None
-    
+
 
 class BookStructureInput(BaseModel):
     structure_type: Optional[str] = "flat"
@@ -55,7 +56,7 @@ class BookStructureInput(BaseModel):
     sections: Optional[List[Dict[str, Any]]] = []
     chapters: Optional[List[Dict[str, Any]]] = []
     structure_metadata: Optional[Dict[str, Any]] = {}  # Add this
-    
+
     class Config:
         schema_extra = {
             "example": {
@@ -65,16 +66,16 @@ class BookStructureInput(BaseModel):
                     "display_name": "Tablet Structure",
                     "icon": "🏺",
                     "section_label": "Tablet",
-                    "chapter_label": "Section"
+                    "chapter_label": "Section",
                 },
                 "sections": [
                     {
                         "title": "Tablet I: The Wild Man",
                         "section_type": "tablet",
                         "section_number": "I",
-                        "order_index": 1
+                        "order_index": 1,
                     }
-                ]
+                ],
             }
         }
 
@@ -84,12 +85,12 @@ class BookStructureInput(BaseModel):
 #     has_sections: Optional[bool] = False
 #     sections: Optional[List[Dict[str, Any]]] = []
 #     chapters: Optional[List[Dict[str, Any]]] = []
-    
+
 #     # Add this method if it's missing
 #     def get(self, key: str, default=None):
 #         """Add dict-like get method for backward compatibility"""
 #         return getattr(self, key, default)
-    
+
 #     class Config:
 #         schema_extra = {
 #             "example": {
@@ -115,7 +116,7 @@ class BookStructureInput(BaseModel):
 #                 ]
 #             }
 #         }
-        
+
 
 class ChapterBase(BaseModel):
     title: str
@@ -133,7 +134,6 @@ class Chapter(ChapterBase):
 
     class Config:
         from_attributes = True
-
 
 
 # Enhanced Chapter with section relationship
@@ -154,7 +154,7 @@ class BookBase(BaseModel):
     uploaded_by_user_id: Optional[str] = None
     is_author: Optional[bool] = False
     created_with_platform: Optional[bool] = False
-
+    original_file_storage_path: Optional[str] = None
 
 
 class Book(BookBase):
@@ -166,13 +166,15 @@ class Book(BookBase):
     created_at: datetime
     updated_at: datetime
     chapters: Optional[List[Chapter]] = None
-    
+
     class Config:
         from_attributes = True
+
 
 # ✅ ADD: New preview schema that extends Book
 class BookPreview(Book):
     """Book with preview chapters (not saved to database yet)"""
+
     preview_chapters: Optional[List[dict]] = None
     total_preview_chapters: Optional[int] = None
     author_name: Optional[str] = None  # From extraction
@@ -185,8 +187,6 @@ class BookWithSections(Book):
     structure_type: Optional[str] = "flat"
     sections: Optional[List[Section]] = []
     chapters: Optional[List[ChapterWithSection]] = []
-
-
 
 
 class ChapterCreate(ChapterBase):

@@ -5,7 +5,7 @@
 
 # Run in development mode WITHOUT debugger
 dev:
-	DEBUG=false ENVIRONMENT=development docker compose -f local.yml up --build -d
+	DEBUG=false ENVIRONMENT=development docker compose -f local.yml up --build -d --remove-orphans
 # 	@cd scripts && ./start-local-dev.sh
 
 # Run in production mode

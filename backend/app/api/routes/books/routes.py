@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
 from fastapi import (
     APIRouter,
     Depends,
@@ -19,14 +20,17 @@ import fitz
 import os
 import aiofiles
 from pydantic import BaseModel
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
+import json
 import io
 
 from app.core.auth import get_current_user, get_current_author, get_current_active_user
 from app.core.database import get_session
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, update, delete, col, or_, text
+from sqlmodel import select, update, delete, col, or_, text
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 from app.books.models import Book as BookModel, Chapter, Section, LearningContent
 from app.auth.models import User, User as UserModel
 from app.books.schemas import (
@@ -165,8 +169,8 @@ async def search_content(
         chapters = chapter_result.all()
 
         return {
-            "books": [book.model_dump() for book in books],
-            "chapters": [chapter.model_dump() for chapter in chapters],
+            "books": [book.model_dump(mode="json") for book in books],
+            "chapters": [chapter.model_dump(mode="json") for chapter in chapters],
         }
 
     except Exception as e:
@@ -213,8 +217,8 @@ async def get_superadmin_learning_books(
             result = await session.exec(stmt)
             chapters = result.all()
 
-            book_dict = book.model_dump()
-            book_dict["chapters"] = [c.model_dump() for c in chapters]
+            book_dict = book.model_dump(mode="json")
+            book_dict["chapters"] = [c.model_dump(mode="json") for c in chapters]
             books_with_chapters.append(BookWithChapters(**book_dict))
 
         return books_with_chapters
@@ -264,8 +268,8 @@ async def get_superadmin_entertainment_books(
             result = await session.exec(stmt)
             chapters = result.all()
 
-            book_dict = book.model_dump()
-            book_dict["chapters"] = [c.model_dump() for c in chapters]
+            book_dict = book.model_dump(mode="json")
+            book_dict["chapters"] = [c.model_dump(mode="json") for c in chapters]
             books_with_chapters.append(BookWithChapters(**book_dict))
 
         return books_with_chapters
@@ -372,7 +376,7 @@ async def get_books(
 
     result = await session.exec(stmt)
     books = result.all()
-    return [book.model_dump() for book in books]
+    return [book.model_dump(mode="json") for book in books]
 
 
 @router.get("/my-books", response_model=List[BookSchema], tags=["Authors"])
@@ -385,7 +389,7 @@ async def get_my_books(
         stmt = select(BookModel).where(BookModel.user_id == current_user.id)
         result = await session.exec(stmt)
         books = result.all()
-        return [book.model_dump() for book in books]
+        return [book.model_dump(mode="json") for book in books]
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -406,7 +410,9 @@ async def get_book(
             raise HTTPException(status_code=404, detail="BookModel not found")
 
         # Check if user can access this book
-        if book.status != BookStatus.PUBLISHED and book.user_id != current_user.id:
+        if book.status != BookStatus.PUBLISHED and str(book.user_id) != str(
+            current_user.id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
             )
@@ -420,8 +426,8 @@ async def get_book(
         result = await session.exec(stmt)
         chapters = result.all()
 
-        book_dict = book.model_dump()
-        book_dict["chapters"] = [c.model_dump() for c in chapters]
+        book_dict = book.model_dump(mode="json")
+        book_dict["chapters"] = [c.model_dump(mode="json") for c in chapters]
         return BookWithChapters(**book_dict)
 
     except HTTPException:
@@ -519,14 +525,18 @@ async def update_book(
 ):
     """Update book"""
     try:
-        stmt = select(BookModel).where(BookModel.id == book_id)
+        stmt = (
+            select(BookModel)
+            .where(BookModel.id == book_id)
+            .options(selectinload(BookModel.chapters))
+        )
         result = await session.exec(stmt)
         book = result.first()
 
         if not book:
             raise HTTPException(status_code=404, detail="BookModel not found")
 
-        if book.user_id != current_user.id:
+        if str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to update this book"
             )
@@ -538,8 +548,17 @@ async def update_book(
         book.updated_at = datetime.now(timezone.utc)
         session.add(book)
         await session.commit()
-        await session.refresh(book)
-        return book
+
+        # optimized refresh with eager loading for response
+        stmt = (
+            select(BookModel)
+            .where(BookModel.id == book_id)
+            .options(selectinload(BookModel.chapters), selectinload(BookModel.sections))
+        )
+        result = await session.exec(stmt)
+        book = result.first()
+
+        return book.model_dump(mode="json")
 
     except HTTPException:
         raise
@@ -563,7 +582,7 @@ async def create_chapter(
         if not book:
             raise HTTPException(status_code=404, detail="BookModel not found")
 
-        if str(book.user_id) != current_user.id:
+        if str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
             )
@@ -809,13 +828,14 @@ async def upload_book(
             # Upload file to storage
             file_content = await file.read()
             original_filename = file.filename
-            storage_path = f"users/{current_user['id']}/{original_filename}"
+            storage_path = f"users/{current_user.id}/{original_filename}"
 
             from app.core.services.storage import storage_service
 
             await storage_service.upload(file_content, storage_path, file.content_type)
 
             # Update book with storage info
+            print(f"DEBUG: Setting storage path to {storage_path}")
             book.original_file_storage_path = storage_path
             session.add(book)
             await session.commit()
@@ -852,7 +872,7 @@ async def upload_book(
 
         # Return updated book from database
         await session.refresh(book)
-        updated_book = book.model_dump()
+        updated_book = book.model_dump(mode="json")
 
         # ✅ FIX: Check if we have sectioned structure
         if preview_result.get("structure_data", {}).get("has_sections"):
@@ -900,7 +920,7 @@ async def upload_book(
 async def get_book_status(
     book_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get the processing status of a book by its ID, and output time from QUEUED to READY."""
     try:
@@ -918,41 +938,11 @@ async def get_book_status(
         # The original code: .eq("id", book_id).single().execute()
         # It didn't filter by user_id in the query, but maybe RLS handled it.
         # I'll add ownership check for safety.
-        if str(book.user_id) != current_user.id:
+        if str(book.user_id) != str(current_user.id):
             raise HTTPException(status_code=403, detail="Not authorized")
 
-        import datetime
-        from datetime import timezone
-        import time
-
-        # Track QUEUED timestamp
-        now_utc = datetime.datetime.now(timezone.utc)
-        updated = False
-
-        # Note: book.status is an Enum in model, so compare with value or Enum member
-        if (
-            book.status == "QUEUED"
-        ):  # Assuming string comparison works with Enum or it's a string in DB
-            if not book.queued_at:
-                book.queued_at = now_utc
-                updated = True
-
-        # If book is READY and has queued_at, calculate processing time
-        processing_time_seconds = None
-        if book.status == "READY" and book.queued_at:
-            try:
-                queued_at = book.queued_at
-                ready_at = book.ready_at
-                if not ready_at:
-                    book.ready_at = now_utc
-                    ready_at = now_utc
-                    updated = True
-
-                # Calculate diff
-                # Ensure both are datetime objects (SQLAlchemy returns datetime)
-                processing_time_seconds = int((ready_at - queued_at).total_seconds())
-            except Exception:
-                processing_time_seconds = None
+        # Processing time calculation removed as fields are missing in DB
+        processing_time_seconds = 0
 
         if updated:
             session.add(book)
@@ -1016,7 +1006,7 @@ async def get_book_status(
 async def regenerate_chapters(
     book_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
     ai_service: AIService = Depends(AIService),
 ):
     """Regenerates chapters for a book and returns them for review."""
@@ -1025,7 +1015,7 @@ async def regenerate_chapters(
     result = await session.exec(stmt)
     book = result.first()
 
-    if not book or str(book.user_id) != current_user.id:
+    if not book or str(book.user_id) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized or book not found")
 
     # content is not in BookModel model?
@@ -1087,7 +1077,7 @@ async def retry_book_processing(
     book_id: str,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Retry processing a failed book"""
     try:
@@ -1099,7 +1089,7 @@ async def retry_book_processing(
         if not book:
             raise HTTPException(status_code=404, detail="BookModel not found")
 
-        if str(book.user_id) != current_user.id:
+        if str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=404, detail="BookModel not found"
             )  # mimic 404 for unauthorized
@@ -1156,7 +1146,7 @@ async def retry_book_processing(
 async def delete_book(
     book_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     # 1. Get the book record to find the storage path and verify ownership
     try:
@@ -1168,7 +1158,7 @@ async def delete_book(
             raise HTTPException(status_code=404, detail="BookModel not found")
 
         # 2. Only allow the owner to delete
-        if str(book.user_id) != current_user.id:
+        if str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to delete this book"
             )
@@ -1184,53 +1174,19 @@ async def delete_book(
     from app.core.services.storage import storage_service
 
     try:
-        # Delete covers
+        # Delete covers (only for this book)
         try:
-            covers = storage_service.list(f"users/{user_id}/covers")
-            if covers:
-                cover_paths = [
-                    f"users/{user_id}/covers/{item['name']}" for item in covers
-                ]
-                await storage_service.remove_batch(cover_paths)
-                print(f"Deleted {len(cover_paths)} cover files for user {user_id}")
-        except Exception as e:
-            print(f"Warning: Could not delete cover files: {e}")
+            # Try specific cover path pattern (from upload_book)
+            cover_path = f"users/{user_id}/covers/cover_{book_id}_upload.png"
+            await storage_service.delete(cover_path)
 
-        # Delete audio files
-        try:
-            audio_files = storage_service.list(f"users/{user_id}/audio")
-            if audio_files:
-                audio_paths = [
-                    f"users/{user_id}/audio/{item['name']}" for item in audio_files
-                ]
-                await storage_service.remove_batch(audio_paths)
-                print(f"Deleted {len(audio_paths)} audio files for user {user_id}")
+            # Also try to clean up extracted covers if they follow a pattern
+            # For now, we only safely know about the upload cover
         except Exception as e:
-            print(f"Warning: Could not delete audio files: {e}")
+            print(f"Warning: Could not delete cover file: {e}")
 
-        # Delete video files
-        try:
-            video_files = storage_service.list(f"users/{user_id}/videos")
-            if video_files:
-                video_paths = [
-                    f"users/{user_id}/videos/{item['name']}" for item in video_files
-                ]
-                await storage_service.remove_batch(video_paths)
-                print(f"Deleted {len(video_paths)} video files for user {user_id}")
-        except Exception as e:
-            print(f"Warning: Could not delete video files: {e}")
-
-        # Delete image files
-        try:
-            image_files = storage_service.list(f"users/{user_id}/images")
-            if image_files:
-                image_paths = [
-                    f"users/{user_id}/images/{item['name']}" for item in image_files
-                ]
-                await storage_service.remove_batch(image_paths)
-                print(f"Deleted {len(image_paths)} image files for user {user_id}")
-        except Exception as e:
-            print(f"Warning: Could not delete image files: {e}")
+        # Note: We avoid deleting audio/video/images directories broadly as they may contain assets for OTHER books.
+        # TODO: Implement granular asset tracking (e.g. store asset paths in DB) to safely delete them.
 
         # Delete the specific book file from users folder
         try:
@@ -1271,19 +1227,15 @@ async def delete_book(
     # 4. Delete related records from database
     try:
         # With SQLAlchemy cascade, deleting the book should delete chapters and embeddings
-        # But we might need to delete videos manually if no cascade
-        # Let's assume cascade handles it or we delete book and it works.
-        # If we need to be explicit:
 
         # Delete book (should cascade)
-        session.delete(book)
+        await session.delete(book)
         await session.commit()
-        print(f"Deleted book record {book_id}")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-    return {"message": "BookModel and all associated data deleted successfully"}
+    return {"message": "Book and all associated data deleted successfully"}
 
 
 @router.post("/search", response_model=List[BookSchema])
@@ -1325,7 +1277,7 @@ async def extract_cover_from_page(
     book_id: str,
     page: int,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     # Get book record
     try:
@@ -1336,7 +1288,7 @@ async def extract_cover_from_page(
         if not book:
             raise HTTPException(status_code=404, detail="BookModel not found")
 
-        if str(book.user_id) != current_user.id:
+        if str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to modify this book"
             )
@@ -1391,7 +1343,7 @@ async def upload_custom_cover(
     book_id: str,
     cover_image: UploadFile = File(...),
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     try:
         book_uuid = uuid.UUID(book_id)
@@ -1402,7 +1354,7 @@ async def upload_custom_cover(
         if not book:
             raise HTTPException(status_code=404, detail="BookModel not found")
 
-        if str(book.user_id) != current_user.id:
+        if str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to modify this book"
             )
@@ -1442,7 +1394,7 @@ async def save_book_structure(
     book_id: str,
     structure_data: dict,  # Contains confirmed_chapters array
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Save confirmed book structure to database"""
     try:
@@ -1454,7 +1406,7 @@ async def save_book_structure(
         if not book:
             raise HTTPException(status_code=404, detail="BookModel not found")
 
-        if str(book.user_id) != current_user.id:
+        if str(book.user_id) != str(current_user.id):
             raise HTTPException(status_code=404, detail="BookModel not found")
 
         # Extract confirmed chapters from structure_data
@@ -1462,23 +1414,67 @@ async def save_book_structure(
         if not confirmed_chapters:
             raise HTTPException(status_code=400, detail="No chapters provided")
 
-        # Save confirmed structure
-        file_service = FileService()
-        await file_service.confirm_book_structure(
-            book_id=book_id,
-            confirmed_chapters=confirmed_chapters,
-            user_id=str(current_user.id),
-            session=session,
+        # Define generator for streaming response
+        async def structure_save_generator():
+            try:
+                # Initialize file service
+                file_service = FileService()
+
+                # Stream progress updates from the service
+                async for status_msg in file_service.confirm_book_structure(
+                    book_id=book_id,
+                    confirmed_chapters=confirmed_chapters,
+                    user_id=str(current_user.id),
+                    session=session,
+                ):
+                    # Yield progress message as JSON
+                    yield json.dumps(
+                        {"status": "progress", "message": status_msg}
+                    ) + "\n"
+
+                # After generator completes, fetch the final book state
+                # We need to fetch it again with relationships loaded to avoid MissingGreenlet
+                stmt = (
+                    select(BookModel)
+                    .where(BookModel.id == book_id)
+                    .options(
+                        selectinload(BookModel.chapters),
+                        selectinload(BookModel.sections),
+                    )
+                )
+                result = await session.exec(stmt)
+                book = result.first()
+
+                if book:
+                    # Serialize and yield final result
+                    book_data = book.model_dump(mode="json")
+                    yield json.dumps(
+                        {
+                            "status": "complete",
+                            "message": "Book structure saved successfully",
+                            "book": book_data,
+                        }
+                    ) + "\n"
+                else:
+                    yield json.dumps(
+                        {"status": "error", "message": "Book not found after save"}
+                    ) + "\n"
+
+            except Exception as e:
+                # Yield error message
+                yield json.dumps({"status": "error", "message": str(e)}) + "\n"
+
+        # Return StreamingResponse
+        return StreamingResponse(
+            structure_save_generator(), media_type="application/x-ndjson"
         )
 
-        # Return updated book
-        await session.refresh(book)
-        return {
-            "message": "BookModel structure saved successfully",
-            "book": book.model_dump(),
-        }
-
+    except HTTPException:
+        raise
     except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to save structure: {str(e)}"
+        )
         raise HTTPException(
             status_code=500, detail=f"Failed to save structure: {str(e)}"
         )

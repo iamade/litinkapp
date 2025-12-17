@@ -60,6 +60,42 @@ export const apiClient = {
     return withLoading(() => this.request<T>(endpoint, "DELETE", body));
   },
 
+  async postStream(endpoint: string, body: unknown): Promise<Response> {
+    return withLoading(async () => {
+      const headers: HeadersInit = {
+        "Content-Type": "application/json",
+      };
+      
+      let response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        credentials: "include",
+      });
+
+      if (response.status === 401) {
+        const refreshed = await refreshToken();
+        if (refreshed) {
+          response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: "POST",
+            headers,
+            body: JSON.stringify(body),
+            credentials: "include",
+          });
+        }
+      }
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          (errorData as { detail?: string }).detail || "An API error occurred"
+        );
+      }
+      
+      return response;
+    });
+  },
+
   async upload<T>(endpoint: string, formData: FormData): Promise<T> {
     return withLoading(async () => {
       let response = await fetch(`${API_BASE_URL}${endpoint}`, {

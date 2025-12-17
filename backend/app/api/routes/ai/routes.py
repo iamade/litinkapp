@@ -22,6 +22,7 @@ from app.books.models import (
     LearningContent,
 )
 from app.plots.models import PlotOverview
+from app.auth.models import User
 import time
 
 from app.ai.schemas import (
@@ -348,7 +349,7 @@ router = APIRouter()
 async def generate_text(
     request: AIRequest,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate text using AI service"""
     ai_service = AIService()
@@ -364,7 +365,7 @@ async def generate_text(
 async def generate_quiz(
     request: QuizGenerationRequest,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate quiz using AI service"""
     ai_service = AIService()
@@ -377,7 +378,7 @@ async def generate_voice(
     text: str,
     voice_id: str = "21m00Tcm4TlvDq8ikWAM",
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate voice using ElevenLabs service"""
     elevenlabs_service = ElevenLabsService()
@@ -398,7 +399,7 @@ async def generate_video_from_chapter(
     include_context: bool = True,
     include_audio_enhancement: bool = True,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate video from chapter using RAG system with ElevenLabs audio enhancement"""
     try:
@@ -413,7 +414,7 @@ async def generate_video_from_chapter(
         chapter, book = chapter_book
 
         # Check access permissions
-        if book.status != "published" and str(book.user_id) != current_user["id"]:
+        if book.status != "published" and str(book.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -442,7 +443,7 @@ async def generate_tutorial_video(
     chapter_id: str,
     video_style: str = "realistic",
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate tutorial video from chapter using RAG system"""
     try:
@@ -457,7 +458,7 @@ async def generate_tutorial_video(
         chapter, book = chapter_book
 
         # Check access permissions
-        if book.status != "published" and str(book.user_id) != current_user["id"]:
+        if book.status != "published" and str(book.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -486,7 +487,7 @@ async def generate_entertainment_video(
     request: VideoGenerationRequest,
     # request: dict = Body(...),
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate entertainment video using already saved script"""
     try:
@@ -505,9 +506,7 @@ async def generate_entertainment_video(
         # Step 1: Get the most recent script for this chapter (regardless of style)
         stmt = (
             select(Script)
-            .where(
-                Script.chapter_id == chapter_id, Script.user_id == current_user["id"]
-            )
+            .where(Script.chapter_id == chapter_id, Script.user_id == current_user.id)
             .order_by(col(Script.created_at).desc())
             .limit(1)
         )
@@ -524,12 +523,12 @@ async def generate_entertainment_video(
 
         # Step 2: Create video generation record
         print(
-            f"[VIDEO GEN DEBUG] Creating video generation with chapter_id: {chapter_id}, script_id: {script_data['id']}, user_id: {current_user['id']}"
+            f"[VIDEO GEN DEBUG] Creating video generation with chapter_id: {chapter_id}, script_id: {script_data['id']}, user_id: {current_user.id}"
         )
         video_generation = VideoGeneration(
             chapter_id=chapter_id,
             script_id=script_data.id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             generation_status="pending",
             quality_tier=quality_tier,
             can_resume=True,
@@ -554,12 +553,12 @@ async def generate_entertainment_video(
             # Check for existing audio in audio_generations table
             print(f"[AUDIO QUERY DEBUG] Querying audio_generations with:")
             print(f"  chapter_id: {chapter_id}")
-            print(f"  user_id: {current_user['id']}")
+            print(f"  user_id: {current_user.id}")
             print(f"  generation_status: completed (using 'generation_status' column)")
 
             stmt = select(AudioGeneration).where(
                 AudioGeneration.chapter_id == chapter_id,
-                AudioGeneration.user_id == current_user["id"],
+                AudioGeneration.user_id == current_user.id,
                 AudioGeneration.generation_status == "completed",
             )
             result = await session.exec(stmt)
@@ -647,7 +646,7 @@ async def generate_entertainment_video(
 
                 # Query image_generations table for images associated with this chapter
                 stmt = select(ImageGeneration).where(
-                    ImageGeneration.user_id == current_user["id"],
+                    ImageGeneration.user_id == current_user.id,
                     ImageGeneration.status == "completed",
                 )
                 result = await session.exec(stmt)
@@ -807,13 +806,13 @@ async def generate_entertainment_video(
 async def get_video_generation_status(
     video_gen_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get video generation status with detailed progress"""
     try:
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         data = result.first()
@@ -960,12 +959,12 @@ async def get_video_generation_status(
 async def get_chapter_video_generations(
     chapter_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get all video generations for a chapter"""
     try:
         print(f"🔍 DEBUG: Getting video generations for chapter: {chapter_id}")
-        print(f"🔍 DEBUG: User ID: {current_user.get('id', 'Unknown')}")
+        print(f"🔍 DEBUG: User ID: {getattr(current_user, 'id', 'Unknown')}")
 
         # First check if chapter exists
         stmt = select(Chapter).where(Chapter.id == chapter_id)
@@ -978,7 +977,7 @@ async def get_chapter_video_generations(
             select(VideoGeneration)
             .where(
                 VideoGeneration.chapter_id == chapter_id,
-                VideoGeneration.user_id == current_user["id"],
+                VideoGeneration.user_id == current_user.id,
             )
             .order_by(col(VideoGeneration.created_at).desc())
         )
@@ -1034,14 +1033,14 @@ async def get_chapter_video_generations(
 async def get_scene_videos(
     video_gen_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get scene videos for a video generation"""
     try:
         # Verify access
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_response = result.first()
@@ -1105,14 +1104,14 @@ async def get_scene_videos(
 async def get_final_video(
     video_gen_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get final merged video for a video generation"""
     try:
         # Verify access
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_response = result.first()
@@ -1151,14 +1150,14 @@ async def get_final_video(
 async def get_merge_status(
     video_gen_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get detailed merge status and progress"""
     try:
         # Verify access
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_response = result.first()
@@ -1197,14 +1196,14 @@ async def get_merge_status(
 async def get_lip_sync_status(
     video_gen_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get detailed lip sync status and progress"""
     try:
         # Verify access
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_response = result.first()
@@ -1239,14 +1238,14 @@ async def get_lip_sync_status(
 async def get_lip_synced_videos(
     video_gen_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get lip synced scene videos for a video generation"""
     try:
         # Verify access
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_response = result.first()
@@ -1311,14 +1310,14 @@ async def get_lip_synced_videos(
 async def trigger_lip_sync_manually(
     video_gen_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Manually trigger lip sync processing for a video generation"""
     try:
         # Verify access and status
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_response = result.first()
@@ -1372,18 +1371,16 @@ async def get_script_styles():
 async def list_chapter_scripts(
     chapter_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """List all scripts for a chapter by current user"""
     try:
         print(
-            f"[DEBUG] list_chapter_scripts called for chapter_id: {chapter_id}, user_id: {current_user['id']}"
+            f"[DEBUG] list_chapter_scripts called for chapter_id: {chapter_id}, user_id: {current_user.id}"
         )
         stmt = (
             select(Script)
-            .where(
-                Script.chapter_id == chapter_id, Script.user_id == current_user["id"]
-            )
+            .where(Script.chapter_id == chapter_id, Script.user_id == current_user.id)
             .order_by(col(Script.created_at).desc())
         )
         result = await session.exec(stmt)
@@ -1406,12 +1403,12 @@ async def list_chapter_scripts(
 async def get_script_details(
     script_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get detailed script information"""
     try:
         stmt = select(Script).where(
-            Script.id == script_id, Script.user_id == current_user["id"]
+            Script.id == script_id, Script.user_id == current_user.id
         )
         result = await session.exec(stmt)
         script_data = result.first()
@@ -1431,7 +1428,7 @@ async def get_script_details(
 async def evaluate_script(
     script_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     Evaluate a script using DeepSeekScriptService (LLM) for coherence, storytelling, character consistency, video suitability.
@@ -1440,7 +1437,7 @@ async def evaluate_script(
     try:
         # Fetch script and chapter context
         stmt = select(Script).where(
-            Script.id == script_id, Script.user_id == current_user["id"]
+            Script.id == script_id, Script.user_id == current_user.id
         )
         result = await session.exec(stmt)
         script_record = result.first()
@@ -1484,7 +1481,7 @@ async def update_script_status(
     script_id: str,
     status: str = Body(...),
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     Update the status of a script (draft, evaluated, approved, rejected, active).
@@ -1504,7 +1501,7 @@ async def update_script_status(
         result = await session.exec(stmt)
         script_record = result.first()
 
-        if not script_record or script_record.user_id != current_user["id"]:
+        if not script_record or script_record.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to update this script"
             )
@@ -1522,7 +1519,7 @@ async def update_script_status(
 async def activate_script(
     script_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     Set a script as active for its chapter (deactivate others).
@@ -1532,7 +1529,7 @@ async def activate_script(
         result = await session.exec(stmt)
         script_record = result.first()
 
-        if not script_record or script_record.user_id != current_user["id"]:
+        if not script_record or script_record.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to activate this script"
             )
@@ -1542,7 +1539,7 @@ async def activate_script(
         # Deactivate other scripts for this chapter/user
         stmt = select(Script).where(
             Script.chapter_id == chapter_id,
-            Script.user_id == current_user["id"],
+            Script.user_id == current_user.id,
             Script.id != script_id,
         )
         result = await session.exec(stmt)
@@ -1565,7 +1562,7 @@ async def activate_script(
 async def deactivate_script(
     script_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     Deactivate a script (set status to ready).
@@ -1575,7 +1572,7 @@ async def deactivate_script(
         result = await session.exec(stmt)
         script_record = result.first()
 
-        if not script_record or script_record.user_id != current_user["id"]:
+        if not script_record or script_record.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to deactivate this script"
             )
@@ -1596,14 +1593,14 @@ async def deactivate_script(
 async def get_character_images(
     video_gen_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get character images for a video generation"""
     try:
         # Verify access
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_response = result.first()
@@ -1646,7 +1643,7 @@ async def generate_video_avatar(
     chapter_id: str,
     avatar_style: str = "realistic",
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate video avatar from chapter content"""
     try:
@@ -1665,7 +1662,7 @@ async def generate_video_avatar(
         book_data = chapter_data.book
 
         # Check access permissions
-        if book_data.status != "published" and book_data.user_id != current_user["id"]:
+        if book_data.status != "published" and book_data.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -1694,7 +1691,7 @@ async def generate_video_avatar(
 async def enhance_entertainment_content(
     chapter_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Enhance entertainment content using PlotDrive service"""
     try:
@@ -1713,7 +1710,7 @@ async def enhance_entertainment_content(
         book_data = chapter_data.book
 
         # Check access permissions
-        if book_data.status != "published" and book_data.user_id != current_user["id"]:
+        if book_data.status != "published" and book_data.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -1743,7 +1740,7 @@ async def generate_screenplay(
     chapter_id: str,
     style: str = "realistic",
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate screenplay using RAG service with PlotDrive"""
     try:
@@ -1762,7 +1759,7 @@ async def generate_screenplay(
         book_data = chapter_data.book
 
         # Check access permissions
-        if book_data.status != "published" and book_data.user_id != current_user["id"]:
+        if book_data.status != "published" and book_data.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -1794,7 +1791,7 @@ async def generate_screenplay(
 async def create_chapter_embeddings(
     chapter_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Create vector embeddings for a chapter"""
     try:
@@ -1810,7 +1807,7 @@ async def create_chapter_embeddings(
         chapter_data, book_data = chapter_book
 
         # Check access permissions
-        if str(book_data.user_id) != current_user["id"]:
+        if str(book_data.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -1835,7 +1832,7 @@ async def create_chapter_embeddings(
 async def create_book_embeddings(
     book_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Create vector embeddings for a book"""
     try:
@@ -1849,7 +1846,7 @@ async def create_book_embeddings(
             raise HTTPException(status_code=404, detail="Book not found")
 
         # Check access permissions
-        if str(book_data.user_id) != current_user["id"]:
+        if str(book_data.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this book"
             )
@@ -1879,7 +1876,7 @@ async def search_similar_content(
     book_id: str = None,
     limit: int = 5,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Search for similar content using vector embeddings"""
     try:
@@ -1900,7 +1897,7 @@ async def search_similar_books(
     query: str,
     limit: int = 5,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Search for similar books using vector embeddings"""
     try:
@@ -1924,7 +1921,7 @@ async def generate_enhanced_speech(
     emotion: str = "neutral",
     speed: float = 1.0,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate enhanced speech with emotion and speed control"""
     try:
@@ -1932,7 +1929,7 @@ async def generate_enhanced_speech(
         result = await elevenlabs_service.generate_enhanced_speech(
             text=text,
             voice_id=voice_id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             emotion=emotion,
             speed=speed,
         )
@@ -1950,7 +1947,7 @@ async def generate_sound_effects(
     duration: float = 2.0,
     intensity: str = "medium",
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate sound effects"""
     try:
@@ -1959,7 +1956,7 @@ async def generate_sound_effects(
             effect_type=effect_type,
             duration=duration,
             intensity=intensity,
-            user_id=current_user["id"],
+            user_id=current_user.id,
         )
 
         return {"audio_url": audio_url}
@@ -1973,7 +1970,7 @@ async def generate_sound_effects(
 async def generate_audio_narration(
     request: dict,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate audio narration for learning content using RAG embeddings and ElevenLabs"""
     try:
@@ -1996,7 +1993,7 @@ async def generate_audio_narration(
         book_data = chapter_data.book
 
         # Check access permissions
-        if book_data.status != "published" and book_data.user_id != current_user["id"]:
+        if book_data.status != "published" and book_data.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -2048,7 +2045,7 @@ async def generate_audio_narration(
         audio_result = await elevenlabs_service.create_audio_narration(
             text=tutorial_script,
             narrator_style="professional",
-            user_id=current_user["id"],
+            user_id=current_user.id,
         )
 
         if not audio_result:
@@ -2060,7 +2057,7 @@ async def generate_audio_narration(
         audio_record = LearningContent(
             chapter_id=chapter_id,
             book_id=book_data.id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             content_type="audio_narration",
             content_url=audio_result,
             script=tutorial_script,
@@ -2086,11 +2083,11 @@ async def generate_audio_narration(
 async def generate_realistic_video(
     request: dict,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate realistic video tutorial using RAG embeddings and Tavus with enhanced error handling"""
     try:
-        print(f"🎬 Starting realistic video generation for user: {current_user['id']}")
+        print(f"🎬 Starting realistic video generation for user: {current_user.id}")
 
         chapter_id = request.get("chapter_id")
         if not chapter_id:
@@ -2117,7 +2114,7 @@ async def generate_realistic_video(
         print(f"📚 Book: {book_data.title} (Type: {book_data.book_type})")
 
         # Check access permissions
-        if book_data.status != "published" and book_data.user_id != current_user["id"]:
+        if book_data.status != "published" and book_data.user_id != current_user.id:
             print(f"❌ Access denied for chapter: {chapter_id}")
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
@@ -2177,7 +2174,7 @@ async def generate_realistic_video(
         initial_record = {
             "chapter_id": chapter_id,
             "book_id": book_data["id"],
-            "user_id": current_user["id"],
+            "user_id": current_user.id,
             "content_type": "realistic_video",
             "content_url": None,
             "tavus_url": None,
@@ -2192,7 +2189,7 @@ async def generate_realistic_video(
         learning_content = LearningContent(
             chapter_id=chapter_id,
             book_id=book_data.id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             content_type="video_tutorial",
             title=f"Video Tutorial: {chapter_data.title}",
             script=tutorial_script,
@@ -2301,7 +2298,7 @@ async def generate_realistic_video(
 @router.get("/list-voices")
 async def list_voices(
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """List available ElevenLabs voices"""
     try:
@@ -2319,7 +2316,7 @@ async def list_voices(
 async def analyze_chapter_safety(
     request: AnalyzeChapterSafetyRequest,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Analyze chapter content for potential KlingAI risk control issues"""
     try:
@@ -2358,7 +2355,7 @@ async def analyze_chapter_safety(
 async def check_video_status(
     content_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Check the status of video generation and handle completion"""
     try:
@@ -2368,7 +2365,7 @@ async def check_video_status(
 
         if not content_data:
             raise HTTPException(status_code=404, detail="Content not found")
-        if content_data.user_id != current_user["id"]:
+        if content_data.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this content"
             )
@@ -2393,7 +2390,7 @@ async def check_video_status(
                 )
                 if video_url:
                     final_video_url = await video_service._download_and_store_video(
-                        video_url, f"video_{content_id}.mp4", current_user["id"]
+                        video_url, f"video_{content_id}.mp4", current_user.id
                     )
                     content_data.status = "ready"
                     content_data.content_url = final_video_url
@@ -2459,7 +2456,7 @@ async def check_video_status(
 async def get_learning_content(
     chapter_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get existing learning content for a chapter"""
     try:
@@ -2468,7 +2465,7 @@ async def get_learning_content(
         # Get all learning content for this chapter and user
         stmt = select(LearningContent).where(
             LearningContent.chapter_id == chapter_id,
-            LearningContent.user_id == current_user["id"],
+            LearningContent.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         content_records = result.all()
@@ -2507,7 +2504,7 @@ async def get_learning_content(
 async def combine_videos(
     request: dict,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Combine multiple videos using FFmpeg"""
     try:
@@ -2521,7 +2518,7 @@ async def combine_videos(
 
         # Combine videos using FFmpeg
         combined_video_url = await video_service._combine_videos_with_ffmpeg(
-            video_urls, f"combined_video_{int(time.time())}.mp4", current_user["id"]
+            video_urls, f"combined_video_{int(time.time())}.mp4", current_user.id
         )
 
         if not combined_video_url:
@@ -2542,11 +2539,11 @@ async def combine_videos(
 async def combine_tavus_videos(
     request: dict,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Combine Tavus video segments and process hosted_url"""
     try:
-        print(f"🎬 Starting Tavus video combination for user: {current_user['id']}")
+        print(f"🎬 Starting Tavus video combination for user: {current_user.id}")
 
         content_id = request.get("content_id")
         if not content_id:
@@ -2565,7 +2562,7 @@ async def combine_tavus_videos(
             raise HTTPException(status_code=404, detail="Content not found")
 
         # Check access permissions
-        if content_data.user_id != current_user["id"]:
+        if content_data.user_id != current_user.id:
             print(f"❌ Access denied for content: {content_id}")
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this content"
@@ -2608,7 +2605,7 @@ async def combine_tavus_videos(
 async def generate_script_and_scenes(
     request: dict = Body(...),
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate only the AI script and scene descriptions for a chapter using OpenRouter (no video generation)"""
     try:
@@ -2644,17 +2641,15 @@ async def generate_script_and_scenes(
         book_data = chapter_data.book
 
         # Check access permissions
-        if book_data.status != "published" and book_data.user_id != current_user["id"]:
+        if book_data.status != "published" and book_data.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
 
         # ✅ NEW: Check subscription tier and limits
         subscription_manager = SubscriptionManager(session)
-        user_tier = await subscription_manager.get_user_tier(current_user["id"])
-        tier_check = await subscription_manager.can_user_generate_video(
-            current_user["id"]
-        )
+        user_tier = await subscription_manager.get_user_tier(current_user.id)
+        tier_check = await subscription_manager.can_user_generate_video(current_user.id)
 
         if not tier_check["can_generate"]:
             raise HTTPException(
@@ -2695,7 +2690,7 @@ async def generate_script_and_scenes(
             try:
                 plot_info = await enhance_with_plot_context(
                     session,
-                    current_user["id"],
+                    current_user.id,
                     chapter_data.book_id,
                     content_for_script,
                 )
@@ -2894,7 +2889,7 @@ Script to analyze:
             "character_details": character_details,
             "script_style": script_style,
             "script_name": script_name,
-            "user_id": current_user["id"],
+            "user_id": current_user.id,
             "created_at": datetime.now().isoformat(),
             "metadata": {
                 "total_scenes": len(scene_descriptions),
@@ -2913,7 +2908,7 @@ Script to analyze:
         ai_content = chapter_data.ai_generated_content or {}
         if not isinstance(ai_content, dict):
             ai_content = {}
-        key = f"{current_user['id']}:{script_style}"
+        key = f"{current_user.id}:{script_style}"
         ai_content[key] = script_data
 
         chapter_data.ai_generated_content = ai_content
@@ -2924,7 +2919,7 @@ Script to analyze:
         # Allow multiple scripts per chapter by not checking for existing ones
         script_record = {
             "chapter_id": chapter_id,
-            "user_id": current_user["id"],
+            "user_id": current_user.id,
             "script_style": script_style,
             "script_name": script_name,
             "script": script,
@@ -2950,7 +2945,7 @@ Script to analyze:
 
         # ✅ Record usage for billing/limits
         await subscription_manager.record_usage(
-            user_id=current_user["id"],
+            user_id=current_user.id,
             resource_type="script",
             cost_usd=usage.get("estimated_cost", 0.0),
             metadata={
@@ -2996,7 +2991,7 @@ Script to analyze:
 async def generate_script_and_scenes_with_gpt(
     request: dict = Body(...),  # Accept body instead of query params
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Generate only the AI script and scene descriptions for a chapter (no video generation)"""
     try:
@@ -3022,7 +3017,7 @@ async def generate_script_and_scenes_with_gpt(
         book_data = chapter_data.book
 
         # Check access permissions
-        if book_data.status != "published" and book_data.user_id != current_user["id"]:
+        if book_data.status != "published" and book_data.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -3053,7 +3048,7 @@ async def generate_script_and_scenes_with_gpt(
             "characters": characters,
             "character_details": character_details,
             "script_style": script_style,
-            "user_id": current_user["id"],
+            "user_id": current_user.id,
             "created_at": datetime.now().isoformat(),
             "metadata": {
                 "total_scenes": len(scene_descriptions),
@@ -3068,7 +3063,7 @@ async def generate_script_and_scenes_with_gpt(
         ai_content = chapter_data.ai_generated_content or {}
         if not isinstance(ai_content, dict):
             ai_content = {}
-        key = f"{current_user['id']}:{script_style}"
+        key = f"{current_user.id}:{script_style}"
         ai_content[key] = script_data
 
         chapter_data.ai_generated_content = ai_content
@@ -3078,7 +3073,7 @@ async def generate_script_and_scenes_with_gpt(
         # ALSO create a dedicated scripts table entry for easier access
         script_record = {
             "chapter_id": chapter_id,
-            "user_id": current_user["id"],
+            "user_id": current_user.id,
             "script_style": script_style,
             "script": script,
             "scene_descriptions": scene_descriptions,
@@ -3092,7 +3087,7 @@ async def generate_script_and_scenes_with_gpt(
         # Insert or update in scripts table
         stmt = select(Script).where(
             Script.chapter_id == chapter_id,
-            Script.user_id == current_user["id"],
+            Script.user_id == current_user.id,
             Script.script_style == script_style,
         )
         result = await session.exec(stmt)
@@ -3139,7 +3134,7 @@ async def save_script_and_scenes(
     script_style: str = Body(...),
     script_name: str = Body(None),
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Save a new AI-generated script and scene descriptions for a chapter."""
     try:
@@ -3157,7 +3152,7 @@ async def save_script_and_scenes(
             raise HTTPException(status_code=404, detail="Chapter not found")
 
         book_data = chapter_data.book
-        if str(book_data.user_id) != current_user["id"]:
+        if str(book_data.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to modify this chapter"
             )
@@ -3172,7 +3167,7 @@ async def save_script_and_scenes(
         # Create new script record (allow multiple scripts)
         script_record = {
             "chapter_id": chapter_id,
-            "user_id": current_user["id"],
+            "user_id": current_user.id,
             "script_style": script_style,
             "script_name": script_name,
             "script": script,
@@ -3212,7 +3207,7 @@ async def get_script_and_scenes(
     chapter_id: str,
     script_style: str = "cinematic_movie",
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Fetch the saved AI-generated script and scene descriptions for a chapter (per user)."""
     try:
@@ -3226,7 +3221,7 @@ async def get_script_and_scenes(
         ai_content = chapter_data.ai_generated_content or {}
         if not isinstance(ai_content, dict):
             ai_content = {}
-        key = f"{current_user['id']}:{script_style}"
+        key = f"{current_user.id}:{script_style}"
         result = ai_content.get(key)
         if not result:
             return {
@@ -3248,7 +3243,7 @@ async def get_script_and_scenes(
 async def delete_script(
     script_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Delete a specific script by ID."""
     try:
@@ -3261,7 +3256,7 @@ async def delete_script(
         if not script_data:
             raise HTTPException(status_code=404, detail="Script not found")
 
-        if str(script_data.user_id) != current_user["id"]:
+        if str(script_data.user_id) != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to delete this script"
             )
@@ -3286,14 +3281,14 @@ async def delete_script(
 async def get_pipeline_status(
     video_gen_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Get detailed pipeline status for video generation"""
     try:
         # Verify access
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_data = result.first()
@@ -3372,7 +3367,7 @@ async def retry_video_generation(
     video_gen_id: str,
     request: dict = Body(default={}),
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Retry video generation from failed step or specific step - with smart resume logic"""
     try:
@@ -3385,7 +3380,7 @@ async def retry_video_generation(
         # Verify access
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_gen_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_response = result.first()
@@ -3807,14 +3802,14 @@ async def trigger_task_for_step(
 async def get_video_generation_polling_status(
     video_generation_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Comprehensive polling endpoint for video generation status with step-by-step progress"""
     try:
         # Verify access to video generation
         stmt = select(VideoGeneration).where(
             VideoGeneration.id == video_generation_id,
-            VideoGeneration.user_id == current_user["id"],
+            VideoGeneration.user_id == current_user.id,
         )
         result = await session.exec(stmt)
         video_response = result.first()
@@ -3981,7 +3976,7 @@ async def retry_video_retrieval(
     task_id: str,
     video_url: str = Body(None),
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
 ):
     """Retry video retrieval for a failed video generation task"""
     try:
@@ -3989,7 +3984,7 @@ async def retry_video_retrieval(
 
         # Verify task access
         stmt = select(VideoGeneration).where(
-            VideoGeneration.id == task_id, VideoGeneration.user_id == current_user["id"]
+            VideoGeneration.id == task_id, VideoGeneration.user_id == current_user.id
         )
         result = await session.exec(stmt)
         task_response = result.first()

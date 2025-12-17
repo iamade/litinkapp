@@ -13,6 +13,7 @@ import {
   CheckCircle,
   CreditCard,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 import { apiClient } from "../lib/api";
 import { stripeService } from "../services/stripeService";
@@ -1133,20 +1134,56 @@ export default function BookUpload() {
         }
     
     
-        // Call the save-structure endpoint
-        await apiClient.post(`/books/${aiBook.id}/save-structure`, structureData);
-    
-        toast.success("Book structure confirmed! Processing chapters...");
-        setStep(5); // Move to book details step
+
+
+        // Call the save-structure endpoint with streaming support using the new apiClient method
+        const response = await apiClient.postStream(`/books/${aiBook.id}/save-structure`, structureData);
+
+        // No need to check response.ok or Authorization here, apiClient.postStream handles URL, Auth, and errors.
+        
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error("No response body");
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || ""; // Keep the incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const data = JSON.parse(line);
+              
+              if (data.status === "progress") {
+                setProcessingStatus(data.message);
+              } else if (data.status === "error") {
+                throw new Error(data.message);
+              } else if (data.status === "complete") {
+                 // Success!
+                 toast.success("Book structure confirmed! Processing chapters...");
+                 setStep(5); // Move to book details step
+                 return; // Exit function
+              }
+            } catch (e) {
+              console.warn("Failed to parse stream message:", line);
+            }
+          }
+        }
         
       } catch (error: any) {
         const errorMessage =
-          error?.response?.data?.detail ||
           error?.message ||
           "Failed to save book structure";
         toast.error(`Failed to save structure: ${errorMessage}`);
       } finally {
         setSavingChapters(false);
+        setProcessingStatus("");
       }
     };
 
@@ -1964,30 +2001,49 @@ export default function BookUpload() {
                   <p className="mt-4">Loading book structure...</p>
                 </div>
               )}
-              <div className="flex justify-between">
-                <button
-                  onClick={handleBack}
-                  className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl"
-                >
-                  Back
-                </button>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowRejectModal(true)}
-                    disabled={savingChapters || !bookStructure}
-                    className="px-6 py-4 bg-red-100 text-red-700 rounded-xl font-semibold hover:bg-red-200 transition-all text-lg disabled:opacity-50"
-                  >
-                    Reject Structure
-                  </button>
-                  <button
-                    onClick={handleSaveStructure}
-                    disabled={savingChapters || !bookStructure}
-                    className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50"
-                  >
-                    {savingChapters ? "Saving..." : "Confirm Structure"}
-                  </button>
+                <div className="flex flex-col gap-4">
+                  {savingChapters && (
+                    <div className="flex flex-col items-center justify-center py-4 bg-purple-50 rounded-xl border border-purple-100">
+                      <Loader2 className="w-8 h-8 text-purple-600 animate-spin mb-2" />
+                      <p className="text-purple-700 font-medium">
+                        {processingStatus || "Saving structure..."}
+                      </p>
+                    </div>
+                  )}
+                  
+                  <div className="flex justify-between">
+                    <button
+                      onClick={handleBack}
+                      className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl disabled:opacity-50"
+                      disabled={savingChapters}
+                    >
+                      Back
+                    </button>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setShowRejectModal(true)}
+                        disabled={savingChapters || !bookStructure}
+                        className="px-6 py-4 bg-red-100 text-red-700 rounded-xl font-semibold hover:bg-red-200 transition-all text-lg disabled:opacity-50"
+                      >
+                        Reject Structure
+                      </button>
+                      <button
+                        onClick={handleSaveStructure}
+                        disabled={savingChapters || !bookStructure}
+                        className="px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-semibold hover:from-purple-700 hover:to-blue-700 transition-all text-lg disabled:opacity-50 flex items-center gap-2"
+                      >
+                         {savingChapters ? (
+                           <>
+                             <Loader2 className="w-5 h-5 animate-spin" />
+                             Saving...
+                           </>
+                         ) : (
+                           "Confirm Structure"
+                         )}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-              </div>
             </div>
           )}
 

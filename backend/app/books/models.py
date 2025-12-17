@@ -39,6 +39,11 @@ class Book(SQLModel, table=True):
     # Structure fields
     has_sections: bool = Field(default=False)
     structure_type: str = Field(default="flat")
+    original_file_storage_path: Optional[str] = Field(default=None)
+
+    # Progress fields
+    progress: int = Field(default=0)
+    progress_message: Optional[str] = Field(default=None)
 
     # Payment fields
     stripe_checkout_session_id: Optional[str] = Field(default=None)
