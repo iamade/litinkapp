@@ -424,7 +424,7 @@ class StandaloneImageService:
             statement = (
                 select(ImageGeneration)
                 .where(ImageGeneration.id == record_id)
-                .where(ImageGeneration.user_id == uuid.UUID(user_id))
+                .where(ImageGeneration.user_id == uuid.UUID(str(user_id)))
             )
             result = await self.session.exec(statement)
             record = result.first()
@@ -449,7 +449,7 @@ class StandaloneImageService:
         try:
             statement = (
                 select(ImageGeneration)
-                .where(ImageGeneration.user_id == uuid.UUID(user_id))
+                .where(ImageGeneration.user_id == uuid.UUID(str(user_id)))
                 .where(ImageGeneration.video_generation_id == None)
                 .order_by(desc(ImageGeneration.created_at))
                 .limit(limit)
@@ -482,7 +482,7 @@ class StandaloneImageService:
             statement = (
                 select(ImageGeneration)
                 .where(ImageGeneration.id == record_id)
-                .where(ImageGeneration.user_id == uuid.UUID(user_id))
+                .where(ImageGeneration.user_id == uuid.UUID(str(user_id)))
             )
             result = await self.session.exec(statement)
             record = result.first()
@@ -608,7 +608,7 @@ class StandaloneImageService:
 
             image_record = ImageGeneration(
                 id=record_id,
-                user_id=uuid.UUID(user_id),
+                user_id=uuid.UUID(str(user_id)),
                 image_type=image_type,
                 scene_description=scene_description,
                 character_name=character_name,

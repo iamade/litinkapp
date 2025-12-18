@@ -1,3 +1,6 @@
+ if i delete a book on the explorer mode it should not affect the book in creator mode but right now it seems its the same book uploaded in creator mo
+
+=============================================
 i noticed the following issues in the creator mode
 
 1. on the front end i can see a recent project harry potter and the sorcers stone but when i click on it it does not open the project page

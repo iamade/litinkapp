@@ -1,12 +1,17 @@
 import { apiClient } from "../lib/api";
 
+export type ProjectStatus = "draft" | "generating" | "review" | "completed" | "published";
+
 export interface Project {
   id: string;
   title: string;
   project_type: "entertainment" | "training" | "advert" | "music_video";
   workflow_mode: "explorer_agentic" | "creator_interactive";
-  status: "draft" | "generating" | "review" | "completed" | "published";
+  status: ProjectStatus;
   created_at: string;
+  updated_at: string;
+  input_prompt?: string;
+  artifacts?: any[];
 }
 
 export interface IntentAnalysisResult {
@@ -22,6 +27,18 @@ export const projectService = {
     return await apiClient.post<Project>("/projects/", data);
   },
 
+  createProjectFromUpload: async (file: File, projectType: string, inputPrompt?: string) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("project_type", projectType);
+    if (inputPrompt) {
+        formData.append("input_prompt", inputPrompt);
+    }
+    
+    // Use apiClient.upload which handles FormData and multipart
+    return await apiClient.upload<Project>("/projects/upload", formData);
+  },
+
   getProjects: async () => {
     return await apiClient.get<Project[]>("/projects/");
   },
@@ -35,5 +52,9 @@ export const projectService = {
       prompt,
       file_name: fileName,
     });
+  },
+
+  deleteProject: async (id: string) => {
+    return await apiClient.delete(`/projects/${id}`);
   },
 };

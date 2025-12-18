@@ -5,6 +5,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { Toaster } from "react-hot-toast";
 import Navbar from "./components/Navbar";
 import HomePage from "./pages/HomePage";
+import ProjectView from "./pages/ProjectView";
 import AuthPage from "./pages/AuthPage";
 import Dashboard from "./pages/Dashboard";
 import AuthorPanel from "./pages/AuthorPanel";
@@ -64,6 +65,7 @@ function App() {
                     <Route path="/learn" element={<LearningMode />} />
                     <Route path="/explore" element={<EntertainmentMode />} />
                     <Route path="/creator" element={<CreatorMode />} />
+                    <Route path="/project/:id" element={<ProjectView />} />
                     <Route path="/profile" element={<Profile />} />
                     <Route path="/upload" element={<BookUpload />} />
                     <Route path="/book/:id" element={<BookView />} />

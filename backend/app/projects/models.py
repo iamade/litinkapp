@@ -34,6 +34,7 @@ class ArtifactType(str, Enum):
     IMAGE = "image"
     AUDIO = "audio"
     VIDEO = "video"
+    CHAPTER = "chapter"
     DOCUMENT_SUMMARY = "document_summary"
 
 

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -12,9 +12,29 @@ from app.projects.schemas import (
     IntentAnalysisRequest,
     IntentAnalysisResult,
 )
+from app.projects.models import ProjectType
+from fastapi import UploadFile, File, Form
 from app.projects.services import ProjectService, IntentService
 
 router = APIRouter()
+
+
+@router.post("/upload", response_model=ProjectRead)
+async def create_project_upload(
+    file: UploadFile = File(...),
+    project_type: ProjectType = Form(ProjectType.ENTERTAINMENT),
+    input_prompt: Optional[str] = Form(None),
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Create a new project from an uploaded file (PDF, etc).
+    Extracts chapters and stores them as artifacts.
+    """
+    project_service = ProjectService(session)
+    return await project_service.create_project_from_upload(
+        file, current_user.id, project_type, input_prompt
+    )
 
 
 @router.post("/", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)

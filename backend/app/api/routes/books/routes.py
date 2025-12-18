@@ -25,7 +25,7 @@ import json
 import io
 
 from app.core.auth import get_current_user, get_current_author, get_current_active_user
-from app.core.database import get_session
+from app.core.database import get_session, async_session
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, update, delete, col, or_, text
 from sqlmodel import select, update, delete, col, or_, text
@@ -1416,53 +1416,56 @@ async def save_book_structure(
 
         # Define generator for streaming response
         async def structure_save_generator():
-            try:
-                # Initialize file service
-                file_service = FileService()
+            # Create a NEW session for the streaming context because the route dependency session
+            # will be closed when the route handler returns (before stream finishes)
+            async with async_session() as streaming_session:
+                try:
+                    # Initialize file service
+                    file_service = FileService()
 
-                # Stream progress updates from the service
-                async for status_msg in file_service.confirm_book_structure(
-                    book_id=book_id,
-                    confirmed_chapters=confirmed_chapters,
-                    user_id=str(current_user.id),
-                    session=session,
-                ):
-                    # Yield progress message as JSON
-                    yield json.dumps(
-                        {"status": "progress", "message": status_msg}
-                    ) + "\n"
+                    # Stream progress updates from the service
+                    async for status_msg in file_service.confirm_book_structure(
+                        book_id=book_id,
+                        confirmed_chapters=confirmed_chapters,
+                        user_id=str(current_user.id),
+                        session=streaming_session,
+                    ):
+                        # Yield progress message as JSON
+                        yield json.dumps(
+                            {"status": "progress", "message": status_msg}
+                        ) + "\n"
 
-                # After generator completes, fetch the final book state
-                # We need to fetch it again with relationships loaded to avoid MissingGreenlet
-                stmt = (
-                    select(BookModel)
-                    .where(BookModel.id == book_id)
-                    .options(
-                        selectinload(BookModel.chapters),
-                        selectinload(BookModel.sections),
+                    # After generator completes, fetch the final book state using the same streaming session
+                    stmt = (
+                        select(BookModel)
+                        .where(BookModel.id == book_id)
+                        .options(
+                            selectinload(BookModel.chapters),
+                            selectinload(BookModel.sections),
+                        )
                     )
-                )
-                result = await session.exec(stmt)
-                book = result.first()
+                    result = await streaming_session.exec(stmt)
+                    book = result.first()
 
-                if book:
-                    # Serialize and yield final result
-                    book_data = book.model_dump(mode="json")
-                    yield json.dumps(
-                        {
-                            "status": "complete",
-                            "message": "Book structure saved successfully",
-                            "book": book_data,
-                        }
-                    ) + "\n"
-                else:
-                    yield json.dumps(
-                        {"status": "error", "message": "Book not found after save"}
-                    ) + "\n"
+                    if book:
+                        # Serialize and yield final result
+                        book_data = book.model_dump(mode="json")
+                        yield json.dumps(
+                            {
+                                "status": "complete",
+                                "message": "Book structure saved successfully",
+                                "book": book_data,
+                            }
+                        ) + "\n"
+                    else:
+                        yield json.dumps(
+                            {"status": "error", "message": "Book not found after save"}
+                        ) + "\n"
 
-            except Exception as e:
-                # Yield error message
-                yield json.dumps({"status": "error", "message": str(e)}) + "\n"
+                except Exception as e:
+                    # Yield error message
+                    print(f"[STRUCTURE SAVE ERROR] {e}")
+                    yield json.dumps({"status": "error", "message": str(e)}) + "\n"
 
         # Return StreamingResponse
         return StreamingResponse(

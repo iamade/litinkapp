@@ -87,6 +87,44 @@ class BookStructureDetector:
 
         # COMPREHENSIVE CHAPTER PATTERNS - handles multiple book formats
         # Ordered by specificity (most specific first)
+        self.WORD_TO_NUMBER = {
+            "ONE": 1,
+            "TWO": 2,
+            "THREE": 3,
+            "FOUR": 4,
+            "FIVE": 5,
+            "SIX": 6,
+            "SEVEN": 7,
+            "EIGHT": 8,
+            "NINE": 9,
+            "TEN": 10,
+            "ELEVEN": 11,
+            "TWELVE": 12,
+            "THIRTEEN": 13,
+            "FOURTEEN": 14,
+            "FIFTEEN": 15,
+            "SIXTEEN": 16,
+            "SEVENTEEN": 17,
+            "EIGHTEEN": 18,
+            "NINETEEN": 19,
+            "TWENTY": 20,
+            "THIRTY": 30,
+            "FORTY": 40,
+            "FIFTY": 50,
+            "SIXTY": 60,
+            "SEVENTY": 70,
+            "EIGHTY": 80,
+            "NINETY": 90,
+            "HUNDRED": 100,
+        }
+
+        # Build regex for spelled out numbers
+        number_words = "|".join(self.WORD_TO_NUMBER.keys())
+        # Regex for compound numbers like "TWENTY-ONE" or "THIRTY TWO"
+        self.SPELLED_NUMBER_RE = (
+            f"((?:{number_words})(?:[\\\\s\\\\-]*(?:{number_words}))?)"
+        )
+
         self.CHAPTER_PATTERNS = [
             # Roman numerals with CHAPTER keyword (like "CHAPTER XIX.")
             r"^\s*CHAPTER\s+([IVXLCDM]+)\.?\s*$",  # CHAPTER XIX. or CHAPTER XIX
@@ -101,6 +139,8 @@ class BookStructureDetector:
             # Standalone Roman numerals or numbers (for minimalist books)
             r"^\s*([IVXLCDM]+)\.?\s*$",  # Just "XIX." or "I."
             r"^\s*(\d+)\.?\s*$",  # Just "19." or "1."
+            # Spelled out standalone numbers (e.g. "ONE", "TWENTY-ONE")
+            rf"^\s*{self.SPELLED_NUMBER_RE}\.?\s*$",
             # With separators (colon, dash)
             r"^\s*CHAPTER\s+(\d+)[\s\-:]+(.+)$",  # CHAPTER 1: Title, CHAPTER 1 - Title
             r"^\s*CHAPTER\s+([IVXLCDM]+)[\s\-:]+(.+)$",  # CHAPTER I: Title
@@ -406,6 +446,9 @@ class BookStructureDetector:
     def _normalize_chapter_number(self, number: str) -> str:
         """Normalize chapter numbers (convert Roman to Arabic)"""
         number = number.strip().upper()
+        # Remove trailing dot if present
+        if number.endswith("."):
+            number = number[:-1]
 
         # If it's already Arabic, return as is
         if number.isdigit():
@@ -428,6 +471,19 @@ class BookStructureDetector:
             "XIII": 13,
             "XIV": 14,
             "XV": 15,
+            "XVI": 16,
+            "XVII": 17,
+            "XVIII": 18,
+            "XIX": 19,
+            "XX": 20,
+            "XXI": 21,
+            "XXII": 22,
+            "XXIII": 23,
+            "XXIV": 24,
+            "XXV": 25,
+            "XXX": 30,
+            "XL": 40,
+            "L": 50,
         }
         return str(roman_to_int.get(number, number))
 
@@ -494,8 +550,36 @@ class BookStructureDetector:
             if not content_lines and not line:
                 continue
 
-            # Stop if we hit another chapter number
+            # Stop if we hit another chapter number - RELAXED CHECK
             if re.match(r"^(\d+)$", line) and i < len(lines) - 5:
+                # Only break if the next line actually looks like a chapter title or continuation
+                # Many books have page numbers in the middle of text flow on raw extraction
+                is_real_chapter_break = False
+
+                # Check previous line (if it ends with sentence terminator, break is more likely)
+                # prev_line = lines[i-1].strip() if i > 0 else ""
+
+                # Check next few lines for title pattern
+                for j in range(i + 1, min(i + 5, len(lines))):
+                    next_line = lines[j].strip()
+                    if not next_line:
+                        continue
+
+                    # If next line looks like a title (uppercase, shortish) or matches chapter pattern
+                    if (
+                        10 < len(next_line) < 100 and next_line[0].isupper()
+                    ) or self._match_chapter_patterns(next_line):
+                        is_real_chapter_break = True
+                        break
+
+                if is_real_chapter_break:
+                    print(
+                        f"[CONTENT EXTRACTION] Stopped at next chapter number break: {line}"
+                    )
+                    break
+                else:
+                    # Probably a page number, ignore it
+                    continue
                 # Check if next few lines contain a title pattern
                 has_title_after = False
                 for j in range(i + 1, min(i + 10, len(lines))):
@@ -610,19 +694,20 @@ class BookStructureDetector:
                     print(f"[CHAPTER DETECTION] Found: {full_title}")
 
         # FIX: Additional validation - check for reasonable sequence
+        # Relaxed: If we found at least 3 chapters, even if sequence has gaps, it's better than nothing
         if len(chapter_headers) >= 3:
             numbers = [h["number"] for h in chapter_headers]
-            # Should start from 1 or close to 1, and be somewhat sequential
-            if min(numbers) <= 3 and max(numbers) - min(numbers) < len(numbers) * 2:
+            # More lenient sequence check
+            if min(numbers) <= 10:  # Allow starting a bit later
                 print(
                     f"[CHAPTER DETECTION] Validated sequence: {min(numbers)} to {max(numbers)}"
                 )
                 return chapter_headers
             else:
                 print(
-                    f"[CHAPTER DETECTION] Invalid sequence: {min(numbers)} to {max(numbers)}, rejecting"
+                    f"[CHAPTER DETECTION] Suspicious sequence start: {min(numbers)}, keeping for now"
                 )
-                return []
+                return chapter_headers
 
         return chapter_headers
 
@@ -742,11 +827,38 @@ class BookStructureDetector:
 
     def _normalize_chapter_number(self, number_str: str) -> str:
         """Normalize chapter number to a consistent format"""
+        # Clean up the input
+        number_str = number_str.strip().upper()
+        if number_str.endswith("."):
+            number_str = number_str[:-1]
+
         # Check if it's a Roman numeral
-        if re.match(r"^[IVXLCDM]+$", number_str.upper()):
+        if re.match(r"^[IVXLCDM]+$", number_str):
             # Convert to integer
             decimal = self._roman_to_int(number_str)
             return str(decimal)
+
+        # Check if it's a spelled out number (e.g. ONE or TWENTY-ONE)
+        if re.match(r"^[A-Z\- \t]+$", number_str) and not number_str.isdigit():
+            # Handle compound numbers like TWENTY-ONE
+            parts = re.split(r"[\s\-]+", number_str)
+            total = 0
+            valid_word = False
+
+            current_val = 0
+            for part in parts:
+                if part in self.WORD_TO_NUMBER:
+                    val = self.WORD_TO_NUMBER[part]
+                    if val == 100:  # Handle HUNDRED multiplier if simple
+                        current_val = (current_val or 1) * 100
+                    else:
+                        current_val += val
+                    valid_word = True
+
+            if valid_word and current_val > 0:
+                print(f"[CHAPTER NORMALIZE] Converted '{number_str}' to {current_val}")
+                return str(current_val)
+
         return number_str
 
     def _match_chapter_patterns(self, line: str) -> Optional[Dict]:
@@ -926,6 +1038,42 @@ class BookStructureDetector:
 
         return min(score, 5)  # Cap at 5 points
 
+    def _find_page_by_title_scan(
+        self, doc, chapter_title: str, start_page: int, end_page: int
+    ) -> Optional[int]:
+        """Fallback: Scan pages for the chapter title if page number finding fails"""
+        print(
+            f"[PAGE FINDER] Scanning pages {start_page+1}-{end_page+1} for title: {chapter_title}"
+        )
+
+        try:
+            # Clean title for matching
+            clean_title = chapter_title
+            if ":" in chapter_title:
+                clean_title = chapter_title.split(":", 1)[1].strip()
+
+            clean_title_upper = clean_title.upper()
+
+            for i in range(start_page, min(len(doc), end_page)):
+                try:
+                    text = doc[i].get_text()
+                    # Check for title in the first 1000 chars (usually top of page)
+                    page_head = text[:1000].upper()
+
+                    # Loose matching - check if title exists in header area
+                    if clean_title_upper in page_head:
+                        print(
+                            f"[PAGE FINDER] Found title '{clean_title}' on page {i+1}"
+                        )
+                        return i
+                except Exception:
+                    continue
+
+        except Exception as e:
+            print(f"[PAGE FINDER] Error scanning for title: {e}")
+
+        return None
+
     async def _extract_content_for_chapters_by_pages(
         self, validated_chapters: List[Dict], doc
     ) -> List[Dict[str, Any]]:
@@ -963,7 +1111,31 @@ class BookStructureDetector:
                     print(
                         f"[PAGE EXTRACTION] Could not find actual page {toc_page_num} for {chapter_title}"
                     )
-                    actual_start_page = toc_page_num  # Fallback to TOC page number
+                    # Fallback: Scan for title
+                    scan_start = (
+                        0
+                        if i == 0
+                        else (
+                            final_chapters[-1]["actual_end_page"]
+                            if final_chapters
+                            else 0
+                        )
+                    )
+                    scan_end = min(len(doc), scan_start + 50)
+
+                    found_page = self._find_page_by_title_scan(
+                        doc, chapter_title, scan_start, scan_end
+                    )
+                    if found_page is not None:
+                        print(
+                            f"[PAGE EXTRACTION] Recovered start page using title scan: {found_page + 1}"
+                        )
+                        actual_start_page = found_page
+                    else:
+                        print(
+                            f"[PAGE EXTRACTION] Title scan failed. Defaulting to TOC page {toc_page_num}"
+                        )
+                        actual_start_page = toc_page_num  # Fallback to TOC page number
                 else:
                     print(
                         f"[PAGE EXTRACTION] Found page number {toc_page_num} on actual page {actual_start_page + 1}"
@@ -2455,12 +2627,32 @@ class FileService:
                 pattern_chapters = await self._extract_toc_with_patterns(
                     doc, True, toc_pages[0], min(75, len(doc))
                 )
+                print(
+                    f"[DEBUG] Pattern extraction returned {len(pattern_chapters)} chapters"
+                )
                 if len(pattern_chapters) >= 3:
                     print(
                         f"[TOC EXTRACTION] SUCCESS: Pattern fallback yielded {len(pattern_chapters)} chapters"
                     )
                     doc.close()
                     return pattern_chapters
+                print(f"[DEBUG] Falling through to AI fallback check")
+
+                # Strategy 3.5: AI Fallback if patterns failed but we have TOC pages
+                # This catches the case where complexity is "moderate" (so we skipped explicit AI)
+                # but patterns failed to parse the specific format
+                print(
+                    f"[TOC EXTRACTION] Pattern fallback failed ({len(pattern_chapters)} chapters). Attempting AI fallback on confirmed TOC pages..."
+                )
+                ai_fallback_chapters = await self._extract_complex_toc_with_ai(
+                    doc, toc_pages
+                )
+                if len(ai_fallback_chapters) >= 3:
+                    print(
+                        f"[TOC EXTRACTION] SUCCESS: AI fallback yielded {len(ai_fallback_chapters)} chapters"
+                    )
+                    doc.close()
+                    return ai_fallback_chapters
 
             # Strategy 4: Layout analysis with coordinates (last resort for very complex TOCs)
             if toc_pages:
@@ -2681,14 +2873,22 @@ class FileService:
 
             # ✅ FIX: Only look for chapter patterns if we're near a confirmed TOC start
             if confirmed_toc_start is not None:
-                # Check if this page continues the TOC (must be within 3 pages of TOC start)
-                if page_num <= confirmed_toc_start + 2:
+                # Check if this page continues the TOC (must be within 10 pages of TOC start)
+                if page_num <= confirmed_toc_start + 9:
+
+                    spelled_num = (
+                        self.structure_detector.SPELLED_NUMBER_RE
+                        if hasattr(self, "structure_detector")
+                        else r"(ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|ELEVEN|TWELVE|THIRTY|THIRTY-ONE|TWENTY|TWENTY-ONE)"
+                    )
+
                     chapter_patterns = [
                         r"CHAPTER\s+\d+",  # "CHAPTER 1", "CHAPTER 2"
                         r"Chapter\s+\d+",  # "Chapter 1", "Chapter 2"
                         r"CHAPTER\s+[IVX]+",  # "CHAPTER I", "CHAPTER II"
                         r"Chapter\s+[IVX]+",  # "Chapter I", "Chapter II"
                         r"BOOK\s+THE\s+(FIRST|SECOND|THIRD)",  # "BOOK THE FIRST"
+                        rf"{spelled_num}",  # Spelled out numbers like "THIRTY"
                     ]
 
                     chapter_matches = 0
@@ -2696,12 +2896,16 @@ class FileService:
                         chapter_matches += len(re.findall(pattern, text))
 
                     # ✅ FIX: Require substantial TOC-like formatting
+                    # Relaxed dot matching (allow single dots with spaces)
                     page_number_patterns = len(
-                        re.findall(r"\.{3,}\s*\d+", text)
+                        re.findall(r"(\.{2,}|\s\.\s)\s*\d+", text)
                     )  # Dots leading to page numbers
 
                     # Must have BOTH chapter patterns AND TOC formatting
-                    if chapter_matches >= 3 and page_number_patterns >= 2:
+                    # Relax logic: if we have MANY chapter matches, we need fewer dots
+                    if (chapter_matches >= 3 and page_number_patterns >= 1) or (
+                        chapter_matches >= 5
+                    ):
                         print(
                             f"[TOC PAGES] Found TOC continuation on page {page_num + 1} ({chapter_matches} chapters, {page_number_patterns} page refs)"
                         )
@@ -2719,17 +2923,31 @@ class FileService:
                 # Only accept pages that have very strong TOC indicators
                 strong_toc_score = 0
 
+                spelled_num = (
+                    self.structure_detector.SPELLED_NUMBER_RE
+                    if hasattr(self, "structure_detector")
+                    else r"(ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN|THIRTY)"
+                )
+
                 # Count chapter-like entries with page numbers
                 chapter_with_pages = len(
                     re.findall(
                         r"(CHAPTER|Chapter)\s+[IVX\d]+.*?\d+\s*$", text, re.MULTILINE
                     )
                 )
-                if chapter_with_pages >= 5:
+
+                # Also check for spelled out lines ending in numbers
+                spelled_with_pages = len(
+                    re.findall(
+                        rf"{spelled_num}\s*\n.*?\.{{1,}}\s*\d+\s*$", text, re.MULTILINE
+                    )
+                )
+
+                if chapter_with_pages >= 5 or spelled_with_pages >= 3:
                     strong_toc_score += 3
 
                 # Count dotted lines (TOC formatting)
-                dotted_lines = len(re.findall(r"\.{5,}", text))
+                dotted_lines = len(re.findall(r"(\.{3,}|\s\.\s)\s*\d+", text))
                 if dotted_lines >= 3:
                     strong_toc_score += 2
 
@@ -3933,6 +4151,12 @@ class FileService:
         ]
 
         # ✅ FIX: More comprehensive chapter patterns for different TOC layouts
+        spelled_num = (
+            self.structure_detector.SPELLED_NUMBER_RE
+            if hasattr(self, "structure_detector")
+            else ""
+        )
+
         chapter_patterns = [
             # Pattern for "I. TITLE ... PAGE" format
             re.compile(
@@ -3946,6 +4170,11 @@ class FileService:
             # Pattern for Roman numeral on separate line from title
             re.compile(
                 r"^\s*([IVX]+)\s*$\s*([A-Z][A-Z\s]+[A-Z])\s+(\d+)$", re.MULTILINE
+            ),
+            # Pattern for spelled out number (THIRTY) on separate line from title
+            re.compile(
+                rf"^\s*{spelled_num}\s*\n\s*([A-Z][^\n]+?)\s+(\.{{1,}}|\s)\s*(\d+)\s*$",
+                re.MULTILINE | re.IGNORECASE,
             ),
             # Pattern for titles that span multiple lines
             re.compile(r"^\s*([IVX]+)\s*\n\s*([A-Z][^\n]+?)\s+(\d+)\s*$", re.MULTILINE),
@@ -3999,10 +4228,18 @@ class FileService:
                         if len(match.groups()) == 3:
                             num_str, title_str, page_str = match.groups()
                         elif len(match.groups()) == 4:  # Multi-line title
-                            num_str, title_part1, title_part2, page_str = match.groups()
-                            title_str = (
-                                f"{title_part1.strip()} {title_part2.strip()}".strip()
-                            )
+                            if (
+                                pattern_idx == 3
+                            ):  # Check if it's our spelled-out pattern
+                                # Spelled num regex has nested groups, so match.groups is messier
+                                # Wait, SPELLED_NUMBER_RE is ((?:...)) so has 1 capturing group.
+                                # So (Number, Title, Separator, Page) -> 4 groups.
+                                num_str, title_str, sep, page_str = match.groups()
+                            else:
+                                num_str, title_part1, title_part2, page_str = (
+                                    match.groups()
+                                )
+                                title_str = f"{title_part1.strip()} {title_part2.strip()}".strip()
                         else:
                             continue
 
@@ -4010,11 +4247,30 @@ class FileService:
                             f"[PATTERN TOC EXTRACTION] Raw match: num='{num_str}', title='{title_str}', page='{page_str}'"
                         )
 
-                        # Convert Roman to Arabic
+                        # Convert Roman OR Spelled to Arabic
                         try:
-                            chapter_number = self._roman_to_int(num_str.strip().upper())
+                            # Try simple/roman conversion
+                            if re.match(r"^[IVXLCDM]+$", num_str.strip().upper()):
+                                chapter_number = self._roman_to_int(
+                                    num_str.strip().upper()
+                                )
+                            else:
+                                # Try normalizer for spelled out numbers
+                                norm = (
+                                    self.structure_detector._normalize_chapter_number(
+                                        num_str
+                                    )
+                                )
+                                if norm.isdigit():
+                                    chapter_number = int(norm)
+                                else:
+                                    print(
+                                        f"[PATTERN TOC EXTRACTION] Failed to normalize number: {num_str}"
+                                    )
+                                    continue
+
                             print(
-                                f"[PATTERN TOC EXTRACTION] Converted roman '{num_str}' to {chapter_number}"
+                                f"[PATTERN TOC EXTRACTION] Converted '{num_str}' to {chapter_number}"
                             )
                         except:
                             continue
@@ -5701,8 +5957,8 @@ class FileService:
                         section = Section(
                             book_id=book_uuid,
                             title=ch["section_title"],
-                            section_type=ch.get("section_type", ""),
-                            section_number=ch.get("section_number", ""),
+                            section_type=ch.get("section_type") or "",
+                            section_number=ch.get("section_number") or "",
                             order_index=ch.get("section_order", order),
                         )
                         session.add(section)
@@ -7199,7 +7455,12 @@ Chapters:
             page_refs = len(
                 re.findall(r"\.{3,}\s*\d+|[A-Za-z]\s+\d+\s*$", text, re.MULTILINE)
             )
-            if page_refs >= 2:
+            if page_refs >= 5:
+                continuation_score += 3  # Strong indicator
+                print(
+                    f"[COMPLEX TOC AI] Found high density of page refs ({page_refs}) on page {additional_page + 1}"
+                )
+            elif page_refs >= 2:
                 continuation_score += 1
 
             # Only include if we have strong evidence
@@ -7218,6 +7479,52 @@ Chapters:
                 print(
                     f"[COMPLEX TOC AI] ❌ Skipping page {additional_page + 1} (score: {continuation_score})"
                 )
+
+        # GAP FILLING LOGIC: If we have a gap between pages, fill it
+        # E.g. we have pages [8, 9, 10] and [15], we should likely include [11, 12, 13, 14]
+        # Sort current blocks by page
+        toc_text_blocks.sort(key=lambda x: x["page_num"])
+
+        print(
+            f"[COMPLEX TOC AI] Starting Gap Filling Check. Current pages: {[b['page_num'] for b in toc_text_blocks]}"
+        )
+
+        filled_blocks = []
+        if toc_text_blocks:
+            current_pages = {b["page_num"] for b in toc_text_blocks}
+            min_page = toc_text_blocks[0]["page_num"]
+            max_page = toc_text_blocks[-1]["page_num"]
+
+            print(
+                f"[COMPLEX TOC AI] Checking for gaps between page {min_page} and {max_page}"
+            )
+
+            for p in range(min_page, max_page + 1):
+                if p not in current_pages:
+                    # Found a gap page
+                    print(f"[COMPLEX TOC AI] Filling gap: including page {p}")
+                    try:
+                        # Find the doc index for this page (p is 1-based, doc is 0-based)
+                        page_idx = p - 1
+                        if 0 <= page_idx < len(doc):
+                            page_text = doc[page_idx].get_text()
+                            filled_blocks.append(
+                                {
+                                    "page_num": p,
+                                    "text": page_text,
+                                    "lines": page_text.split("\n"),
+                                }
+                            )
+                    except Exception as e:
+                        print(f"[COMPLEX TOC AI] Error filling gap page {p}: {e}")
+
+        # Add filled blocks and resort
+        if filled_blocks:
+            print(f"[COMPLEX TOC AI] Added {len(filled_blocks)} gap-filled pages")
+            toc_text_blocks.extend(filled_blocks)
+            toc_text_blocks.sort(key=lambda x: x["page_num"])
+        else:
+            print("[COMPLEX TOC AI] No gaps found to fill")
 
         combined_toc_text = "\n\n=== PAGE BREAK ===\n\n".join(
             [f"PAGE {block['page_num']}:\n{block['text']}" for block in toc_text_blocks]

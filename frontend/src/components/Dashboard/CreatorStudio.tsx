@@ -11,11 +11,11 @@ import {
   MonitorPlay,
   File as FileIcon,
   X,
-  CheckCircle2
+  CheckCircle2,
+  Trash2
 } from "lucide-react";
 import { projectService, IntentAnalysisResult } from "../../services/projectService";
 import { toast } from "react-hot-toast";
-import { apiClient } from "../../lib/api";
 
 interface UploadedBook {
   id: string;
@@ -30,7 +30,7 @@ export default function CreatorStudio() {
   
   // File Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  // const [isUploading, setIsUploading] = useState(false); // Unused now
   const [uploadedBook, setUploadedBook] = useState<UploadedBook | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [recentProjects, setRecentProjects] = useState<any[]>([]);
@@ -39,9 +39,7 @@ export default function CreatorStudio() {
   React.useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const books = await apiClient.get<any[]>('/books/my-books');
-        // Filter for entertainment books (Creator projects)
-        const projects = books.filter((b: any) => b.book_type === 'entertainment');
+        const projects = await projectService.getProjects();
         setRecentProjects(projects);
       } catch (e) {
         console.error("Failed to fetch projects", e);
@@ -58,61 +56,22 @@ export default function CreatorStudio() {
     setUploadedBook(null);
   };
 
-  const uploadFile = async () => {
-    if (!selectedFile) return null;
-    
-    setIsUploading(true);
-    const toastId = toast.loading("Uploading and processing source material...");
-
-    try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-      formData.append("book_type", "entertainment");
-      formData.append("title", selectedFile.name);
-      formData.append("description", "Uploaded via Creator Studio");
-
-      const response = await apiClient.upload<any>("/books/upload", formData);
-      
-      let bookId = response.id || response.book_id;
-      if (bookId) {
-         setUploadedBook({
-            id: bookId,
-            title: response.title || selectedFile.name,
-            status: response.status || "PROCESSING"
-         });
-         toast.success("File uploaded successfully!", { id: toastId });
-         return { id: bookId, title: response.title || selectedFile.name };
-      }
-      throw new Error("No Book ID returned");
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to upload file.", { id: toastId });
-      return null;
-    } finally {
-      setIsUploading(false);
-    }
-  };
+  /* 
+     REMOVED: Old uploadFile logic that created a Book. 
+     Now we handle uploads directly during project creation.
+  */
 
   const triggerFileUpload = () => {
     fileInputRef.current?.click();
   };
 
   const handleAnalyze = async () => {
-    if (!prompt.trim() && !selectedFile && !uploadedBook) return;
+    if (!prompt.trim() && !selectedFile) return;
 
     setIsAnalyzing(true);
     try {
-      // 1. Upload file if selected but not yet uploaded
-      let currentBook = uploadedBook;
-      if (selectedFile && !currentBook) {
-         const uploaded = await uploadFile();
-         if (uploaded) {
-            currentBook = { id: uploaded.id, title: uploaded.title, status: 'PROCESSING' };
-         }
-      }
-
-      // 2. Analyze Intent
-      const textToAnalyze = prompt || (currentBook ? `Create a project from the book ${currentBook.title}` : "");
+      // Analyze Intent
+      const textToAnalyze = prompt || (selectedFile ? `Create a project from the file ${selectedFile.name}` : "");
       
       const result = await projectService.analyzeIntent(textToAnalyze);
       setAnalysis(result);
@@ -128,18 +87,47 @@ export default function CreatorStudio() {
   const handleCreateProject = async () => {
     if (!analysis) return;
     
+    // Show loading toast
+    const loadingToast = toast.loading("Creating your project...");
+    
     try {
-      await projectService.createProject({
-        title: `Project: ${prompt.slice(0, 20) || uploadedBook?.title || "Untitled"}...`, 
-        input_prompt: prompt,
-        project_type: analysis.primary_intent,
-        workflow_mode: "creator_interactive",
-        source_material_url: uploadedBook ? `book://${uploadedBook.id}` : undefined
-      });
-      toast.success("Project created! Redirecting to workspace...");
-      window.location.reload();
+      let projectId;
+
+      if (selectedFile) {
+        // Create project from upload
+        // We append the prompt to the upload if available
+         const data = await projectService.createProjectFromUpload(selectedFile, analysis.primary_intent, prompt);
+         projectId = data.id;
+      } else {
+        // Create text-only project
+        const data = await projectService.createProject({
+          title: `Project: ${prompt.slice(0, 20) || "Untitled"}...`, 
+          input_prompt: prompt,
+          project_type: analysis.primary_intent,
+          workflow_mode: "creator_interactive",
+        });
+        projectId = data.id;
+      }
+      
+      toast.success("Project created! Redirecting...", { id: loadingToast });
+      window.location.href = `/project/${projectId}`;
     } catch (e) {
-      toast.error("Failed to create project.");
+      console.error(e);
+      toast.error("Failed to create project.", { id: loadingToast });
+    }
+  };
+
+  const handleDeleteProject = async (e: React.MouseEvent, projectId: string) => {
+    e.stopPropagation(); // Prevent navigation
+    if (!confirm("Are you sure you want to delete this project?")) return;
+
+    try {
+      await projectService.deleteProject(projectId);
+      setRecentProjects((prev) => prev.filter((p) => p.id !== projectId));
+      toast.success("Project deleted");
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to delete project");
     }
   };
 
@@ -205,14 +193,10 @@ export default function CreatorStudio() {
             <div className="absolute bottom-4 right-4 flex gap-2">
                <button 
                   onClick={triggerFileUpload}
-                  disabled={isUploading}
-                  className={`p-2 rounded-lg transition-colors flex items-center gap-2 ${
-                     isUploading ? "bg-purple-50 text-purple-400 cursor-wait" : "text-gray-400 hover:text-gray-600 hover:bg-gray-200"
-                  }`} 
+                  className="p-2 rounded-lg transition-colors flex items-center gap-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200"
                   title="Upload Source Material"
                >
-                {isUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Upload className="h-5 w-5" />}
-                {isUploading && <span className="text-xs font-semibold">Processing...</span>}
+                <Upload className="h-5 w-5" />
               </button>
               <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-lg transition-colors" title="Record Voice">
                 <Mic className="h-5 w-5" />
@@ -290,21 +274,34 @@ export default function CreatorStudio() {
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {recentProjects.map((project) => (
-              <div key={project.id} className="group border border-gray-200 rounded-xl p-4 hover:border-purple-200 hover:shadow-md transition-all">
+              <div 
+                key={project.id} 
+                onClick={() => window.location.href = `/book/${project.id}`}
+                className="group border border-gray-200 rounded-xl p-4 hover:border-purple-200 hover:shadow-md transition-all cursor-pointer relative"
+              >
                 <div className="flex items-start justify-between mb-3">
                   <div className={`p-2 rounded-lg ${
-                    project.status === 'READY' ? 'bg-green-100 text-green-600' : 
+                    project.status === 'READY' || project.status === 'completed' || project.status === 'published' ? 'bg-green-100 text-green-600' : 
                     project.status === 'FAILED' ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-600'
                   }`}>
-                    {project.status === 'READY' ? <CheckCircle2 className="h-5 w-5" /> : <Loader2 className="h-5 w-5" />}
+                    {(project.status === 'READY' || project.status === 'completed' || project.status === 'published') ? <CheckCircle2 className="h-5 w-5" /> : <Loader2 className="h-5 w-5" />}
                   </div>
-                  <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">{project.book_type}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">{project.project_type || project.book_type}</span>
+                    <button
+                      onClick={(e) => handleDeleteProject(e, project.id)}
+                      className="text-gray-400 hover:text-red-500 p-1 rounded-full hover:bg-red-50 transition-colors"
+                      title="Delete Project"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
-                <h4 className="font-semibold text-gray-900 mb-1 group-hover:text-purple-600 transition-colors truncate">{project.title}</h4>
+                <h4 className="font-semibold text-gray-900 mb-1 group-hover:text-purple-600 transition-colors truncate pr-8">{project.title}</h4>
                 <p className="text-sm text-gray-500 mb-4 line-clamp-2">{project.description || "No description"}</p>
                 <div className="flex items-center text-sm text-gray-500">
                   <span className="flex items-center gap-1">
-                    <BookOpen className="h-4 w-4" /> {project.chapters?.length || 0} Chapters
+                    <BookOpen className="h-4 w-4" /> {project.pipeline_steps?.length || project.chapters?.length || 0} Steps
                   </span>
                 </div>
               </div>
