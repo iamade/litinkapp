@@ -11,6 +11,7 @@ export interface Project {
   created_at: string;
   updated_at: string;
   input_prompt?: string;
+  source_material_url?: string;
   artifacts?: any[];
 }
 

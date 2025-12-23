@@ -81,11 +81,22 @@ class ProjectService:
         )
         self.session.add(project)
         await self.session.commit()
-        await self.session.refresh(project)
-        return project
+
+        # Re-fetch with artifacts loaded to avoid lazy loading issues
+        statement = (
+            select(Project)
+            .where(Project.id == project.id)
+            .options(selectinload(Project.artifacts))
+        )
+        result = await self.session.exec(statement)
+        return result.first()
 
     async def get_project(self, project_id: uuid.UUID) -> Optional[Project]:
-        statement = select(Project).where(Project.id == project_id)
+        statement = (
+            select(Project)
+            .where(Project.id == project_id)
+            .options(selectinload(Project.artifacts))
+        )
         result = await self.session.exec(statement)
         return result.first()
 
@@ -112,8 +123,15 @@ class ProjectService:
 
         self.session.add(project)
         await self.session.commit()
-        await self.session.refresh(project)
-        return project
+
+        # Re-fetch with artifacts loaded
+        statement = (
+            select(Project)
+            .where(Project.id == project_id)
+            .options(selectinload(Project.artifacts))
+        )
+        result = await self.session.exec(statement)
+        return result.first()
 
     async def delete_project(self, project_id: uuid.UUID) -> bool:
         project = await self.get_project(project_id)
@@ -156,9 +174,25 @@ class ProjectService:
                 text_content += page.get_text() + "\n"
             doc.close()
 
-            # 4. Detect Structure
-            detector = BookStructureDetector()
-            structure = detector.detect_structure(text_content)
+            # 4. Extract Chapters using Robust Flow (TOC -> AI -> Regex)
+            # Pass both content (for fallback) and storage_path (for TOC/EPUB)
+            try:
+                extracted_data = await file_service.extract_chapters_with_new_flow(
+                    content=text_content,
+                    book_type=(
+                        project_type.value
+                        if hasattr(project_type, "value")
+                        else "entertainment"
+                    ),
+                    original_filename=file.filename or "unknown",
+                    storage_path=remote_path,
+                )
+            except Exception as e:
+                print(f"[PROJECT UPLOAD] Extraction failed: {e}")
+                # Fallback to empty list or re-raise?
+                # For now, let's log and proceed with whatever we have or fail.
+                # Since this is the core value add, we should probably fail if extraction completely dies.
+                raise e
 
             # 5. Create Project
             project = Project(
@@ -180,33 +214,61 @@ class ProjectService:
             await self.session.commit()
             await self.session.refresh(project)
 
-            # 6. Create Artifacts from Chapters
-            chapters = structure.get("chapters", []) or []
-            # If structure is hierarchical, flatten it
-            if structure.get("sections"):
-                for section in structure.get("sections"):
-                    chapters.extend(section.get("chapters", []))
+            # 6. Create Artifacts from Extracted Data
+            try:
+                chapters = []
+                structure_type = "flat"
 
-            for idx, chapter in enumerate(chapters):
-                # Ensure content is not too large for JSONB if needed, but Artifact.content is JSON
-                # Storing full chapter text in content dict
-                artifact = Artifact(
-                    project_id=project.id,
-                    artifact_type=ArtifactType.CHAPTER,
-                    version=1,
-                    content={
-                        "title": chapter.get("title", f"Chapter {idx+1}"),
-                        "content": chapter.get("content", ""),
-                        "chapter_number": chapter.get("number", idx + 1),
-                    },
-                    generation_metadata={
-                        "source": "upload_extraction",
-                        "original_structure": structure.get("structure_type", "flat"),
-                    },
+                # Standardize output (Handle Sections vs Flat Chapters)
+                if extracted_data and isinstance(extracted_data, list):
+                    first_item = extracted_data[0] if extracted_data else {}
+
+                    if "chapters" in first_item:
+                        # It's a list of Sections
+                        structure_type = "hierarchical"
+                        for section in extracted_data:
+                            section_chapters = section.get("chapters", [])
+                            # Add section metadata to chapters if needed?
+                            # For now, just flatten them as requested by Project structure
+                            chapters.extend(section_chapters)
+                    else:
+                        # It's a flat list of Chapters
+                        chapters = extracted_data
+
+                print(
+                    f"[PROJECT UPLOAD] Creating artifacts for {len(chapters)} chapters..."
                 )
-                self.session.add(artifact)
 
-            await self.session.commit()
+                for idx, chapter in enumerate(chapters):
+                    # Artifact content
+                    artifact = Artifact(
+                        project_id=project.id,
+                        artifact_type=ArtifactType.CHAPTER.value,
+                        version=1,
+                        content={
+                            "title": chapter.get("title", f"Chapter {idx+1}"),
+                            "content": chapter.get("content", ""),
+                            "chapter_number": chapter.get("number", idx + 1),
+                            "summary": chapter.get("summary", ""),
+                        },
+                        generation_metadata={
+                            "source": "upload_extraction",
+                            "original_structure": structure_type,
+                            "section_title": chapter.get(
+                                "section_title"
+                            ),  # if available
+                        },
+                    )
+                    self.session.add(artifact)
+
+                await self.session.commit()
+                print("[PROJECT UPLOAD] Artifacts saved successfully.")
+            except Exception as e:
+                print(f"[PROJECT UPLOAD] Error creating artifacts: {e}")
+                # Use verify_partial_success or raise?
+                # If we made the project but failed artifacts, user sees empty project.
+                # Better to raise so FE gets 500 and user knows to retry.
+                raise e
 
             # Re-fetch with artifacts
             statement = (

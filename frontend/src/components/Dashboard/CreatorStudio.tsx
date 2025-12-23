@@ -276,7 +276,7 @@ export default function CreatorStudio() {
             {recentProjects.map((project) => (
               <div 
                 key={project.id} 
-                onClick={() => window.location.href = `/book/${project.id}`}
+                onClick={() => window.location.href = `/project/${project.id}`}
                 className="group border border-gray-200 rounded-xl p-4 hover:border-purple-200 hover:shadow-md transition-all cursor-pointer relative"
               >
                 <div className="flex items-start justify-between mb-3">

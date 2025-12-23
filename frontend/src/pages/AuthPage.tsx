@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { Mail, Lock, User, UserCheck, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, User, UserCheck, Eye, EyeOff, Shield } from "lucide-react";
 import { toast } from "react-hot-toast";
 import PasswordReset from "../components/PasswordReset";
+import { apiClient } from "../lib/api";
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -16,6 +17,10 @@ export default function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [securityQuestion, setSecurityQuestion] = useState("");
+  const [securityAnswer, setSecurityAnswer] = useState("");
   const { login, register, resendVerificationEmail } = useAuth();
   const navigate = useNavigate();
 
@@ -53,12 +58,41 @@ export default function AuthPage() {
           setLoading(false);
           return;
         }
-        await register(username, email, password, selectedRoles);
+        await register(username, email, password, confirmPassword, firstName, lastName, securityQuestion, securityAnswer, selectedRoles);
         toast.success(
           "Account created successfully! Please check your email for verification."
         );
+        // Don't navigate - user needs to verify email first
+        // Switch to login mode so they can log in after verification
+        setIsLogin(true);
+        setPassword("");
+        setConfirmPassword("");
+        setLoading(false);
+        return;
       }
-      navigate("/dashboard");
+      
+      // Only try to navigate after login (not registration)
+      try {
+        const user = await apiClient.get<any>("/users/me");
+        const hasCreator = user.roles?.includes('creator');
+        const hasExplorer = user.roles?.includes('explorer');
+        
+        if (hasCreator && !hasExplorer) {
+            navigate('/creator');
+        } else if (!hasCreator && hasExplorer) {
+            navigate('/dashboard');
+        } else {
+            // Both or neither
+            if (user.preferred_mode === 'creator') {
+                navigate('/creator');
+            } else {
+                navigate('/dashboard');
+            }
+        }
+      } catch (err) {
+         console.error("Failed to fetch user profile for redirect", err);
+         navigate("/dashboard");
+      }
     } catch (error) {
       if (error instanceof Error) {
         toast.error(error.message);
@@ -153,27 +187,76 @@ export default function AuthPage() {
             )}
 
             {!isLogin && (
-              <div>
-                <label
-                  htmlFor="username"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  Username
-                </label>
-                <div className="mt-1 relative">
-                  <input
-                    id="username"
-                    name="username"
-                    type="text"
-                    required
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    className="appearance-none relative block w-full px-3 py-3 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-xl focus:outline-none focus:ring-purple-500 focus:border-purple-500 focus:z-10"
-                    placeholder="Choose a username"
-                  />
-                  <User className="h-5 w-5 text-gray-400 absolute left-3 top-3.5" />
+              <>
+                {/* First Name and Last Name row */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label
+                      htmlFor="firstName"
+                      className="block text-sm font-medium text-gray-700"
+                    >
+                      First Name
+                    </label>
+                    <div className="mt-1 relative">
+                      <input
+                        id="firstName"
+                        name="firstName"
+                        type="text"
+                        required
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        className="appearance-none relative block w-full px-3 py-3 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-xl focus:outline-none focus:ring-purple-500 focus:border-purple-500 focus:z-10"
+                        placeholder="First name"
+                      />
+                      <User className="h-5 w-5 text-gray-400 absolute left-3 top-3.5" />
+                    </div>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="lastName"
+                      className="block text-sm font-medium text-gray-700"
+                    >
+                      Last Name
+                    </label>
+                    <div className="mt-1 relative">
+                      <input
+                        id="lastName"
+                        name="lastName"
+                        type="text"
+                        required
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        className="appearance-none relative block w-full px-3 py-3 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-xl focus:outline-none focus:ring-purple-500 focus:border-purple-500 focus:z-10"
+                        placeholder="Last name"
+                      />
+                      <User className="h-5 w-5 text-gray-400 absolute left-3 top-3.5" />
+                    </div>
+                  </div>
                 </div>
-              </div>
+
+                {/* Username */}
+                <div>
+                  <label
+                    htmlFor="username"
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    Username
+                  </label>
+                  <div className="mt-1 relative">
+                    <input
+                      id="username"
+                      name="username"
+                      type="text"
+                      required
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="appearance-none relative block w-full px-3 py-3 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-xl focus:outline-none focus:ring-purple-500 focus:border-purple-500 focus:z-10"
+                      placeholder="Choose a username"
+                    />
+                    <User className="h-5 w-5 text-gray-400 absolute left-3 top-3.5" />
+                  </div>
+                </div>
+              </>
             )}
 
             <div>
@@ -234,39 +317,92 @@ export default function AuthPage() {
             </div>
 
             {!isLogin && (
-              <div>
-                <label
-                  htmlFor="confirmPassword"
-                  className="block text-sm font-medium text-gray-700"
-                >
-                  Confirm Password
-                </label>
-                <div className="mt-1 relative">
-                  <input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    type={showConfirmPassword ? "text" : "password"}
-                    autoComplete="new-password"
-                    required
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="appearance-none relative block w-full px-3 py-3 pl-10 pr-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-xl focus:outline-none focus:ring-purple-500 focus:border-purple-500 focus:z-10"
-                    placeholder="Confirm your password"
-                  />
-                  <Lock className="h-5 w-5 text-gray-400 absolute left-3 top-3.5" />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600"
+              <>
+                {/* Confirm Password */}
+                <div>
+                  <label
+                    htmlFor="confirmPassword"
+                    className="block text-sm font-medium text-gray-700"
                   >
-                    {showConfirmPassword ? (
-                      <EyeOff className="h-5 w-5" />
-                    ) : (
-                      <Eye className="h-5 w-5" />
-                    )}
-                  </button>
+                    Confirm Password
+                  </label>
+                  <div className="mt-1 relative">
+                    <input
+                      id="confirmPassword"
+                      name="confirmPassword"
+                      type={showConfirmPassword ? "text" : "password"}
+                      autoComplete="new-password"
+                      required
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="appearance-none relative block w-full px-3 py-3 pl-10 pr-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-xl focus:outline-none focus:ring-purple-500 focus:border-purple-500 focus:z-10"
+                      placeholder="Confirm your password"
+                    />
+                    <Lock className="h-5 w-5 text-gray-400 absolute left-3 top-3.5" />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-3.5 text-gray-400 hover:text-gray-600"
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="h-5 w-5" />
+                      ) : (
+                        <Eye className="h-5 w-5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
+
+                {/* Security Question */}
+                <div>
+                  <label
+                    htmlFor="securityQuestion"
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    Security Question
+                  </label>
+                  <div className="mt-1 relative">
+                    <select
+                      id="securityQuestion"
+                      name="securityQuestion"
+                      required
+                      value={securityQuestion}
+                      onChange={(e) => setSecurityQuestion(e.target.value)}
+                      className="appearance-none relative block w-full px-3 py-3 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-xl focus:outline-none focus:ring-purple-500 focus:border-purple-500 focus:z-10"
+                    >
+                      <option value="">Select a security question</option>
+                      <option value="mother_maiden_name">What is your mother's maiden name?</option>
+                      <option value="childhood_friend">What was your childhood friend's name?</option>
+                      <option value="favorite_color">What is your favorite color?</option>
+                      <option value="birth_city">What city were you born in?</option>
+                    </select>
+                    <Shield className="h-5 w-5 text-gray-400 absolute left-3 top-3.5" />
+                  </div>
+                </div>
+
+                {/* Security Answer */}
+                <div>
+                  <label
+                    htmlFor="securityAnswer"
+                    className="block text-sm font-medium text-gray-700"
+                  >
+                    Security Answer
+                  </label>
+                  <div className="mt-1 relative">
+                    <input
+                      id="securityAnswer"
+                      name="securityAnswer"
+                      type="text"
+                      required
+                      value={securityAnswer}
+                      onChange={(e) => setSecurityAnswer(e.target.value)}
+                      className="appearance-none relative block w-full px-3 py-3 pl-10 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-xl focus:outline-none focus:ring-purple-500 focus:border-purple-500 focus:z-10"
+                      placeholder="Your answer"
+                    />
+                    <Shield className="h-5 w-5 text-gray-400 absolute left-3 top-3.5" />
+                  </div>
+                </div>
+              </>
             )}
 
             <button
@@ -294,17 +430,16 @@ export default function AuthPage() {
               </div>
             )}
 
-            {!isLogin && (
-              <div className="text-center">
-                <button
-                  type="button"
-                  onClick={handleResendVerification}
-                  className="text-purple-600 hover:text-purple-500 text-sm font-medium"
-                >
-                  Didn't receive verification email?
-                </button>
-              </div>
-            )}
+            {/* Resend verification - show on both login and registration */}
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                className="text-purple-600 hover:text-purple-500 text-sm font-medium"
+              >
+                Didn't receive verification email?
+              </button>
+            </div>
 
             <div className="text-center">
               <button
@@ -314,6 +449,10 @@ export default function AuthPage() {
                   setPassword("");
                   setConfirmPassword("");
                   setUsername("");
+                  setFirstName("");
+                  setLastName("");
+                  setSecurityQuestion("");
+                  setSecurityAnswer("");
                   setShowPassword(false);
                   setShowConfirmPassword(false);
                 }}

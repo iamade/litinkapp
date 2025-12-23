@@ -87,9 +87,14 @@ export const apiClient = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          (errorData as { detail?: string }).detail || "An API error occurred"
-        );
+        const detail = (errorData as { detail?: string | { message?: string } }).detail;
+        let errorMessage = "An API error occurred";
+        if (typeof detail === "string") {
+          errorMessage = detail;
+        } else if (detail && typeof detail === "object" && "message" in detail) {
+          errorMessage = detail.message || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
       
       return response;
@@ -120,7 +125,14 @@ export const apiClient = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || "An API error occurred");
+        const detail = (errorData as { detail?: string | { message?: string } }).detail;
+        let errorMessage = "An API error occurred";
+        if (typeof detail === "string") {
+          errorMessage = detail;
+        } else if (detail && typeof detail === "object" && "message" in detail) {
+          errorMessage = detail.message || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
       return response.json();
     });
@@ -162,9 +174,15 @@ export const apiClient = {
       } catch {
         // ignore
       }
-      throw new Error(
-        (errorData as { detail?: string }).detail || "An API error occurred"
-      );
+      // Handle both string detail and object detail (with message property)
+      const detail = (errorData as { detail?: string | { message?: string } }).detail;
+      let errorMessage = "An API error occurred";
+      if (typeof detail === "string") {
+        errorMessage = detail;
+      } else if (detail && typeof detail === "object" && "message" in detail) {
+        errorMessage = detail.message || errorMessage;
+      }
+      throw new Error(errorMessage);
     }
 
     if (response.status === 204) {

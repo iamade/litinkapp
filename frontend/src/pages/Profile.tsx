@@ -13,10 +13,14 @@ import {
   Badge,
   Zap,
   Upload,
+  Compass,
+  Sparkles,
 } from "lucide-react";
+import { useUserMode } from "../hooks/useUserMode";
 
 export default function Profile() {
   const { user } = useAuth();
+  const { mode, switchMode } = useUserMode();
 
   if (!user) {
     return (
@@ -178,6 +182,57 @@ export default function Profile() {
           <div className="lg:col-span-2 space-y-8">
             {/* Role Management Section */}
             <RoleManagement />
+            
+            {/* Preferred Mode Selection (Only for users with both roles) */}
+            {hasRole(user, "explorer") && (hasRole(user, "author") || hasRole(user, "creator")) && (
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
+                  <Target className="h-6 w-6 text-purple-600 mr-2" />
+                  Default Dashboard
+                </h2>
+                <p className="text-sm text-gray-600 mb-4">
+                  Select which dashboard you want to see when you first log in.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button
+                    onClick={() => switchMode('explorer')}
+                    className={`flex items-center p-4 rounded-xl border-2 transition-all ${
+                      mode === 'explorer'
+                        ? 'border-green-500 bg-green-50 text-green-700'
+                        : 'border-gray-200 hover:border-green-200 text-gray-600'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-full mr-3 ${mode === 'explorer' ? 'bg-white' : 'bg-gray-100'}`}>
+                      <Compass className="h-6 w-6" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-semibold">Explorer Mode</div>
+                      <div className="text-xs opacity-80">Learn & Discover</div>
+                    </div>
+                    {mode === 'explorer' && <div className="ml-auto w-3 h-3 bg-green-500 rounded-full" />}
+                  </button>
+
+                  <button
+                    onClick={() => switchMode('creator')}
+                    className={`flex items-center p-4 rounded-xl border-2 transition-all ${
+                      mode === 'creator'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-200 hover:border-blue-200 text-gray-600'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-full mr-3 ${mode === 'creator' ? 'bg-white' : 'bg-gray-100'}`}>
+                      <Sparkles className="h-6 w-6" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-semibold">Creator Mode</div>
+                      <div className="text-xs opacity-80">Create & Publish</div>
+                    </div>
+                    {mode === 'creator' && <div className="ml-auto w-3 h-3 bg-blue-500 rounded-full" />}
+                  </button>
+                </div>
+              </div>
+            )}
+            
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">

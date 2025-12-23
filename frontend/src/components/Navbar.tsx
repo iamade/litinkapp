@@ -109,7 +109,12 @@ export default function Navbar() {
                         navigate('/dashboard');
                       }}
                       className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                        mode === 'explorer'
+                        location.pathname.startsWith('/dashboard') || 
+                        location.pathname.startsWith('/explore') || 
+                        location.pathname.startsWith('/learn') || 
+                        location.pathname.startsWith('/subscription') ||
+                        location.pathname.startsWith('/book') ||
+                        (mode === 'explorer' && !location.pathname.startsWith('/creator') && !location.pathname.startsWith('/author') && !location.pathname.startsWith('/upload') && !location.pathname.startsWith('/project') && !location.pathname.startsWith('/profile'))
                           ? 'bg-white dark:bg-gray-700 text-green-600 dark:text-green-400 shadow-sm'
                           : 'text-gray-600 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400'
                       }`}
@@ -123,7 +128,11 @@ export default function Navbar() {
                         navigate('/creator');
                       }}
                       className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                        mode === 'creator'
+                        location.pathname.startsWith('/creator') || 
+                        location.pathname.startsWith('/author') || 
+                        location.pathname.startsWith('/upload') || 
+                        location.pathname.startsWith('/project') ||
+                        (mode === 'creator' && !location.pathname.startsWith('/dashboard') && !location.pathname.startsWith('/explore') && !location.pathname.startsWith('/learn') && !location.pathname.startsWith('/subscription') && !location.pathname.startsWith('/profile') && !location.pathname.startsWith('/book'))
                           ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
                           : 'text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400'
                       }`}

@@ -10,6 +10,7 @@ from app.plots.schemas import (
     PlotGenerationResponse,
     PlotOverviewResponse,
     PlotOverviewUpdate,
+    ProjectPlotGenerationRequest,
 )
 from app.api.services.plot import PlotService
 from app.core.database import get_session
@@ -18,6 +19,7 @@ from app.api.services.subscription import SubscriptionManager
 from app.books.models import Book
 from app.auth.models import User
 from app.plots.models import PlotOverview, Character
+from app.projects.models import Project
 
 router = APIRouter()
 
@@ -221,4 +223,68 @@ async def delete_plot_overview(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to delete plot overview: {str(e)}"
+        )
+
+
+@router.post("/projects/{project_id}/generate")
+async def generate_project_plot_overview(
+    project_id: uuid.UUID,
+    request: ProjectPlotGenerationRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Generate plot overview from a project's prompt (no book required).
+
+    This is for prompt-only projects like adverts, music videos, etc.
+
+    - **project_id**: ID of the project to generate plot for
+    - **request**: Plot generation parameters including the input prompt
+    """
+    try:
+        # Validate project ownership
+        statement = select(Project).where(Project.id == project_id)
+        result = await session.exec(statement)
+        project = result.first()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if project.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to access this project"
+            )
+
+        # Check subscription limits
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(
+            current_user.id, "plot"
+        )
+
+        if not usage_check["can_generate"]:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Plot generation limit exceeded. You have used {usage_check['plots_used']} out of {usage_check['plots_limit']} plots. Please upgrade your subscription.",
+            )
+
+        # Generate plot from project prompt
+        plot_service = PlotService(session)
+        result = await plot_service.generate_plot_from_prompt(
+            user_id=current_user.id,
+            project_id=project_id,
+            input_prompt=request.input_prompt or project.input_prompt,
+            project_type=request.project_type or project.project_type,
+            story_type=request.story_type,
+            genre=request.genre,
+            tone=request.tone,
+            audience=request.audience,
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate plot overview: {str(e)}"
         )

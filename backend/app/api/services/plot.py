@@ -89,6 +89,196 @@ class PlotService:
             logger.error(f"[PlotService] Error generating plot: {str(e)}")
             raise PlotGenerationError(f"Failed to generate plot: {str(e)}")
 
+    async def generate_plot_from_prompt(
+        self,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+        input_prompt: str,
+        project_type: Optional[str] = None,
+        story_type: Optional[str] = None,
+        genre: Optional[str] = None,
+        tone: Optional[str] = None,
+        audience: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a plot overview from a user prompt (for projects without books).
+        """
+        try:
+            # 1. Check subscription limits
+            user_tier = await self.subscription_manager.get_user_tier(user_id)
+            model_tier = self._map_subscription_to_model_tier(user_tier)
+
+            # 2. Create a prompt-based context (no book/chapters)
+            prompt_context = {
+                "prompt": input_prompt,
+                "project_type": project_type or "entertainment",
+                "project_id": str(project_id),
+            }
+
+            # 3. Generate plot content from prompt
+            generated_plot = await self._generate_plot_from_prompt_content(
+                prompt_context=prompt_context,
+                story_type=story_type,
+                genre=genre,
+                tone=tone,
+                audience=audience,
+                model_tier=model_tier,
+            )
+
+            # 4. Generate characters from the prompt
+            generated_characters = await self._generate_characters_from_prompt(
+                prompt_context=prompt_context,
+                plot_data=generated_plot,
+                model_tier=model_tier,
+            )
+
+            # 5. Store results (using project_id as a pseudo book_id for now)
+            # Note: We're storing with project_id in the book_id field - may need to update model later
+            result = await self._store_plot_overview(
+                generated_plot,
+                generated_characters,
+                user_id,
+                project_id,  # Using project_id where book_id would go
+                {
+                    "book": {
+                        "title": input_prompt[:100],
+                        "genre": genre or "entertainment",
+                    }
+                },
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[PlotService] Error generating plot from prompt: {str(e)}")
+            raise PlotGenerationError(f"Failed to generate plot from prompt: {str(e)}")
+
+    async def _generate_plot_from_prompt_content(
+        self,
+        prompt_context: Dict[str, Any],
+        story_type: Optional[str],
+        genre: Optional[str],
+        tone: Optional[str],
+        audience: Optional[str],
+        model_tier: ModelTier,
+    ) -> Dict[str, Any]:
+        """
+        Generate plot content from a user prompt (no book context).
+        """
+        user_prompt = prompt_context.get("prompt", "")
+        project_type = prompt_context.get("project_type", "entertainment")
+
+        prompt = f"""
+You are a creative director generating a plot overview for a {project_type} project.
+
+USER PROMPT:
+{user_prompt}
+
+PROJECT TYPE: {project_type}
+STORY TYPE: {story_type or "engaging narrative"}
+GENRE: {genre or "general"}
+TONE: {tone or "professional"}
+TARGET AUDIENCE: {audience or "general"}
+
+TASK:
+Generate a comprehensive plot overview for this creative project including:
+1. Logline (1-2 sentences capturing the essence)
+2. Themes (list of 3-5 major themes)
+3. Setting Description
+4. Story Arc Summary
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON object:
+{{
+    "logline": "...",
+    "themes": ["theme1", "theme2", ...],
+    "story_type": "{story_type or 'engaging narrative'}",
+    "script_story_type": "{project_type}",
+    "genre": "{genre or 'general'}",
+    "tone": "{tone or 'professional'}",
+    "audience": "{audience or 'general'}",
+    "setting": "...",
+    "status": "completed"
+}}
+"""
+
+        response = await self.openrouter.analyze_content(
+            content=prompt, user_tier=model_tier, analysis_type="plot_generation"
+        )
+
+        if response.get("status") == "success":
+            try:
+                result = json.loads(response.get("result", "{}"))
+                result["generation_method"] = "openrouter"
+                result["model_used"] = response.get("model")
+                result["generation_cost"] = response.get("cost", 0.0)
+                return result
+            except json.JSONDecodeError:
+                logger.error("[PlotService] Failed to parse prompt plot JSON response")
+                return {
+                    "logline": f"A creative {project_type} based on: {user_prompt[:100]}",
+                    "themes": ["creativity", "engagement"],
+                    "story_type": story_type or "engaging narrative",
+                    "genre": genre or "general",
+                    "tone": tone or "professional",
+                    "audience": audience or "general",
+                    "setting": "Contemporary",
+                    "status": "completed",
+                    "generation_method": "openrouter_fallback",
+                }
+        else:
+            raise PlotGenerationError(
+                f"AI generation failed: {response.get('error', 'Unknown error')}"
+            )
+
+    async def _generate_characters_from_prompt(
+        self,
+        prompt_context: Dict[str, Any],
+        plot_data: Dict[str, Any],
+        model_tier: ModelTier,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate character profiles from a prompt-based project.
+        """
+        user_prompt = prompt_context.get("prompt", "")
+        project_type = prompt_context.get("project_type", "entertainment")
+
+        prompt = f"""
+Based on this creative project, identify and profile any key characters or personas.
+
+PROJECT PROMPT: {user_prompt}
+PROJECT TYPE: {project_type}
+LOGLINE: {plot_data.get('logline', '')}
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON array of character objects:
+[
+    {{
+        "name": "Character/Persona Name",
+        "role": "protagonist",
+        "character_arc": "Brief description",
+        "physical_description": "Appearance if relevant",
+        "personality": "Key traits",
+        "want": "Goal",
+        "need": "Internal need",
+        "lie": "False belief",
+        "ghost": "Background"
+    }}
+]
+
+If no specific characters are needed (e.g., for a product ad), return an empty array: []
+"""
+
+        response = await self.openrouter.analyze_content(
+            content=prompt, user_tier=model_tier, analysis_type="character_generation"
+        )
+
+        if response.get("status") == "success":
+            return self._parse_character_generation_response(response.get("result", ""))
+        else:
+            logger.warning("[PlotService] Character generation from prompt failed")
+            return []
+
     async def _get_book_context_for_plot(self, book_id: uuid.UUID) -> Dict[str, Any]:
         """
         Retrieve book and chapter summaries for context.

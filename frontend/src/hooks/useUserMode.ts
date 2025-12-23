@@ -17,6 +17,22 @@ export const useUserMode = () => {
         return;
       }
 
+      // precise role based enforcement
+      const hasCreator = user.roles?.includes('creator');
+      const hasExplorer = user.roles?.includes('explorer');
+      
+      if (hasCreator && !hasExplorer) {
+        setMode('creator');
+        setIsLoading(false);
+        return; 
+      }
+      
+      if (!hasCreator && hasExplorer) {
+        setMode('explorer');
+        setIsLoading(false);
+        return;
+      }
+
       try {
         const profile = await apiClient.get<{ preferred_mode: UserMode }>('/users/me');
         setMode(profile.preferred_mode || 'explorer');

@@ -28,14 +28,14 @@ class ProjectStatus(str, Enum):
 
 
 class ArtifactType(str, Enum):
-    PLOT = "plot"
-    SCRIPT = "script"
-    STORYBOARD = "storyboard"
-    IMAGE = "image"
-    AUDIO = "audio"
-    VIDEO = "video"
-    CHAPTER = "chapter"
-    DOCUMENT_SUMMARY = "document_summary"
+    PLOT = "PLOT"
+    SCRIPT = "SCRIPT"
+    STORYBOARD = "STORYBOARD"
+    IMAGE = "IMAGE"
+    AUDIO = "AUDIO"
+    VIDEO = "VIDEO"
+    CHAPTER = "CHAPTER"
+    DOCUMENT_SUMMARY = "DOCUMENT_SUMMARY"
 
 
 class Project(SQLModel, table=True):
@@ -112,7 +112,10 @@ class Artifact(SQLModel, table=True):
     )
 
     artifact_type: ArtifactType = Field(
-        sa_column=Column(pg.ENUM(ArtifactType, name="artifact_type"), nullable=False)
+        sa_column=Column(
+            pg.ENUM(ArtifactType, name="artifact_type", create_type=False),
+            nullable=False,
+        )
     )
     version: int = Field(default=1)
 

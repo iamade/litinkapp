@@ -522,14 +522,38 @@ export const userService = {
     );
   },
 
-  // async savePlotOverview(bookId: string, plot: any) {
-  //   const response = await apiClient.post<any>(`/books/${bookId}/plot/save`, plot);
-  //   return response.data;
-  // },
+  // Project plot generation (for prompt-only projects)
+  async generateProjectPlotOverview(projectId: string, inputPrompt: string, options?: {
+    projectType?: string;
+    storyType?: string;
+    genre?: string;
+    tone?: string;
+    audience?: string;
+  }) {
+    return apiClient.post<any>(
+      `/plots/projects/${projectId}/generate`,
+      {
+        input_prompt: inputPrompt,
+        project_type: options?.projectType,
+        story_type: options?.storyType,
+        genre: options?.genre,
+        tone: options?.tone,
+        audience: options?.audience,
+      }
+    );
+  },
 
   async getPlotOverview(bookId: string) {
     const response = await apiClient.get<any>(
       `/plots/books/${bookId}/overview`
+    );
+    return response;
+  },
+
+  // Get project plot overview (uses same endpoint structure as books for now)
+  async getProjectPlotOverview(projectId: string) {
+    const response = await apiClient.get<any>(
+      `/plots/books/${projectId}/overview`
     );
     return response;
   },

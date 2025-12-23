@@ -43,6 +43,11 @@ interface AuthContextType {
     username: string,
     email: string,
     password: string,
+    confirmPassword: string,
+    firstName: string,
+    lastName: string,
+    securityQuestion: string,
+    securityAnswer: string,
     roles: ("author" | "explorer")[]
   ) => Promise<void>;
   logout: () => void;
@@ -101,12 +106,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     username: string,
     email: string,
     password: string,
+    confirmPassword: string,
+    firstName: string,
+    lastName: string,
+    securityQuestion: string,
+    securityAnswer: string,
     roles: ("author" | "explorer")[]
   ) => {
     await apiClient.post("/auth/register", {
       display_name: username,
       email,
       password,
+      confirm_password: confirmPassword,
+      first_name: firstName,
+      last_name: lastName,
+      security_question: securityQuestion,
+      security_answer: securityAnswer,
       roles,
     });
     // await login(email, password);
@@ -141,7 +156,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const resendVerificationEmail = async (email: string) => {
-    await apiClient.post("/auth/resend-verification", { email });
+    await apiClient.post("/auth/resend-activation-link", { email });
   };
 
   const logout = async () => {

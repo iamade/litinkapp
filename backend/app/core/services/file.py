@@ -6407,6 +6407,7 @@ Chapters:
 
         print(f"[CHAPTER EXTRACTION] Starting extraction for {safe_filename}")
         print(f"[CHAPTER EXTRACTION] Storage path: {storage_path or 'None'}")
+        print(f"[CHAPTER EXTRACTION] Storage path type: {type(storage_path)}")
 
         # Step 1: Try EPUB-specific extraction for EPUB files
         if (

@@ -324,19 +324,30 @@ Get inside this instant! And stop bothering Dudley.
         """
         Analyze content for various purposes (summary, keywords, difficulty, etc.)
         """
-        config = self.MODEL_CONFIGS[user_tier]
-        model = config["primary"]
+        tier_str = (
+            user_tier.value if isinstance(user_tier, ModelTier) else str(user_tier)
+        )
+
+        # Use centralized model config
+        config = get_model_config("script", tier_str)
+        if not config:
+            logger.warning(f"No config for tier {tier_str}, using FREE tier defaults")
+            config = get_model_config("script", "free")
+
+        model = config.primary
 
         # Special handling for plot generation and character creation
         if analysis_type in [
             "plot_overview",
+            "plot_generation",
             "characters",
+            "character_generation",
             "archetype_analysis",
             "character_details",
         ]:
             system_prompt = self._get_special_system_prompt(analysis_type)
             user_message = content
-            max_tokens = config["max_tokens"]  # Use full token limit for generation
+            max_tokens = config.max_tokens if config.max_tokens else 4000
             temperature = 0.7  # Higher temperature for creative generation
         else:
             analysis_prompts = {
@@ -369,10 +380,14 @@ Get inside this instant! And stop bothering Dudley.
 
             # Calculate cost
             usage = response.usage
-            input_cost = (usage.prompt_tokens / 1000) * config["cost_per_1k_input"]
-            output_cost = (usage.completion_tokens / 1000) * config[
-                "cost_per_1k_output"
-            ]
+            cost_per_1k_input = (
+                config.cost_per_1k_input if config.cost_per_1k_input else 0.0
+            )
+            cost_per_1k_output = (
+                config.cost_per_1k_output if config.cost_per_1k_output else 0.0
+            )
+            input_cost = (usage.prompt_tokens / 1000) * cost_per_1k_input
+            output_cost = (usage.completion_tokens / 1000) * cost_per_1k_output
             total_cost = input_cost + output_cost
 
             # Track the cost
@@ -388,6 +403,7 @@ Get inside this instant! And stop bothering Dudley.
                 "status": "success",
                 "analysis_type": analysis_type,
                 "result": response.choices[0].message.content,
+                "model": model,
                 "model_used": model,
                 "usage": {
                     "prompt_tokens": usage.prompt_tokens,
@@ -432,10 +448,7 @@ Get inside this instant! And stop bothering Dudley.
                         "context_length": getattr(model, "context_length", 4096)
                         or 4096,
                         "pricing": getattr(model, "pricing", {}) or {},
-                        "supported": model.id
-                        in [
-                            config["primary"] for config in self.MODEL_CONFIGS.values()
-                        ],
+                        "supported": True,  # All models from OpenRouter are technically supported
                     }
                 )
 

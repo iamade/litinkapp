@@ -102,11 +102,6 @@ class Settings(BaseSettings):
     MAILGUN_SENDER_NAME: str = "Litink"
     MAILGUN_SENDER_EMAIL: str = "noreply@litink.com"
 
-    # Legacy / FastAPI-Mail support
-    MAIL_FROM: str = "noreply@litink.com"
-    MAIL_FROM_NAME: str = "Litink"
-    SMTP_HOST: str = "localhost"
-    SMTP_PORT: int = 1025
 
     FRONTEND_URL: str = "http://localhost:3000"
 
