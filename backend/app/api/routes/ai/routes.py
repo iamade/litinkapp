@@ -2718,9 +2718,7 @@ async def generate_script_and_scenes(
 
         # ✅ Generate script using OpenRouter with tier-appropriate model
         script_result = await openrouter_service.generate_script(
-            content=chapter_data[
-                "content"
-            ],  # Use original content, plot context is handled separately
+            content=chapter_data.content,  # Use original content, plot context is handled separately
             user_tier=user_model_tier,
             script_type=script_style,
             target_duration=target_duration,
@@ -2745,23 +2743,26 @@ async def generate_script_and_scenes(
         script_lines = script.split("\n")
         current_scene = ""
         scene_number = 0
+        pending_location = None  # Track location header to merge with scene
 
         for i, line in enumerate(script_lines):
             line_stripped = line.strip()
 
-            # Look for scene markers in the script itself
-            # Match: "ACT I - SCENE 1", "**ACT I - SCENE 1**", "SCENE 1:", "INT./EXT." etc.
-            scene_header_patterns = [
-                r"^\*?\*?(?:ACT\s+[IVX]+\s*-\s*)?(?:SCENE\s+\d+)",  # ACT I - SCENE 1 or SCENE 1
-                r"^(?:INT\.|EXT\.)\s+.+\s+-\s+(?:DAY|NIGHT|MORNING|EVENING|AFTERNOON)",  # INT./EXT. LOCATION - TIME
-            ]
-
-            is_scene_header = any(
-                re.match(pattern, line_stripped, re.IGNORECASE)
-                for pattern in scene_header_patterns
+            # Check if this is an ACT-SCENE header (primary scene marker)
+            act_scene_match = re.match(
+                r"^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?",
+                line_stripped,
+                re.IGNORECASE,
             )
 
-            if is_scene_header:
+            # Check if this is a location header (INT./EXT.)
+            location_match = re.match(
+                r"^(?:INT\.|EXT\.)\s+.+\s+-\s+(?:DAY|NIGHT|MORNING|EVENING|AFTERNOON)",
+                line_stripped,
+                re.IGNORECASE,
+            )
+
+            if act_scene_match:
                 # Save previous scene if it exists
                 if current_scene and len(current_scene) > 20:
                     scene_descriptions.append(current_scene[:400])
@@ -2769,18 +2770,45 @@ async def generate_script_and_scenes(
                 # Start new scene
                 scene_number += 1
                 current_scene = line_stripped
+                pending_location = None  # Reset pending location
 
-                # Add next few lines as context (action description)
-                context_lines = []
-                for j in range(i + 1, min(i + 6, len(script_lines))):
-                    next_line = script_lines[j].strip()
-                    if next_line and not next_line.isupper() and len(next_line) > 10:
-                        context_lines.append(next_line)
-                    if len(context_lines) >= 3:
-                        break
+                # Look ahead for location header on next line
+                if i + 1 < len(script_lines):
+                    next_line = script_lines[i + 1].strip()
+                    if re.match(r"^(?:INT\.|EXT\.)", next_line, re.IGNORECASE):
+                        current_scene += " " + next_line
+                        # Add context from lines after location
+                        context_lines = []
+                        for j in range(i + 2, min(i + 6, len(script_lines))):
+                            ctx_line = script_lines[j].strip()
+                            if (
+                                ctx_line
+                                and not ctx_line.isupper()
+                                and len(ctx_line) > 10
+                            ):
+                                context_lines.append(ctx_line)
+                            if len(context_lines) >= 2:
+                                break
+                        if context_lines:
+                            current_scene += " " + " ".join(context_lines)
+                    else:
+                        # No location header, just add context
+                        context_lines = []
+                        for j in range(i + 1, min(i + 5, len(script_lines))):
+                            ctx_line = script_lines[j].strip()
+                            if (
+                                ctx_line
+                                and not ctx_line.isupper()
+                                and len(ctx_line) > 10
+                            ):
+                                context_lines.append(ctx_line)
+                            if len(context_lines) >= 2:
+                                break
+                        if context_lines:
+                            current_scene += " " + " ".join(context_lines)
 
-                if context_lines:
-                    current_scene += " " + " ".join(context_lines)
+            # Skip location headers as they're included with ACT-SCENE headers
+            # Don't match them as separate scenes
 
         # Add the last scene
         if current_scene and len(current_scene) > 20:
@@ -2903,19 +2931,9 @@ Script to analyze:
             },
         }
 
-        # Store in chapters table (your existing approach)
-        # Store in chapters table (your existing approach)
-        ai_content = chapter_data.ai_generated_content or {}
-        if not isinstance(ai_content, dict):
-            ai_content = {}
-        key = f"{current_user.id}:{script_style}"
-        ai_content[key] = script_data
+        # NOTE: Script data is stored in the dedicated Script table below
+        # The Chapter model does not have ai_generated_content field
 
-        chapter_data.ai_generated_content = ai_content
-        session.add(chapter_data)
-        await session.commit()
-
-        # Create a dedicated scripts table entry for easier access
         # Allow multiple scripts per chapter by not checking for existing ones
         script_record = {
             "chapter_id": chapter_id,
@@ -2923,6 +2941,7 @@ Script to analyze:
             "script_style": script_style,
             "script_name": script_name,
             "script": script,
+            "video_style": script_style,  # Required field - use script_style as default
             "scene_descriptions": scene_descriptions,
             "characters": characters,
             "character_details": character_details,
@@ -3028,7 +3047,7 @@ async def generate_script_and_scenes_with_gpt(
         )
         script_result = await rag_service.generate_video_script(
             chapter_context,
-            video_style=book_data.get("book_type", "realistic"),
+            video_style=getattr(book_data, "book_type", "realistic") or "realistic",
             script_style=script_style,
         )
         script = script_result.get("script", "")

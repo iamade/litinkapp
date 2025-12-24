@@ -373,27 +373,54 @@ Return ONLY a valid JSON object with the following keys:
             content=prompt, user_tier=model_tier, analysis_type="plot_generation"
         )
 
+        model_used = response.get("model") or response.get("model_used")
+
         if response.get("status") == "success":
+            raw_result = response.get("result", "{}")
+
             try:
-                result = json.loads(response.get("result", "{}"))
+                result = json.loads(raw_result)
+            except json.JSONDecodeError:
+                # Try to extract JSON from markdown code blocks
+                logger.warning(
+                    "[PlotService] Initial JSON parse failed, trying to extract from markdown"
+                )
+                import re
+
+                json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw_result)
+                if json_match:
+                    try:
+                        result = json.loads(json_match.group(1))
+                        logger.info(
+                            "[PlotService] Successfully extracted JSON from markdown"
+                        )
+                    except json.JSONDecodeError:
+                        result = None
+                else:
+                    result = None
+
+            if result:
                 # Ensure defaults
                 result["generation_method"] = "openrouter"
-                result["model_used"] = response.get("model")
+                result["model_used"] = model_used
                 result["generation_cost"] = response.get("cost", 0.0)
                 return result
-            except json.JSONDecodeError:
-                logger.error("[PlotService] Failed to parse plot JSON response")
-                # Fallback to basic structure
+            else:
+                logger.error(
+                    f"[PlotService] Failed to parse plot JSON response. Raw: {raw_result[:500]}"
+                )
+                # Fallback to basic structure - still include model info
                 return {
-                    "logline": "Plot generation completed but parsing failed.",
+                    "logline": "AI generated a plot but response format was unexpected. Please try again.",
                     "themes": ["General"],
                     "status": "completed",
                     "generation_method": "openrouter_fallback",
+                    "model_used": model_used,
                 }
         else:
-            raise PlotGenerationError(
-                f"AI generation failed: {response.get('error', 'Unknown error')}"
-            )
+            error_msg = response.get("error", "Unknown error")
+            logger.error(f"[PlotService] Plot generation failed: {error_msg}")
+            raise PlotGenerationError(f"AI generation failed: {error_msg}")
 
     async def _generate_characters(
         self,
@@ -441,9 +468,17 @@ Focus on characters who actually appear in the story, not locations or objects.
         )
 
         if response.get("status") == "success":
-            return self._parse_character_generation_response(response.get("result", ""))
+            result = response.get("result", "")
+            if result:
+                return self._parse_character_generation_response(result)
+            else:
+                logger.warning(
+                    "[PlotService] Character generation returned empty result"
+                )
+                return []
         else:
-            logger.warning("[PlotService] Character generation failed")
+            error_msg = response.get("error", "Unknown error")
+            logger.warning(f"[PlotService] Character generation failed: {error_msg}")
             return []
 
     def _parse_character_generation_response(
@@ -452,42 +487,56 @@ Focus on characters who actually appear in the story, not locations or objects.
         """
         Parse the AI response for character generation.
         """
+        import re
+
+        # First try direct JSON parsing
         try:
             characters = json.loads(ai_response.strip())
-
-            if not isinstance(characters, list):
-                characters = [characters]
-
-            # Validate and clean character data
-            validated_characters = []
-            for char in characters:
-                if isinstance(char, dict) and char.get("name"):
-                    validated_characters.append(
-                        {
-                            "name": char.get("name", ""),
-                            "role": char.get("role", "supporting"),
-                            "character_arc": char.get("character_arc", ""),
-                            "physical_description": char.get(
-                                "physical_description", ""
-                            ),
-                            "personality": char.get("personality", ""),
-                            "want": char.get("want", ""),
-                            "need": char.get("need", ""),
-                            "lie": char.get("lie", ""),
-                            "ghost": char.get("ghost", ""),
-                            "archetypes": [],
-                            "generation_method": "openrouter",
-                        }
-                    )
-
-            return validated_characters[:5]  # Limit to 5 characters
-
         except json.JSONDecodeError:
+            # Try to extract JSON from markdown code blocks
+            json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", ai_response)
+            if json_match:
+                try:
+                    characters = json.loads(json_match.group(1))
+                    logger.info(
+                        "[PlotService] Successfully extracted character JSON from markdown"
+                    )
+                except json.JSONDecodeError:
+                    characters = None
+            else:
+                characters = None
+
+        if characters is None:
             # Fallback: extract information from text response
             logger.warning(
                 "[PlotService] Character response not valid JSON, attempting text parsing"
             )
             return self._parse_character_generation_text_response(ai_response)
+
+        if not isinstance(characters, list):
+            characters = [characters]
+
+        # Validate and clean character data
+        validated_characters = []
+        for char in characters:
+            if isinstance(char, dict) and char.get("name"):
+                validated_characters.append(
+                    {
+                        "name": char.get("name", ""),
+                        "role": char.get("role", "supporting"),
+                        "character_arc": char.get("character_arc", ""),
+                        "physical_description": char.get("physical_description", ""),
+                        "personality": char.get("personality", ""),
+                        "want": char.get("want", ""),
+                        "need": char.get("need", ""),
+                        "lie": char.get("lie", ""),
+                        "ghost": char.get("ghost", ""),
+                        "archetypes": [],
+                        "generation_method": "openrouter",
+                    }
+                )
+
+        return validated_characters[:5]  # Limit to 5 characters
 
     def _parse_character_generation_text_response(
         self, ai_response: str
@@ -775,12 +824,12 @@ Return a JSON object with:
                 await self.session.commit()
                 await self.session.refresh(character)
 
-                # Create response object
+                # Create response object - convert UUIDs to strings
                 stored_char = CharacterResponse(
-                    id=character.id,
-                    plot_overview_id=plot_id,
-                    book_id=book_id,
-                    user_id=user_id,
+                    id=str(character.id),
+                    plot_overview_id=str(plot_id),
+                    book_id=str(book_id),
+                    user_id=str(user_id),
                     name=character.name,
                     role=character.role,
                     character_arc=character.character_arc,
@@ -808,11 +857,11 @@ Return a JSON object with:
                     f"[PlotService] First character: {stored_characters[0].name if stored_characters[0] else 'None'}"
                 )
 
-            # Create plot overview response with defaults
+            # Create plot overview response with defaults - convert UUIDs to strings
             plot_response = PlotOverviewResponse(
-                id=plot_overview.id,
-                book_id=plot_overview.book_id,
-                user_id=plot_overview.user_id,
+                id=str(plot_overview.id),
+                book_id=str(plot_overview.book_id),
+                user_id=str(plot_overview.user_id),
                 logline=plot_overview.logline,
                 themes=plot_overview.themes,
                 story_type=plot_overview.story_type,
@@ -835,7 +884,11 @@ Return a JSON object with:
                 f"[PlotService] PlotOverviewResponse created with characters field: {len(plot_response.characters) if hasattr(plot_response, 'characters') else 'MISSING'}"
             )
 
-            return {"plot_overview": plot_response, "characters": stored_characters}
+            return {
+                "plot_overview": plot_response,
+                "characters": stored_characters,
+                "message": f"Successfully generated plot overview with {len(stored_characters)} characters",
+            }
 
         except Exception as e:
             logger.error(f"[PlotService] Error storing plot overview: {str(e)}")
@@ -1053,10 +1106,10 @@ Return the enhanced script.
             characters = []
             for char_data in characters_data:
                 char_response = CharacterResponse(
-                    id=char_data.id,
-                    plot_overview_id=char_data.plot_overview_id,
-                    book_id=char_data.book_id,
-                    user_id=char_data.user_id,
+                    id=str(char_data.id),
+                    plot_overview_id=str(char_data.plot_overview_id),
+                    book_id=str(char_data.book_id),
+                    user_id=str(char_data.user_id),
                     name=char_data.name,
                     role=char_data.role,
                     character_arc=char_data.character_arc,
@@ -1074,11 +1127,11 @@ Return the enhanced script.
                 )
                 characters.append(char_response)
 
-            # Create plot overview response
+            # Create plot overview response - convert UUIDs to strings
             plot_overview = PlotOverviewResponse(
-                id=plot_data.id,
-                book_id=plot_data.book_id,
-                user_id=plot_data.user_id,
+                id=str(plot_data.id),
+                book_id=str(plot_data.book_id),
+                user_id=str(plot_data.user_id),
                 logline=plot_data.logline,
                 themes=plot_data.themes,
                 story_type=plot_data.story_type,

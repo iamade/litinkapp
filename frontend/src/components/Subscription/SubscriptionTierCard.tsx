@@ -9,6 +9,11 @@ interface TierFeatures {
   custom_voices?: boolean;
   api_access?: boolean;
   team_collaboration?: boolean;
+  books_upload_limit?: number;
+  video_books_limit?: number;
+  chapters_per_book?: number | string;
+  model_selection?: boolean;
+  voice_cloning?: boolean;
 }
 
 interface SubscriptionTierCardProps {
@@ -149,7 +154,7 @@ export default function SubscriptionTierCard({
           <div className="flex items-center gap-3">
             <Check className="h-5 w-5 text-green-600 flex-shrink-0" />
             <span className="text-sm text-gray-700">
-              {tier.has_watermark ? "Watermark-free videos" : "No watermark on your content"}
+              {tier.has_watermark ? "Videos include watermark" : "No watermark on your content"}
             </span>
           </div>
 
@@ -157,7 +162,7 @@ export default function SubscriptionTierCard({
             <div className="flex items-center gap-3">
               <Check className="h-5 w-5 text-green-600 flex-shrink-0" />
               <span className="text-sm text-gray-700">
-                Videos up to {tier.max_video_duration} seconds in length
+                Videos up to {Math.round(tier.max_video_duration / 60)} minutes in length
               </span>
             </div>
           )}
@@ -171,6 +176,62 @@ export default function SubscriptionTierCard({
             </div>
           )}
         </div>
+
+        {/* Book & Content Limits */}
+        {tier.features && (
+          <div className="space-y-2">
+            <h4 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Content Limits</h4>
+            {(tier.features as TierFeatures).books_upload_limit && (
+              <div className="flex items-center gap-3">
+                <Check className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <span className="text-sm text-gray-700">
+                  Upload up to {(tier.features as TierFeatures).books_upload_limit} books
+                </span>
+              </div>
+            )}
+            {(tier.features as TierFeatures).video_books_limit && (
+              <div className="flex items-center gap-3">
+                <Check className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <span className="text-sm text-gray-700">
+                  Generate videos for {(tier.features as TierFeatures).video_books_limit} book{(tier.features as TierFeatures).video_books_limit !== 1 ? 's' : ''}
+                </span>
+              </div>
+            )}
+            {(tier.features as TierFeatures).chapters_per_book && (
+              <div className="flex items-center gap-3">
+                <Check className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <span className="text-sm text-gray-700">
+                  {(tier.features as TierFeatures).chapters_per_book === 'unlimited' 
+                    ? 'All chapters included' 
+                    : `${(tier.features as TierFeatures).chapters_per_book} chapters per book`}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* AI Features */}
+        {tier.features && ((tier.features as TierFeatures).model_selection || (tier.features as TierFeatures).voice_cloning) && (
+          <div className="space-y-2">
+            <h4 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">AI Features</h4>
+            {(tier.features as TierFeatures).model_selection && (
+              <div className="flex items-center gap-3">
+                <Check className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <span className="text-sm text-gray-700">
+                  Choose your preferred AI model
+                </span>
+              </div>
+            )}
+            {(tier.features as TierFeatures).voice_cloning && (
+              <div className="flex items-center gap-3">
+                <Check className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <span className="text-sm text-gray-700">
+                  Voice cloning capabilities
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* File and Export Features */}
         {tier.features && Object.keys(tier.features).length > 0 && (

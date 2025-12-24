@@ -20,6 +20,7 @@ class SubscriptionStatus(str, Enum):
 
 class SubscriptionTierInfo(BaseModel):
     """Information about a subscription tier"""
+
     tier: SubscriptionTier
     display_name: str
     description: Optional[str] = None
@@ -32,6 +33,7 @@ class SubscriptionTierInfo(BaseModel):
     max_video_duration: Optional[int] = None
     priority_processing: bool = False
     features: Dict[str, Any] = {}
+    feature_highlights: List[str] = []
     display_order: int = 0
     is_active: bool = True
 
@@ -41,6 +43,7 @@ class SubscriptionTierInfo(BaseModel):
 
 class UserSubscriptionBase(BaseModel):
     """Base subscription model"""
+
     user_id: str
     tier: SubscriptionTier
     status: SubscriptionStatus
@@ -60,11 +63,13 @@ class UserSubscriptionBase(BaseModel):
 
 class UserSubscriptionCreate(UserSubscriptionBase):
     """Create subscription model"""
+
     pass
 
 
 class UserSubscriptionUpdate(BaseModel):
     """Update subscription model"""
+
     tier: Optional[SubscriptionTier] = None
     status: Optional[SubscriptionStatus] = None
     stripe_customer_id: Optional[str] = None
@@ -83,6 +88,7 @@ class UserSubscriptionUpdate(BaseModel):
 
 class UserSubscription(UserSubscriptionBase):
     """Full subscription model"""
+
     id: str
     created_at: datetime
     updated_at: datetime
@@ -93,6 +99,7 @@ class UserSubscription(UserSubscriptionBase):
 
 class CheckoutSessionCreate(BaseModel):
     """Create checkout session request"""
+
     tier: SubscriptionTier
     billing_period: Optional[str] = "monthly"  # "monthly" or "annual"
     success_url: str
@@ -101,12 +108,14 @@ class CheckoutSessionCreate(BaseModel):
 
 class CheckoutSessionResponse(BaseModel):
     """Checkout session response"""
+
     session_id: str
     url: str
 
 
 class WebhookEvent(BaseModel):
     """Stripe webhook event"""
+
     event_type: str
     subscription_id: Optional[str] = None
     customer_id: Optional[str] = None
@@ -124,6 +133,7 @@ class WebhookEvent(BaseModel):
 
 class UsageLogBase(BaseModel):
     """Base usage log model"""
+
     user_id: str
     subscription_id: str
     resource_type: str = "video_generation"
@@ -136,11 +146,13 @@ class UsageLogBase(BaseModel):
 
 class UsageLogCreate(UsageLogBase):
     """Create usage log model"""
+
     pass
 
 
 class UsageLog(UsageLogBase):
     """Full usage log model"""
+
     id: str
     created_at: datetime
 
@@ -150,6 +162,7 @@ class UsageLog(UsageLogBase):
 
 class SubscriptionUsageStats(BaseModel):
     """Current usage statistics"""
+
     current_period_videos: int
     period_limit: int
     remaining_videos: int
@@ -160,6 +173,7 @@ class SubscriptionUsageStats(BaseModel):
 
 class SubscriptionHistoryBase(BaseModel):
     """Base subscription history model"""
+
     user_id: str
     subscription_id: Optional[str] = None
     event_type: str
@@ -177,11 +191,13 @@ class SubscriptionHistoryBase(BaseModel):
 
 class SubscriptionHistoryCreate(SubscriptionHistoryBase):
     """Create subscription history model"""
+
     pass
 
 
 class SubscriptionHistory(SubscriptionHistoryBase):
     """Full subscription history model"""
+
     id: str
     created_at: datetime
 
@@ -191,6 +207,7 @@ class SubscriptionHistory(SubscriptionHistoryBase):
 
 class PaymentMethodInfo(BaseModel):
     """Payment method information"""
+
     id: str
     type: str
     card: Optional[Dict[str, Any]] = None
@@ -198,11 +215,13 @@ class PaymentMethodInfo(BaseModel):
 
 class SubscriptionCancelRequest(BaseModel):
     """Cancel subscription request"""
+
     cancel_at_period_end: bool = True
 
 
 class SubscriptionCancelResponse(BaseModel):
     """Cancel subscription response"""
+
     subscription_id: str
     status: str
     cancel_at_period_end: bool

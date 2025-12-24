@@ -323,6 +323,7 @@ Get inside this instant! And stop bothering Dudley.
     ) -> Dict[str, Any]:
         """
         Analyze content for various purposes (summary, keywords, difficulty, etc.)
+        Uses fallback manager for automatic retry on rate limits.
         """
         tier_str = (
             user_tier.value if isinstance(user_tier, ModelTier) else str(user_tier)
@@ -333,8 +334,6 @@ Get inside this instant! And stop bothering Dudley.
         if not config:
             logger.warning(f"No config for tier {tier_str}, using FREE tier defaults")
             config = get_model_config("script", "free")
-
-        model = config.primary
 
         # Special handling for plot generation and character creation
         if analysis_type in [
@@ -366,6 +365,40 @@ Get inside this instant! And stop bothering Dudley.
             max_tokens = 500
             temperature = 0.3  # Lower temperature for analysis
 
+        async def _analyze_with_model(model_id: str, **kwargs) -> Dict[str, Any]:
+            """Inner function that executes analysis with specified model"""
+            return await self._execute_analysis(
+                model=model_id,
+                system_prompt=system_prompt,
+                user_message=user_message,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                analysis_type=analysis_type,
+                config=config,
+                tier_str=tier_str,
+            )
+
+        # Use fallback manager for automatic retry on rate limits
+        return await fallback_manager.try_with_fallback(
+            service_type="script",
+            user_tier=tier_str,
+            generation_function=_analyze_with_model,
+            request_params={"model_id": config.primary},
+            model_param_name="model_id",
+        )
+
+    async def _execute_analysis(
+        self,
+        model: str,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int,
+        temperature: float,
+        analysis_type: str,
+        config: Any,
+        tier_str: str,
+    ) -> Dict[str, Any]:
+        """Execute the actual analysis API call"""
         try:
             create_fn: Any = getattr(self.client.chat.completions, "create")
             response = await create_fn(
@@ -391,8 +424,13 @@ Get inside this instant! And stop bothering Dudley.
             total_cost = input_cost + output_cost
 
             # Track the cost
+            tier_enum = (
+                ModelTier(tier_str)
+                if tier_str in [t.value for t in ModelTier]
+                else ModelTier.FREE
+            )
             await self.cost_tracker.track(
-                user_tier=user_tier,
+                user_tier=tier_enum,
                 model=model,
                 input_tokens=usage.prompt_tokens,
                 output_tokens=usage.completion_tokens,
@@ -414,8 +452,8 @@ Get inside this instant! And stop bothering Dudley.
             }
 
         except Exception as e:
-            logger.error(f"[OpenRouter] Analysis error: {str(e)}")
-            return {"status": "error", "error": str(e), "analysis_type": analysis_type}
+            logger.error(f"[OpenRouter] Analysis error with {model}: {str(e)}")
+            raise  # Re-raise so fallback manager can handle it
 
     def _get_special_system_prompt(self, analysis_type: str) -> str:
         """

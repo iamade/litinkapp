@@ -162,24 +162,38 @@ async def get_subscription_tiers(session: AsyncSession = Depends(get_session)):
     # Map to SubscriptionTierInfo schema
     mapped_tiers = []
     for tier_info in tiers_data:
-        features = tier_info["features"]
+        features = tier_info.get("features", {})
         mapped_tiers.append(
             {
                 "tier": tier_info["tier"],
-                "display_name": tier_info["name"],
-                "monthly_price": tier_info["price_monthly"],
+                "display_name": tier_info.get(
+                    "display_name", tier_info["tier"].title()
+                ),
+                "description": tier_info.get("description", ""),
+                "monthly_price": tier_info.get("monthly_price", 0),
                 "monthly_video_limit": (
                     features.get("videos_per_month", 0)
                     if features.get("videos_per_month") != "unlimited"
                     else -1
                 ),
-                "video_quality": features.get("max_resolution", "720p"),
-                "has_watermark": features.get("watermark", False),
-                "max_video_duration": features.get("max_video_duration"),
-                "priority_processing": features.get("priority", 0) > 0,
+                "video_quality": tier_info.get(
+                    "video_quality", features.get("max_resolution", "720p")
+                ),
+                "has_watermark": tier_info.get(
+                    "has_watermark", features.get("watermark", False)
+                ),
+                "max_video_duration": tier_info.get(
+                    "max_video_duration", features.get("max_video_duration")
+                ),
+                "priority_processing": tier_info.get(
+                    "priority_processing", features.get("priority", 0) > 0
+                ),
                 "features": features,
-                "display_order": features.get("priority", 0),
-                "is_active": True,
+                "feature_highlights": tier_info.get("feature_highlights", []),
+                "display_order": tier_info.get(
+                    "display_order", features.get("priority", 0)
+                ),
+                "is_active": tier_info.get("is_active", True),
             }
         )
 

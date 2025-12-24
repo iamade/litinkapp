@@ -27,52 +27,108 @@ class SubscriptionManager:
     TIER_LIMITS = {
         SubscriptionTier.FREE: {
             "videos_per_month": 2,
-            "max_video_duration": 60,  # seconds
+            "books_upload_limit": 3,
+            "video_books_limit": 1,  # Can only generate videos for 1 book
+            "chapters_per_book": 2,  # Only 2 chapters max for video
+            "max_video_duration": 10800,  # 180 minutes in seconds
             "max_resolution": "720p",
             "watermark": True,
             "priority": 0,
             "support": "community",
             "api_access": False,
+            "model_selection": False,
             "price_monthly": 0,
+            "display_name": "Free",
+            "description": "Perfect for trying out the platform",
         },
         SubscriptionTier.BASIC: {
-            "videos_per_month": 10,
-            "max_video_duration": 180,
+            "videos_per_month": 8,
+            "books_upload_limit": 10,
+            "video_books_limit": 3,
+            "chapters_per_book": "unlimited",
+            "max_video_duration": 10800,  # 180 minutes
             "max_resolution": "720p",
             "watermark": False,
             "priority": 1,
             "support": "email",
             "api_access": False,
-            "price_monthly": 19,
+            "model_selection": False,
+            "voice_cloning": False,
+            "price_monthly": 29,
+            "display_name": "Basic",
+            "description": "Great for casual creators",
         },
         SubscriptionTier.PRO: {
-            "videos_per_month": 30,
-            "max_video_duration": 300,
+            "videos_per_month": 20,
+            "books_upload_limit": 25,
+            "video_books_limit": 10,
+            "chapters_per_book": "unlimited",
+            "max_video_duration": 10800,  # 180 minutes
             "max_resolution": "1080p",
             "watermark": False,
             "priority": 2,
             "support": "priority_email",
             "api_access": False,
+            "model_selection": True,  # Can select AI models
             "voice_cloning": True,
-            "price_monthly": 49,
+            "price_monthly": 79,
+            "display_name": "Standard",  # Renamed from Pro to Standard
+            "description": "For serious content creators",
         },
-        # Add other tiers as needed matching the Enum
+        # Future tiers (require DB migration):
+        # SubscriptionTier.PREMIUM: {...}
+        # SubscriptionTier.PROFESSIONAL: {...}
     }
 
     def get_all_tiers(self) -> List[Dict[str, Any]]:
         """
-        Get all available subscription tiers
+        Get all available subscription tiers with full details
         """
         tiers = []
+        display_order = 0
         for tier, limits in self.TIER_LIMITS.items():
+            feature_highlights = []
+
+            # Build feature highlights for display
+            if limits.get("videos_per_month"):
+                feature_highlights.append(f"{limits['videos_per_month']} videos/month")
+            if limits.get("books_upload_limit"):
+                feature_highlights.append(
+                    f"{limits['books_upload_limit']} book uploads"
+                )
+            if limits.get("video_books_limit"):
+                feature_highlights.append(
+                    f"Videos for {limits['video_books_limit']} books"
+                )
+            if limits.get("max_resolution"):
+                feature_highlights.append(f"{limits['max_resolution']} resolution")
+            if not limits.get("watermark"):
+                feature_highlights.append("No watermark")
+            if limits.get("voice_cloning"):
+                feature_highlights.append("Voice cloning")
+            if limits.get("model_selection"):
+                feature_highlights.append("AI model selection")
+            if limits.get("priority", 0) >= 2:
+                feature_highlights.append("Priority processing")
+
             tiers.append(
                 {
                     "tier": tier.value,
-                    "name": tier.value.title(),
-                    "price_monthly": limits["price_monthly"],
+                    "display_name": limits.get("display_name", tier.value.title()),
+                    "description": limits.get("description", ""),
+                    "monthly_price": limits["price_monthly"],
+                    "video_quality": limits.get("max_resolution", "720p"),
+                    "has_watermark": limits.get("watermark", True),
+                    "max_video_duration": limits.get("max_video_duration"),
+                    "monthly_video_limit": limits.get("videos_per_month", 0),
+                    "priority_processing": limits.get("priority", 0) >= 2,
                     "features": limits,
+                    "feature_highlights": feature_highlights,
+                    "display_order": display_order,
+                    "is_active": True,
                 }
             )
+            display_order += 1
         return tiers
 
     def __init__(self, session: AsyncSession):

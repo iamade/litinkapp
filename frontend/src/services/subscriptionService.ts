@@ -13,6 +13,7 @@ export interface SubscriptionTier {
   max_video_duration?: number;
   priority_processing: boolean;
   features: Record<string, unknown>;
+  feature_highlights?: string[];
   display_order: number;
   is_active: boolean;
 }

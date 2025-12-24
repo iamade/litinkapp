@@ -456,16 +456,55 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     );
   };
 
-  const renderScriptOverview = (script: ChapterScript) => (
+  // Helper function to count acts from script text
+  const countActsFromScript = (script: ChapterScript): number => {
+    if (script.acts && script.acts.length > 0) return script.acts.length;
+    // Count unique ACT headers from script text
+    const scriptText = script.script || '';
+    const actMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\*?\*?(?:\s|$)/gi);
+    if (actMatches) {
+      // Get unique acts (case insensitive)
+      const uniqueActs = new Set(actMatches.map(a => a.toUpperCase().replace(/\*/g, '').trim()));
+      return uniqueActs.size;
+    }
+    return 0;
+  };
+
+  // Helper function to count scenes from script text
+  const countScenesFromScript = (script: ChapterScript): number => {
+    if (script.scenes && script.scenes.length > 0) return script.scenes.length;
+    // Count SCENE headers from script text (more reliable than scene_descriptions which may have duplicates)
+    const scriptText = script.script || '';
+    const sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?/gi);
+    if (sceneMatches) {
+      return sceneMatches.length;
+    }
+    // Fallback to scene_descriptions if no matches in script text
+    if (script.scene_descriptions && script.scene_descriptions.length > 0) {
+      // Filter out duplicates - only count entries that start with ACT header
+      const actScenes = script.scene_descriptions.filter((desc: any) => {
+        const text = typeof desc === 'string' ? desc : desc?.visual_description || '';
+        return text.match(/^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE/i);
+      });
+      return actScenes.length > 0 ? actScenes.length : Math.ceil(script.scene_descriptions.length / 2);
+    }
+    return 0;
+  };
+
+  const renderScriptOverview = (script: ChapterScript) => {
+    const actCount = countActsFromScript(script);
+    const sceneCount = countScenesFromScript(script);
+
+    return (
     <div className="space-y-6">
       {/* Script Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="text-center p-4 bg-gray-50 rounded-lg">
-          <div className="text-2xl font-bold text-gray-900">{script.acts?.length || 0}</div>
+          <div className="text-2xl font-bold text-gray-900">{actCount}</div>
           <div className="text-sm text-gray-600">Acts</div>
         </div>
         <div className="text-center p-4 bg-gray-50 rounded-lg">
-          <div className="text-2xl font-bold text-gray-900">{script.scenes?.length || script.scene_descriptions?.length || 0}</div>
+          <div className="text-2xl font-bold text-gray-900">{sceneCount}</div>
           <div className="text-sm text-gray-600">Scenes</div>
         </div>
         <div className="text-center p-4 bg-gray-50 rounded-lg">
@@ -524,31 +563,71 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       </div>
     </div>
   );
+  };
 
-  const renderActsBreakdown = (script: ChapterScript) => (
+  const renderActsBreakdown = (script: ChapterScript) => {
+    // Parse acts from script text if not provided as structured data
+    const parseActsFromScript = (): { act_number: string; title: string; scenes: string[]; content: string }[] => {
+      if (script.acts && script.acts.length > 0) {
+        return script.acts.map(act => ({
+          act_number: String(act.act_number),
+          title: act.title || '',
+          scenes: act.scenes?.map(String) || [],
+          content: act.description || ''
+        }));
+      }
+
+      const scriptText = script.script || '';
+      const acts: { act_number: string; title: string; scenes: string[]; content: string }[] = [];
+      
+      // Split by ACT markers
+      const actPattern = /\*?\*?ACT\s+([IVX]+)\*?\*?/gi;
+      const matches = [...scriptText.matchAll(actPattern)];
+      
+      if (matches.length === 0) return [];
+
+      matches.forEach((match, idx) => {
+        const actNum = match[1];
+        const startIdx = match.index! + match[0].length;
+        const endIdx = idx < matches.length - 1 ? matches[idx + 1].index! : scriptText.length;
+        const actContent = scriptText.substring(startIdx, endIdx).trim();
+        
+        // Count scenes in this act
+        const sceneMatches = actContent.match(/\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?/gi) || [];
+        
+        acts.push({
+          act_number: actNum,
+          title: `Act ${actNum}`,
+          scenes: sceneMatches.map((_, i) => String(i + 1)),
+          content: actContent.substring(0, 200) + (actContent.length > 200 ? '...' : '')
+        });
+      });
+
+      return acts;
+    };
+
+    const parsedActs = parseActsFromScript();
+
+    return (
     <div className="space-y-6">
       <h4 className="text-lg font-semibold text-gray-900">Acts Structure</h4>
       
-      {script.acts && script.acts.length > 0 ? (
+      {parsedActs.length > 0 ? (
         <div className="space-y-4">
-          {script.acts.map((act, idx) => (
+          {parsedActs.map((act, idx) => (
             <div key={idx} className="border rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
                 <h5 className="text-lg font-medium text-gray-900">
-                  Act {act.act_number}: {act.title}
+                  {act.title}
                 </h5>
                 <div className="flex items-center space-x-4 text-sm text-gray-600">
                   <div className="flex items-center space-x-1">
-                    <Clock className="w-4 h-4" />
-                    <span>{act.duration}m</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
                     <Camera className="w-4 h-4" />
-                    <span>{act.scenes} scenes</span>
+                    <span>{act.scenes.length} scenes</span>
                   </div>
                 </div>
               </div>
-              <p className="text-gray-700">{act.description}</p>
+              <p className="text-gray-700 text-sm">{act.content}</p>
             </div>
           ))}
         </div>
@@ -560,31 +639,83 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       )}
     </div>
   );
+  };
 
-  const renderScenesDetail = (script: ChapterScript) => (
+  const renderScenesDetail = (script: ChapterScript) => {
+    // Parse scenes from script text
+    const parseScenesFromScript = (): { scene_number: number; header: string; location: string; content: string }[] => {
+      const scriptText = script.script || '';
+      const scenes: { scene_number: number; header: string; location: string; content: string }[] = [];
+      
+      // Find all ACT-SCENE headers
+      const scenePattern = /(\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?)/gi;
+      const matches = [...scriptText.matchAll(scenePattern)];
+      
+      if (matches.length === 0) {
+        // Fallback to scene_descriptions if available
+        if (script.scene_descriptions && script.scene_descriptions.length > 0) {
+          return script.scene_descriptions
+            .filter((desc: any, idx: number) => {
+              // Only include non-duplicate entries (filter out location-only entries)
+              const text = typeof desc === 'string' ? desc : '';
+              return text.match(/^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE/i) || idx % 2 === 0;
+            })
+            .map((desc: any, idx: number) => ({
+              scene_number: idx + 1,
+              header: `Scene ${idx + 1}`,
+              location: '',
+              content: typeof desc === 'string' ? desc : (desc?.visual_description || JSON.stringify(desc))
+            }));
+        }
+        return [];
+      }
+
+      matches.forEach((match, idx) => {
+        const startIdx = match.index!;
+        const endIdx = idx < matches.length - 1 ? matches[idx + 1].index! : scriptText.length;
+        const sceneContent = scriptText.substring(startIdx, endIdx).trim();
+        
+        // Extract location (INT./EXT. line)
+        const locationMatch = sceneContent.match(/(?:INT\.|EXT\.)[^\n]+/i);
+        const location = locationMatch ? locationMatch[0] : '';
+        
+        // Get first few lines of content (excluding header and location)
+        const lines = sceneContent.split('\n').slice(1, 6);
+        const contentLines = lines.filter(l => l.trim() && !l.trim().match(/^(?:INT\.|EXT\.)/i));
+        const content = contentLines.join(' ').substring(0, 300);
+        
+        scenes.push({
+          scene_number: idx + 1,
+          header: match[0].replace(/\*/g, '').trim(),
+          location: location,
+          content: content + (content.length >= 300 ? '...' : '')
+        });
+      });
+
+      return scenes;
+    };
+
+    const parsedScenes = parseScenesFromScript();
+
+    return (
     <div className="space-y-4">
       <h4 className="text-lg font-semibold text-gray-900">Scenes Breakdown</h4>
       
-      {script.scene_descriptions && script.scene_descriptions.length > 0 ? (
+      {parsedScenes.length > 0 ? (
         <div className="space-y-4">
-          {script.scene_descriptions.map((scene, idx) => {
-            if (typeof scene === 'object' && scene !== null) {
-              return (
-                <SceneDetailCard
-                  key={idx}
-                  scene={scene}
-                  isExpanded={expandedScenes.has(scene.scene_number)}
-                  onToggleExpand={() => toggleSceneExpansion(scene.scene_number)}
-                />
-              );
-            } else {
-              return (
-                <div key={idx} className="border rounded-lg p-4 bg-gray-50">
-                  <p className="text-gray-700">{typeof scene === 'string' ? scene : JSON.stringify(scene)}</p>
-                </div>
-              );
-            }
-          })}
+          {parsedScenes.map((scene, idx) => (
+            <div key={idx} className="border rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h5 className="font-medium text-gray-900">{scene.header}</h5>
+                {scene.location && (
+                  <span className="text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                    {scene.location}
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-gray-700">{scene.content}</p>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="text-center py-8 text-gray-500">
@@ -594,6 +725,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       )}
     </div>
   );
+  };
 
   const renderDialogueView = (script: ChapterScript) => (
     <div className="space-y-4">
@@ -660,6 +792,17 @@ interface ScriptCardProps {
 const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching, onSelect, onDelete }) => {
   const [showActions, setShowActions] = useState(false);
 
+  // Count scenes from script text
+  const getSceneCount = (): number => {
+    const scriptText = script.script || '';
+    const sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?/gi);
+    if (sceneMatches && sceneMatches.length > 0) {
+      return sceneMatches.length;
+    }
+    // Fallback
+    return script.scene_descriptions ? Math.ceil(script.scene_descriptions.length / 2) : 0;
+  };
+
   return (
     <div
       className={`border rounded-lg p-4 transition-all hover:shadow-md ${
@@ -711,7 +854,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
 
       <div className="grid grid-cols-3 gap-4 text-sm text-gray-600 mb-3">
         <div>
-          <span className="font-medium">Scenes:</span> {script.scene_descriptions?.length || 0}
+          <span className="font-medium">Scenes:</span> {getSceneCount()}
         </div>
         <div>
           <span className="font-medium">Characters:</span> {script.characters?.length || 0}

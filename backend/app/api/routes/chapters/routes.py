@@ -942,7 +942,7 @@ async def list_chapter_audio(
 
         # Get user's audio files for this chapter
         print(
-            f"[DEBUG] Querying audio_generations for user_id: {current_user['id']}, chapter_id: {chapter_id}"
+            f"[DEBUG] Querying audio_generations for user_id: {current_user.id}, chapter_id: {chapter_id}"
         )
 
         stmt = select(AudioGeneration).where(
@@ -1090,7 +1090,7 @@ async def generate_chapter_audio(
 
         # Create initial record in database
         print(
-            f"[DEBUG] Creating audio record with audio_type: {audio_type}, user_id: {current_user['id']}, chapter_id: {chapter_id}"
+            f"[DEBUG] Creating audio record with audio_type: {audio_type}, user_id: {current_user.id}, chapter_id: {chapter_id}"
         )
 
         audio_record = AudioGeneration(
@@ -1115,7 +1115,7 @@ async def generate_chapter_audio(
         await session.refresh(audio_record)
         record_id = str(audio_record.id)
 
-        print(f"[DEBUG] Created audio record {record_id} for user {current_user['id']}")
+        print(f"[DEBUG] Created audio record {record_id} for user {current_user.id}")
 
         # Queue the audio generation task
         from app.tasks.audio_tasks import generate_chapter_audio_task
