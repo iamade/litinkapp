@@ -33,19 +33,19 @@ export default function CreatorOnboardingModal({
             <ul className="space-y-2 text-gray-700">
               <li className="flex items-start space-x-2">
                 <Check className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <span>Generate books with AI assistance</span>
+                <span>Upload your books, articles, and documents</span>
               </li>
               <li className="flex items-start space-x-2">
                 <Check className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <span>Write and produce scripts for movies and entertainment</span>
+                <span>Generate quizzes, summaries, and study materials from your content</span>
               </li>
               <li className="flex items-start space-x-2">
                 <Check className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <span>Create videos with professional AI tools</span>
+                <span>Create interactive learning experiences with AI</span>
               </li>
               <li className="flex items-start space-x-2">
                 <Check className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <span>Access advanced plot and character creation</span>
+                <span>Manage and organize your content library</span>
               </li>
             </ul>
           </div>
@@ -53,7 +53,7 @@ export default function CreatorOnboardingModal({
       ),
     },
     {
-      title: 'The Author Panel',
+      title: 'The Creator Dashboard',
       icon: Wand2,
       iconColor: 'text-indigo-600',
       iconBg: 'bg-indigo-100',
@@ -67,27 +67,27 @@ export default function CreatorOnboardingModal({
               <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <BookOpen className="h-6 w-6 text-blue-600" />
               </div>
-              <h4 className="font-semibold text-gray-900 mb-2">Books</h4>
+              <h4 className="font-semibold text-gray-900 mb-2">Books & Docs</h4>
               <p className="text-sm text-gray-600">
-                Create interactive books with AI-generated content
+                Upload and manage your books, articles, and documents
               </p>
             </div>
             <div className="bg-white border-2 border-green-200 rounded-xl p-4 text-center">
               <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <Film className="h-6 w-6 text-green-600" />
               </div>
-              <h4 className="font-semibold text-gray-900 mb-2">Scripts</h4>
+              <h4 className="font-semibold text-gray-900 mb-2">Content</h4>
               <p className="text-sm text-gray-600">
-                Write movie scripts with AI assistance
+                Generate quizzes, summaries, and study guides
               </p>
             </div>
             <div className="bg-white border-2 border-pink-200 rounded-xl p-4 text-center">
               <div className="w-12 h-12 bg-pink-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <Sparkles className="h-6 w-6 text-pink-600" />
               </div>
-              <h4 className="font-semibold text-gray-900 mb-2">Videos</h4>
+              <h4 className="font-semibold text-gray-900 mb-2">AI Tools</h4>
               <p className="text-sm text-gray-600">
-                Produce videos with professional AI tools
+                Use AI to analyze and enhance your content
               </p>
             </div>
           </div>
@@ -197,7 +197,7 @@ export default function CreatorOnboardingModal({
       console.error('Failed to mark onboarding as completed:', error);
     }
     onClose();
-    navigate('/author');
+    navigate('/creator');
   };
 
   const handleSkip = async () => {

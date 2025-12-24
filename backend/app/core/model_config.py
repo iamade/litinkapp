@@ -28,18 +28,18 @@ class ModelConfig:
 
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="arliai/qwq-32b-arliai-rpr-v1:free",
-        fallback="meta-llama/llama-3.2-3b-instruct",
-        fallback2="deepseek-chat-v3-0324:free",
+        primary="google/gemini-2.0-flash-exp:free",
+        fallback="meta-llama/llama-3.3-70b-instruct:free",
+        fallback2="deepseek/deepseek-chat",
         max_tokens=2000,
         temperature=0.7,
-        cost_per_1k_input=0.00006,
-        cost_per_1k_output=0.00006,
+        cost_per_1k_input=0.0,
+        cost_per_1k_output=0.0,
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="deepseek-chat-v3-0324:free",
-        fallback="mistralai/mistral-7b-instruct",
-        fallback2="meta-llama/llama-3.2-3b-instruct",
+        primary="deepseek/deepseek-chat",
+        fallback="mistralai/mistral-nemo",
+        fallback2="meta-llama/llama-3.3-70b-instruct:free",
         max_tokens=3000,
         temperature=0.7,
         cost_per_1k_input=0.00014,
@@ -48,7 +48,7 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.STANDARD: ModelConfig(
         primary="anthropic/claude-3-haiku-20240307",
         fallback="openai/gpt-3.5-turbo",
-        fallback2="deepseek-chat-v3-0324:free",
+        fallback2="deepseek/deepseek-chat",
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.00025,

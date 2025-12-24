@@ -1041,7 +1041,7 @@ class BookStructureDetector:
     def _find_page_by_title_scan(
         self, doc, chapter_title: str, start_page: int, end_page: int
     ) -> Optional[int]:
-        """Fallback: Scan pages for the chapter title if page number finding fails"""
+        """Fallback: Scan pages for the chapter title if page number finding fails - with OCR"""
         print(
             f"[PAGE FINDER] Scanning pages {start_page+1}-{end_page+1} for title: {chapter_title}"
         )
@@ -1056,7 +1056,19 @@ class BookStructureDetector:
 
             for i in range(start_page, min(len(doc), end_page)):
                 try:
-                    text = doc[i].get_text()
+                    page = doc[i]
+                    text = page.get_text()
+
+                    # OCR fallback for scanned PDFs
+                    if not text.strip():
+                        try:
+                            tp = page.get_textpage_ocr(
+                                flags=0, language="eng", dpi=150, full=True
+                            )
+                            text = page.get_text(textpage=tp)
+                        except Exception:
+                            pass
+
                     # Check for title in the first 1000 chars (usually top of page)
                     page_head = text[:1000].upper()
 
@@ -1303,6 +1315,16 @@ class BookStructureDetector:
             page = doc[page_idx]
             text = page.get_text()
 
+            # OCR fallback for scanned PDFs
+            if not text.strip():
+                try:
+                    tp = page.get_textpage_ocr(
+                        flags=0, language="eng", dpi=150, full=True
+                    )
+                    text = page.get_text(textpage=tp)
+                except Exception:
+                    pass
+
             # Get lines for better analysis
             lines = text.split("\n")
 
@@ -1332,7 +1354,7 @@ class BookStructureDetector:
         return None
 
     def _detect_numbering_system(self, doc, target_page_num: int) -> str:
-        """Detect whether the book uses Roman numerals, Arabic numbers, or mixed"""
+        """Detect whether the book uses Roman numerals, Arabic numbers, or mixed - with OCR"""
 
         # Look at the first few pages to see what numbering system is used
         roman_indicators = 0
@@ -1341,6 +1363,17 @@ class BookStructureDetector:
         for page_idx in range(min(20, len(doc))):
             page = doc[page_idx]
             text = page.get_text()
+
+            # OCR fallback for scanned PDFs
+            if not text.strip():
+                try:
+                    tp = page.get_textpage_ocr(
+                        flags=0, language="eng", dpi=150, full=True
+                    )
+                    text = page.get_text(textpage=tp)
+                except Exception:
+                    pass
+
             lines = text.split("\n")
 
             # Check headers and footers for numbering patterns
@@ -1458,13 +1491,30 @@ class BookStructureDetector:
         return False
 
     def _extract_pages_content(self, doc, start_page: int, end_page: int) -> str:
-        """Extract text content from a range of pages"""
+        """Extract text content from a range of pages - with OCR fallback for scanned PDFs"""
         content_parts = []
 
         for page_num in range(start_page, end_page + 1):
             if page_num < len(doc):
                 page = doc[page_num]
                 text = page.get_text()
+
+                # OCR fallback for scanned/image-based PDFs
+                if not text.strip():
+                    try:
+                        tp = page.get_textpage_ocr(
+                            flags=0, language="eng", dpi=150, full=True
+                        )
+                        text = page.get_text(textpage=tp)
+                        if text.strip():
+                            print(
+                                f"[PAGE EXTRACTION] OCR extracted text from page {page_num + 1}"
+                            )
+                    except Exception as e:
+                        print(
+                            f"[PAGE EXTRACTION] OCR failed for page {page_num + 1}: {e}"
+                        )
+
                 if text.strip():
                     content_parts.append(text)
 
@@ -1701,182 +1751,6 @@ class FileService:
         self.ai_service = AIService()
         self.structure_detector = BookStructureDetector()
         os.makedirs(self.upload_dir, exist_ok=True)
-
-    # async def process_uploaded_book(
-    #     self,
-    #     storage_path: Optional[str],
-    #     original_filename: Optional[str],
-    #     text_content: Optional[str],
-    #     book_type: str,
-    #     user_id: str,
-    #     book_id_to_update: str,
-    # ) -> None:
-    #     """Process uploaded book and create chapters with embeddings"""
-    #     try:
-    #         # Extract text content
-    #         if text_content:
-    #             content = text_content
-    #         elif storage_path:
-    #             # Download file from Supabase Storage to a temporary location
-    #             with tempfile.NamedTemporaryFile(delete=False, suffix=original_filename) as temp_file:
-    #                 file_content = self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(path=storage_path)
-    #                 temp_file.write(file_content)
-    #                 temp_file_path = temp_file.name
-
-    #             extracted_data = self.process_book_file(temp_file_path, original_filename, user_id)
-    #             content = extracted_data.get("text", "")
-    #             author_name = extracted_data.get("author")
-    #             cover_image_url = extracted_data.get("cover_image_url")
-
-    #             # Clean up temporary file
-    #             os.unlink(temp_file_path)
-    #         else:
-    #             raise ValueError("No content provided")
-
-    #         # Update book with extracted content
-    #         # Clean the content to handle Unicode escape sequences
-    #         cleaned_content = self._clean_text_content(content)
-
-    #         self.db.table("books").update({
-    #             "content": cleaned_content,
-    #             "status": "PROCESSING",
-    #             "cover_image_url": cover_image_url
-    #         }).eq("id", book_id_to_update).execute()
-
-    #         # NEW FLOW: Extract chapters following the specified order
-    #         chapters = await self.extract_chapters_with_new_flow(content, book_type, original_filename, storage_path)
-
-    #         # Create sections and chapters in database
-    #         # section_id_map = {}  # Map section titles to section IDs
-    #         section_id_map: Dict[str, str] = {}  # section key -> section id
-
-    #         for i, chapter_data in enumerate(chapters):
-    #             section_id = None
-
-    #             # If chapter has section data, create or get section
-    #             if "section_title" in chapter_data:
-    #                 # section_key = f"{chapter_data['section_title']}_{chapter_data.get('section_type', '')}"
-    #                 section_key = f"{chapter_data.get('section_title','')}|{chapter_data.get('section_type','')}|{chapter_data.get('section_number','')}"
-
-    #                 # if section_key not in section_id_map:
-    #                 #     # Create new section
-    #                 #     section_insert_data = {
-    #                 #         "book_id": book_id_to_update,
-    #                 #         "title": chapter_data["section_title"],
-    #                 #         "section_type": chapter_data.get("section_type", ""),
-    #                 #         "section_number": chapter_data.get("section_number", ""),
-    #                 #         "order_index": chapter_data.get("section_order", i + 1)
-    #                 #     }
-
-    #                 #     section_response = self.db.table("book_sections").insert(section_insert_data).execute()
-    #                 #     section_id = section_response.data[0]["id"]
-    #                 #     section_id_map[section_key] = section_id
-    #                 # else:
-    #                 #     section_id = section_id_map[section_key]
-
-    #                 if section_key not in section_id_map:
-    #                         section_insert = {
-    #                             "book_id": book_id_to_update,
-    #                             "title": chapter_data.get("section_title", ""),
-    #                             "section_type": chapter_data.get("section_type", "part"),   # book|part|section
-    #                             "section_number": chapter_data.get("section_number", ""),
-    #                             "order_index": len(section_id_map) + 1,
-    #                         }
-    #                         resp = self.db.table("book_sections").insert(section_insert).execute()
-    #                         section_id_map[section_key] = resp.data[0]["id"]
-    #                 section_id = section_id_map[section_key]
-
-    #             # Build chapter data
-    #             chapter_insert_data = {
-    #                 "book_id": book_id_to_update,
-    #                 "chapter_number": chapter_data.get("chapter_number", chapter_data.get("number") or i + 1),
-    #                 "title": chapter_data["title"],
-    #                 "content": self._clean_text_content(chapter_data.get("content", "")),
-    #                 "summary": self._clean_text_content(chapter_data.get("summary", "")),
-    #                 "order_index": chapter_data.get("chapter_number", chapter_data.get("number") or i + 1),
-    #             }
-    #             if section_id:
-    #                 chapter_insert_data["section_id"] = section_id
-
-    #             # Insert chapter
-    #             chapter_response = self.db.table("chapters").insert(chapter_insert_data).execute()
-    #             chapter_id = chapter_response.data[0]["id"]
-
-    #             # Create embeddings for the chapter (best-effort)
-    #             try:
-    #                 from app.core.services.embeddings import EmbeddingsService
-    #                 embeddings_service = EmbeddingsService(self.db)
-    #                 await embeddings_service.create_chapter_embeddings(chapter_id, chapter_insert_data["content"])
-    #             except Exception as e:
-    #                 print(f"Failed to create embeddings for chapter {chapter_id}: {e}")
-
-    #         # Mark book as hierarchical if sections were created
-    #         self.db.table("books").update({
-    #             "has_sections": bool(section_id_map),
-    #             "structure_type": "hierarchical" if section_id_map else "flat",
-    #             "status": "READY",
-    #             "total_chapters": len(chapters)
-    #         }).eq("id", book_id_to_update).execute()
-
-    #             # # Create chapter
-    #             # chapter_insert_data = {
-    #             #     "book_id": book_id_to_update,
-    #             #     "chapter_number": chapter_data.get("chapter_number", i + 1),
-    #             #     "title": chapter_data["title"],
-    #             #     "content": self._clean_text_content(chapter_data["content"]),
-    #             #     "summary": self._clean_text_content(chapter_data.get("summary", "")),
-    #             #     "order_index": chapter_data.get("chapter_number", i + 1)
-    #             # }
-
-    #             # # Add section_id if chapter belongs to a section
-    #             # if section_id:
-    #             #     chapter_insert_data["section_id"] = section_id
-
-    #             # # Insert chapter
-    #             # chapter_response = self.db.table("chapters").insert(chapter_insert_data).execute()
-    #             # chapter_id = chapter_response.data[0]["id"]
-
-    #             # # Create embeddings for the chapter
-    #             # try:
-    #             #     from app.core.services.embeddings import EmbeddingsService
-    #             #     embeddings_service = EmbeddingsService(self.db)
-    #             #     await embeddings_service.create_chapter_embeddings(
-    #             #         chapter_id=chapter_id,
-    #             #         content=chapter_data["content"]
-    #             #     )
-    #             # except Exception as e:
-    #             #     print(f"Failed to create embeddings for chapter {chapter_id}: {e}")
-
-    #         # Create book-level embeddings
-    #         try:
-    #             from app.core.services.embeddings import EmbeddingsService
-    #             embeddings_service = EmbeddingsService(self.db)
-
-    #             # Get book data for embeddings
-    #             book_response = self.db.table("books").select("*").eq("id", book_id_to_update).single().execute()
-    #             book_data = book_response.data
-
-    #             await embeddings_service.create_book_embeddings(
-    #                 book_id=book_id_to_update,
-    #                 title=book_data["title"],
-    #                 description=book_data.get("description"),
-    #                 content=content
-    #             )
-    #         except Exception as e:
-    #             print(f"Failed to create book embeddings: {e}")
-
-    #         # Update book status to completed
-    #         self.db.table("books").update({
-    #             "status": "READY",
-    #             "total_chapters": len(chapters)
-    #         }).eq("id", book_id_to_update).execute()
-
-    #     except Exception as e:
-    #         # Update book status to failed
-    #         self.db.table("books").update({
-    #             "status": "FAILED"
-    #         }).eq("id", book_id_to_update).execute()
-    #         raise e
 
     def _extract_chapter_content(
         self, full_content: str, chapter_title: str, lines: List[str], start_line: int
@@ -2574,33 +2448,68 @@ class FileService:
         return chapters[: self.MAX_CHAPTERS]
 
     async def extract_chapters_from_pdf_with_toc(
-        self, file_path: str
+        self, file_path: str, progress_callback=None
     ) -> Optional[List[Dict[str, Any]]]:
         """Updated Multi-strategy TOC extraction with better complexity detection"""
         try:
             doc = fitz.open(file_path)
+            total_pages = len(doc)
 
             print("[TOC EXTRACTION] Starting updated multi-strategy extraction...")
+            if progress_callback:
+                await progress_callback(
+                    30,
+                    f"Scanning {total_pages} pages for TOC...",
+                    "toc",
+                    total_pages=total_pages,
+                )
 
             # Strategy 1: Try PDF bookmarks first (most reliable)
             toc = doc.get_toc()
             if toc and len(toc) >= 3:
+                if progress_callback:
+                    await progress_callback(
+                        35, "Found PDF bookmarks, extracting...", "toc"
+                    )
                 bookmark_chapters = self._process_pdf_bookmarks(doc, toc)
                 if len(bookmark_chapters) >= 3:
                     print(
                         f"[TOC EXTRACTION] SUCCESS: PDF bookmarks yielded {len(bookmark_chapters)} chapters"
                     )
+                    if progress_callback:
+                        await progress_callback(
+                            90,
+                            f"Extracted {len(bookmark_chapters)} chapters from bookmarks",
+                            "complete",
+                            completed_step=f"✅ Found {len(bookmark_chapters)} chapters from PDF bookmarks",
+                            total_chapters=len(bookmark_chapters),
+                        )
                     doc.close()
                     return bookmark_chapters
 
             # Strategy 2: Analyze TOC complexity to choose appropriate method
+            if progress_callback:
+                await progress_callback(
+                    40, "Detecting Table of Contents pages...", "toc"
+                )
             toc_pages = self._find_toc_pages(doc)
             if toc_pages:
+                if progress_callback:
+                    await progress_callback(
+                        45,
+                        f"Found TOC on page(s) {[p+1 for p in toc_pages]}",
+                        "toc",
+                        completed_step=f"✅ TOC detected on page {toc_pages[0]+1}",
+                    )
                 toc_complexity = self._analyze_toc_complexity(doc, toc_pages)
                 print(f"[TOC EXTRACTION] TOC complexity assessment: {toc_complexity}")
 
                 if toc_complexity == "simple":
                     # Strategy 2A: Simple pattern-based extraction for straightforward TOCs
+                    if progress_callback:
+                        await progress_callback(
+                            50, "Extracting chapters from TOC patterns...", "extract"
+                        )
                     simple_chapters = await self._extract_simple_toc_patterns(
                         doc, toc_pages
                     )
@@ -2608,11 +2517,23 @@ class FileService:
                         print(
                             f"[TOC EXTRACTION] SUCCESS: Simple pattern extraction yielded {len(simple_chapters)} chapters"
                         )
+                        if progress_callback:
+                            await progress_callback(
+                                55,
+                                f"Found {len(simple_chapters)} chapters, extracting content...",
+                                "content",
+                                completed_step=f"✅ Found {len(simple_chapters)} chapters in TOC",
+                                total_chapters=len(simple_chapters),
+                            )
                         doc.close()
                         return simple_chapters
 
                 elif toc_complexity == "complex":
                     # Strategy 2B: AI-powered extraction for complex columnar TOCs
+                    if progress_callback:
+                        await progress_callback(
+                            50, "Complex TOC detected, using AI analysis...", "ai"
+                        )
                     ai_chapters = await self._extract_complex_toc_with_ai(
                         doc, toc_pages
                     )
@@ -2620,10 +2541,22 @@ class FileService:
                         print(
                             f"[TOC EXTRACTION] SUCCESS: AI complex extraction yielded {len(ai_chapters)} chapters"
                         )
+                        if progress_callback:
+                            await progress_callback(
+                                55,
+                                f"AI found {len(ai_chapters)} chapters, extracting content...",
+                                "content",
+                                completed_step=f"✅ AI extracted {len(ai_chapters)} chapters",
+                                total_chapters=len(ai_chapters),
+                            )
                         doc.close()
                         return ai_chapters
 
                 # Strategy 3: Pattern-based fallback
+                if progress_callback:
+                    await progress_callback(
+                        55, "Trying pattern-based extraction...", "extract"
+                    )
                 pattern_chapters = await self._extract_toc_with_patterns(
                     doc, True, toc_pages[0], min(75, len(doc))
                 )
@@ -2634,6 +2567,14 @@ class FileService:
                     print(
                         f"[TOC EXTRACTION] SUCCESS: Pattern fallback yielded {len(pattern_chapters)} chapters"
                     )
+                    if progress_callback:
+                        await progress_callback(
+                            60,
+                            f"Found {len(pattern_chapters)} chapters, extracting content...",
+                            "content",
+                            completed_step=f"✅ Pattern matching found {len(pattern_chapters)} chapters",
+                            total_chapters=len(pattern_chapters),
+                        )
                     doc.close()
                     return pattern_chapters
                 print(f"[DEBUG] Falling through to AI fallback check")
@@ -2644,6 +2585,10 @@ class FileService:
                 print(
                     f"[TOC EXTRACTION] Pattern fallback failed ({len(pattern_chapters)} chapters). Attempting AI fallback on confirmed TOC pages..."
                 )
+                if progress_callback:
+                    await progress_callback(
+                        60, "Patterns insufficient, trying AI analysis...", "ai"
+                    )
                 ai_fallback_chapters = await self._extract_complex_toc_with_ai(
                     doc, toc_pages
                 )
@@ -2651,6 +2596,14 @@ class FileService:
                     print(
                         f"[TOC EXTRACTION] SUCCESS: AI fallback yielded {len(ai_fallback_chapters)} chapters"
                     )
+                    if progress_callback:
+                        await progress_callback(
+                            65,
+                            f"AI found {len(ai_fallback_chapters)} chapters, extracting content...",
+                            "content",
+                            completed_step=f"✅ AI analysis found {len(ai_fallback_chapters)} chapters",
+                            total_chapters=len(ai_fallback_chapters),
+                        )
                     doc.close()
                     return ai_fallback_chapters
 
@@ -2765,7 +2718,7 @@ class FileService:
                 # Standard patterns
                 r"CHAPTER\s+(\d+)[\.\s]*(.+?)\s+(\d+)",  # "CHAPTER 1. Title 123"
                 r"Chapter\s+(\d+)[\.\s]*(.+?)\s+(\d+)",  # "Chapter 1. Title 123"
-                r"^(\d+)\.\s+(.+?)\s+(\d+)",  # "1. Title 123"
+                r"^(\d+)\.\s+(.+?)\s+(\d{1,3})$",  # "1. Title 123" - improved end anchor
                 # ✅ NEW: Angel Magic specific patterns
                 r"CHAPTER\s+(\d+)[\.\s]+([A-Z][^\.]+?)\s+(\d+)",  # "CHAPTER 1. Introduction to Angel Magic 1"
                 r"Chapter\s+(\d+)[\.\s]+([A-Z][^\.]+?)\s+(\d+)",  # "Chapter 1. Introduction to Angel Magic 1"
@@ -2855,7 +2808,30 @@ class FileService:
         for page_num in range(min(30, len(doc))):
             page = doc[page_num]
             text = page.get_text()
+
+            # OCR fallback for image-based/scanned PDFs
+            if not text.strip() and page_num < 15:
+                try:
+                    # Try PyMuPDF's built-in OCR (requires Tesseract)
+                    tp = page.get_textpage_ocr(
+                        flags=0, language="eng", dpi=150, full=True
+                    )
+                    text = page.get_text(textpage=tp)
+                    if text.strip():
+                        print(
+                            f"[OCR] Successfully extracted text from page {page_num + 1} via OCR"
+                        )
+                except Exception as e:
+                    # OCR not available or failed
+                    print(f"[OCR] OCR failed for page {page_num + 1}: {e}")
+
             text_upper = text.upper()
+
+            # DEBUG: Print text from likely TOC pages to see actual format
+            if 7 <= page_num <= 12:
+                print(f"[DEBUG TOC] Page {page_num + 1} text (first 500 chars):")
+                print(repr(text[:500]))
+                print("---END DEBUG---")
 
             # ✅ FIX: First, look for explicit TOC headers
             explicit_toc_indicators = [r"\bCONTENTS\b", r"\bTABLE\s+OF\s+CONTENTS\b"]
@@ -2946,6 +2922,21 @@ class FileService:
                 if chapter_with_pages >= 5 or spelled_with_pages >= 3:
                     strong_toc_score += 3
 
+                # ✅ NEW: Count numbered entries with page numbers (e.g., "1. Title Name 11")
+                # This handles TOC formats like: "1. Our Gang: The Electronics Kids 11"
+                numbered_entries = len(
+                    re.findall(
+                        r"^\s*\d+\.\s+[A-Za-z][^\n]{3,}\s+\d{1,3}\s*$",
+                        text,
+                        re.MULTILINE,
+                    )
+                )
+                if numbered_entries >= 5:
+                    strong_toc_score += 3
+                    print(
+                        f"[TOC PAGES] Page {page_num + 1} has {numbered_entries} numbered entries"
+                    )
+
                 # Count dotted lines (TOC formatting)
                 dotted_lines = len(re.findall(r"(\.{3,}|\s\.\s)\s*\d+", text))
                 if dotted_lines >= 3:
@@ -2958,8 +2949,8 @@ class FileService:
                 if structural_divisions >= 1:
                     strong_toc_score += 2
 
-                # Only add if we have very strong evidence
-                if strong_toc_score >= 5:
+                # Only add if we have strong evidence (lowered from 5 to 3 for numbered lists)
+                if strong_toc_score >= 3:
                     print(
                         f"[TOC PAGES] Found strong TOC page at {page_num + 1} (score: {strong_toc_score})"
                     )
@@ -2989,62 +2980,6 @@ class FileService:
 
         print(f"[TOC PAGES] Final TOC pages: {[p + 1 for p in toc_pages]}")
         return toc_pages
-
-    # def _find_toc_pages(self, doc) -> List[int]:
-    #     """Find pages that likely contain TOC - IMPROVED"""
-    #     toc_pages = []
-
-    #     for page_num in range(min(30, len(doc))):
-    #         page = doc[page_num]
-    #         text = page.get_text()
-
-    #         # ✅ FIX: Better TOC detection
-    #         # Look for TOC indicators - more flexible
-    #         toc_indicators = [
-    #             r'\b(contents|table\s+of\s+contents)\b',
-    #             r'CHAPTER\s+\d+.*?\d+\s*$',  # Chapter with page number
-    #             r'Chapter\s+\d+.*?\d+\s*$',   # Chapter with page number
-    #         ]
-
-    #         found_toc_indicator = False
-    #         for pattern in toc_indicators:
-    #             if re.search(pattern, text, re.IGNORECASE | re.MULTILINE):
-    #                 found_toc_indicator = True
-    #                 break
-
-    #         if found_toc_indicator:
-    #             toc_pages.append(page_num)
-    #             print(f"[TOC PAGES] Found TOC page at {page_num + 1}")
-
-    #         # Look for chapter listing patterns - more flexible
-    #         chapter_patterns = [
-    #             r'CHAPTER\s+\d+',           # "CHAPTER 1", "CHAPTER 2"
-    #             r'Chapter\s+\d+',           # "Chapter 1", "Chapter 2"
-    #             r'CHAPTER\s+[IVX]+',        # "CHAPTER I", "CHAPTER II"
-    #             r'Chapter\s+[IVX]+',        # "Chapter I", "Chapter II"
-    #             r'^\s*[IVX]+\.\s+[A-Z]',    # "I. TITLE", "II. TITLE"
-    #             r'^\s*\d+\.\s+[A-Z]',       # "1. TITLE", "2. TITLE"
-    #             r'PART\s+[IVX]+',           # "PART I", "PART II"
-    #             r'BOOK\s+[IVX]+',           # "BOOK I", "BOOK II"
-    #             r'ACT\s+[IVX]+',            # "ACT I", "ACT II"
-    #             r'SECTION\s+[IVX]+',        # "SECTION I", "SECTION II"
-    #         ]
-
-    #         chapter_matches = 0
-    #         for pattern in chapter_patterns:
-    #             chapter_matches += len(re.findall(pattern, text, re.MULTILINE))
-
-    #         if chapter_matches >= 3:  # At least 3 chapter-like entries
-    #             toc_pages.append(page_num)
-    #             print(f"[TOC PAGES] Found chapter listing page at {page_num + 1} ({chapter_matches} matches)")
-
-    #         # Additional heuristic: Look for page number patterns (dots leading to numbers)
-    #         page_number_patterns = len(re.findall(r'\.{3,}\s*\d+', text))
-    #         if page_number_patterns >= 3:  # Multiple page number references
-    #             toc_pages.append(page_num)
-    #             print(f"[TOC PAGES] Found TOC page at {page_num + 1} ({page_number_patterns} page references)")
-
-    #     return list(set(toc_pages))
 
     def _process_pdf_bookmarks(self, doc, toc) -> List[Dict[str, Any]]:
         """Process PDF bookmarks into chapters"""
@@ -3076,224 +3011,6 @@ class FileService:
 
         print(f"[TOC EXTRACTION] Processed {len(chapters)} chapters from bookmarks")
         return chapters
-
-    # async def _enhance_partial_toc_with_ai(self, doc, partial_chapters: List[Dict]) -> List[Dict]:
-    #     """Use AI to find missing chapters when partial TOC is detected"""
-    #     print(f"[TOC ENHANCEMENT] Enhancing {len(partial_chapters)} partial chapters with AI...")
-
-    #     # Get more text from the document
-    #     full_toc_text = ""
-    #     for page_num in range(min(40, len(doc))):
-    #         page_text = doc[page_num].get_text()
-    #         if any(keyword in page_text.upper() for keyword in ['CONTENTS', 'CHAPTER', 'BOOK THE']):
-    #             full_toc_text += f"\n--- PAGE {page_num + 1} ---\n{page_text}"
-
-    #     try:
-    #         prompt = f"""
-    #         I found {len(partial_chapters)} chapters in a Table of Contents, but I suspect there are more.
-
-    #         Currently found chapters:
-    #         {json.dumps([{'title': ch['title'], 'page': ch.get('page_hint')} for ch in partial_chapters], indent=2)}
-
-    #         Here's the full TOC text to analyze:
-    #         {full_toc_text[:10000]}
-
-    #         Please find ALL chapters in this TOC, including any I missed. Look for:
-    #         - Roman numerals (I, II, III, etc.)
-    #         - Chapter titles in various formats
-    #         - Page numbers
-    #         - Section divisions (Book the First, etc.)
-
-    #         Return complete list as JSON:
-    #         {{
-    #             "chapters": [
-    #                 {{
-    #                     "number": 1,
-    #                     "title": "THE PERIOD",
-    #                     "page": 1,
-    #                     "section": "BOOK THE FIRST"
-    #                 }}
-    #             ]
-    #         }}
-    #         """
-
-    #         response = await self.ai_service.client.chat.completions.create(
-    #             model="gpt-4o-mini",
-    #             messages=[
-    #                 {"role": "system", "content": "You are an expert at analyzing Table of Contents. Find ALL chapters, don't miss any."},
-    #                 {"role": "user", "content": prompt}
-    #             ],
-    #             max_tokens=4000,
-    #             temperature=0.1
-    #         )
-
-    #         result = json.loads(response.choices[0].message.content)
-    #         enhanced_chapters = []
-
-    #         for ch in result.get('chapters', []):
-    #             formatted_chapter = {
-    #                 'number': ch.get('number', 1),
-    #                 'title': f"Chapter {ch.get('number', 1)}: {ch.get('title', 'Unknown')}",
-    #                 'raw_title': ch.get('title', 'Unknown'),
-    #                 'page_hint': ch.get('page', 1),
-    #             }
-
-    #             if ch.get('section'):
-    #                 formatted_chapter.update({
-    #                     'section_title': ch['section'],
-    #                     'section_type': 'book' if 'BOOK' in ch['section'].upper() else 'section',
-    #                 })
-
-    #             enhanced_chapters.append(formatted_chapter)
-
-    #         print(f"[TOC ENHANCEMENT] AI enhanced to {len(enhanced_chapters)} total chapters")
-    #         return enhanced_chapters
-
-    #     except Exception as e:
-    #         print(f"[TOC ENHANCEMENT] Failed: {e}")
-    #         return partial_chapters
-
-    # def _process_pdf_bookmarks(self, doc, toc) -> List[Dict[str, Any]]:
-    #     """Process PDF bookmarks into chapters"""
-    #     chapters = []
-    #     main_chapters = [item for item in toc if item[0] == 1]  # Level 1 items only
-
-    #     for i, (level, title, page) in enumerate(main_chapters):
-    #         start_page = page - 1
-    #         end_page = len(doc) - 1
-
-    #         # Find next chapter
-    #         if i + 1 < len(main_chapters):
-    #             end_page = main_chapters[i + 1][2] - 2
-
-    #         # Extract content
-    #         chapter_text = ""
-    #         for p in range(start_page, min(end_page + 1, len(doc))):
-    #             chapter_text += doc[p].get_text()
-
-    #         if len(chapter_text.strip()) > 500:  # Minimum content threshold
-    #             chapters.append({
-    #                 "title": title.strip(),
-    #                 "content": chapter_text.strip(),
-    #                 "summary": "",
-    #                 "chapter_number": i + 1
-    #             })
-
-    #     print(f"[TOC EXTRACTION] Processed {len(chapters)} chapters from bookmarks")
-    #     return chapters
-
-    # async def _parse_toc_with_ai(self, toc_text: str, doc) -> List[Dict[str, Any]]:
-    #     """Step 2: Use AI to extract chapter titles from TOC text"""
-    #     print("[TOC PARSING] Using AI to extract chapter titles from TOC...")
-
-    #     try:
-    #         prompt = f"""
-    #         Extract ONLY the main chapter titles from this table of contents. Look for entries that follow the pattern:
-    #         "CHAPTER X. Title Name PageNumber"
-
-    #         IGNORE:
-    #         - List of Illustrations
-    #         - List of Figures
-    #         - Preface
-    #         - Bibliography
-    #         - Index
-    #         - Page headers
-
-    #         TOC Text:
-    #         {toc_text[:3000]}
-
-    #         Return JSON with ONLY main chapters:
-    #         {{
-    #             "chapters": [
-    #                 {{"title": "Chapter 1: Introduction to Angel Magic", "estimated_page": 1}},
-    #                 {{"title": "Chapter 2: The Source of Angel Magic", "estimated_page": 23}}
-    #             ]
-    #         }}
-    #         """
-
-    #         response = await self.ai_service.client.chat.completions.create(
-    #             model="gpt-3.5-turbo",
-    #             messages=[{"role": "user", "content": prompt}],
-    #             max_tokens=1500,
-    #             temperature=0.1
-    #         )
-
-    #         result = json.loads(response.choices[0].message.content)
-
-    #         if 'chapters' in result:
-    #             print(f"[TOC PARSING] AI extracted {len(result['chapters'])} chapter titles")
-    #             # Print what AI found
-    #             for ch in result['chapters']:
-    #                 print(f"[TOC PARSING] AI found: {ch['title']}")
-
-    #             return await self._validate_chapters_exist_in_book(result['chapters'], doc)
-
-    #     except Exception as e:
-    #         print(f"[TOC PARSING] AI extraction failed: {e}")
-
-    #     return []
-
-    # async def _validate_chapters_exist_in_book(self, chapter_titles: List[Dict], doc) -> List[Dict[str, Any]]:
-    #     """Step 3: FIXED - More thorough validation that checks more of the book content"""
-    #     print("[CHAPTER VALIDATION] Validating chapters exist in book...")
-
-    #     # Get MORE book text for validation (not just first 5000 chars)
-    #     full_text = ""
-    #     sample_pages = min(50, len(doc))  # Check first 50 pages instead of just 5000 chars
-    #     for i in range(sample_pages):
-    #         full_text += doc[i].get_text()
-
-    #     try:
-    #         # Prepare chapter list for validation
-    #         titles_to_validate = [ch['title'] for ch in chapter_titles]
-
-    #         prompt = f"""
-    #         I extracted these {len(chapter_titles)} chapter titles from a table of contents. Please check if these chapters actually exist in the book content.
-
-    #         IMPORTANT: Look for chapter headings, not just keywords. A chapter exists if you find text like "CHAPTER X" or "Chapter X:" in the content.
-
-    #         Extracted Chapters:
-    #         {json.dumps(titles_to_validate)}
-
-    #         Book Content (first 10000 chars from 50 pages):
-    #         {full_text[:10000]}
-
-    #         Return JSON with chapters that actually exist in the book. BE GENEROUS - if you find any evidence of a chapter, include it:
-    #         {{
-    #             "validated_chapters": [
-    #                 {{"title": "Chapter 1: Introduction", "confidence": 0.95}},
-    #                 {{"title": "Chapter 2: History", "confidence": 0.87}}
-    #             ],
-    #             "reasoning": "Found Chapter 1 and 2 headings in the text"
-    #         }}
-    #         """
-
-    #         response = await self.ai_service.client.chat.completions.create(
-    #             model="gpt-3.5-turbo",
-    #             messages=[{"role": "user", "content": prompt}],
-    #             max_tokens=1500,  # Increased token limit
-    #             temperature=0.1
-    #         )
-
-    #         result = json.loads(response.choices[0].message.content)
-
-    #         if 'validated_chapters' in result:
-    #             validated_count = len(result['validated_chapters'])
-    #             print(f"[CHAPTER VALIDATION] AI validated {validated_count} chapters out of {len(chapter_titles)}")
-    #             print(f"[CHAPTER VALIDATION] Reasoning: {result.get('reasoning', '')}")
-
-    #             # If AI validates at least 50% of chapters, proceed with content extraction
-    #             if validated_count >= len(chapter_titles) * 0.5:
-    #                 return await self._extract_content_for_chapters(result['validated_chapters'], full_text)
-    #             else:
-    #                 print(f"[CHAPTER VALIDATION] Too few chapters validated ({validated_count}/{len(chapter_titles)}), using all TOC chapters")
-    #                 # Use all TOC chapters if AI validation is too restrictive
-    #                 return await self._extract_content_for_chapters(chapter_titles, full_text)
-
-    #     except Exception as e:
-    #         print(f"[CHAPTER VALIDATION] Validation failed: {e}")
-
-    #     return []
 
     async def _extract_content_for_chapters(
         self, validated_chapters: List[Dict], full_text: str
@@ -3373,106 +3090,6 @@ class FileService:
                 print(f"[CONTENT EXTRACTION] Insufficient content for: {chapter_title}")
 
         return final_chapters
-
-    # async def _validate_content_match(self, chapter_title: str, content_preview: str) -> bool:
-    #     """Step 5: Validate that extracted content actually matches the chapter"""
-    #     print(f"[CONTENT VALIDATION] Validating content for: {chapter_title}")
-
-    #     try:
-    #         prompt = f"""
-    #         Does this content preview match what you'd expect for a chapter titled "{chapter_title}"?
-
-    #         Content Preview:
-    #         {content_preview}
-
-    #         Return JSON:
-    #         {{
-    #             "matches": true/false,
-    #             "confidence": 0.0-1.0,
-    #             "reason": "explanation"
-    #         }}
-    #         """
-
-    #         response = await self.ai_service.client.chat.completions.create(
-    #             model="gpt-3.5-turbo",
-    #             messages=[{"role": "user", "content": prompt}],
-    #             max_tokens=300,
-    #             temperature=0.1
-    #         )
-
-    #         result = json.loads(response.choices[0].message.content)
-    #         matches = result.get('matches', False)
-    #         confidence = result.get('confidence', 0.0)
-
-    #         print(f"[CONTENT VALIDATION] Match: {matches}, Confidence: {confidence}")
-    #         return matches and confidence > 0.7
-
-    #     except Exception as e:
-    #         print(f"[CONTENT VALIDATION] Validation failed: {e}")
-    #         return True  # Default to accepting if validation fails
-
-    # async def _extract_toc_from_text(self, doc) -> List[Dict[str, Any]]:
-    #     """Step 1: Extract TOC by finding ALL  chapter entries across multiple pages"""
-    #     print("[TOC EXTRACTION] Searching for table of contents...")
-
-    #     all_chapters = []
-
-    #     # Search first 25 pages for ANY chapter entries
-    #     for page_num in range(min(25, len(doc))):
-    #         page = doc[page_num]
-    #         text = page.get_text()
-
-    #         print(f"[TOC EXTRACTION] Checking page {page_num + 1}...")
-
-    #         # Look for chapter entries REGARDLESS of "Contents" header
-    #         chapter_patterns = [
-    #             r'CHAPTER\s+(\d+)\.\s+(.+?)\s+(\d+)',  # "CHAPTER 1. Title 123"
-    #             r'Chapter\s+(\d+)[\.\s]+(.+?)\s+(\d+)', # "Chapter 1. Title 123"
-    #         ]
-
-    #         page_chapters = []
-    #         for pattern in chapter_patterns:
-    #             matches = re.findall(pattern, text, re.MULTILINE)
-    #             for match in matches:
-    #                 chapter_num, title, page_str = match
-
-    #                 # Clean title - remove dots and page numbers
-    #                 clean_title = re.sub(r'\.+\s*\d*$', '', title.strip())  # Remove trailing dots and numbers
-    #                 clean_title = re.sub(r'\.{3,}', '', clean_title)        # Remove multiple dots
-
-    #                 # Skip if title is too short or looks like page number
-    #                 if len(clean_title.strip()) < 5 or clean_title.strip().isdigit():
-    #                     continue
-
-    #                 try:
-    #                     page_chapters.append({
-    #                         'number': int(chapter_num),
-    #                         'title': f"Chapter {chapter_num}: {clean_title}",
-    #                         'page': int(page_str),
-    #                         'raw_title': clean_title
-    #                     })
-    #                     print(f"[TOC EXTRACTION] Found Chapter {chapter_num}: {clean_title}")
-    #                 except ValueError:
-    #                     continue
-
-    #         all_chapters.extend(page_chapters)
-
-    #     # Remove duplicates and sort by chapter number
-    #     unique_chapters = {}
-    #     for ch in all_chapters:
-    #         if ch['number'] not in unique_chapters:
-    #             unique_chapters[ch['number']] = ch
-
-    #     sorted_chapters = sorted(unique_chapters.values(), key=lambda x: x['number'])
-
-    #     print(f"[TOC EXTRACTION] Found {len(sorted_chapters)} total unique chapters")
-    #     for ch in sorted_chapters:
-    #         print(f"[TOC EXTRACTION] Final: {ch['title']}")
-
-    #     if len(sorted_chapters) >= 3:
-    #         return await self._parse_toc_with_ai_improved(sorted_chapters, doc)
-
-    #     return []
 
     @staticmethod
     def _roman_to_int(roman: str) -> int:
@@ -3572,340 +3189,6 @@ class FileService:
 
         return pattern_chapters
 
-    # async def _extract_toc_with_ai(self, toc_text_blocks: List[Dict], doc) -> List[Dict[str, Any]]:
-    #     """Generic AI TOC parsing for any book - completely generic approach"""
-    #     print("[AI TOC EXTRACTION] Using AI to parse TOC structure...")
-
-    #     # Combine all TOC text with better separation
-    #     combined_toc_text = "\n\n=== NEW PAGE ===\n\n".join([
-    #         f"PAGE {block['page_num']}:\n{block['text']}" for block in toc_text_blocks
-    #     ])
-
-    #     # ✅ COMPLETELY GENERIC PROMPT - no hardcoding
-    #     prompt = f"""
-    #     You are analyzing a Table of Contents from a book. Extract ALL chapters and sections from this TOC.
-
-    #     INSTRUCTIONS:
-    #     1. Extract EVERY chapter entry you can find across ALL pages
-    #     2. Look for any numbering system: Roman numerals (I, II, III), Arabic numbers (1, 2, 3), or word numbers (One, Two)
-    #     3. Identify any major sections/books/parts that group chapters together
-    #     4. The TOC may span multiple pages - analyze ALL pages thoroughly
-    #     5. Don't miss any chapters just because the layout is complex or they appear on later pages
-    #     6. Include ALL sections mentioned (there could be 2, 3, 4, or more major divisions)
-    #     7. Look for patterns like columnar layouts where numbers and titles may be separated
-    #     8. Look for the PRIMARY content divisions (main chapters, books, parts, acts, etc.)
-    #     9. IGNORE front/back matter: preface, acknowledgments, bibliography, index, appendix, notes
-    #     10. IGNORE subsections and detailed breakdowns - focus on major divisions
-    #     11. Look for numbered or titled main content sections
-    #     12. Typically books have 3-25 main content divisions
-
-    #     WHAT TO EXTRACT (examples):
-    #     - Numbered chapters: "Chapter 1", "Chapter 2"
-    #     - Named sections: "The Beginning", "The Journey"
-    #     - Books/Parts: "Book One", "Part I"
-    #     - Acts/Movements: "Act 1", "First Movement"
-    #     - Any major story/content divisions
-
-    #     WHAT TO IGNORE:
-    #     - Table of contents, list of figures, preface, acknowledgments
-    #     - Bibliography, index, appendix, notes, references
-    #     - Detailed subsections within main chapters
-    #     - Publication information, copyright pages
-
-    #     Common patterns to look for:
-    #     - "CHAPTER 1. Title Name ... Page"
-    #     - "I. Title Name ... Page" (Roman numerals)
-    #     - "BOOK/PART/SECTION [Name]" followed by chapters
-    #     - Multi-level hierarchies with sections containing chapters
-    #     - Any numbered content that represents story/learning divisions
-
-    #     TOC Text (spans multiple pages):
-    #     {combined_toc_text[:12000]}
-
-    #     Return JSON with ALL chapters found. If the book has sections/parts/books, include that information:
-    #     {{
-    #         "chapters": [
-    #             {{
-    #                 "number": 1,
-    #                 "title": "First Chapter Title",
-    #                 "page": 1,
-    #                 "section": "Section Name (if any, otherwise leave empty)"
-    #             }},
-    #             {{
-    #                 "number": 2,
-    #                 "title": "Second Chapter Title",
-    #                 "page": 15,
-    #                 "section": "Section Name (if any, otherwise leave empty)"
-    #             }}
-    #         ]
-    #     }}
-
-    #     CRITICAL:
-    #     - Extract the COMPLETE structure - don't stop early
-    #     - If chapters are grouped under sections/books/parts, include that section information
-    #     - If no clear sections exist, leave section field empty
-    #     - Look at ALL pages of the TOC provided
-    #     - Return ONLY valid JSON, no other text
-    #     """
-
-    #     try:
-    #         response = await self.ai_service.client.chat.completions.create(
-    #             model="gpt-4o-mini",
-    #             messages=[
-    #                 {"role": "system", "content": "You are an expert at parsing Table of Contents from any book. Extract ALL chapters comprehensively from any book structure. Return only valid JSON."},
-    #                 {"role": "user", "content": prompt}
-    #             ],
-    #             max_tokens=5000,
-    #             temperature=0.1
-    #         )
-
-    #         # Clean the response
-    #         content = response.choices[0].message.content.strip()
-
-    #         # Remove markdown formatting if present
-    #         if content.startswith('```'):
-    #             lines = content.split('\n')
-    #             content = '\n'.join(lines[1:-1])
-
-    #         # Additional cleaning
-    #         content = content.strip()
-    #         if content.startswith('json\n'):
-    #             content = content[5:]
-
-    #         print(f"[AI TOC EXTRACTION] AI response length: {len(content)}")
-    #         print(f"[AI TOC EXTRACTION] First 200 chars: {content[:200]}")
-
-    #         result = json.loads(content)
-    #         chapters = result.get('chapters', [])
-
-    #         print(f"[AI TOC EXTRACTION] AI extracted {len(chapters)} chapters")
-
-    #         # ✅ ADD: Count chapters per section to verify we got all sections
-    #         section_counts = {}
-    #         for ch in chapters:
-    #             section = ch.get('section', 'No Section')
-    #             if section and section.strip():  # Only count non-empty sections
-    #                 section_counts[section] = section_counts.get(section, 0) + 1
-
-    #         print(f"[AI TOC EXTRACTION] Chapters per section: {section_counts}")
-
-    #         # Convert to our format with better validation
-    #         formatted_chapters = []
-    #         chapter_counter = 1
-
-    #         for ch in chapters:
-    #             if not ch.get('title') or not ch.get('page'):
-    #                 print(f"[AI TOC EXTRACTION] Skipping chapter with missing title or page: {ch}")
-    #                 continue
-
-    #             try:
-    #                 chapter_number = int(ch.get('number', chapter_counter))
-    #                 page_hint = int(ch.get('page', 1))
-    #                 title = str(ch.get('title', 'Unknown')).strip()
-
-    #                 # Clean the title
-    #                 title = re.sub(r'\.{3,}.*$', '', title)
-    #                 title = re.sub(r'\s+\d+\s*$', '', title)
-    #                 title = title.strip()
-
-    #                 if not title or len(title) < 2:
-    #                     continue
-
-    #                 formatted_chapter = {
-    #                     'number': chapter_number,
-    #                     'title': f"Chapter {chapter_number}: {title}",
-    #                     'raw_title': title,
-    #                     'page_hint': page_hint,
-    #                 }
-
-    #                 # Add section info if present
-    #                 section_info = ch.get('section', '')
-    #                 if section_info and isinstance(section_info, str) and section_info.strip():
-    #                     formatted_chapter.update({
-    #                         'section_title': section_info.strip(),
-    #                         'section_type': self._extract_section_type(section_info),
-    #                         'section_number': self._extract_section_number(section_info),
-    #                     })
-
-    #                     print(f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: {title} (Section: {section_info})")
-    #                 else:
-    #                     print(f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: {title} (No section)")
-
-    #                 formatted_chapters.append(formatted_chapter)
-    #                 chapter_counter += 1
-
-    #             except (ValueError, TypeError) as e:
-    #                 print(f"[AI TOC EXTRACTION] Error processing chapter {ch}: {e}")
-    #                 continue
-
-    #         # ✅ FINAL VERIFICATION: Check section distribution
-    #         final_section_counts = {}
-    #         for ch in formatted_chapters:
-    #             section = ch.get('section_title', 'No Section')
-    #             final_section_counts[section] = final_section_counts.get(section, 0) + 1
-
-    #         print(f"[AI TOC EXTRACTION] Final chapters per section: {final_section_counts}")
-    #         print(f"[AI TOC EXTRACTION] Total formatted chapters: {len(formatted_chapters)}")
-
-    #         return formatted_chapters
-
-    #     except json.JSONDecodeError as e:
-    #         print(f"[AI TOC EXTRACTION] JSON decode failed: {e}")
-    #         print(f"[AI TOC EXTRACTION] Raw response: {response.choices[0].message.content if 'response' in locals() else 'No response'}")
-    #         return []
-    #     except Exception as e:
-    #         print(f"[AI TOC EXTRACTION] Failed: {e}")
-    #         print(f"[AI TOC EXTRACTION] Full error: {traceback.format_exc()}")
-    #         return []
-
-    # async def _extract_toc_with_ai(self, toc_text_blocks: List[Dict], doc) -> List[Dict[str, Any]]:
-    #     """Generic AI TOC parsing for any book - NO HARDCODING"""
-    #     print("[AI TOC EXTRACTION] Using AI to parse TOC structure...")
-
-    #     # Combine all TOC text with better separation
-    #     combined_toc_text = "\n\n=== NEW PAGE ===\n\n".join([
-    #         f"PAGE {block['page_num']}:\n{block['text']}" for block in toc_text_blocks
-    #     ])
-
-    #     # ✅ FIX: Generic prompt that works for ANY book
-    #     prompt = f"""
-    #     You are analyzing a Table of Contents from a book. This TOC spans multiple pages and may have a complex layout.
-
-    #     INSTRUCTIONS:
-    #     1. Extract EVERY chapter entry you can find across ALL pages
-    #     2. Look for patterns like Roman numerals (I, II, III) or Arabic numbers (1, 2, 3) paired with chapter titles
-    #     3. Some chapters may be in columnar format - match numbers with nearby titles
-    #     4. Include ALL sections/books/parts mentioned (there could be 2, 3, 4, or more sections)
-    #     5. Don't miss chapters just because the layout is complex
-    #     6. Look carefully at ALL pages of the TOC
-    #     7. Extract the complete structure - find ALL sections and their chapters
-
-    #     Common TOC patterns to look for:
-    #     - "CHAPTER 1. Title Name ... Page"
-    #     - "I. Title Name ... Page" (Roman numerals)
-    #     - "BOOK THE FIRST: Section Name" followed by chapters
-    #     - "PART I: Section Name" followed by chapters
-    #     - Columnar layouts where numbers and titles may be separated
-
-    #     TOC Text (Multiple Pages):
-    #     {combined_toc_text[:12000]}
-
-    #     Return JSON with ALL chapters found. For books with multiple sections, include section information:
-    #     {{
-    #         "chapters": [
-    #             {{
-    #                 "number": 1,
-    #                 "title": "Chapter Title Here",
-    #                 "page": 1,
-    #                 "section": "Section Title Here (if any)"
-    #             }},
-    #             {{
-    #                 "number": 2,
-    #                 "title": "Another Chapter Title",
-    #                 "page": 15,
-    #                 "section": "Section Title Here (if any)"
-    #             }}
-    #         ]
-    #     }}
-
-    #     IMPORTANT:
-    #     - Find ALL chapters from ALL sections
-    #     - Extract the complete book structure
-    #     - If no clear sections exist, leave section field empty or as "Main"
-    #     - Return ONLY valid JSON, no other text
-    #     """
-
-    #     try:
-    #         response = await self.ai_service.client.chat.completions.create(
-    #             model="gpt-4o-mini",
-    #             messages=[
-    #                 {"role": "system", "content": "You are an expert at parsing Table of Contents from any book. Extract ALL chapters comprehensively. Return only valid JSON."},
-    #                 {"role": "user", "content": prompt}
-    #             ],
-    #             max_tokens=4000,
-    #             temperature=0.1
-    #         )
-
-    #         # Clean the response
-    #         content = response.choices[0].message.content.strip()
-
-    #         # Remove markdown formatting if present
-    #         if content.startswith('```'):
-    #             lines = content.split('\n')
-    #             content = '\n'.join(lines[1:-1])
-
-    #         # Additional cleaning
-    #         content = content.strip()
-    #         if content.startswith('json\n'):
-    #             content = content[5:]
-
-    #         print(f"[AI TOC EXTRACTION] AI response length: {len(content)}")
-    #         print(f"[AI TOC EXTRACTION] First 200 chars: {content[:200]}")
-
-    #         result = json.loads(content)
-    #         chapters = result.get('chapters', [])
-
-    #         print(f"[AI TOC EXTRACTION] AI extracted {len(chapters)} chapters")
-
-    #         # Convert to our format with better validation
-    #         formatted_chapters = []
-    #         chapter_counter = 1
-
-    #         for ch in chapters:
-    #             if not ch.get('title') or not ch.get('page'):
-    #                 print(f"[AI TOC EXTRACTION] Skipping chapter with missing title or page: {ch}")
-    #                 continue
-
-    #             try:
-    #                 chapter_number = int(ch.get('number', chapter_counter))
-    #                 page_hint = int(ch.get('page', 1))
-    #                 title = str(ch.get('title', 'Unknown')).strip()
-
-    #                 # Clean the title
-    #                 title = re.sub(r'\.{3,}.*$', '', title)
-    #                 title = re.sub(r'\s+\d+\s*$', '', title)
-    #                 title = title.strip()
-
-    #                 if not title or len(title) < 2:
-    #                     continue
-
-    #                 formatted_chapter = {
-    #                     'number': chapter_number,
-    #                     'title': f"Chapter {chapter_number}: {title}",
-    #                     'raw_title': title,
-    #                     'page_hint': page_hint,
-    #                 }
-
-    #                 # Add section info if present
-    #                 section_info = ch.get('section', '')
-    #                 if section_info and isinstance(section_info, str) and section_info.strip() and section_info.strip().lower() != 'main':
-    #                     formatted_chapter.update({
-    #                         'section_title': section_info.strip(),
-    #                         'section_type': self._extract_section_type(section_info),
-    #                         'section_number': self._extract_section_number(section_info),
-    #                     })
-
-    #                 formatted_chapters.append(formatted_chapter)
-    #                 print(f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: {title} (Section: {section_info or 'None'})")
-    #                 chapter_counter += 1
-
-    #             except (ValueError, TypeError) as e:
-    #                 print(f"[AI TOC EXTRACTION] Error processing chapter {ch}: {e}")
-    #                 continue
-
-    #         print(f"[AI TOC EXTRACTION] Total formatted chapters: {len(formatted_chapters)}")
-    #         return formatted_chapters
-
-    #     except json.JSONDecodeError as e:
-    #         print(f"[AI TOC EXTRACTION] JSON decode failed: {e}")
-    #         print(f"[AI TOC EXTRACTION] Raw response: {response.choices[0].message.content if 'response' in locals() else 'No response'}")
-    #         return []
-    #     except Exception as e:
-    #         print(f"[AI TOC EXTRACTION] Failed: {e}")
-    #         import traceback
-    #         print(f"[AI TOC EXTRACTION] Full error: {traceback.format_exc()}")
-    #         return []
-
     def _extract_section_type(self, section_text: str) -> str:
         """Extract section type from section title"""
         section_lower = section_text.lower()
@@ -3939,195 +3222,6 @@ class FileService:
             return num_match.group(1)
 
         return ""
-
-    # async def _extract_toc_with_patterns(self, doc, found_contents_page: bool, toc_page_start: Optional[int], max_scan: int) -> List[Dict[str, Any]]:
-    #     """Fallback pattern-based extraction (your existing logic)"""
-    #     print("[PATTERN TOC EXTRACTION] Using pattern-based extraction...")
-
-    #     all_entries: List[Dict[str, Any]] = []
-    #     current_section: Optional[Dict[str, Any]] = None
-
-    #     # Enhanced patterns that can handle columnar layouts
-    #     section_patterns = [
-    #         re.compile(r'^\s*(BOOK|PART|SECTION)\s+(THE\s+)?(FIRST|SECOND|THIRD|FOURTH|FIFTH|ONE|TWO|THREE|FOUR|FIVE|[IVX]+|\d+)[\s\-:]*(.*)$', re.MULTILINE),
-    #     ]
-
-    #     # More flexible chapter patterns for columnar TOCs
-    #     chapter_patterns = [
-    #         # Traditional patterns
-    #         re.compile(rf'^\s*([IVX]+)\.\s+(.+?)\s+\.{{2,}}\s*(\d+)\s*$', re.MULTILINE),
-    #         re.compile(rf'^\s*([IVX]+)\.\s+(.+?)\s+(\d+)\s*$', re.MULTILINE),
-
-    #         # NEW: Columnar patterns where Roman numeral may be on separate line
-    #         re.compile(r'^\s*([IVX]+)\s*$\s*([A-Z][A-Z\s]+[A-Z])\s+(\d+)$', re.MULTILINE),
-    #         re.compile(r'^\s*([IVX]+)\s*\n\s*([A-Z][^.]+?)\s+(\d+)\s*$', re.MULTILINE),
-
-    #         # Handle cases where title spans multiple lines
-    #         re.compile(r'^\s*([IVX]+)\s*\n\s*([A-Z][^\n]+)\n\s*([A-Z][^\n]*)\s+(\d+)\s*$', re.MULTILINE),
-    #     ]
-
-    #     found_any = False
-    #     for page_num in range(max_scan):
-    #         page = doc[page_num]
-    #         text = page.get_text()
-    #         if not text:
-    #             continue
-
-    #         print(f"[PATTERN TOC EXTRACTION] Checking page {page_num + 1}...")
-
-    #         # Process sections
-    #         if found_contents_page and toc_page_start is not None:
-    #             for pattern in section_patterns:
-    #                 for match in pattern.finditer(text):
-    #                     sec_type = match.group(1).upper()
-    #                     ordinal_word = match.group(3).upper()
-    #                     sec_title_tail = (match.group(4) or "").strip()
-
-    #                     # Better validation of section matches
-    #                     if (len(ordinal_word) > 15 or
-    #                         any(char.isdigit() for char in ordinal_word if char not in 'IVX') or
-    #                         ordinal_word in ['CONTENTS', 'CHAPTER']):
-    #                         continue
-
-    #                     section_title = f"{sec_type.title()} the {ordinal_word.title()}"
-    #                     if sec_title_tail and len(sec_title_tail) < 100:
-    #                         section_title += f": {sec_title_tail}"
-
-    #                     current_section = {
-    #                         "section_type": sec_type.lower(),
-    #                         "section_number": ordinal_word.title(),
-    #                         "title": section_title,
-    #                     }
-    #                     print(f"[PATTERN TOC EXTRACTION] Found section: {section_title}")
-
-    #         # Process chapters with enhanced patterns
-    #         page_chapters = []
-    #         for pat_idx, pattern in enumerate(chapter_patterns):
-    #             matches = pattern.findall(text)
-    #             print(f"[PATTERN TOC EXTRACTION] Pattern {pat_idx} found {len(matches)} matches on page {page_num + 1}")
-
-    #             for match in matches:
-    #                 if len(match) == 3:  # Standard 3-group pattern
-    #                     num, title, page_str = match
-    #                 elif len(match) == 4:  # 4-group pattern (multi-line title)
-    #                     num, title_part1, title_part2, page_str = match
-    #                     title = f"{title_part1} {title_part2}".strip()
-    #                 else:
-    #                     continue
-
-    #                 print(f"[PATTERN TOC EXTRACTION] Raw match: num='{num}', title='{title}', page='{page_str}'")
-
-    #                 # Validation
-    #                 if (len(title.strip()) < 3 or len(title.strip()) > 100 or
-    #                     title.strip().isdigit() or 'BOOK THE' in title.upper()):
-    #                     print(f"[PATTERN TOC EXTRACTION] Skipping invalid title: '{title}'")
-    #                     continue
-
-    #                 # Convert roman to int
-    #                 try:
-    #                     if re.fullmatch(r'[IVX]+', num.upper()):
-    #                         chap_num = self._roman_to_int(num)
-    #                         print(f"[PATTERN TOC EXTRACTION] Converted roman '{num}' to {chap_num}")
-    #                     else:
-    #                         chap_num = int(num)
-    #                         print(f"[PATTERN TOC EXTRACTION] Using arabic number {chap_num}")
-    #                 except Exception as e:
-    #                     print(f"[PATTERN TOC EXTRACTION] Failed to parse chapter number '{num}': {e}")
-    #                     continue
-
-    #                 # Validate page number
-    #                 try:
-    #                     page_num_val = int(page_str)
-    #                     if page_num_val < 1 or page_num_val > len(doc):
-    #                         print(f"[PATTERN TOC EXTRACTION] Invalid page number: {page_num_val}")
-    #                         continue
-    #                     print(f"[PATTERN TOC EXTRACTION] Page number: {page_num_val}")
-    #                 except Exception as e:
-    #                     print(f"[PATTERN TOC EXTRACTION] Failed to parse page '{page_str}': {e}")
-    #                     continue
-
-    #                 clean_title = re.sub(r'\s*\.{2,}\s*$', '', title).strip()
-    #                 clean_title = re.sub(r'\s+', ' ', clean_title)
-
-    #                 entry = {
-    #                     "number": chap_num,
-    #                     "title": f"Chapter {chap_num}: {clean_title}",
-    #                     "raw_title": clean_title,
-    #                     "page_hint": page_num_val,
-    #                 }
-
-    #                 # Attach current section context if any
-    #                 if current_section:
-    #                     entry.update({
-    #                         "section_title": current_section["title"],
-    #                         "section_type": current_section["section_type"],
-    #                         "section_number": current_section["section_number"],
-    #                     })
-
-    #                 page_chapters.append(entry)
-    #                 found_any = True
-    #                 print(f"[PATTERN TOC EXTRACTION] Found chapter: {entry['title']} (sec={entry.get('section_title')})")
-
-    #         all_entries.extend(page_chapters)
-
-    #         # Early exit conditions
-    #         if found_contents_page and toc_page_start is not None:
-    #             pages_after_toc = page_num - toc_page_start
-    #             if pages_after_toc >= 3 and len(all_entries) >= 8:
-    #                 print(f"[PATTERN TOC EXTRACTION] Early exit: processed {pages_after_toc} pages after TOC, found {len(all_entries)} entries")
-    #                 break
-    #             elif pages_after_toc >= 10:
-    #                 print(f"[PATTERN TOC EXTRACTION] Stopping: {pages_after_toc} pages past TOC")
-    #                 break
-
-    #         if found_any and len(all_entries) >= 15:
-    #             print(f"[PATTERN TOC EXTRACTION] Early exit with {len(all_entries)} entries")
-    #             break
-
-    #     # Process results (existing logic)
-    #     if not all_entries:
-    #         print("[PATTERN TOC EXTRACTION] Found 0 total unique chapters")
-    #         return []
-
-    #     # Improved deduplication
-    #     dedup = {}
-    #     for item in all_entries:
-    #         section_key = item.get('section_title', 'no_section')
-    #         chapter_num = item.get('number', 0)
-    #         title_key = item["raw_title"].lower()
-
-    #         key = (section_key, chapter_num, title_key)
-
-    #         if key not in dedup:
-    #             dedup[key] = item
-    #             print(f"[PATTERN TOC EXTRACTION] Added unique: {item['title']} | section={section_key}")
-    #         else:
-    #             print(f"[PATTERN TOC EXTRACTION] Skipped duplicate: {item['title']} | section={section_key}")
-
-    #     chapters = list(dedup.values())
-    #     chapters.sort(key=lambda x: (
-    #         x.get('section_title', 'zzz_no_section'),
-    #         x.get("number", 10_000)
-    #     ))
-
-    #     print(f"[PATTERN TOC EXTRACTION] Found {len(chapters)} total unique chapters after improved dedupe")
-    #     for ch in chapters:
-    #         print(f"[PATTERN TOC EXTRACTION] Final: {ch['title']} | section={ch.get('section_title')}")
-
-    #     # Add structure detection and return
-    #     if chapters:
-    #         structure_type = self.structure_detector.detect_structure_type(chapters)
-    #         print(f"[PATTERN TOC EXTRACTION] Detected structure type: {structure_type}")
-
-    #         for chapter in chapters:
-    #             chapter['detected_structure'] = structure_type
-    #             if not chapter.get('section_type') and structure_type != 'flat':
-    #                 chapter['section_type'] = structure_type
-
-    #     if len(chapters) >= 3:
-    #         return await self._parse_toc_with_ai_improved(chapters, doc)
-
-    #     return []
 
     async def _extract_toc_with_patterns(
         self,
@@ -4569,18 +3663,6 @@ class FileService:
             )
             return []
 
-    # async def _validate_chapters_exist_in_book_improved(self, chapter_titles: List[Dict], original_chapters: List[Dict], doc) -> List[Dict[str, Any]]:
-    #     """Skip AI validation - TOC extraction is reliable enough"""
-    #     print(f"[CHAPTER VALIDATION] TOC found {len(chapter_titles)} chapters - proceeding directly to content extraction")
-
-    #     # Get full book text
-    #     full_text = ""
-    #     for i in range(min(100, len(doc))):
-    #         full_text += doc[i].get_text()
-
-    #     # Go directly to content extraction without AI validation
-    #     return await self._extract_content_for_chapters_improved(chapter_titles, full_text)
-
     def _identify_toc_boundaries(self, full_text: str) -> Dict[str, int]:
         """Better TOC boundary detection"""
         toc_patterns = [
@@ -4607,80 +3689,6 @@ class FileService:
             end_pos = start_pos + match.start()
 
         return {"start": start_pos, "end": end_pos}
-
-    # def _extract_content_for_chapters_improved(self, validated_chapters: List[Dict], full_text: str) -> List[Dict[str, Any]]:
-    #     """Step 4: Extract actual chapter content, avoiding TOC sections"""
-    #     """Extract chapter content with better boundary handling"""
-    #     print("[CONTENT EXTRACTION] Extracting actual chapter content...")
-
-    #     toc_boundaries = self._identify_toc_boundaries(full_text)
-    #     print(f"[CONTENT EXTRACTION] TOC boundaries: {toc_boundaries}")
-
-    #     final_chapters = []
-
-    #     for i, chapter in enumerate(validated_chapters):
-    #         chapter_title = chapter['title']
-    #         print(f"[CONTENT EXTRACTION] Processing: {chapter_title}")
-
-    #         # chapter_num_match = re.search(r'Chapter (\d+)', chapter_title)
-    #         # if not chapter_num_match:
-    #         #     continue
-    #         # chapter_num = int(chapter_num_match.group(1))
-
-    #         # all_occurrences = self._find_all_chapter_occurrences(full_text, chapter_num, chapter_title)
-    #         # Use title-based search instead of chapter number extraction
-    #         all_occurrences = self._find_title_occurrences(full_text, chapter_title)
-
-    #         content_start = None
-
-    #         # For last chapter, be more lenient with TOC boundaries
-    #         is_last_chapter = (i == len(validated_chapters) - 1)
-
-    #         for occurrence in all_occurrences:
-    #             # For last chapter, only skip if clearly in TOC start area
-    #             if is_last_chapter:
-    #                 if occurrence < toc_boundaries['start'] + 1000:  # Only skip if very early in doc
-    #                     print(f"[CONTENT EXTRACTION] Skipping early occurrence at position {occurrence}")
-    #                     continue
-    #             else:
-    #                 # For other chapters, use normal TOC boundary check
-    #                 if self._is_in_toc_boundaries(occurrence, toc_boundaries):
-    #                     print(f"[CONTENT EXTRACTION] Skipping TOC occurrence at position {occurrence}")
-    #                     continue
-
-    #             # Validate this is actual chapter content
-    #             preview = full_text[occurrence:occurrence + 500]
-    #             # if self._is_actual_chapter_content(preview, chapter_num):
-    #             if self._is_actual_chapter_content_by_title(preview, chapter_title):
-    #                 content_start = occurrence
-    #                 print(f"[CONTENT EXTRACTION] Found chapter {chapter_title} start at position {content_start}")
-    #                 break
-    #             else:
-    #                 print(f"[CONTENT EXTRACTION] Position {occurrence} appears to be another TOC/index reference")
-
-    #         if content_start is not None:
-    #             # content_end = self._find_chapter_content_end(full_text, chapter_num, content_start)
-    #             content_end = self._find_chapter_content_end_by_title(full_text, validated_chapters, i, content_start)
-    #             # Extract and clean content
-    #             raw_content = full_text[content_start:content_end]
-    #             extracted_content = self._clean_chapter_content(raw_content, chapter_title)
-
-    #             if len(extracted_content) > 200:
-    #                 final_chapters.append({
-    #                     'title': chapter_title,
-    #                     'content': extracted_content,
-    #                     'summary': f"Content for {chapter_title}",
-    #                     # 'chapter_number': chapter_num,
-    #                     'toc_validated': True,
-    #                     'extraction_method': 'content_search'
-    #                 })
-    #                 print(f"[CONTENT EXTRACTION] ✅ Successfully extracted {len(extracted_content)} chars for: {chapter_title}")
-    #             else:
-    #                 print(f"[CONTENT EXTRACTION] ❌ Content too short for: {chapter_title}")
-    #         else:
-    #             print(f"[CONTENT EXTRACTION] ❌ No valid content found for: {chapter_title}")
-
-    #     return final_chapters
 
     async def _extract_content_for_chapters_improved(
         self, validated_chapters: List[Dict], full_text: str
@@ -4870,70 +3878,6 @@ class FileService:
                     return line
 
         return "Untitled Book"
-
-    # async def _ai_extract_chapter_content(self, chunks: List[str], chapter_title: str, context: Dict) -> str:
-    #     """Use AI to extract specific chapter content from text chunks"""
-
-    #     # Combine relevant chunks
-    #     search_text = "\n\n".join(chunks)
-
-    #     # Use the property correctly
-    #     book_title = self.extracted_title or context.get('book_title', 'Unknown Book')
-
-    #     print(f"[AI EXTRACTION] Processing: {chapter_title}")
-    #     print(f"[AI EXTRACTION] Search text length: {len(search_text)}")
-    #     print(f"[AI EXTRACTION] First 200 chars: {search_text[:200]}...")
-
-    #     prompt = f"""
-    #     Extract the full content for the chapter titled "{chapter_title}" from the following text.
-
-    #     Book context: {book_title} - Total chapters: {context.get('total_chapters', 'unknown')}
-
-    #     Instructions:
-    #     1. Find the chapter that matches the title "{chapter_title}"
-    #     2. Extract the complete content from chapter start to chapter end
-    #     3. Include all paragraphs, sections, and subsections within this chapter
-    #     4. Stop before the next chapter begins
-    #     5. Remove any table of contents references
-    #     6. Return only the main chapter content, not headers or page numbers
-
-    #     Text to search:
-    #     {search_text[:10000]}...
-
-    #     Chapter content:
-    #     """
-
-    #     try:
-    #         response = await self.ai_service.client.chat.completions.create(
-    #             model="gpt-4o-mini",
-    #             messages=[
-    #                 {"role": "system", "content": "You are an expert at extracting specific chapter content from books. Return only the requested chapter content, nothing else."},
-    #                 {"role": "user", "content": prompt}
-    #             ],
-    #             max_tokens=4000,
-    #             temperature=0.1
-    #         )
-
-    #         content = response.choices[0].message.content.strip()
-    #         print(f"[AI EXTRACTION] AI returned {len(content)} characters")
-    #         print(f"[AI EXTRACTION] First 200 chars of AI response: {content[:200]}...")
-
-    #         # Validate the extracted content
-    #         is_valid = self._validate_ai_extracted_content(content, chapter_title)
-    #         print(f"[AI EXTRACTION] Content validation: {is_valid}")
-
-    #         # Validate the extracted content
-    #         if is_valid:
-    #             return content
-    #         else:
-    #             print(f"[AI EXTRACTION] Content failed validation")
-    #             return ""
-
-    #     except Exception as e:
-    #         print(f"[AI EXTRACTION] Error: {e}")
-    #         import traceback
-    #         print(f"[AI EXTRACTION] Full error: {traceback.format_exc()}")
-    #         return ""
 
     def _validate_ai_extracted_content(self, content: str, chapter_title: str) -> bool:
         """Validate that AI extracted relevant content"""
@@ -5210,48 +4154,6 @@ class FileService:
 
         return occurrences
 
-    # def _find_all_chapter_occurrences(self, full_text: str, chapter_num: int, chapter_title: str) -> List[int]:
-    #     """Find ALL occurrences of a chapter in the text"""
-    #     occurrences = []
-
-    #     # Extract just the title part (without "Chapter X:")
-    #     title_match = re.search(r'Chapter \d+:\s*(.+)', chapter_title)
-    #     clean_title = title_match.group(1) if title_match else chapter_title
-
-    #     # Multiple search patterns
-    #     patterns = [
-    #         # Pattern 0: Chapter number and title
-    #         rf'Chapter\s+{chapter_num}\s*[:\-.]?\s*{re.escape(clean_title)}',
-    #         # Pattern 1: Just chapter number
-    #         rf'Chapter\s+{chapter_num}\b',
-    #         # Pattern 2: Number on its own line followed by title (YOUR BOOK FORMAT)
-    #         rf'^\s*{chapter_num}\s*\n+\s*{re.escape(clean_title.split()[0])}',
-    #         # Pattern 3: Just the number at start of line
-    #         rf'^\s*{chapter_num}\s*$',
-    #         # Pattern 4: Just the title
-    #         rf'\b{re.escape(clean_title)}\b'
-    #     ]
-
-    #     for pattern_idx, pattern in enumerate(patterns):
-    #         try:
-    #             flags = re.IGNORECASE | re.MULTILINE
-    #             for match in re.finditer(pattern, full_text, flags):
-    #                 position = match.start()
-    #                 occurrences.append(position)
-    #                 print(f"[CONTENT EXTRACTION] Found pattern {pattern_idx} match at position {position}")
-    #         except re.error:
-    #             continue
-
-    #     # Remove duplicates and sort
-    #     occurrences = sorted(list(set(occurrences)))
-    #     print(f"[CONTENT EXTRACTION] Found {len(occurrences)} total occurrences for chapter {chapter_num}")
-
-    #     return occurrences
-
-    # def _is_in_toc_boundaries(self, position: int, toc_boundaries: Dict[str, int]) -> bool:
-    #     """Check if a position is within TOC boundaries"""
-    #     return toc_boundaries['start'] <= position <= toc_boundaries['end']
-
     def _is_in_toc_boundaries(
         self, position: int, toc_boundaries: Dict[str, int]
     ) -> bool:
@@ -5484,144 +4386,6 @@ class FileService:
         # Accept if there's any reasonable content
         return word_count > 20 or has_sentences
 
-    # async def process_uploaded_book_preview(
-    #     self,
-    #     storage_path: Optional[str],
-    #     original_filename: Optional[str],
-    #     text_content: Optional[str],
-    #     book_type: str,
-    #     user_id: str,
-    #     book_id_to_update: str,
-    # ) -> Dict[str, Any]:
-    #     """Process upload and return a PREVIEW with null safety throughout"""
-    #     # FIX: Add comprehensive null safety at the start
-    #     safe_filename = original_filename or "untitled_book"
-    #     if not isinstance(safe_filename, str):
-    #         safe_filename = str(safe_filename) if safe_filename else "untitled_book"
-
-    #     safe_book_type = book_type or "learning"
-    #     if not isinstance(safe_book_type, str):
-    #         safe_book_type = str(safe_book_type) if safe_book_type else "learning"
-
-    #     # 1) Extract content (pdf/docx/txt or provided text)
-    #     if text_content:
-    #         content = text_content
-    #         cover_image_url = None
-    #         author_name = None
-    #     elif storage_path and safe_filename:
-    #         with tempfile.NamedTemporaryFile(delete=False, suffix=safe_filename) as temp_file:
-    #             temp_file.write(self.db.storage.from_(settings.SUPABASE_BUCKET_NAME).download(storage_path))
-    #             temp_file_path = temp_file.name
-    #         extracted = self.process_book_file(temp_file_path, safe_filename, user_id)
-    #         os.unlink(temp_file_path)
-    #         content = extracted.get("text", "")
-    #         cover_image_url = extracted.get("cover_image_url")
-    #         author_name = extracted.get("author")
-    #     else:
-    #         raise ValueError("No content provided")
-
-    #     # 2) Extract chapters with null safety
-    #     chapters = await self.extract_chapters_with_new_flow(content, safe_book_type, safe_filename, storage_path)
-
-    #     print(f"[PREVIEW] ✅ Extracted {len(chapters)} chapters for preview")
-
-    #     # 3) Build structure with comprehensive null safety
-    #     has_sections = False
-
-    #     # FIX: More careful section detection with null safety
-    #     for ch in chapters:
-    #         section_title = ch.get("section_title")
-    #         if section_title and isinstance(section_title, str) and section_title.strip():
-    #             has_sections = True
-    #             break
-
-    #     if has_sections:
-    #         sections_grouped = {}
-
-    #         for ch in chapters:
-    #             # FIX: Ensure all section values are safe strings
-    #             section_title = ch.get("section_title") or "Default Section"
-    #             section_type = ch.get("section_type") or "section"
-    #             section_number = ch.get("section_number") or ""
-
-    #             # Ensure all are strings
-    #             if not isinstance(section_title, str):
-    #                 section_title = str(section_title) if section_title else "Default Section"
-    #             if not isinstance(section_type, str):
-    #                 section_type = str(section_type) if section_type else "section"
-    #             if not isinstance(section_number, str):
-    #                 section_number = str(section_number) if section_number else ""
-
-    #             section_key = (section_title, section_type, section_number)
-
-    #             if section_key not in sections_grouped:
-    #                 sections_grouped[section_key] = {
-    #                     'title': section_title,
-    #                     'section_type': section_type,
-    #                     'section_number': section_number,
-    #                     'chapters': []
-    #                 }
-    #             sections_grouped[section_key]['chapters'].append(ch)
-
-    #         section_list = list(sections_grouped.values())
-
-    #         # FIX: Add null safety for structure detection
-    #         try:
-    #             detected_structure = self.structure_detector.detect_structure_type(section_list)
-    #         except Exception as e:
-    #             print(f"[STRUCTURE DETECTION] Error: {e}, using default")
-    #             detected_structure = "hierarchical"
-
-    #         structure = {
-    #             "id": book_id_to_update,
-    #             "title": safe_filename,
-    #             "structure_type": detected_structure,
-    #             "has_sections": True,
-    #             "sections": section_list,
-    #             "chapters": [],
-    #             "structure_metadata": self.structure_detector.get_structure_metadata(detected_structure)
-    #         }
-    #     else:
-    #         structure = {
-    #             "id": book_id_to_update,
-    #             "title": safe_filename,
-    #             "structure_type": "flat",
-    #             "has_sections": False,
-    #             "sections": [],
-    #             "chapters": chapters,
-    #             "structure_metadata": self.structure_detector.get_structure_metadata("flat")
-    #         }
-
-    #     # 4) Update book record with null safety
-    #     try:
-    #         self.db.table("books").update({
-    #             "content": self._clean_text_content(content) if content else "",
-    #             "title": safe_filename,
-    #             "cover_image_url": cover_image_url,
-    #             "author_name": author_name,
-    #             "status": "READY",
-    #             "structure_type": structure["structure_type"],
-    #             "has_sections": structure["has_sections"],
-    #             "total_chapters": sum(len(s["chapters"]) for s in structure["sections"]) if structure["has_sections"] else len(structure["chapters"]),
-    #         }).eq("id", book_id_to_update).execute()
-    #     except Exception as e:
-    #         print(f"[DATABASE UPDATE] Error updating book: {e}")
-    #         raise e
-
-    #     # Return data for the frontend preview
-    #     if structure["has_sections"]:
-    #         flat_preview = list(itertools.chain.from_iterable([s["chapters"] for s in structure["sections"]]))
-    #     else:
-    #         flat_preview = structure["chapters"]
-
-    #     return {
-    #         "chapters": flat_preview[: self.MAX_CHAPTERS],
-    #         "total_chapters": len(flat_preview),
-    #         "author_name": author_name,
-    #         "cover_image_url": cover_image_url,
-    #         "structure_data": structure,
-    #     }
-
     async def process_uploaded_book_preview(
         self,
         storage_path: Optional[str],
@@ -5631,8 +4395,38 @@ class FileService:
         user_id: str,
         book_id_to_update: str,
         session: AsyncSession,
+        progress_book_id: Optional[str] = None,  # For progress tracking
     ) -> Dict[str, Any]:
         """Process upload and return a PREVIEW with proper structure handling"""
+
+        # Helper function to emit progress updates
+        async def emit_progress(
+            percent: int,
+            message: str,
+            stage: str = "",
+            completed_step: str = None,
+            details: str = "",
+            total_pages: int = 0,
+            current_page: int = 0,
+            total_chapters: int = 0,
+            current_chapter: int = 0,
+        ):
+            if progress_book_id:
+                from app.core.services.progress import progress_store
+
+                await progress_store.update(
+                    progress_book_id,
+                    percent=percent,
+                    message=message,
+                    stage=stage,
+                    details=details,
+                    completed_step=completed_step,
+                    total_pages=total_pages,
+                    current_page=current_page,
+                    total_chapters=total_chapters,
+                    current_chapter=current_chapter,
+                )
+
         # Add comprehensive null safety at the start
         safe_filename = original_filename or "untitled_book"
         if not isinstance(safe_filename, str):
@@ -5643,6 +4437,8 @@ class FileService:
             safe_book_type = str(safe_book_type) if safe_book_type else "learning"
 
         # 1) Extract content (pdf/docx/txt or provided text)
+        await emit_progress(10, "Extracting content from file...", "extract")
+
         if text_content:
             content = text_content
             cover_image_url = None
@@ -5668,9 +4464,20 @@ class FileService:
         else:
             raise ValueError("No content provided")
 
-        # 2) Extract chapters with null safety
+        await emit_progress(
+            15,
+            "Scanning for Table of Contents...",
+            "toc",
+            completed_step="✅ File content extracted",
+        )
+
+        # 2) Extract chapters with null safety - pass progress callback
         extracted_data = await self.extract_chapters_with_new_flow(
-            content, safe_book_type, safe_filename, storage_path
+            content,
+            safe_book_type,
+            safe_filename,
+            storage_path,
+            progress_callback=emit_progress if progress_book_id else None,
         )
 
         print(f"[PREVIEW] ✅ Extracted data type: {type(extracted_data)}")
@@ -6397,7 +5204,12 @@ Chapters:
             return str(content) if content else ""
 
     async def extract_chapters_with_new_flow(
-        self, content: str, book_type: str, original_filename: str, storage_path: str
+        self,
+        content: str,
+        book_type: str,
+        original_filename: str,
+        storage_path: str,
+        progress_callback=None,  # Optional progress callback
     ) -> List[Dict[str, Any]]:
         """Enhanced chapter extraction: TOC first, then fallback with null safety"""
         # FIX: Add comprehensive null safety at the start
@@ -6417,6 +5229,8 @@ Chapters:
         ):
 
             print("[EPUB EXTRACTION] Attempting EPUB chapter extraction...")
+            if progress_callback:
+                await progress_callback(20, "Processing EPUB file...", "epub")
             try:
                 from app.core.services.storage import storage_service
 
@@ -6442,6 +5256,14 @@ Chapters:
                     print(
                         f"[EPUB EXTRACTION] SUCCESS: Found {len(epub_chapters)} chapters from EPUB structure"
                     )
+                    if progress_callback:
+                        await progress_callback(
+                            90,
+                            f"Found {len(epub_chapters)} chapters",
+                            "complete",
+                            completed_step=f"✅ Extracted {len(epub_chapters)} chapters from EPUB",
+                            total_chapters=len(epub_chapters),
+                        )
                     return epub_chapters  # Return the chapters directly
                 else:
                     print(
@@ -6467,6 +5289,8 @@ Chapters:
         ):
 
             print("[TOC EXTRACTION] Attempting PDF TOC extraction...")
+            if progress_callback:
+                await progress_callback(20, "Downloading PDF for analysis...", "toc")
             try:
                 from app.core.services.storage import storage_service
 
@@ -6479,8 +5303,16 @@ Chapters:
                     temp_file.write(file_content)
                     temp_file_path = temp_file.name
 
+                if progress_callback:
+                    await progress_callback(
+                        25,
+                        "Scanning PDF for Table of Contents...",
+                        "toc",
+                        completed_step="✅ PDF downloaded for analysis",
+                    )
+
                 toc_chapters = await self.extract_chapters_from_pdf_with_toc(
-                    temp_file_path
+                    temp_file_path, progress_callback=progress_callback
                 )
 
                 # FIX: Ensure toc_chapters is a valid list
@@ -6819,231 +5651,6 @@ Chapters:
 
         return chapter_list
 
-    # async def _ai_filter_real_chapters(self, chapters: List[Dict[str, Any]], book_type: str, book_content: str) -> List[Dict[str, Any]]:
-    #     """Use AI to filter and identify real chapters from a list - MORE CONSERVATIVE"""
-    #     print(f"[AI FILTERING] Filtering {len(chapters)} chapters to find real chapters...")
-
-    #     # FIX: Don't use AI filtering unless we have an excessive number of chapters
-    #     if len(chapters) <= 30:
-    #         print(f"[AI FILTERING] Chapter count reasonable ({len(chapters)}), skipping AI filtering")
-    #         return chapters[:25]  # Just cap at 25 if needed
-
-    #     # Add input validation
-    #     if not chapters:
-    #         print("[AI FILTERING] No chapters to filter")
-    #         return []
-
-    #     # Prepare a sample of the book content for AI context
-    #     content_sample = book_content[:8000] if len(book_content) > 8000 else book_content
-
-    #     # Limit chapters sent to AI to avoid token limits
-    #     chapters_to_analyze = chapters[:30]  # Analyze first 30 only
-
-    #     # FIX: Much more conservative prompt
-    #     prompt = f"""You are analyzing a {book_type} book. Here's a sample of the book content:
-
-    # ---
-    # {content_sample}
-    # ---
-
-    # I have extracted {len(chapters_to_analyze)} potential chapters. Many are likely valid chapters.
-
-    # Chapter titles:
-    # {json.dumps([{'number': i+1, 'title': ch.get('title', 'Untitled')[:100]} for i, ch in enumerate(chapters_to_analyze)], indent=2)}
-
-    # IMPORTANT: Be VERY CONSERVATIVE. Only exclude chapters if they are clearly:
-    # - Table of contents entries
-    # - Copyright pages
-    # - Index entries
-    # - Bibliography entries
-    # - Obviously not story/content chapters
-
-    # Most chapters should be KEPT, not removed.
-
-    # Return JSON with chapter numbers to KEEP (be generous):
-    # {{
-    #     "chapters": [1, 2, 3, 4, ...],
-    #     "total_chapters": {len(chapters_to_analyze)},
-    #     "reasoning": "Kept most chapters as they appear to be valid story content"
-    # }}"""
-
-    #     try:
-    #         response = await self.ai_service.extract_real_chapters_from_list(prompt)
-
-    #         if not response or 'chapters' not in response:
-    #             print(f"[AI FILTERING] No valid response from AI, keeping all chapters")
-    #             return chapters_to_analyze
-
-    #         valid_indices = response.get('chapters', [])
-    #         filtered_chapters = []
-
-    #         for idx in valid_indices:
-    #             if 1 <= idx <= len(chapters_to_analyze):
-    #                 filtered_chapters.append(chapters_to_analyze[idx - 1])
-
-    #         # FIX: Much more lenient threshold - keep most chapters
-    #         if len(filtered_chapters) < len(chapters_to_analyze) * 0.7:  # Less than 70% kept
-    #             print(f"[AI FILTERING] AI too aggressive ({len(filtered_chapters)}/{len(chapters_to_analyze)}), keeping most chapters")
-    #             filtered_chapters = chapters_to_analyze[:20]  # Keep first 20
-
-    #         estimated_total = response.get('total_chapters', len(filtered_chapters))
-    #         reason = response.get('reasoning', 'AI analysis')
-
-    #         print(f"[AI FILTERING] AI kept {len(filtered_chapters)} chapters out of {len(chapters_to_analyze)}")
-    #         print(f"[AI FILTERING] Estimated total chapters: {estimated_total}")
-    #         print(f"[AI FILTERING] Reasoning: {reason}")
-
-    #         return filtered_chapters
-
-    #     except Exception as e:
-    #         print(f"[AI FILTERING] Error: {e}")
-    #         print(f"[AI FILTERING] Falling back to keeping first 20 chapters")
-    #         return chapters[:20]  # Conservative fallback
-
-    # def _pattern_based_chapter_filtering(self, chapters: List[Dict]) -> List[Dict[str, Any]]:
-    #     """Fallback method to filter chapters using patterns"""
-    #     print("[PATTERN FILTERING] Using pattern-based chapter filtering...")
-
-    #     real_chapters = []
-    #     seen_numbers = set()
-
-    #     for chapter in chapters:
-    #         title = chapter.get('title', '').strip()
-
-    #         # Skip obvious non-chapters
-    #         skip_patterns = [
-    #             r'^\d{4}$',  # Just years
-    #             r'^Page \d+',  # Page numbers
-    #             r'^Figure \d+',  # Figure captions
-    #             r'^Table \d+',  # Table captions
-    #             r'^List of',  # List of figures, etc.
-    #             r'^Bibliography',
-    #             r'^Index$',
-    #             r'^\d+$',  # Just numbers
-    #         ]
-
-    #         if any(re.match(pattern, title, re.IGNORECASE) for pattern in skip_patterns):
-    #             continue
-
-    #         # Look for proper chapter patterns
-    #         chapter_patterns = [
-    #             r'^Chapter\s+(\d+)[:\.\s]*(.+)$',
-    #             r'^(\d+)[:\.\s]+([A-Z].{10,})$',  # Number followed by substantial title
-    #         ]
-
-    #         for pattern in chapter_patterns:
-    #             match = re.match(pattern, title, re.IGNORECASE)
-    #             if match:
-    #                 chapter_num = int(match.group(1))
-    #                 if chapter_num not in seen_numbers and len(chapter.get('content', '')) > 1000:
-    #                     seen_numbers.add(chapter_num)
-    #                     real_chapters.append(chapter)
-    #                 break
-
-    #     # Sort by chapter number
-    #     real_chapters.sort(key=lambda x: int(re.search(r'(\d+)', x['title']).group(1)) if re.search(r'(\d+)', x['title']) else 0)
-
-    #     print(f"[PATTERN FILTERING] Filtered to {len(real_chapters)} chapters")
-    #     return real_chapters
-
-    # async def _validate_chapters_with_ai(self, chapters: List[Dict], book_type: str) -> List[Dict[str, Any]]:
-    #     """Validate and enhance chapters with AI using chunking to avoid token limits"""
-    #     print(f"[AI VALIDATION] Validating {len(chapters)} chapters with AI...")
-
-    #     # If we have too many chapters, ask AI to identify the real ones
-    #     if len(chapters) > 50:
-    #         return await self._ai_filter_real_chapters(chapters, book_type)
-
-    #     CHUNK_SIZE = 10  # Process 10 chapters at a time instead of all 492
-    #     validated_chapters = []
-
-    #     try:
-    #         if not self.ai_service.client:
-    #             print("[AI VALIDATION] AI service not available, skipping validation")
-    #             return chapters
-
-    #         # Process chapters in chunks
-    #         for i in range(0, len(chapters), CHUNK_SIZE):
-    #             chunk = chapters[i:i + CHUNK_SIZE]
-    #             chunk_num = i//CHUNK_SIZE + 1
-    #             total_chunks = (len(chapters) + CHUNK_SIZE - 1) // CHUNK_SIZE
-
-    #             print(f"[AI VALIDATION] Processing chunk {chunk_num}/{total_chunks} ({len(chunk)} chapters)")
-
-    #             # Prepare chapters for AI validation (reduced content)
-    #             chapters_for_validation = []
-    #             for chapter in chunk:
-    #                 chapters_for_validation.append({
-    #                     "title": chapter.get("title", ""),
-    #                     "content": chapter.get("content", "")[:500],  # Limit content to 500 chars
-    #                     "summary": chapter.get("summary", "")
-    #                 })
-
-    #             # Create shorter prompt for each chunk
-    #             validation_prompt = f"""
-    #             Please validate and enhance these {len(chunk)} {book_type} book chapters (chunk {chunk_num}/{total_chunks}). IMPORTANT: Return ONLY valid JSON with no additional text or formatting.
-
-    #             For each chapter, ensure:
-    #             1. Title is clear and descriptive
-    #             2. Content is meaningful and substantial
-    #             3. Summary is accurate (if provided)
-
-    #             Return in this JSON format:
-    #             {{
-    #                 "validated_chapters": [
-    #                     {{
-    #                         "title": "Enhanced title",
-    #                         "content": "Enhanced content preview...",
-    #                         "summary": "Enhanced summary"
-    #                     }}
-    #                 ]
-    #             }}
-
-    #             Chapters to validate: {json.dumps(chapters_for_validation)}
-    #             """
-
-    #             try:
-    #                 response = await self.ai_service.client.chat.completions.create(
-    #                     model="gpt-3.5-turbo",
-    #                     messages=[{"role": "user", "content": validation_prompt}],
-    #                     max_tokens=2000,  # Reduced token limit
-    #                     temperature=0.3
-    #                 )
-
-    #                 result = json.loads(response.choices[0].message.content)
-
-    #                 if 'validated_chapters' in result and result['validated_chapters']:
-    #                     print(f"[AI VALIDATION] Chunk {chunk_num} enhanced {len(result['validated_chapters'])} chapters")
-
-    #                     # Merge AI enhancements with original chapter data
-    #                     for j, original_chapter in enumerate(chunk):
-    #                         if j < len(result['validated_chapters']):
-    #                             ai_chapter = result['validated_chapters'][j]
-    #                             enhanced_chapter = {
-    #                                 **original_chapter,  # Keep original data
-    #                                 "title": ai_chapter.get("title", original_chapter.get("title", "")),
-    #                                 "summary": ai_chapter.get("summary", original_chapter.get("summary", ""))
-    #                                 # Keep original content, don't replace with truncated version
-    #                             }
-    #                             validated_chapters.append(enhanced_chapter)
-    #                         else:
-    #                             validated_chapters.append(original_chapter)
-    #                 else:
-    #                     print(f"[AI VALIDATION] Chunk {chunk_num} returned no enhancements, using original chapters")
-    #                     validated_chapters.extend(chunk)
-
-    #             except Exception as chunk_error:
-    #                 print(f"[AI VALIDATION] Chunk {chunk_num} failed: {chunk_error}")
-    #                 # Add chapters without AI validation as fallback
-    #                 validated_chapters.extend(chunk)
-
-    #         print(f"[AI VALIDATION] Completed processing {len(validated_chapters)} chapters")
-    #         return validated_chapters
-
-    #     except Exception as e:
-    #         print(f"[AI VALIDATION] Overall AI validation failed: {e}")
-    #         return chapters
-
     def _get_fallback_chapters(
         self, content: str, book_type: str
     ) -> List[Dict[str, Any]]:
@@ -7125,267 +5732,6 @@ Chapters:
         """Generate unique temporary filename"""
         return f"{prefix}_{uuid.uuid4().hex}{extension}"
 
-    # async def _extract_complex_toc_with_ai(self, doc, toc_pages: List[int]) -> List[Dict[str, Any]]:
-    #     """AI extraction for complex columnar TOCs with multiple sections - FIXED"""
-    #     print("[COMPLEX TOC AI] Using AI for complex columnar TOC extraction...")
-
-    #     # Get text from detected TOC pages ONLY (don't search additional pages automatically)
-    #     toc_text_blocks = []
-    #     for page_num in toc_pages:
-    #         page = doc[page_num]
-    #         text = page.get_text()
-    #         toc_text_blocks.append({
-    #             'page_num': page_num + 1,
-    #             'text': text,
-    #             'lines': text.split('\n')
-    #         })
-
-    #     # ✅ FIX: Much more restrictive continuation page detection
-    #     last_toc_page = max(toc_pages) if toc_pages else 0
-    #     print(f"[COMPLEX TOC AI] Searching 3 pages after last TOC page {last_toc_page + 1}")
-
-    #     for additional_page in range(last_toc_page + 1, min(last_toc_page + 4, len(doc))):  # Reduced from 11 to 4
-    #         page = doc[additional_page]
-    #         text = page.get_text()
-
-    #         # ✅ FIX: Much more restrictive patterns - must have STRONG TOC indicators
-    #         strong_toc_indicators = 0
-
-    #         # Check for actual TOC formatting (not just keywords)
-    #         if re.search(r'BOOK\s+THE\s+(FIRST|SECOND|THIRD)', text, re.IGNORECASE):
-    #             strong_toc_indicators += 2
-    #         if re.search(r'PART\s+[IVX]+', text):
-    #             strong_toc_indicators += 2
-    #         # Look for chapter number + title + page number pattern
-    #         if re.search(r'[IVX]+\.\s+[A-Z][^.]+\s+\d+', text):
-    #             strong_toc_indicators += 2
-    #         # Look for multiple chapter entries
-    #         chapter_matches = len(re.findall(r'\b[IVX]+\.\s+[A-Z]', text))
-    #         if chapter_matches >= 3:
-    #             strong_toc_indicators += 1
-
-    #         # ✅ FIX: Only add if we have STRONG evidence this is TOC content
-    #         if strong_toc_indicators >= 3:
-    #             print(f"[COMPLEX TOC AI] ✅ Found strong TOC continuation on page {additional_page + 1} (score: {strong_toc_indicators})")
-    #             toc_text_blocks.append({
-    #                 'page_num': additional_page + 1,
-    #                 'text': text,
-    #                 'lines': text.split('\n')
-    #             })
-    #         else:
-    #             print(f"[COMPLEX TOC AI] ❌ Page {additional_page + 1} not TOC (score: {strong_toc_indicators})")
-
-    #     combined_toc_text = "\n\n=== PAGE BREAK ===\n\n".join([
-    #         f"PAGE {block['page_num']}:\n{block['text']}" for block in toc_text_blocks
-    #     ])
-
-    #     print(f"[COMPLEX TOC AI] Processing {len(toc_text_blocks)} TOC pages")
-    #     print(f"[COMPLEX TOC AI] Combined text length: {len(combined_toc_text)}")
-
-    #     # Generic prompt that works for any book structure
-    #     prompt = f"""
-    #     You are analyzing a complex Table of Contents that spans multiple pages and has a hierarchical structure.
-
-    #     INSTRUCTIONS:
-    #     1. Extract ALL major sections (Books, Parts, Acts, Volumes, etc.) and their chapters
-    #     2. Look for hierarchical patterns like:
-    #     - "BOOK THE FIRST/SECOND/THIRD"
-    #     - "PART I/II/III" or "PART ONE/TWO/THREE"
-    #     - "SECTION A/B/C" or "SECTION 1/2/3"
-    #     - "ACT I/II/III" or "ACT ONE/TWO/THREE"
-    #     - "VOLUME I/II/III"
-    #     3. Each section typically contains multiple chapters with:
-    #     - Roman numerals (I, II, III, IV, V, etc.)
-    #     - Arabic numbers (1, 2, 3, 4, 5, etc.)
-    #     - Chapter titles following the numbers
-    #     4. Scan ALL pages provided - sections may continue across pages
-    #     5. Find ALL sections mentioned - don't stop early
-    #     6. IGNORE front/back matter: preface, appendix, notes, bibliography, index
-
-    #     COMMON PATTERNS TO LOOK FOR:
-    #     - Major sections: "BOOK THE FIRST: [Title]", "PART TWO: [Title]", "ACT III: [Title]"
-    #     - Chapters within sections: "I. Chapter Title", "II. Another Chapter", etc.
-    #     - Page numbers: Usually at the end of each line
-    #     - Columnar layouts: Numbers and titles may be separated by dots or spaces
-
-    #     TOC Text (Multiple Pages - ANALYZE ALL):
-    #     {combined_toc_text[:20000]}
-
-    #     Return JSON with ALL sections and their chapters:
-    #     {{
-    #         "sections": [
-    #             {{
-    #                 "section_title": "[Detected Section Title]",
-    #                 "section_type": "[book/part/act/volume/section]",
-    #                 "section_number": "[1/2/3 or I/II/III or ONE/TWO/THREE]",
-    #                 "chapters": [
-    #                     {{
-    #                         "number": "[I/II/III or 1/2/3]",
-    #                         "title": "[Chapter Title]",
-    #                         "page": [page_number]
-    #                     }}
-    #                 ]
-    #             }}
-    #         ]
-    #     }}
-
-    #     CRITICAL REQUIREMENTS:
-    #     - Extract ALL sections found in the TOC (could be 2, 3, 4, or more)
-    #     - Don't assume a specific number of sections - find what's actually there
-    #     - Include ALL chapters within each section
-    #     - Keep chapter numbers as strings (especially Roman numerals)
-    #     - Scan all provided pages thoroughly
-    #     - If no major sections are found, treat individual chapters as a single section
-
-    #     RETURN ONLY THE JSON OBJECT, NO OTHER TEXT OR EXPLANATION.
-    #     """
-
-    #     try:
-    #         # Use the updated provider-based system
-    #         response = await self.ai_service._make_completion(
-    #             messages=[
-    #                 {"role": "system", "content": "You are an expert at analyzing complex hierarchical Table of Contents from any type of book. Extract ALL sections and chapters comprehensively. Never miss sections - scan all provided content thoroughly. Return ONLY valid JSON, no other text."},
-    #                 {"role": "user", "content": prompt}
-    #             ],
-    #             provider="auto",
-    #             max_tokens=8000,
-    #             temperature=0.1
-    #         )
-
-    #         content = response.choices[0].message.content.strip()
-
-    #         # Clean JSON response
-    #         print(f"[COMPLEX TOC AI] Raw AI response length: {len(content)}")
-    #         print(f"[COMPLEX TOC AI] First 500 chars: {content[:500]}")
-
-    #         # Remove markdown formatting if present
-    #         if content.startswith('```'):
-    #             lines = content.split('\n')
-    #             start_idx = 1
-    #             end_idx = len(lines) - 1
-    #             for i, line in enumerate(lines[1:], 1):
-    #                 if line.strip().startswith('{'):
-    #                     start_idx = i
-    #                     break
-    #             for i in range(len(lines) - 1, 0, -1):
-    #                 if lines[i].strip().endswith('}'):
-    #                     end_idx = i
-    #                     break
-    #             content = '\n'.join(lines[start_idx:end_idx + 1])
-
-    #         # Find JSON boundaries
-    #         first_brace = content.find('{')
-    #         if first_brace != -1:
-    #             brace_count = 0
-    #             last_brace = -1
-    #             for i, char in enumerate(content[first_brace:], first_brace):
-    #                 if char == '{':
-    #                     brace_count += 1
-    #                 elif char == '}':
-    #                     brace_count -= 1
-    #                     if brace_count == 0:
-    #                         last_brace = i
-    #                         break
-
-    #             if last_brace != -1:
-    #                 content = content[first_brace:last_brace + 1]
-
-    #         print(f"[COMPLEX TOC AI] Cleaned content length: {len(content)}")
-
-    #         result = json.loads(content)
-    #         sections = result.get('sections', [])
-
-    #         print(f"[COMPLEX TOC AI] AI found {len(sections)} sections")
-
-    #         # Generic validation - warn if we found very few sections for a complex TOC
-    #         if len(sections) < 2:
-    #             print(f"[COMPLEX TOC AI] WARNING: Only found {len(sections)} sections for complex TOC")
-    #             print(f"[COMPLEX TOC AI] TOC text length: {len(combined_toc_text)} characters")
-
-    #             # Check if text contains indicators of multiple sections
-    #             text_upper = combined_toc_text.upper()
-    #             section_indicators = ['BOOK', 'PART', 'SECTION', 'VOLUME', 'ACT']
-    #             found_indicators = [indicator for indicator in section_indicators if indicator in text_upper]
-
-    #             if found_indicators:
-    #                 print(f"[COMPLEX TOC AI] Found section indicators {found_indicators} but AI only extracted {len(sections)} sections")
-
-    #         # Convert to flat chapter list with section information
-    #         all_chapters = []
-    #         chapter_counter = 1
-
-    #         for section in sections:
-    #             section_title = section.get('section_title', f'Section {len(all_chapters) + 1}')
-    #             section_type = section.get('section_type', 'section')
-    #             section_number = section.get('section_number', str(len(all_chapters) + 1))
-
-    #             print(f"[COMPLEX TOC AI] Processing section: {section_title}")
-
-    #             for ch in section.get('chapters', []):
-    #                 try:
-    #                     # Handle different number formats
-    #                     raw_number = ch.get('number', str(chapter_counter))
-
-    #                     # Convert Roman numerals to Arabic numbers
-    #                     if isinstance(raw_number, str) and raw_number.strip().upper() in [
-    #                         'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
-    #                         'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
-    #                         'XXI', 'XXII', 'XXIII', 'XXIV', 'XXV', 'XXVI', 'XXVII', 'XXVIII', 'XXIX', 'XXX'
-    #                     ]:
-    #                         chapter_number = self._roman_to_int(raw_number.strip().upper())
-    #                     else:
-    #                         try:
-    #                             chapter_number = int(raw_number)
-    #                         except (ValueError, TypeError):
-    #                             chapter_number = chapter_counter
-
-    #                     title = str(ch.get('title', 'Unknown')).strip()
-    #                     page_hint = ch.get('page', 1)
-
-    #                     # Ensure page_hint is an integer
-    #                     try:
-    #                         page_hint = int(page_hint)
-    #                     except (ValueError, TypeError):
-    #                         page_hint = 1
-
-    #                     if not title or len(title) < 2:
-    #                         continue
-
-    #                     formatted_chapter = {
-    #                         'number': chapter_counter,
-    #                         'title': f"Chapter {chapter_number}: {title}",
-    #                         'raw_title': title,
-    #                         'page_hint': page_hint,
-    #                         'section_title': section_title,
-    #                         'section_type': section_type,
-    #                         'section_number': section_number,
-    #                         'is_main_chapter': True
-    #                     }
-
-    #                     all_chapters.append(formatted_chapter)
-    #                     print(f"[COMPLEX TOC AI] Added: {title} (Section: {section_title})")
-    #                     chapter_counter += 1
-
-    #                 except (ValueError, TypeError) as e:
-    #                     print(f"[COMPLEX TOC AI] Error processing chapter {ch}: {e}")
-    #                     continue
-
-    #         print(f"[COMPLEX TOC AI] Total chapters extracted: {len(all_chapters)}")
-
-    #         # ✅ FIX: Extract content using page-based extraction (like simple TOC does)
-    #         if len(all_chapters) >= 3:
-    #             print("[COMPLEX TOC AI] Extracting content using page-based extraction...")
-    #             return await self._parse_toc_with_ai_improved(all_chapters, doc)
-
-    #         return all_chapters
-
-    #     except json.JSONDecodeError as e:
-    #         print(f"[COMPLEX TOC AI] JSON decode failed: {e}")
-    #         print(f"[COMPLEX TOC AI] Failed content: {content if 'content' in locals() else 'No content'}")
-    #         return []
-    #     except Exception as e:
-    #         print(f"[COMPLEX TOC AI] Failed: {e}")
-    #         return []
     async def _extract_complex_toc_with_ai(
         self, doc, toc_pages: List[int]
     ) -> List[Dict[str, Any]]:
@@ -7397,6 +5743,21 @@ Chapters:
         for page_num in toc_pages:
             page = doc[page_num]
             text = page.get_text()
+
+            # OCR fallback for scanned/image-based PDFs
+            if not text.strip():
+                try:
+                    tp = page.get_textpage_ocr(
+                        flags=0, language="eng", dpi=150, full=True
+                    )
+                    text = page.get_text(textpage=tp)
+                    if text.strip():
+                        print(
+                            f"[COMPLEX TOC AI] OCR extracted text from page {page_num + 1}"
+                        )
+                except Exception as e:
+                    print(f"[COMPLEX TOC AI] OCR failed for page {page_num + 1}: {e}")
+
             toc_text_blocks.append(
                 {"page_num": page_num + 1, "text": text, "lines": text.split("\n")}
             )
@@ -7404,14 +5765,25 @@ Chapters:
         # Generic search for additional TOC pages (not hardcoded)
         last_toc_page = max(toc_pages) if toc_pages else 0
         print(
-            f"[COMPLEX TOC AI] Searching up to 5 pages after last TOC page {last_toc_page + 1}"
+            f"[COMPLEX TOC AI] Searching up to 10 pages after last TOC page {last_toc_page + 1}"
         )
 
         for additional_page in range(
-            last_toc_page + 1, min(last_toc_page + 6, len(doc))
+            last_toc_page + 1, min(last_toc_page + 11, len(doc))
         ):
             page = doc[additional_page]
             text = page.get_text()
+
+            # OCR fallback for scanned PDFs
+            if not text.strip():
+                try:
+                    tp = page.get_textpage_ocr(
+                        flags=0, language="eng", dpi=150, full=True
+                    )
+                    text = page.get_text(textpage=tp)
+                except Exception:
+                    pass
+
             text_upper = text.upper()
 
             # Generic TOC continuation indicators
@@ -7464,8 +5836,8 @@ Chapters:
             elif page_refs >= 2:
                 continuation_score += 1
 
-            # Only include if we have strong evidence
-            if continuation_score >= 3:
+            # Only include if we have evidence (lowered threshold from 3 to 2)
+            if continuation_score >= 2:
                 print(
                     f"[COMPLEX TOC AI] ✅ Including page {additional_page + 1} (score: {continuation_score})"
                 )
@@ -7538,28 +5910,43 @@ Chapters:
         prompt = f"""
         You are analyzing a Table of Contents that may have a hierarchical structure with multiple sections.
 
+        CRITICAL: DISTINGUISH BETWEEN CHAPTERS AND SUB-SECTIONS
+        - A CHAPTER is a top-level entry like: "1 Algorithms with numbers", "Chapter 9 Coping with NP-completeness", "0 Prologue"
+        - A SUB-SECTION is an indented or numbered sub-entry like: "1.1 Basic arithmetic", "9.2 Approximation algorithms"
+        - ONLY extract TOP-LEVEL CHAPTERS, NOT sub-sections!
+        - If you see "1 Title" followed by "1.1 Subtitle", "1.2 Subtitle", the chapter is "1 Title" and the 1.x entries are sub-sections to IGNORE
+
         INSTRUCTIONS:
-        1. Extract ALL major structural divisions and their chapters
+        1. Extract ONLY major structural divisions and their TOP-LEVEL chapters
         2. Look for hierarchical patterns such as:
-        - Books: "BOOK I", "BOOK THE FIRST", "BOOK ONE"
-        - Parts: "PART I", "PART ONE", "PART A"
-        - Sections: "SECTION I", "SECTION ONE"
-        - Acts: "ACT I", "ACT ONE" (for plays)
-        - Volumes: "VOLUME I", "VOLUME ONE"
-        - Any other major divisions
-        3. Within each section, find chapters with:
-        - Roman numerals: I, II, III, IV, V, etc.
-        - Arabic numbers: 1, 2, 3, 4, 5, etc.
-        - Chapter titles following the numbers
+           - Books: "BOOK I", "BOOK THE FIRST", "BOOK ONE"
+           - Parts: "PART I", "PART ONE", "PART A"
+           - Sections: "SECTION I", "SECTION ONE"
+           - Acts: "ACT I", "ACT ONE" (for plays)
+           - Volumes: "VOLUME I", "VOLUME ONE"
+           - Any other major divisions
+        3. Within each section, find ONLY TOP-LEVEL chapters:
+           - Roman numerals: I, II, III, IV, V, etc.
+           - Arabic numbers WITHOUT decimals: 0, 1, 2, 3, 4, 5, etc. (NOT 1.1, 2.3)
+           - "Chapter N" entries
+           - DO NOT include sub-sections like "1.1", "2.3", "10.5", etc.
         4. Scan ALL pages provided - content may continue across pages
         5. Find ALL structural divisions - don't assume a specific number
-        6. IGNORE auxiliary content: preface, appendix, notes, bibliography, index
+        6. IGNORE auxiliary content: preface, appendix, notes, bibliography, index, exercises
 
-        WHAT TO LOOK FOR:
-        - Major structural headers followed by chapter listings
-        - Numbered or titled content divisions
-        - Chapter entries with titles and page numbers
-        - Hierarchical organization patterns
+        EXAMPLE OF WHAT TO EXTRACT:
+        From a TOC like:
+        "0 Prologue ........... 11
+           0.1 Books and algorithms ... 11
+           0.2 Enter Fibonacci ... 12
+         1 Algorithms with numbers ... 21
+           1.1 Basic arithmetic ... 21
+           1.2 Modular arithmetic ... 25"
+        
+        You should extract ONLY:
+        - Chapter 0: "Prologue" (page 11)
+        - Chapter 1: "Algorithms with numbers" (page 21)
+        NOT the 0.1, 0.2, 1.1, 1.2 sub-sections!
 
         TOC Text (Multiple Pages):
         {combined_toc_text[:20000]}
@@ -7573,7 +5960,7 @@ Chapters:
                     "section_number": "I|II|III|ONE|TWO|1|2|3",
                     "chapters": [
                         {{
-                            "number": "I|II|1|2",
+                            "number": "0|1|2|I|II (TOP-LEVEL ONLY, no decimals)",
                             "title": "Chapter Title",
                             "page": page_number
                         }}
@@ -7583,8 +5970,8 @@ Chapters:
         }}
 
         REQUIREMENTS:
-        - Extract ALL structural divisions found
-        - Include ALL chapters within each division
+        - Extract ONLY TOP-LEVEL chapters (no sub-sections like 1.1, 2.3)
+        - Include ALL main chapters within each division
         - If no major divisions exist, create a single section with all chapters
         - Keep original number formats (Roman numerals as Roman, Arabic as Arabic)
         - Return ONLY the JSON object

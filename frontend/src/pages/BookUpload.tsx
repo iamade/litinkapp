@@ -178,6 +178,14 @@ export default function BookUpload() {
   const [processingStatus, setProcessingStatus] = useState("");
   const [processingFailed, setProcessingFailed] = useState(false);
 
+  // Progress tracking state
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [progressMessage, setProgressMessage] = useState("");
+  const [progressSteps, setProgressSteps] = useState<string[]>([]);
+  const [progressTimeRemaining, setProgressTimeRemaining] = useState<number | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+
   // Payment-related state
   const [paymentRequired, setPaymentRequired] = useState(false);
   const [paymentProcessing, setPaymentProcessing] = useState(false);
@@ -738,21 +746,62 @@ export default function BookUpload() {
       setIsUploading(true);
       setIsProcessing(true);
       setProcessingStatus("Uploading...");
+      
+      // Reset progress state
+      setProgressPercent(0);
+      setProgressMessage("Starting upload...");
+      setProgressSteps([]);
+      setProgressTimeRemaining(null);
+
+      // Generate a progress session ID BEFORE upload
+      const progressSessionId = `progress_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
       try {
         const formData = new FormData();
         formData.append("book_type", bookMode);
         formData.append("title", `Uploaded Book - ${new Date().toISOString()}`);
         formData.append("description", "Book uploaded for processing");
+        formData.append("progress_session_id", progressSessionId); // Send session ID with upload
     
         if (uploadMethod === "file" && file) {
           formData.append("file", file);
         } else if (uploadMethod === "text" && textContent) {
           formData.append("text_content", textContent);
         }
+
+        // Connect to SSE BEFORE starting upload so we receive progress updates
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
+        const eventSource = new EventSource(`${API_BASE_URL}/books/upload-progress/${progressSessionId}`, {
+          withCredentials: true
+        });
+        eventSourceRef.current = eventSource;
+        
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            console.log("[SSE Progress]", data);
+            if (data.percent !== undefined) setProgressPercent(data.percent);
+            if (data.message) setProgressMessage(data.message);
+            if (data.completed_steps) setProgressSteps(data.completed_steps);
+            if (data.remaining_seconds !== undefined) setProgressTimeRemaining(data.remaining_seconds);
+            if (data.is_complete || data.error) {
+              eventSource.close();
+              eventSourceRef.current = null;
+            }
+          } catch (e) {
+            console.error("SSE parse error:", e);
+          }
+        };
+        
+        eventSource.onerror = (e) => {
+          console.error("SSE connection error:", e);
+          eventSource.close();
+          eventSourceRef.current = null;
+        };
     
+        // NOW start the upload (SSE is already connected)
         const uploadResponse = (await apiClient.upload("/books/upload", formData)) as any;
-    
+
     
         // Check if response is valid
         if (!uploadResponse || typeof uploadResponse !== "object") {
@@ -762,6 +811,14 @@ export default function BookUpload() {
         // ✅ FIX: Check for preview_chapters instead of chapters
         if (uploadResponse.status === "READY" && uploadResponse.preview_chapters) {
         
+          // Close SSE connection
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+          }
+          
+          setProgressPercent(100);
+          setProgressMessage("Complete!");
           setIsProcessing(false);
           setProcessingStatus("");
           setAiBook(uploadResponse);
@@ -1927,17 +1984,50 @@ export default function BookUpload() {
                 </div>
               )} */}
 
-              <div className="flex flex-col items-center justify-center min-h-[120px]">
+              <div className="flex flex-col items-center justify-center min-h-[200px]">
                 {isProcessing ? (
-                  <div className="flex flex-col items-center">
-                    <Settings className="h-10 w-10 animate-spin text-purple-600 mb-2" />
-                    <span className="text-purple-600 font-medium">
-                      Processing with AI...
-                    </span>
-                    {processingStatus && (
-                      <span className="text-gray-600 text-sm mt-2 text-center max-w-md">
-                        {processingStatus}
-                      </span>
+                  <div className="w-full max-w-lg space-y-6">
+                    {/* Progress Bar */}
+                    <div className="relative">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-purple-700">
+                          {progressMessage || "Processing..."}
+                        </span>
+                        <span className="text-sm font-bold text-purple-600">
+                          {progressPercent}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                        <div 
+                          className="bg-gradient-to-r from-purple-500 to-purple-600 h-4 rounded-full transition-all duration-500 ease-out"
+                          style={{ width: `${progressPercent}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Estimated Time */}
+                    {progressTimeRemaining !== null && progressTimeRemaining > 0 && (
+                      <div className="flex items-center justify-center gap-2 text-gray-500 text-sm">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>
+                          Estimated time remaining: ~{progressTimeRemaining < 60 
+                            ? `${progressTimeRemaining} seconds` 
+                            : `${Math.ceil(progressTimeRemaining / 60)} minutes`}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Completed Steps */}
+                    {progressSteps.length > 0 && (
+                      <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Progress</p>
+                        {progressSteps.slice(-4).map((step, idx) => (
+                          <div key={idx} className="flex items-center gap-2 text-sm text-gray-700">
+                            <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                            <span>{step}</span>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 ) : processingFailed ? (

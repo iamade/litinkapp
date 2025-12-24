@@ -788,6 +788,7 @@ async def upload_book(
     title: str = Form(...),
     description: Optional[str] = Form(None),
     book_type: str = Form(...),
+    progress_session_id: Optional[str] = Form(None),  # Session ID for SSE progress
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
@@ -841,6 +842,21 @@ async def upload_book(
             await session.commit()
             await session.refresh(book)
 
+        # Initialize progress tracking - use session ID if provided, otherwise book ID
+        from app.core.services.progress import progress_store
+
+        tracking_id = progress_session_id if progress_session_id else str(book.id)
+        print(f"[PROGRESS] Using tracking ID: {tracking_id}")
+
+        progress_store.create(tracking_id)
+        await progress_store.update(
+            tracking_id,
+            percent=5,
+            message="File uploaded successfully",
+            stage="upload",
+            completed_step="✅ File uploaded",
+        )
+
         # Process book for PREVIEW only (don't save chapters)
         file_service = FileService()
         preview_result = await file_service.process_uploaded_book_preview(
@@ -851,6 +867,7 @@ async def upload_book(
             user_id=str(current_user.id),
             book_id_to_update=str(book.id),
             session=session,
+            progress_book_id=tracking_id,  # Pass tracking ID for progress updates
         )
 
         # ✅ FIX: Handle both sectioned and flat structures properly
@@ -902,12 +919,35 @@ async def upload_book(
                 ),  # ✅ Include structure data
             }
 
+        # Mark processing as complete in progress store
+        await progress_store.update(
+            tracking_id,
+            percent=100,
+            message="Processing complete!",
+            stage="complete",
+            is_complete=True,
+            completed_step="✅ Book processing complete",
+        )
+
         return BookPreview(**final_response)
 
     except Exception as e:
-        # Clean up on failure
+        # Update progress store with error
+        if "tracking_id" in locals():
+            try:
+                from app.core.services.progress import progress_store
+
+                await progress_store.update(
+                    tracking_id,
+                    percent=0,
+                    message=f"Error: {str(e)}",
+                    stage="error",
+                    error=str(e),
+                    is_complete=True,
+                )
+            except:
+                pass
         if "book" in locals():
-            # Delete book from DB
             try:
                 await session.delete(book)
                 await session.commit()
@@ -1481,3 +1521,56 @@ async def save_book_structure(
         raise HTTPException(
             status_code=500, detail=f"Failed to save structure: {str(e)}"
         )
+
+
+@router.get("/upload-progress/{book_id}")
+async def get_upload_progress(
+    book_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    SSE endpoint for streaming upload progress updates.
+    Returns Server-Sent Events with progress data.
+    """
+    from app.core.services.progress import progress_store
+    import asyncio
+
+    async def event_generator():
+        """Generate SSE events from progress queue."""
+        queue = progress_store.get_queue(book_id)
+
+        if not queue:
+            # No progress tracking for this book, send initial state
+            yield f"data: {json.dumps({'percent': 0, 'message': 'Waiting for upload...', 'is_complete': False})}\n\n"
+            return
+
+        try:
+            while True:
+                try:
+                    # Wait for progress update with timeout
+                    progress_data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(progress_data)}\n\n"
+
+                    # If complete, stop streaming
+                    if progress_data.get("is_complete") or progress_data.get("error"):
+                        break
+
+                except asyncio.TimeoutError:
+                    # Send keepalive ping
+                    yield f": keepalive\n\n"
+
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # Clean up after streaming ends
+            progress_store.cleanup(book_id)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

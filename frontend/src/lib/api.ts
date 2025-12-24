@@ -94,7 +94,7 @@ export const apiClient = {
         } else if (detail && typeof detail === "object" && "message" in detail) {
           errorMessage = detail.message || errorMessage;
         }
-        throw new Error(errorMessage);
+        throw new Error(`[${response.status}] ${errorMessage}`);
       }
       
       return response;
@@ -132,7 +132,7 @@ export const apiClient = {
         } else if (detail && typeof detail === "object" && "message" in detail) {
           errorMessage = detail.message || errorMessage;
         }
-        throw new Error(errorMessage);
+        throw new Error(`[${response.status}] ${errorMessage}`);
       }
       return response.json();
     });
@@ -182,7 +182,8 @@ export const apiClient = {
       } else if (detail && typeof detail === "object" && "message" in detail) {
         errorMessage = detail.message || errorMessage;
       }
-      throw new Error(errorMessage);
+      // Include status code in error message for proper 404 detection
+      throw new Error(`[${response.status}] ${errorMessage}`);
     }
 
     if (response.status === 204) {
