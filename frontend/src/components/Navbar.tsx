@@ -1,0 +1,347 @@
+import React, { useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useAuth, hasRole } from "../contexts/AuthContext";
+import { useTheme } from "../contexts/ThemeContext";
+import { useUserMode } from "../hooks/useUserMode";
+import { Menu, X, User, LogOut, Moon, Sun, Compass, Sparkles } from "lucide-react";
+import { toast } from "react-hot-toast";
+import Logo from "./Logo";
+
+export default function Navbar() {
+  const { user, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
+  const { mode, switchMode, canAccessCreatorMode, canAccessExplorerMode } = useUserMode();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const handleSignOut = () => {
+    logout();
+    navigate("/auth");
+  };
+
+  const handleExploreClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    toast("Explore feature coming soon! 🔍", {
+      icon: "🌟",
+      style: {
+        borderRadius: "10px",
+        background: "#333",
+        color: "#fff",
+      },
+    });
+  };
+
+  const navItems = [
+    // { path: "/", label: "Home", showWhenLoggedIn: true },
+    // {
+    //   path: "/learn",
+    //   label: "Learn",
+    //   showWhenLoggedIn: true,
+    // },
+    {
+      path: "/dashboard",
+      label: "Dashboard",
+      showWhenLoggedIn: true,
+    },
+    {
+      path: "/explore",
+      label: "Explore",
+      showWhenLoggedIn: false,
+      onClick: handleExploreClick,
+    },
+    ...(user && hasRole(user, "author")
+      ? [{ path: "/author", label: "Create", showWhenLoggedIn: true }]
+      : []),
+    { path: "/subscription", label: "Subscription", showWhenLoggedIn: true },
+    ...(user && (hasRole(user, "superadmin") || user.email === "support@litinkai.com")
+      ? [{ path: "/admin", label: "Admin", showWhenLoggedIn: true }]
+      : []),
+  ];
+
+  // Filter nav items based on authentication status
+  const visibleNavItems = navItems.filter(
+    (item) => !item.showWhenLoggedIn || user
+  );
+
+  return (
+    <nav className="bg-white dark:bg-[#0F0F23]/90 backdrop-blur-lg border-b border-gray-200 dark:border-white/5 sticky top-0 z-50 transition-colors duration-300">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between items-center h-16">
+          <Logo />
+
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex items-center space-x-8">
+            {visibleNavItems.map((item) => (
+              <Link
+                key={item.path}
+                to={item.path}
+                onClick={item.onClick}
+                className={`text-sm font-medium transition-colors hover:text-purple-600 dark:hover:text-purple-400 ${
+                  location.pathname === item.path
+                    ? "text-purple-600 dark:text-purple-400"
+                    : "text-gray-600 dark:text-gray-300"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
+
+          {/* Desktop Auth */}
+          <div className="hidden md:flex items-center space-x-4">
+            {user ? (
+              <div className="flex items-center space-x-4">
+                {/* Mode Switcher - Only show if user has both roles */}
+                {canAccessCreatorMode && canAccessExplorerMode && (
+                  <div className="flex items-center bg-gray-100 dark:bg-white/5 rounded-lg p-1 border border-gray-200 dark:border-white/10">
+                    <button
+                      onClick={async () => {
+                        await switchMode('explorer');
+                        navigate('/dashboard');
+                      }}
+                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                        location.pathname.startsWith('/dashboard') || 
+                        location.pathname.startsWith('/explore') || 
+                        location.pathname.startsWith('/learn') || 
+                        location.pathname.startsWith('/subscription') ||
+                        location.pathname.startsWith('/book') ||
+                        (mode === 'explorer' && !location.pathname.startsWith('/creator') && !location.pathname.startsWith('/author') && !location.pathname.startsWith('/upload') && !location.pathname.startsWith('/project') && !location.pathname.startsWith('/profile'))
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Compass className="h-4 w-4" />
+                      <span>Explorer</span>
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await switchMode('creator');
+                        navigate('/creator');
+                      }}
+                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                        location.pathname.startsWith('/creator') || 
+                        location.pathname.startsWith('/author') || 
+                        location.pathname.startsWith('/upload') || 
+                        location.pathname.startsWith('/project') ||
+                        (mode === 'creator' && !location.pathname.startsWith('/dashboard') && !location.pathname.startsWith('/explore') && !location.pathname.startsWith('/learn') && !location.pathname.startsWith('/subscription') && !location.pathname.startsWith('/profile') && !location.pathname.startsWith('/book'))
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      <span>Creator</span>
+                    </button>
+                  </div>
+                )}
+                <button
+                  onClick={toggleTheme}
+                  className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-white/10"
+                  aria-label="Toggle theme"
+                >
+                  {theme === 'dark' ? (
+                    <Sun className="h-5 w-5" />
+                  ) : (
+                    <Moon className="h-5 w-5" />
+                  )}
+                </button>
+
+                {hasRole(user, "author") && (
+                  <Link
+                    to="/author"
+                    className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-2 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 transition-all transform hover:scale-105"
+                  >
+                    Author Panel
+                  </Link>
+                )}
+                <Link
+                  to="/profile"
+                  className="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+                >
+                  <User className="h-4 w-4" />
+                  <span>{user.display_name}</span>
+                </Link>
+                <button
+                  onClick={handleSignOut}
+                  className="flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={toggleTheme}
+                  className="p-2 text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                  aria-label="Toggle theme"
+                >
+                  {theme === 'dark' ? (
+                    <Sun className="h-5 w-5" />
+                  ) : (
+                    <Moon className="h-5 w-5" />
+                  )}
+                </button>
+                <Link
+                  to="/auth"
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-2 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 transition-all transform hover:scale-105"
+                >
+                  Sign In
+                </Link>
+              </>
+            )}
+          </div>
+
+
+          {/* Mobile menu button */}
+          <div className="md:hidden">
+            <button
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
+            >
+              {isMenuOpen ? (
+                <X className="h-6 w-6" />
+              ) : (
+                <Menu className="h-6 w-6" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile Navigation */}
+        {isMenuOpen && (
+          <div className="md:hidden py-4 border-t border-gray-200 dark:border-white/5 bg-white dark:bg-[#0F0F23]">
+            <div className="flex flex-col space-y-3">
+              <button
+                onClick={toggleTheme}
+                className="flex items-center space-x-2 text-base font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors px-2 py-1"
+              >
+                {theme === 'dark' ? (
+                  <>
+                    <Sun className="h-5 w-5" />
+                    <span>Light Mode</span>
+                  </>
+                ) : (
+                  <>
+                    <Moon className="h-5 w-5" />
+                    <span>Dark Mode</span>
+                  </>
+                )}
+              </button>
+              {visibleNavItems.map((item) => (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  onClick={(e) => {
+                    if (item.onClick) {
+                      item.onClick(e);
+                    }
+                    setIsMenuOpen(false);
+                  }}
+                  className={`text-base font-medium transition-colors hover:text-purple-600 dark:hover:text-purple-400 px-2 py-1 ${
+                    location.pathname === item.path
+                      ? "text-purple-600 dark:text-purple-400"
+                      : "text-gray-600 dark:text-gray-300"
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ))}
+
+              {user ? (
+                <>
+                  {/* Mobile Mode Switcher */}
+                  {canAccessCreatorMode && canAccessExplorerMode && (
+                    <div className="px-2 py-3 border-t border-b border-gray-200 dark:border-gray-700">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 px-2">Switch Mode</p>
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={async () => {
+                            await switchMode('explorer');
+                            setIsMenuOpen(false);
+                            navigate('/dashboard');
+                          }}
+                          className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                            mode === 'explorer'
+                              ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                          }`}
+                        >
+                          <Compass className="h-4 w-4" />
+                          <span>Explorer</span>
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await switchMode('creator');
+                            setIsMenuOpen(false);
+                            navigate('/creator');
+                          }}
+                          className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                            mode === 'creator'
+                              ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                          }`}
+                        >
+                          <Sparkles className="h-4 w-4" />
+                          <span>Creator</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <Link
+                    to="/dashboard"
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-base font-medium text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors px-2 py-1"
+                  >
+                    Dashboard
+                  </Link>
+                  {hasRole(user, "author") && (
+                    <Link
+                      to="/author"
+                      onClick={() => setIsMenuOpen(false)}
+                      className="text-base font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-500 transition-colors px-2 py-1"
+                    >
+                      Author Panel
+                    </Link>
+                  )}
+                  <Link
+                    to="/profile"
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-base font-medium text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors px-2 py-1"
+                  >
+                    Profile
+                  </Link>
+                  <Link
+                    to="/subscription"
+                    onClick={() => setIsMenuOpen(false)}
+                    className="text-base font-medium text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors px-2 py-1"
+                  >
+                    Subscription
+                  </Link>
+                  <button
+                    onClick={() => {
+                      logout();
+                      setIsMenuOpen(false);
+                      navigate("/auth");
+                    }}
+                    className="text-base font-medium text-gray-700 dark:text-gray-300 hover:text-red-600 dark:hover:text-red-400 transition-colors text-left px-2 py-1"
+                  >
+                    Sign Out
+                  </button>
+                </>
+              ) : (
+                <Link
+                  to="/auth"
+                  onClick={() => setIsMenuOpen(false)}
+                  className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-2 rounded-full font-medium text-center mx-2"
+                >
+                  Sign In
+                </Link>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </nav>
+  );
+}

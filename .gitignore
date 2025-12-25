@@ -1,3 +1,6 @@
+.envs/*
+!.envs/.env.example
+.env.prod
 # Logs
 logs
 *.log
@@ -25,8 +28,10 @@ dist-ssr
 *.sw?
 .env
 venv
+litinkai-backend
 uploads
 backend/mycoderead.md
 backend/CODEDISCUSS.md
 *.pyc
 architecture
+feature-prompt.md

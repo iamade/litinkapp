@@ -1,3 +1,5 @@
+try to implmenet passkeys and sso in future
+
 # Litink Backend API
 
 FastAPI backend for the Litink AI-powered interactive book platform.
@@ -14,37 +16,51 @@ FastAPI backend for the Litink AI-powered interactive book platform.
 
 ## Quick Start
 
-### Using Docker (Recommended)
+### Local Development (Recommended)
 
-1. Clone the repository and navigate to the backend directory
-2. Copy environment file:
-   ```bash
-   cp .env.example .env
-   ```
-3. Update `.env` with your API keys
-4. Start services:
-   ```bash
-   docker-compose up -d
-   ```
-
-
-# Start services
-docker-compose up -d
-```
-
-### From Supabase to Local:
+**New developers: Follow these steps for first-time setup:**
 
 ```bash
-# Stop services
-docker-compose down
+cd backend
 
-# Switch environment
-cp docker.env.local .env
-# Edit .env with your API keys
+# Step 1: Start Supabase local instance
+make supabase-start
 
-# Start services
-make up 
+# Step 2: Update .env.local with LOCAL Supabase keys
+./scripts/update-env-keys.sh
+
+# Step 3: Start application services
+make dev
 ```
+
+**For subsequent starts:**
+```bash
+cd backend
+make all-up  # Starts both Supabase and application
+```
+
+This starts:
+- Supabase local (Database, Auth, Storage, Studio)
+- All application services (API, Redis, Celery, etc.)
+- Email testing with Inbucket
+
+**For detailed setup:** See [LOCAL_DEVELOPMENT_GUIDE.md](LOCAL_DEVELOPMENT_GUIDE.md)
+
+**Having issues?** See [SUPABASE_TROUBLESHOOTING.md](SUPABASE_TROUBLESHOOTING.md)
+
+### Production/Cloud Database
+
+To connect to the production database (not recommended for development):
+
+1. Copy environment file:
+   ```bash
+   cp .envs/.env.example .envs/.env.production
+   ```
+2. Update with production credentials
+3. Start services:
+   ```bash
+   docker-compose -f local.yml up -d
+   ```
 
 The API will be available at `http://localhost:8000`
 
@@ -233,3 +249,51 @@ VS Code should stop at your breakpoints
 4. Debug the 'id' Error Specifically
 Set breakpoints at these critical points: -->
 
+## Quick Start Workflow
+
+<<<<<<< HEAD
+make supabase-start - Start database (once)
+Update .envs/.env.local with the keys from output
+make dev - Start your application
+make down - Stop app when done
+make supabase-stop - Stop database when completely done
+Use make help to see all available commands!
+
+ALL test users (superadmin, admin, creator, user, premium accounts)
+=======
+**First Time Setup:**
+1. `make supabase-start` - Start local Supabase (database, auth, storage)
+2. `./scripts/update-env-keys.sh` - Automatically update .env.local with local keys
+3. Create superadmin user in Supabase Studio (http://127.0.0.1:54323)
+   - Email: support@litinkai.com
+   - Set a secure password
+4. `make dev` - Start your application
+
+**Daily Development:**
+1. `make all-up` - Start everything (Supabase + app)
+2. Make your changes and develop
+3. `make down` - Stop app when done
+4. `make supabase-stop` - Stop database when completely done
+
+**Common Commands:**
+- `make help` - See all available commands
+- `make logs` - View API logs
+- `make supabase-status` - Check Supabase status
+- `make supabase-reset` - Reset database (⚠️ deletes all data!)
+
+## Important Notes
+
+### Local vs Remote Supabase
+Your `.env.local` should use **LOCAL** Supabase keys for development:
+- ✅ `SUPABASE_URL=http://127.0.0.1:54321`
+- ✅ `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres`
+- ✅ Local API keys from `supabase status` or `./scripts/update-env-keys.sh`
+
+❌ **Do NOT use remote/cloud Supabase keys** (vtuqaubejlzqjmieelyr.supabase.co) in local development
+
+### Stripe Integration
+Stripe payment processing is fully integrated. Ensure you have:
+- `STRIPE_SECRET_KEY` in your `.env.local`
+- `STRIPE_PUBLISHABLE_KEY` for frontend
+- `STRIPE_WEBHOOK_SECRET` for webhook handling
+>>>>>>> 6dfa896d66876e109dc1a4daac823c22a14a5fde
