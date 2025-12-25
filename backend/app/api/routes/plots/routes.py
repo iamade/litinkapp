@@ -238,8 +238,12 @@ async def generate_project_plot_overview(
 
     This is for prompt-only projects like adverts, music videos, etc.
 
+    Supports refinement mode: if refinement_prompt is provided, the existing
+    plot will be used as context and refined based on user's instructions.
+
     - **project_id**: ID of the project to generate plot for
     - **request**: Plot generation parameters including the input prompt
+    - **request.refinement_prompt**: Optional prompt to refine existing plot
     """
     try:
         # Validate project ownership
@@ -267,7 +271,25 @@ async def generate_project_plot_overview(
                 detail=f"Plot generation limit exceeded. You have used {usage_check['plots_used']} out of {usage_check['plots_limit']} plots. Please upgrade your subscription.",
             )
 
-        # Generate plot from project prompt
+        # If refinement is requested, fetch existing plot
+        existing_plot = None
+        if request.refinement_prompt:
+            plot_service = PlotService(session)
+            existing_plot_data = await plot_service.get_plot_overview(
+                user_id=current_user.id, book_id=project_id
+            )
+            if existing_plot_data:
+                existing_plot = {
+                    "logline": existing_plot_data.logline,
+                    "story_type": existing_plot_data.story_type,
+                    "genre": existing_plot_data.genre,
+                    "tone": existing_plot_data.tone,
+                    "audience": existing_plot_data.audience,
+                    "setting": existing_plot_data.setting,
+                    "themes": existing_plot_data.themes,
+                }
+
+        # Generate plot from project prompt (or refine existing)
         plot_service = PlotService(session)
         result = await plot_service.generate_plot_from_prompt(
             user_id=current_user.id,
@@ -278,6 +300,8 @@ async def generate_project_plot_overview(
             genre=request.genre,
             tone=request.tone,
             audience=request.audience,
+            refinement_prompt=request.refinement_prompt,
+            existing_plot=existing_plot,
         )
 
         return result
@@ -287,4 +311,50 @@ async def generate_project_plot_overview(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to generate plot overview: {str(e)}"
+        )
+
+
+@router.get("/projects/{project_id}/overview", response_model=PlotOverviewResponse)
+async def get_project_plot_overview(
+    project_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Retrieve existing plot overview for a project.
+
+    - **project_id**: ID of the project
+    """
+    try:
+        # Validate project ownership
+        statement = select(Project).where(Project.id == project_id)
+        result = await session.exec(statement)
+        project = result.first()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if project.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to access this project"
+            )
+
+        # Get plot overview (project_id is stored in book_id field)
+        plot_service = PlotService(session)
+        plot_overview = await plot_service.get_plot_overview(
+            user_id=current_user.id, book_id=project_id
+        )
+
+        if not plot_overview:
+            raise HTTPException(
+                status_code=404, detail="No plot overview found for this project"
+            )
+
+        return plot_overview
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve plot overview: {str(e)}"
         )

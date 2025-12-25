@@ -3,8 +3,9 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, hasRole } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useUserMode } from "../hooks/useUserMode";
-import { Menu, X, User, LogOut, Moon, Sun, Compass, Sparkles, Shield } from "lucide-react";
+import { Menu, X, User, LogOut, Moon, Sun, Compass, Sparkles } from "lucide-react";
 import { toast } from "react-hot-toast";
+import Logo from "./Logo";
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -64,19 +65,10 @@ export default function Navbar() {
   );
 
   return (
-    <nav className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-lg border-b border-purple-100 dark:border-gray-800 sticky top-0 z-50">
+    <nav className="bg-white dark:bg-[#0F0F23]/90 backdrop-blur-lg border-b border-gray-200 dark:border-white/5 sticky top-0 z-50 transition-colors duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          <Link to="/" className="flex items-center space-x-3">
-            <img
-              src="/litink.png"
-              alt="Litink AI Logo"
-              className="h-10 w-10 object-contain"
-            />
-            <span className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-              Litink AI
-            </span>
-          </Link>
+          <Logo />
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-8">
@@ -88,7 +80,7 @@ export default function Navbar() {
                 className={`text-sm font-medium transition-colors hover:text-purple-600 dark:hover:text-purple-400 ${
                   location.pathname === item.path
                     ? "text-purple-600 dark:text-purple-400"
-                    : "text-gray-700 dark:text-gray-300"
+                    : "text-gray-600 dark:text-gray-300"
                 }`}
               >
                 {item.label}
@@ -102,7 +94,7 @@ export default function Navbar() {
               <div className="flex items-center space-x-4">
                 {/* Mode Switcher - Only show if user has both roles */}
                 {canAccessCreatorMode && canAccessExplorerMode && (
-                  <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                  <div className="flex items-center bg-gray-100 dark:bg-white/5 rounded-lg p-1 border border-gray-200 dark:border-white/10">
                     <button
                       onClick={async () => {
                         await switchMode('explorer');
@@ -115,8 +107,8 @@ export default function Navbar() {
                         location.pathname.startsWith('/subscription') ||
                         location.pathname.startsWith('/book') ||
                         (mode === 'explorer' && !location.pathname.startsWith('/creator') && !location.pathname.startsWith('/author') && !location.pathname.startsWith('/upload') && !location.pathname.startsWith('/project') && !location.pathname.startsWith('/profile'))
-                          ? 'bg-white dark:bg-gray-700 text-green-600 dark:text-green-400 shadow-sm'
-                          : 'text-gray-600 dark:text-gray-400 hover:text-green-600 dark:hover:text-green-400'
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                       }`}
                     >
                       <Compass className="h-4 w-4" />
@@ -133,8 +125,8 @@ export default function Navbar() {
                         location.pathname.startsWith('/upload') || 
                         location.pathname.startsWith('/project') ||
                         (mode === 'creator' && !location.pathname.startsWith('/dashboard') && !location.pathname.startsWith('/explore') && !location.pathname.startsWith('/learn') && !location.pathname.startsWith('/subscription') && !location.pathname.startsWith('/profile') && !location.pathname.startsWith('/book'))
-                          ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm'
-                          : 'text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400'
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                       }`}
                     >
                       <Sparkles className="h-4 w-4" />
@@ -144,7 +136,7 @@ export default function Navbar() {
                 )}
                 <button
                   onClick={toggleTheme}
-                  className="p-2 text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                  className="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors rounded-lg hover:bg-gray-100 dark:hover:bg-white/10"
                   aria-label="Toggle theme"
                 >
                   {theme === 'dark' ? (
@@ -200,11 +192,12 @@ export default function Navbar() {
             )}
           </div>
 
+
           {/* Mobile menu button */}
           <div className="md:hidden">
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
-              className="text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors"
+              className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"
             >
               {isMenuOpen ? (
                 <X className="h-6 w-6" />
@@ -217,11 +210,11 @@ export default function Navbar() {
 
         {/* Mobile Navigation */}
         {isMenuOpen && (
-          <div className="md:hidden py-4 border-t border-purple-100 dark:border-gray-800 bg-white dark:bg-gray-900">
+          <div className="md:hidden py-4 border-t border-gray-200 dark:border-white/5 bg-white dark:bg-[#0F0F23]">
             <div className="flex flex-col space-y-3">
               <button
                 onClick={toggleTheme}
-                className="flex items-center space-x-2 text-base font-medium text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors px-2 py-1"
+                className="flex items-center space-x-2 text-base font-medium text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors px-2 py-1"
               >
                 {theme === 'dark' ? (
                   <>
@@ -248,7 +241,7 @@ export default function Navbar() {
                   className={`text-base font-medium transition-colors hover:text-purple-600 dark:hover:text-purple-400 px-2 py-1 ${
                     location.pathname === item.path
                       ? "text-purple-600 dark:text-purple-400"
-                      : "text-gray-700 dark:text-gray-300"
+                      : "text-gray-600 dark:text-gray-300"
                   }`}
                 >
                   {item.label}

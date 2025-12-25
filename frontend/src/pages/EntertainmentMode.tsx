@@ -60,14 +60,14 @@ export default function EntertainmentMode() {
   }, []);
 
   return (
-    <div className="min-h-screen py-8">
+    <div className="min-h-screen py-8 bg-gray-50 dark:bg-[#0F0F23] transition-colors duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
             Entertainment Mode
           </h1>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+          <p className="text-xl text-gray-600 dark:text-gray-400 max-w-3xl mx-auto">
             Immerse yourself in interactive stories where your choices matter.
             Experience branching narratives with AI-driven characters, voice
             interactions, and collectible NFTs.
@@ -77,15 +77,15 @@ export default function EntertainmentMode() {
         {/* Continue Reading Section */}
         {continueReading.length > 0 && (
           <div className="mb-12">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center">
-              <Clock className="h-7 w-7 text-purple-600 mr-2" />
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+              <Clock className="h-7 w-7 text-purple-600 dark:text-purple-400 mr-2" />
               Continue Your Adventures
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {continueReading.map((story) => (
                 <div
                   key={story.id}
-                  className="group bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden hover:shadow-xl transition-all transform hover:scale-105"
+                  className="group bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden hover:shadow-xl transition-all transform hover:scale-105"
                 >
                   <div className="relative">
                     <img
@@ -107,10 +107,10 @@ export default function EntertainmentMode() {
                     </div>
                   </div>
                   <div className="p-6">
-                    <h3 className="font-bold text-lg text-gray-900 mb-2 group-hover:text-purple-600 transition-colors">
+                    <h3 className="font-bold text-lg text-gray-900 dark:text-white mb-2 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
                       {story.title}
                     </h3>
-                    <p className="text-gray-600 text-sm mb-4">
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">
                       by {story.author}
                     </p>
                     <Link
@@ -137,7 +137,7 @@ export default function EntertainmentMode() {
                 placeholder="Search stories, authors, genres..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
             </div>
 
@@ -147,7 +147,7 @@ export default function EntertainmentMode() {
                 <select
                   value={selectedGenre}
                   onChange={(e) => setSelectedGenre(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 >
                   {genres.map((genre) => (
                     <option key={genre.id} value={genre.id}>
@@ -162,12 +162,12 @@ export default function EntertainmentMode() {
 
         {/* Featured Stories Grid */}
         <div className="mb-12">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center">
-            <Sparkles className="h-7 w-7 text-purple-600 mr-2" />
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+            <Sparkles className="h-7 w-7 text-purple-600 dark:text-purple-400 mr-2" />
             My Entertainment Books
           </h2>
           {exploreLoading ? (
-            <div className="text-center py-8">
+            <div className="text-center py-8 text-gray-600 dark:text-gray-400">
               Loading your entertainment books...
             </div>
           ) : (
@@ -175,7 +175,7 @@ export default function EntertainmentMode() {
               {filteredStories.map((story) => (
                 <div
                   key={story.id}
-                  className="group bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden hover:shadow-xl transition-all transform hover:scale-105"
+                  className="group bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 overflow-hidden hover:shadow-xl transition-all transform hover:scale-105"
                 >
                   <div className="relative">
                     <img
@@ -185,13 +185,13 @@ export default function EntertainmentMode() {
                     />
                   </div>
                   <div className="p-6">
-                    <h3 className="font-bold text-lg text-gray-900 mb-2 group-hover:text-purple-600 transition-colors">
+                    <h3 className="font-bold text-lg text-gray-900 dark:text-white mb-2 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
                       {story.title}
                     </h3>
-                    <p className="text-gray-600 text-sm mb-3">
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-3">
                       by {story.author_name || story.author}
                     </p>
-                    <p className="text-gray-600 text-sm mb-4 line-clamp-2">
+                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-2">
                       {story.description}
                     </p>
                     <div className="flex space-x-2">

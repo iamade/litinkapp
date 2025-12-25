@@ -269,8 +269,8 @@ class ProjectPlotGenerationRequest(BaseModel):
     project_id: Optional[str] = Field(
         None, description="ID of the project to generate plot for"
     )
-    input_prompt: str = Field(
-        ..., max_length=2000, description="The user's creative prompt"
+    input_prompt: Optional[str] = Field(
+        None, max_length=2000, description="The user's creative prompt"
     )
     project_type: Optional[str] = Field(
         None,
@@ -283,6 +283,11 @@ class ProjectPlotGenerationRequest(BaseModel):
     genre: Optional[str] = Field(None, max_length=100, description="Desired genre")
     tone: Optional[str] = Field(None, max_length=100, description="Desired tone")
     audience: Optional[str] = Field(None, max_length=100, description="Target audience")
+    refinement_prompt: Optional[str] = Field(
+        None,
+        max_length=2000,
+        description="Follow-up prompt to refine/customize an existing plot (e.g., 'Make it Boondocks style')",
+    )
 
 
 class PlotGenerationResponse(BaseModel):

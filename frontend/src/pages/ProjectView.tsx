@@ -150,13 +150,17 @@ const ProjectView: React.FC = () => {
     }
   }, [loading, isPromptOnlyProject, isWorkflowMode, virtualChapter]);
 
-  // Plot generation hook - use project ID as book ID equivalent
+  // Plot generation hook - use project ID with isProject flag
   const {
     plotOverview,
     isGenerating: isGeneratingPlot,
     generatePlot,
     loadPlot
-  } = usePlotGeneration(id || '');
+  } = usePlotGeneration(id || '', {
+    isProject: true,
+    inputPrompt: project?.input_prompt,
+    projectType: project?.project_type,
+  });
 
   // Callback to refresh plot overview
   const refreshPlotOverview = useCallback(() => {
@@ -337,6 +341,9 @@ const ProjectView: React.FC = () => {
           <PlotOverviewPanel
             bookId={project.id}
             onCharacterChange={refreshPlotOverview}
+            isProject={true}
+            inputPrompt={project.input_prompt}
+            projectType={project.project_type}
           />
         );
 

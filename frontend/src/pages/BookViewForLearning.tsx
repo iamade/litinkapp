@@ -312,17 +312,17 @@ export default function BookViewForLearning() {
     const maxChars = 70;
 
     if (content.length <= maxChars) {
-      return <p className="text-gray-700">{content}</p>;
+      return <p className="text-gray-700 dark:text-gray-300">{content}</p>;
     }
 
     return (
       <div>
-        <p className="text-gray-700">
+        <p className="text-gray-700 dark:text-gray-300">
           {showFullContent ? content : `${content.substring(0, maxChars)}...`}
         </p>
         <button
           onClick={() => setShowFullContent(!showFullContent)}
-          className="text-blue-600 hover:text-blue-800 text-sm mt-1"
+          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm mt-1"
         >
           {showFullContent ? "Show Less" : "Show More"}
         </button>
@@ -331,17 +331,17 @@ export default function BookViewForLearning() {
   };
 
   if (isLoading) {
-    return <div className="p-8 text-center">Loading...</div>;
+    return <div className="p-8 text-center text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-[#0F0F23] min-h-screen">Loading...</div>;
   }
 
   if (!book) {
-    return <div className="p-8 text-center text-red-500">Book not found.</div>;
+    return <div className="p-8 text-center text-red-500 bg-gray-50 dark:bg-[#0F0F23] min-h-screen">Book not found.</div>;
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-[#0F0F23] transition-colors duration-300">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b">
+      <div className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center space-x-4">
             <img
@@ -350,13 +350,13 @@ export default function BookViewForLearning() {
               className="w-16 h-20 object-cover rounded-lg shadow-md"
             />
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">{book.title}</h1>
-              <p className="text-gray-600">by {book.author_name}</p>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{book.title}</h1>
+              <p className="text-gray-600 dark:text-gray-400">by {book.author_name}</p>
               <div className="flex items-center space-x-2 mt-1">
-                <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
+                <span className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 rounded-full">
                   Learning
                 </span>
-                <span className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
+                <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300 rounded-full">
                   {book.difficulty}
                 </span>
               </div>
@@ -369,8 +369,8 @@ export default function BookViewForLearning() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Chapter List */}
           <div className="lg:col-span-1">
-            <div className="bg-white rounded-lg shadow-sm border p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                 Chapters ({book.total_chapters})
               </h2>
               <div className="space-y-2">
@@ -380,23 +380,23 @@ export default function BookViewForLearning() {
                     onClick={() => handleChapterSelect(chapter)}
                     className={`w-full text-left p-3 rounded-lg transition-colors ${
                       selectedChapter?.id === chapter.id
-                        ? "bg-blue-50 border-blue-200 border"
-                        : "hover:bg-gray-50"
+                        ? "bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700 border"
+                        : "hover:bg-gray-50 dark:hover:bg-gray-700"
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="font-medium text-gray-900">
+                        <p className="font-medium text-gray-900 dark:text-white">
                           {chapter.title}
                         </p>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
                           Chapter {index + 1}
                         </p>
                       </div>
                       {learningContent[chapter.id] && (
                         <div className="flex items-center space-x-1">
                           <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                          <span className="text-xs text-green-600">
+                          <span className="text-xs text-green-600 dark:text-green-400">
                             {learningContent[chapter.id].type === "video"
                               ? "🎬"
                               : "🎵"}
@@ -412,19 +412,19 @@ export default function BookViewForLearning() {
 
           {/* Main Content */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-sm border">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700">
               {selectedChapter && (
                 <div className="p-6">
-                  <h2 className="text-xl font-bold text-gray-900 mb-4">
+                  <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4">
                     {selectedChapter.title}
                   </h2>
-                  <div className="prose max-w-none text-gray-700 leading-relaxed">
+                  <div className="prose dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 leading-relaxed">
                     {renderChapterContent()}
                   </div>
 
                   {/* Learning Content Generation Controls */}
-                  <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                  <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                       Generate Learning Content
                     </h3>
 
@@ -500,7 +500,7 @@ export default function BookViewForLearning() {
                       )}
 
                       {learningContent[selectedChapter.id] && !videoUrl && (
-                        <div className="mt-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded">
+                        <div className="mt-4 p-3 bg-green-100 dark:bg-green-900/30 border border-green-400 dark:border-green-700 text-green-700 dark:text-green-300 rounded">
                           <p>
                             Video content exists for this chapter but is not
                             currently loaded.
@@ -522,7 +522,7 @@ export default function BookViewForLearning() {
                         currentLearningContent &&
                         currentLearningContent.status === "processing" &&
                         currentLearningContent.tavus_url && (
-                          <div className="p-3 bg-yellow-100 border border-yellow-400 text-yellow-800 rounded mt-2">
+                          <div className="p-3 bg-yellow-100 dark:bg-yellow-900/30 border border-yellow-400 dark:border-yellow-600 text-yellow-800 dark:text-yellow-300 rounded mt-2">
                             <span>
                               The video is still being processed. You can
                               preview the hosted video here (may not be ready):{" "}
@@ -530,7 +530,7 @@ export default function BookViewForLearning() {
                                 href={currentLearningContent.tavus_url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="underline text-blue-700"
+                                className="underline text-blue-700 dark:text-blue-400"
                               >
                                 Hosted Video Link
                               </a>
@@ -539,7 +539,7 @@ export default function BookViewForLearning() {
                         )}
                     </div>
 
-                    <div className="text-sm text-gray-600 mt-4">
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mt-4">
                       <p className="mb-2">
                         <strong>Audio Narration:</strong> ElevenLabs AI
                         teaching/narrating an audio tutorial based on RAG

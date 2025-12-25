@@ -529,6 +529,7 @@ export const userService = {
     genre?: string;
     tone?: string;
     audience?: string;
+    refinementPrompt?: string;
   }) {
     return apiClient.post<any>(
       `/plots/projects/${projectId}/generate`,
@@ -539,6 +540,7 @@ export const userService = {
         genre: options?.genre,
         tone: options?.tone,
         audience: options?.audience,
+        refinement_prompt: options?.refinementPrompt,
       }
     );
   },
@@ -550,10 +552,10 @@ export const userService = {
     return response;
   },
 
-  // Get project plot overview (uses same endpoint structure as books for now)
+  // Get project plot overview (uses project-specific endpoint)
   async getProjectPlotOverview(projectId: string) {
     const response = await apiClient.get<any>(
-      `/plots/books/${projectId}/overview`
+      `/plots/projects/${projectId}/overview`
     );
     return response;
   },

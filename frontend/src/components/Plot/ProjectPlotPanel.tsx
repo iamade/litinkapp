@@ -26,6 +26,7 @@ const ProjectPlotPanel: React.FC<ProjectPlotPanelProps> = ({
     isGenerating,
     isLoading,
     generatePlot,
+    refinePlot,
     loadPlot,
     deleteCharacter,
   } = useProjectPlotGeneration({ projectId, inputPrompt, projectType });
@@ -34,6 +35,7 @@ const ProjectPlotPanel: React.FC<ProjectPlotPanelProps> = ({
   const [genre, setGenre] = useState('');
   const [tone, setTone] = useState('');
   const [audience, setAudience] = useState('');
+  const [refinementPrompt, setRefinementPrompt] = useState('');
 
   useEffect(() => {
     loadPlot();
@@ -46,6 +48,13 @@ const ProjectPlotPanel: React.FC<ProjectPlotPanelProps> = ({
       tone: tone || undefined,
       audience: audience || undefined,
     });
+    onCharacterChange?.();
+  };
+
+  const handleRefinePlot = async () => {
+    if (!refinementPrompt.trim()) return;
+    await refinePlot(refinementPrompt);
+    setRefinementPrompt(''); // Clear the prompt after refinement
     onCharacterChange?.();
   };
 
@@ -249,20 +258,54 @@ const ProjectPlotPanel: React.FC<ProjectPlotPanelProps> = ({
             </div>
           )}
 
-          {/* Regenerate Button */}
-          <div className="flex justify-center">
-            <button
-              onClick={handleGeneratePlot}
+          {/* Refinement Prompt Section */}
+          <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-200 p-6 space-y-4">
+            <h4 className="text-lg font-semibold text-purple-900 flex items-center">
+              <Wand2 className="h-5 w-5 mr-2" />
+              Refine Your Plot
+            </h4>
+            <p className="text-sm text-gray-600">
+              Not happy with the result? Describe what changes you'd like to make.
+            </p>
+            <textarea
+              value={refinementPrompt}
+              onChange={(e) => setRefinementPrompt(e.target.value)}
+              placeholder="e.g., 'Make it Boondocks style animation' or 'Add more dramatic tension' or 'Change the setting to Victorian England'"
+              className="w-full border border-purple-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none"
+              rows={3}
               disabled={isGenerating}
-              className="flex items-center px-4 py-2 text-purple-600 border border-purple-600 rounded-lg hover:bg-purple-50 disabled:opacity-50"
-            >
-              {isGenerating ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Wand2 className="h-4 w-4 mr-2" />
-              )}
-              Regenerate Plot
-            </button>
+            />
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleRefinePlot}
+                disabled={isGenerating || !refinementPrompt.trim()}
+                className="flex-1 flex items-center justify-center px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                    Refining Plot...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="h-5 w-5 mr-2" />
+                    Refine Plot
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleGeneratePlot}
+                disabled={isGenerating}
+                className="flex items-center px-4 py-3 text-purple-600 border border-purple-300 rounded-lg hover:bg-purple-50 disabled:opacity-50"
+              >
+                {isGenerating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <BookOpen className="h-4 w-4" />
+                )}
+                <span className="ml-2">Regenerate</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

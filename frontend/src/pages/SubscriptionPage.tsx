@@ -115,9 +115,9 @@ export default function SubscriptionPage() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#0F0F23]">
         <div className="text-center">
-          <p className="text-xl text-gray-600 mb-4">Sign in required</p>
+          <p className="text-xl text-gray-600 dark:text-gray-400 mb-4">Sign in required</p>
         </div>
       </div>
     );
@@ -125,33 +125,33 @@ export default function SubscriptionPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#0F0F23]">
         <div className="flex items-center gap-3">
           <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
-          <span className="text-gray-600">Loading subscription details...</span>
+          <span className="text-gray-600 dark:text-gray-400">Loading subscription details...</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen py-8">
+    <div className="min-h-screen py-8 bg-gray-50 dark:bg-[#0F0F23] transition-colors duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
             Subscription Plans
           </h1>
-          <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+          <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
             Choose the perfect plan for your creative needs. Upgrade or downgrade at any time.
           </p>
         </div>
 
         {/* Current Subscription Status */}
         {currentSubscription && (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 p-6 mb-8">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-6 mb-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-gray-900">Current Plan</h2>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Current Plan</h2>
               <div className="flex items-center gap-2">
                 {currentSubscription.status === "active" ? (
                   <CheckCircle className="h-5 w-5 text-green-500" />
@@ -172,20 +172,20 @@ export default function SubscriptionPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div>
-                <span className="text-sm text-gray-600">Plan</span>
-                <p className="font-semibold text-gray-900 capitalize">
+                <span className="text-sm text-gray-600 dark:text-gray-400">Plan</span>
+                <p className="font-semibold text-gray-900 dark:text-white capitalize">
                   {currentSubscription.tier}
                 </p>
               </div>
               <div>
-                <span className="text-sm text-gray-600">Monthly Limit</span>
-                <p className="font-semibold text-gray-900">
+                <span className="text-sm text-gray-600 dark:text-gray-400">Monthly Limit</span>
+                <p className="font-semibold text-gray-900 dark:text-white">
                   {currentSubscription.monthly_video_limit} videos
                 </p>
               </div>
               <div>
-                <span className="text-sm text-gray-600">Quality</span>
-                <p className="font-semibold text-gray-900">
+                <span className="text-sm text-gray-600 dark:text-gray-400">Quality</span>
+                <p className="font-semibold text-gray-900 dark:text-white">
                   {currentSubscription.video_quality}
                 </p>
               </div>
@@ -200,7 +200,7 @@ export default function SubscriptionPage() {
 
             {/* Subscription Actions */}
             {currentSubscription.tier !== "free" && (
-              <div className="flex gap-3 pt-4 border-t border-gray-200">
+              <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
                 {currentSubscription.cancel_at_period_end ? (
                   <button
                     onClick={handleReactivateSubscription}
@@ -217,7 +217,7 @@ export default function SubscriptionPage() {
                   </button>
                 )}
                 {currentSubscription.current_period_end && (
-                  <div className="text-sm text-gray-600 flex items-center">
+                  <div className="text-sm text-gray-600 dark:text-gray-400 flex items-center">
                     {currentSubscription.cancel_at_period_end ? "Ends" : "Renews"} on{" "}
                     {new Date(currentSubscription.current_period_end).toLocaleDateString()}
                   </div>
@@ -241,40 +241,40 @@ export default function SubscriptionPage() {
         </div>
 
         {/* FAQ Section */}
-        <div className="mt-12 bg-white rounded-xl shadow-lg border border-gray-200 p-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">
+        <div className="mt-12 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-8">
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">
             Frequently Asked Questions
           </h2>
           <div className="space-y-6">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                 Can I change my plan anytime?
               </h3>
-              <p className="text-gray-600">
+              <p className="text-gray-600 dark:text-gray-400">
                 Yes! You can upgrade or downgrade your plan at any time. Changes take effect immediately for upgrades, or at the next billing cycle for downgrades.
               </p>
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                 What happens to my videos if I cancel?
               </h3>
-              <p className="text-gray-600">
+              <p className="text-gray-600 dark:text-gray-400">
                 Your videos remain accessible even after cancellation. You'll just be limited to free tier features and won't be able to generate new videos beyond the free limit.
               </p>
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                 Is there a free trial?
               </h3>
-              <p className="text-gray-600">
+              <p className="text-gray-600 dark:text-gray-400">
                 Our free tier allows you to upload 2 books and generate 2 videos per month. This gives you a great way to try our platform before upgrading.
               </p>
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                 How does billing work?
               </h3>
-              <p className="text-gray-600">
+              <p className="text-gray-600 dark:text-gray-400">
                 All plans are billed monthly. You can cancel anytime, and you'll retain access until the end of your billing period. Refunds are processed according to our refund policy.
               </p>
             </div>
@@ -283,12 +283,12 @@ export default function SubscriptionPage() {
 
         {/* Contact Support */}
         <div className="mt-8 text-center">
-          <p className="text-gray-600 mb-4">
+          <p className="text-gray-600 dark:text-gray-400 mb-4">
             Need help choosing the right plan?
           </p>
           <a
             href="mailto:support@litink.ai"
-            className="inline-flex items-center gap-2 bg-gray-100 text-gray-700 px-6 py-3 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+            className="inline-flex items-center gap-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
           >
             <CreditCard className="h-4 w-4" />
             Contact Support

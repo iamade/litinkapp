@@ -376,9 +376,9 @@ export default function BookUpload() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#0F0F23]">
         <div className="text-center">
-          <p className="text-xl text-gray-600 mb-4">Sign in required</p>
+          <p className="text-xl text-gray-600 dark:text-gray-400 mb-4">Sign in required</p>
         </div>
       </div>
     );
@@ -1653,21 +1653,21 @@ export default function BookUpload() {
   // };
 
   return (
-    <div className="min-h-screen py-4 sm:py-8">
+    <div className="min-h-screen py-4 sm:py-8 bg-gray-50 dark:bg-[#0F0F23] transition-colors duration-300">
       <div className="max-w-4xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8">
         {/* Header */}
         <div className="text-center mb-6 sm:mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2 sm:mb-4">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2 sm:mb-4">
             Upload Your Book
           </h1>
-          <p className="text-gray-600 text-sm sm:text-base">
+          <p className="text-gray-600 dark:text-gray-400 text-sm sm:text-base">
             Transform your content into an interactive AI-powered experience
           </p>
           {userBookCount >= 1 && (
-            <div className="mt-3 sm:mt-4 p-2 sm:p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="mt-3 sm:mt-4 p-2 sm:p-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg">
               <div className="flex items-center justify-center space-x-2">
-                <CreditCard className="h-5 w-5 text-blue-600" />
-                <span className="text-blue-800 text-xs sm:text-sm font-medium">
+                <CreditCard className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                <span className="text-blue-800 dark:text-blue-300 text-xs sm:text-sm font-medium">
                   You have uploaded {userBookCount} book
                   {userBookCount !== 1 ? "s" : ""}. Additional uploads require
                   payment.
@@ -1689,7 +1689,7 @@ export default function BookUpload() {
                   className={`flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 text-sm sm:text-base ${
                     step >= stepItem.number
                       ? "bg-purple-600 border-purple-600 text-white"
-                      : "border-gray-300 text-gray-500"
+                      : "border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400"
                   }`}
                 >
                   {step > stepItem.number ? (
@@ -1702,29 +1702,29 @@ export default function BookUpload() {
                   <p
                     className={`text-xs sm:text-sm font-medium ${
                       step >= stepItem.number
-                        ? "text-purple-600"
-                        : "text-gray-500"
+                        ? "text-purple-600 dark:text-purple-400"
+                        : "text-gray-500 dark:text-gray-400"
                     }`}
                   >
                     {stepItem.title}
                   </p>
-                  <p className="text-[10px] sm:text-xs text-gray-500">
+                  <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400">
                     {stepItem.description}
                   </p>
                 </div>
                 {index < steps.length - 1 && (
-                  <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400 mx-2 sm:mx-4" />
+                  <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400 dark:text-gray-500 mx-2 sm:mx-4" />
                 )}
               </div>
             ))}
           </div>
         </div>
 
-        <div className="bg-white rounded-xl sm:rounded-2xl shadow-lg border border-gray-100 p-4 sm:p-8">
+        <div className="bg-white dark:bg-gray-800 rounded-xl sm:rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-4 sm:p-8">
           {/* Step 1: Upload Method */}
           {step === 1 && (
             <div className="space-y-4 sm:space-y-6">
-              <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-4 sm:mb-6">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-4 sm:mb-6">
                 How would you like to add your content?
               </h2>
 
@@ -1733,15 +1733,15 @@ export default function BookUpload() {
                   onClick={() => setUploadMethod("file")}
                   className={`w-full p-4 sm:p-8 rounded-2xl border-2 transition-all hover:scale-105 text-left ${
                     uploadMethod === "file"
-                      ? "border-purple-500 bg-purple-50"
-                      : "border-gray-300 hover:border-purple-300"
+                      ? "border-purple-500 bg-purple-50 dark:bg-purple-900/30"
+                      : "border-gray-300 dark:border-gray-600 hover:border-purple-300 dark:hover:border-purple-500"
                   }`}
                 >
-                  <Upload className="h-10 w-10 sm:h-12 sm:w-12 text-purple-600 mx-auto mb-2 sm:mb-4" />
-                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-1 sm:mb-2">
+                  <Upload className="h-10 w-10 sm:h-12 sm:w-12 text-purple-600 dark:text-purple-400 mx-auto mb-2 sm:mb-4" />
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-1 sm:mb-2">
                     Upload File
                   </h3>
-                  <p className="text-gray-600 text-xs sm:text-sm">
+                  <p className="text-gray-600 dark:text-gray-400 text-xs sm:text-sm">
                     Upload a PDF, DOCX, TXT, or EPUB file of your book
                   </p>
                 </button>
@@ -1750,15 +1750,15 @@ export default function BookUpload() {
                   onClick={() => setUploadMethod("text")}
                   className={`w-full p-4 sm:p-8 rounded-2xl border-2 transition-all hover:scale-105 text-left ${
                     uploadMethod === "text"
-                      ? "border-purple-500 bg-purple-50"
-                      : "border-gray-300 hover:border-purple-300"
+                      ? "border-purple-500 bg-purple-50 dark:bg-purple-900/30"
+                      : "border-gray-300 dark:border-gray-600 hover:border-purple-300 dark:hover:border-purple-500"
                   }`}
                 >
-                  <FileText className="h-10 w-10 sm:h-12 sm:w-12 text-purple-600 mx-auto mb-2 sm:mb-4" />
-                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 mb-1 sm:mb-2">
+                  <FileText className="h-10 w-10 sm:h-12 sm:w-12 text-purple-600 dark:text-purple-400 mx-auto mb-2 sm:mb-4" />
+                  <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-white mb-1 sm:mb-2">
                     Paste Text
                   </h3>
-                  <p className="text-gray-600 text-xs sm:text-sm">
+                  <p className="text-gray-600 dark:text-gray-400 text-xs sm:text-sm">
                     Copy and paste your book content directly
                   </p>
                 </button>
@@ -1766,10 +1766,10 @@ export default function BookUpload() {
 
               {uploadMethod === "file" && (
                 <div className="mt-4 sm:mt-6">
-                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 sm:mb-2">
                     Select your book file
                   </label>
-                  <div className="border-2 border-dashed border-gray-300 rounded-xl p-4 sm:p-8 text-center hover:border-purple-400 transition-colors">
+                  <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800/50 rounded-xl p-4 sm:p-8 text-center hover:border-purple-400 dark:hover:border-purple-500 transition-colors">
                     <input
                       type="file"
                       accept=".pdf,.docx,.txt,.epub"
@@ -1778,11 +1778,11 @@ export default function BookUpload() {
                       id="file-upload"
                     />
                     <label htmlFor="file-upload" className="cursor-pointer">
-                      <Book className="h-10 w-10 sm:h-12 sm:w-12 text-gray-400 mx-auto mb-2 sm:mb-4" />
-                      <p className="text-gray-600 text-xs sm:text-sm">
+                      <Book className="h-10 w-10 sm:h-12 sm:w-12 text-gray-400 dark:text-gray-500 mx-auto mb-2 sm:mb-4" />
+                      <p className="text-gray-600 dark:text-gray-400 text-xs sm:text-sm">
                         {file ? file.name : "Click to upload or drag and drop"}
                       </p>
-                      <p className="text-[10px] sm:text-xs text-gray-500 mt-1 sm:mt-2">
+                      <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-500 mt-1 sm:mt-2">
                         PDF, DOCX, TXT, or EPUB up to 10MB
                       </p>
                     </label>
@@ -1792,14 +1792,14 @@ export default function BookUpload() {
 
               {uploadMethod === "text" && (
                 <div className="mt-4 sm:mt-6">
-                  <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 sm:mb-2">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 sm:mb-2">
                     Paste your book content
                   </label>
                   <textarea
                     value={textContent}
                     onChange={(e) => setTextContent(e.target.value)}
                     rows={8}
-                    className="w-full border border-gray-300 rounded-xl p-3 sm:p-4 focus:ring-2 focus:ring-purple-500 focus:border-transparent text-xs sm:text-base"
+                    className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800/50 text-gray-900 dark:text-white rounded-xl p-3 sm:p-4 focus:ring-2 focus:ring-purple-500 focus:border-transparent text-xs sm:text-base placeholder-gray-500 dark:placeholder-gray-400"
                     placeholder="Paste your book content here..."
                   />
                 </div>
@@ -1845,7 +1845,7 @@ export default function BookUpload() {
           {/* Step 2: Content Mode */}
           {step === 2 && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
                 Choose the experience mode
               </h2>
 
@@ -1854,18 +1854,18 @@ export default function BookUpload() {
                   onClick={() => setBookMode("learning")}
                   className={`p-8 rounded-2xl border-2 transition-all hover:scale-105 ${
                     bookMode === "learning"
-                      ? "border-green-500 bg-green-50"
-                      : "border-gray-300 hover:border-green-300"
+                      ? "border-green-500 bg-green-50 dark:bg-green-900/30"
+                      : "border-gray-300 dark:border-gray-600 hover:border-green-300 dark:hover:border-green-500"
                   }`}
                 >
-                  <Brain className="h-12 w-12 text-green-600 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  <Brain className="h-12 w-12 text-green-600 dark:text-green-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                     Learning Mode
                   </h3>
-                  <p className="text-gray-600 text-sm mb-4">
+                  <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">
                     Convert into interactive tutorials, lessons, and quizzes
                   </p>
-                  <ul className="text-xs text-gray-600 space-y-1">
+                  <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                     <li>• AI-generated lessons</li>
                     <li>• Smart quizzes</li>
                     <li>• Progress tracking</li>
@@ -1877,18 +1877,18 @@ export default function BookUpload() {
                   onClick={() => setBookMode("entertainment")}
                   className={`p-8 rounded-2xl border-2 transition-all hover:scale-105 ${
                     bookMode === "entertainment"
-                      ? "border-purple-500 bg-purple-50"
-                      : "border-gray-300 hover:border-purple-300"
+                      ? "border-purple-500 bg-purple-50 dark:bg-purple-900/30"
+                      : "border-gray-300 dark:border-gray-600 hover:border-purple-300 dark:hover:border-purple-500"
                   }`}
                 >
-                  <Sparkles className="h-12 w-12 text-purple-600 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  <Sparkles className="h-12 w-12 text-purple-600 dark:text-purple-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                     Entertainment Mode
                   </h3>
-                  <p className="text-gray-600 text-sm mb-4">
+                  <p className="text-gray-600 dark:text-gray-400 text-sm mb-4">
                     Transform into interactive stories with branching narratives
                   </p>
-                  <ul className="text-xs text-gray-600 space-y-1">
+                  <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                     <li>• Choice-driven stories</li>
                     <li>• Voice characters</li>
                     <li>• AI-generated scenes</li>
@@ -1899,7 +1899,7 @@ export default function BookUpload() {
               <div className="flex justify-between mt-8">
                 <button
                   onClick={handleBack}
-                  className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-all"
+                  className="px-6 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
                 >
                   Back
                 </button>
@@ -1916,10 +1916,10 @@ export default function BookUpload() {
           {/* Step 3: AI Processing with Payment */}
           {step === 3 && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
                 AI Processing
               </h2>
-              <p className="text-gray-600 mb-4">
+              <p className="text-gray-600 dark:text-gray-400 mb-4">
                 Let AI analyze your book and auto-populate the details for you.
               </p>
 
@@ -1990,14 +1990,14 @@ export default function BookUpload() {
                     {/* Progress Bar */}
                     <div className="relative">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-purple-700">
+                        <span className="text-sm font-medium text-purple-700 dark:text-purple-400">
                           {progressMessage || "Processing..."}
                         </span>
-                        <span className="text-sm font-bold text-purple-600">
+                        <span className="text-sm font-bold text-purple-600 dark:text-purple-400">
                           {progressPercent}%
                         </span>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 overflow-hidden">
                         <div 
                           className="bg-gradient-to-r from-purple-500 to-purple-600 h-4 rounded-full transition-all duration-500 ease-out"
                           style={{ width: `${progressPercent}%` }}

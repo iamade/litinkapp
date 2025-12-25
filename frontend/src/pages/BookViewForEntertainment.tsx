@@ -660,17 +660,17 @@ export default function BookViewForEntertainment() {
     const maxChars = 70;
 
     if (content.length <= maxChars) {
-      return <p className="text-gray-700">{content}</p>;
+      return <p className="text-gray-700 dark:text-gray-300">{content}</p>;
     }
 
     return (
       <div>
-        <p className="text-gray-700">
+        <p className="text-gray-700 dark:text-gray-300">
           {showFullScript ? content : `${content.substring(0, maxChars)}...`}
         </p>
         <button
           onClick={() => setShowFullScript(!showFullScript)}
-          className="text-blue-600 hover:text-blue-800 text-sm mt-1"
+          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm mt-1"
         >
           {showFullScript ? "Show Less" : "Show More"}
         </button>
@@ -875,16 +875,16 @@ if (!selectedChapter) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-[#0F0F23]">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        <span className="ml-4 text-lg">Loading...</span>
+        <span className="ml-4 text-lg text-gray-700 dark:text-gray-300">Loading...</span>
       </div>
     );
   }
 
   if (!book) {
     return (
-      <div className="flex items-center justify-center min-h-screen text-red-500">
+      <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-[#0F0F23] text-red-500">
         <p className="text-lg">Book not found.</p>
       </div>
     );
@@ -893,9 +893,9 @@ if (!selectedChapter) {
   // DEBUG LOGGING
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-[#0F0F23] transition-colors duration-300">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b">
+      <div className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
@@ -905,13 +905,13 @@ if (!selectedChapter) {
                 className="w-16 h-20 object-cover rounded-lg shadow-md"
               />
               <div className="flex-1">
-                <h1 className="text-2xl font-bold text-gray-900">{book.title}</h1>
-                <p className="text-gray-600">by {book.author_name}</p>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{book.title}</h1>
+                <p className="text-gray-600 dark:text-gray-400">by {book.author_name}</p>
                 <div className="flex items-center space-x-2 mt-1">
-                  <span className="px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full">
+                  <span className="px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-300 rounded-full">
                     Entertainment Production
                   </span>
-                  <span className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded-full">
+                  <span className="px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-300 rounded-full">
                     {book.difficulty}
                   </span>
                 </div>
@@ -933,8 +933,8 @@ if (!selectedChapter) {
         >
           <div className="p-6">
             {/* Workflow Tabs */}
-            <div className="bg-white rounded-lg shadow-sm border mb-6">
-              <div className="border-b">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
+              <div className="border-b border-gray-200 dark:border-gray-700">
                 <nav className="flex space-x-8 px-6" aria-label="Tabs">
                   {workflowTabs.map((tab) => {
                     const isActive = activeTab === tab.id;
@@ -947,15 +947,15 @@ if (!selectedChapter) {
                         onClick={() => setActiveTab(tab.id)}
                         className={`flex items-center space-x-3 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                           isActive
-                            ? "border-blue-500 text-blue-600"
-                            : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                            ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                            : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600"
                         }`}
                       >
                         <tab.icon className="w-5 h-5" />
                         <span>{tab.label}</span>
                         <ProgressIndicator status={tabProgress} />
                         {!isActive && (
-                          <span className="text-xs text-gray-400 hidden lg:block">
+                          <span className="text-xs text-gray-400 dark:text-gray-500 hidden lg:block">
                             {tab.description}
                           </span>
                         )}
@@ -973,31 +973,31 @@ if (!selectedChapter) {
 
         {/* Right Sidebar - Chapter List */}
         <div
-          className={`fixed right-0 top-0 h-full bg-white shadow-lg border-l transition-all duration-300 ${
+          className={`fixed right-0 top-0 h-full bg-white dark:bg-gray-800 shadow-lg border-l border-gray-200 dark:border-gray-700 transition-all duration-300 ${
             sidebarCollapsed ? "w-16" : "w-80"
           }`}
         >
           {/* Sidebar Toggle */}
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="absolute -left-3 top-20 bg-white border border-gray-200 rounded-full p-1 shadow-md hover:bg-gray-50"
+            className="absolute -left-3 top-20 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-full p-1 shadow-md hover:bg-gray-50 dark:hover:bg-gray-600"
           >
             {sidebarCollapsed ? (
-              <ChevronLeft className="w-4 h-4 text-gray-600" />
+              <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-300" />
             ) : (
-              <ChevronRight className="w-4 h-4 text-gray-600" />
+              <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-300" />
             )}
           </button>
 
           {/* Sidebar Content */}
           <div className="h-full overflow-y-auto">
-            <div className="p-4 border-b">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
               {!sidebarCollapsed ? (
                 <>
-                  <h2 className="text-lg font-semibold text-gray-900 mb-1">
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
                     Chapters
                   </h2>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
                     {book.total_chapters} chapters total
                   </p>
                 </>

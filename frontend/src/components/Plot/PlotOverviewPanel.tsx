@@ -9,6 +9,12 @@ interface PlotOverviewPanelProps {
   bookId: string;
   /** Optional callback invoked after character create/delete to refresh plot overview in parent. */
   onCharacterChange?: () => void | Promise<void>;
+  /** Set to true when this is a project (not a book) */
+  isProject?: boolean;
+  /** Input prompt for project-based plot generation */
+  inputPrompt?: string;
+  /** Project type for project-based plot generation */
+  projectType?: string;
 }
 
 interface Character {
@@ -26,9 +32,15 @@ interface Character {
   image_url?: string;
 }
 
-const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharacterChange }) => {
+const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
+  bookId,
+  onCharacterChange,
+  isProject = false,
+  inputPrompt,
+  projectType
+}) => {
   const { plotOverview, isGenerating, isLoading, generatePlot, loadPlot, deleteCharacter } =
-    usePlotGeneration(bookId);
+    usePlotGeneration(bookId, { isProject, inputPrompt, projectType });
 
   const [deletingCharacterId, setDeletingCharacterId] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -60,6 +72,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Refinement prompt state
+  const [refinementPrompt, setRefinementPrompt] = useState('');
 
   // Filter characters based on search query
   const filteredCharacters = useMemo(() => {
@@ -432,11 +447,11 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-xl font-semibold text-gray-900">Plot Overview</h3>
-            <p className="text-gray-600">Generate comprehensive story analysis</p>
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Plot Overview</h3>
+            <p className="text-gray-600 dark:text-gray-400">Generate comprehensive story analysis</p>
           </div>
           <button
-            onClick={generatePlot}
+            onClick={() => generatePlot()}
             disabled={isGenerating}
             className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400"
           >
@@ -454,7 +469,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
           </button>
         </div>
 
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <BookOpen className="mx-auto h-12 w-12 mb-4 opacity-50" />
           <p>Generate a plot overview to see story analysis</p>
         </div>
@@ -468,20 +483,47 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
 
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-xl font-semibold text-gray-900">Plot Overview</h3>
-          <p className="text-gray-600">Story analysis and character management</p>
+      {/* Header with Refinement */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Plot Overview</h3>
+            <p className="text-gray-600 dark:text-gray-400">Story analysis and character management</p>
+          </div>
+          <button
+            onClick={() => {
+              generatePlot(refinementPrompt || undefined);
+              if (refinementPrompt) setRefinementPrompt('');
+            }}
+            disabled={isGenerating}
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-blue-400 text-sm"
+          >
+            {isGenerating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <BookOpen className="w-4 h-4" />
+            )}
+            <span>{refinementPrompt ? 'Refine Plot' : 'Regenerate'}</span>
+          </button>
         </div>
-        <button
-          onClick={generatePlot}
-          disabled={isGenerating}
-          className="flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-blue-400 text-sm"
-        >
-          <BookOpen className="w-4 h-4" />
-          <span>Regenerate</span>
-        </button>
+        
+        {/* Refinement Prompt Input */}
+        <div className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/30 dark:to-blue-900/30 border border-purple-200 dark:border-purple-700 rounded-lg p-4">
+          <label className="block text-sm font-medium text-purple-900 dark:text-purple-300 mb-2">
+            🎯 Customize Your Plot (Optional)
+          </label>
+          <textarea
+            value={refinementPrompt}
+            onChange={(e) => setRefinementPrompt(e.target.value)}
+            placeholder="Describe changes you'd like, e.g., 'Make it Boondocks style animation' or 'Add more dramatic tension' or 'Change the protagonist to be older'"
+            className="w-full border border-purple-300 dark:border-purple-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none text-sm placeholder-gray-500 dark:placeholder-gray-400"
+            rows={2}
+            disabled={isGenerating}
+          />
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            Enter your customization prompt and click "{refinementPrompt ? 'Refine Plot' : 'Regenerate'}" to apply changes.
+          </p>
+        </div>
       </div>
 
       {/* Plot Overview Grid */}
@@ -489,56 +531,56 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
         {/* Left Column */}
         <div className="space-y-4">
           {/* Logline */}
-          <div className="bg-white p-4 rounded-lg border">
-            <h4 className="font-semibold text-gray-900 mb-2">Logline</h4>
-            <p className="text-gray-700">{plotOverview.logline}</p>
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Logline</h4>
+            <p className="text-gray-700 dark:text-gray-300">{plotOverview.logline}</p>
           </div>
           {/* Genre, Tone, Audience */}
-          <div className="bg-white p-4 rounded-lg border">
-            <h4 className="font-semibold text-gray-900 mb-3">Genre & Tone</h4>
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Genre & Tone</h4>
             <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 mb-1">
                   Genre
                 </label>
-                <p className="text-gray-700">{plotOverview.genre}</p>
+                <p className="text-gray-700 dark:text-gray-300">{plotOverview.genre}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 mb-1">
                   Tone
                 </label>
-                <p className="text-gray-700">{plotOverview.tone}</p>
+                <p className="text-gray-700 dark:text-gray-300">{plotOverview.tone}</p>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 mb-1">
                   Audience
                 </label>
-                <p className="text-gray-700">{plotOverview.audience}</p>
+                <p className="text-gray-700 dark:text-gray-300">{plotOverview.audience}</p>
               </div>
             </div>
           </div>
           {/* Setting */}
-          <div className="bg-white p-4 rounded-lg border">
-            <h4 className="font-semibold text-gray-900 mb-2">Setting</h4>
-            <p className="text-gray-700">{plotOverview.setting}</p>
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Setting</h4>
+            <p className="text-gray-700 dark:text-gray-300">{plotOverview.setting}</p>
           </div>
           {/* Script Story Type */}
-          <div className="bg-white p-4 rounded-lg border">
-            <h4 className="font-semibold text-gray-900 mb-2">Script Story Type</h4>
-            <p className="text-gray-700">{plotOverview.script_story_type}</p>
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Script Story Type</h4>
+            <p className="text-gray-700 dark:text-gray-300">{plotOverview.script_story_type}</p>
           </div>
         </div>
 
         {/* Right Column */}
         <div className="space-y-4">
           {/* Themes */}
-          <div className="bg-white p-4 rounded-lg border">
-            <h4 className="font-semibold text-gray-900 mb-2">Themes</h4>
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Themes</h4>
             <div className="flex flex-wrap gap-2">
               {plotOverview.themes.map((theme, idx) => (
                 <span
                   key={idx}
-                  className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                  className="px-3 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 rounded-full text-sm"
                 >
                   {theme}
                 </span>
@@ -547,9 +589,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
           </div>
 
           {/* Story Type */}
-          <div className="bg-white p-4 rounded-lg border">
-            <h4 className="font-semibold text-gray-900 mb-2">Story Type</h4>
-            <p className="text-gray-700">{plotOverview.story_type}</p>
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Story Type</h4>
+            <p className="text-gray-700 dark:text-gray-300">{plotOverview.story_type}</p>
           </div>
         </div>
       </div>
@@ -559,10 +601,10 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
         {/* Characters Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <Users className="w-6 h-6 text-gray-700" />
+            <Users className="w-6 h-6 text-gray-700 dark:text-gray-300" />
             <div>
-              <h4 className="text-lg font-semibold text-gray-900">Characters</h4>
-              <p className="text-sm text-gray-600">
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Characters</h4>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
                 {hasCharacters ? `${plotOverview.characters.length} character${plotOverview.characters.length !== 1 ? 's' : ''}` : 'No characters yet'}
                 {hasCharacters && charactersWithoutImages > 0 && ` • ${charactersWithoutImages} without images`}
                 {selectedCharacters.size > 0 && ` • ${selectedCharacters.size} selected`}
@@ -582,7 +624,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
             {hasCharacters && (
               <button
                 onClick={handleSelectAll}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 text-sm"
               >
                 {selectedCharacters.size === filteredCharacters.length && filteredCharacters.length > 0 ? 'Deselect All' : 'Select All'}
               </button>
@@ -611,21 +653,21 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
         {hasCharacters && (
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-5 w-5 text-gray-400" />
+              <Search className="h-5 w-5 text-gray-400 dark:text-gray-500" />
             </div>
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search characters by name, role, description..."
-              className="block w-full pl-10 pr-10 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="block w-full pl-10 pr-10 py-3 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-gray-500 dark:placeholder-gray-400"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
                 className="absolute inset-y-0 right-0 pr-3 flex items-center"
               >
-                <X className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                <X className="h-5 w-5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300" />
               </button>
             )}
           </div>
@@ -633,7 +675,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
 
         {/* Search Results Info */}
         {hasCharacters && searchQuery && (
-          <div className="text-sm text-gray-600">
+          <div className="text-sm text-gray-600 dark:text-gray-400">
             Found {filteredCharacters.length} character{filteredCharacters.length !== 1 ? 's' : ''} matching "{searchQuery}"
           </div>
         )}
@@ -658,21 +700,21 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({ bookId, onCharact
               ))}
             </div>
           ) : (
-            <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed">
-              <Search className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-              <p className="text-gray-600 mb-2">No characters found matching "{searchQuery}"</p>
+            <div className="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
+              <Search className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500 mb-4" />
+              <p className="text-gray-600 dark:text-gray-400 mb-2">No characters found matching "{searchQuery}"</p>
               <button
                 onClick={() => setSearchQuery('')}
-                className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+                className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 text-sm font-medium"
               >
                 Clear search
               </button>
             </div>
           )
         ) : (
-          <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed">
-            <Users className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-            <p className="text-gray-600 mb-4">No characters yet</p>
+          <div className="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
+            <Users className="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500 mb-4" />
+            <p className="text-gray-600 dark:text-gray-400 mb-4">No characters yet</p>
             <button
               onClick={() => setShowCreateModal(true)}
               className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"

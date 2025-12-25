@@ -22,7 +22,7 @@ interface UserProfile {
   id: string;
   email: string;
   display_name: string;
-  roles: string[]; // Changed from strict union to string[] to match API response likely
+  roles: string[];
   avatar_url?: string;
   bio?: string;
 }
@@ -64,9 +64,9 @@ function DeleteModal({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
-      <div className="bg-white rounded-xl shadow-lg p-8 max-w-sm w-full">
-        <h2 className="text-lg font-bold mb-4 text-gray-900">Delete Book</h2>
-        <p className="mb-6 text-gray-700">
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-8 max-w-sm w-full">
+        <h2 className="text-lg font-bold mb-4 text-gray-900 dark:text-white">Delete Book</h2>
+        <p className="mb-6 text-gray-700 dark:text-gray-300">
           Are you sure you want to delete{" "}
           <span className="font-semibold">{bookTitle}</span>? This action cannot
           be undone.
@@ -74,7 +74,7 @@ function DeleteModal({
         <div className="flex justify-end space-x-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
           >
             Cancel
           </button>
@@ -106,7 +106,7 @@ export default function Dashboard() {
 
   // Function to fetch all books
   const fetchBooks = async () => {
-    const books = await userService.getMyBooks(); // This actually calls /books (all books)
+    const books = await userService.getMyBooks();
     setAllBooks(books as Book[]);
     return books;
   };
@@ -132,9 +132,9 @@ export default function Dashboard() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#0F0F23]">
         <div className="text-center">
-          <p className="text-xl text-gray-600 mb-4">
+          <p className="text-xl text-gray-600 dark:text-gray-400 mb-4">
             Please sign in to access your dashboard
           </p>
           <Link
@@ -155,7 +155,6 @@ export default function Dashboard() {
         `/books/${bookId}/regenerate-chapters`,
         {}
       );
-      // Navigate to the upload page, passing the book data to resume at step 4
       navigate("/upload", { state: { resumeBook: bookWithChapters } });
     } catch (e: unknown) {
       const error = e as Error;
@@ -180,14 +179,14 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen py-8">
+    <div className="min-h-screen py-8 bg-gray-50 dark:bg-[#0F0F23] transition-colors duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
             Welcome back, {profile?.display_name || user.display_name}!
           </h1>
-          <p className="text-gray-600">
+          <p className="text-gray-600 dark:text-gray-400">
             {hasRole(user, "author") && hasRole(user, "explorer")
               ? "Create, explore, and learn amazing content!"
               : hasRole(user, "author")
@@ -209,11 +208,11 @@ export default function Dashboard() {
           {hasRole(user, "explorer") && (
             <Link
               to="/learn"
-              className="group bg-gradient-to-br from-green-50 to-blue-50 p-6 rounded-2xl border border-green-100 hover:border-green-200 transition-all transform hover:scale-105 hover:shadow-lg"
+              className="group bg-gradient-to-br from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 p-6 rounded-2xl border border-green-100 dark:border-green-800 hover:border-green-200 dark:hover:border-green-700 transition-all transform hover:scale-105 hover:shadow-lg"
             >
-              <Brain className="h-12 w-12 text-green-600 mb-4 group-hover:scale-110 transition-transform" />
-              <h3 className="font-semibold text-gray-900 mb-2">Learning Mode</h3>
-              <p className="text-sm text-gray-600">
+              <Brain className="h-12 w-12 text-green-600 dark:text-green-400 mb-4 group-hover:scale-110 transition-transform" />
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Learning Mode</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
                 Interactive tutorials & quizzes
               </p>
             </Link>
@@ -223,11 +222,11 @@ export default function Dashboard() {
           {hasRole(user, "explorer") && (
             <Link
               to="/explore"
-              className="group bg-gradient-to-br from-purple-50 to-pink-50 p-6 rounded-2xl border border-purple-100 hover:border-purple-200 transition-all transform hover:scale-105 hover:shadow-lg"
+              className="group bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 p-6 rounded-2xl border border-purple-100 dark:border-purple-800 hover:border-purple-200 dark:hover:border-purple-700 transition-all transform hover:scale-105 hover:shadow-lg"
             >
-              <Sparkles className="h-12 w-12 text-purple-600 mb-4 group-hover:scale-110 transition-transform" />
-              <h3 className="font-semibold text-gray-900 mb-2">Entertainment</h3>
-              <p className="text-sm text-gray-600">
+              <Sparkles className="h-12 w-12 text-purple-600 dark:text-purple-400 mb-4 group-hover:scale-110 transition-transform" />
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Entertainment</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
                 Interactive stories & adventures
               </p>
             </Link>
@@ -237,11 +236,11 @@ export default function Dashboard() {
           {hasRole(user, "author") && (
             <Link
               to="/creator"
-              className="group bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-2xl border border-blue-100 hover:border-blue-200 transition-all transform hover:scale-105 hover:shadow-lg"
+              className="group bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-6 rounded-2xl border border-blue-100 dark:border-blue-800 hover:border-blue-200 dark:hover:border-blue-700 transition-all transform hover:scale-105 hover:shadow-lg"
             >
-              <Wand2 className="h-12 w-12 text-blue-600 mb-4 group-hover:scale-110 transition-transform" />
-              <h3 className="font-semibold text-gray-900 mb-2">Creator Mode</h3>
-              <p className="text-sm text-gray-600">
+              <Wand2 className="h-12 w-12 text-blue-600 dark:text-blue-400 mb-4 group-hover:scale-110 transition-transform" />
+              <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Creator Mode</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
                 Generate books, scripts & videos
               </p>
             </Link>
@@ -249,11 +248,11 @@ export default function Dashboard() {
 
           <Link
             to="/upload"
-            className="group bg-gradient-to-br from-yellow-50 to-orange-50 p-6 rounded-2xl border border-yellow-100 hover:border-yellow-200 transition-all transform hover:scale-105 hover:shadow-lg"
+            className="group bg-gradient-to-br from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 p-6 rounded-2xl border border-yellow-100 dark:border-yellow-800 hover:border-yellow-200 dark:hover:border-yellow-700 transition-all transform hover:scale-105 hover:shadow-lg"
           >
-            <Upload className="h-12 w-12 text-orange-600 mb-4 group-hover:scale-110 transition-transform" />
-            <h3 className="font-semibold text-gray-900 mb-2">Upload Book</h3>
-            <p className="text-sm text-gray-600">
+            <Upload className="h-12 w-12 text-orange-600 dark:text-orange-400 mb-4 group-hover:scale-110 transition-transform" />
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Upload Book</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
               {hasRole(user, "author")
                 ? "Upload and claim authorship"
                 : "Upload a book to the platform"}
@@ -264,15 +263,15 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Recent Activity */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
+            <div className="bg-white dark:bg-gray-800/50 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 transition-colors duration-300">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-gray-900 flex items-center">
-                  <Clock className="h-6 w-6 text-purple-600 mr-2" />
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center">
+                  <Clock className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
                   Start Learning
                 </h2>
                 <Link
                   to="/learn"
-                  className="text-purple-600 hover:text-purple-700 text-sm font-medium"
+                  className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 text-sm font-medium"
                 >
                   View All
                 </Link>
@@ -280,14 +279,14 @@ export default function Dashboard() {
 
               <div className="space-y-4">
                 {allBooks.length === 0 ? (
-                  <div className="text-gray-500 text-center py-8">
+                  <div className="text-gray-500 dark:text-gray-400 text-center py-8">
                     You have no books uploaded.
                   </div>
                 ) : (
                   allBooks.map((book) => (
                     <div
                       key={book.id}
-                      className="flex items-center space-x-4 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors group"
+                      className="flex items-center space-x-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group"
                     >
                       <div
                         className={`w-12 h-12 rounded-lg flex items-center justify-center ${
@@ -307,13 +306,13 @@ export default function Dashboard() {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-gray-900 group-hover:text-purple-600 transition-colors">
+                        <h3 className="font-semibold text-gray-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">
                           {book.title}
                         </h3>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
                           by {book.author_name}
                         </p>
-                        <div className="text-sm text-gray-500 mt-1">
+                        <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                           Status:{" "}
                           <span
                             className={`font-semibold ${
@@ -330,7 +329,7 @@ export default function Dashboard() {
                       </div>
                       <div className="flex flex-col space-y-2 items-end">
                         <button
-                          className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-200 transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
+                          className="px-3 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors disabled:bg-gray-100 dark:disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed"
                           onClick={() =>
                             book.status === "READY" &&
                             navigate(`/book/${book.id}`)
@@ -341,7 +340,7 @@ export default function Dashboard() {
                         </button>
                         {book.status === "GENERATING" && (
                           <button
-                            className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-lg text-xs font-medium hover:bg-yellow-200 transition-colors"
+                            className="px-3 py-1 bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 rounded-lg text-xs font-medium hover:bg-yellow-200 dark:hover:bg-yellow-800 transition-colors"
                             onClick={() => handleChapterRetry(book.id)}
                             disabled={retryingBookId === book.id}
                           >
@@ -351,7 +350,7 @@ export default function Dashboard() {
                           </button>
                         )}
                         <button
-                          className="px-3 py-1 bg-red-100 text-red-700 rounded-lg text-xs font-medium hover:bg-red-200 transition-colors"
+                          className="px-3 py-1 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg text-xs font-medium hover:bg-red-200 dark:hover:bg-red-800 transition-colors"
                           onClick={() => {
                             setBookToDelete({ id: book.id, title: book.title });
                             setDeleteModalOpen(true);
@@ -375,45 +374,45 @@ export default function Dashboard() {
             )}
 
             {/* Stats */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
-                <TrendingUp className="h-6 w-6 text-purple-600 mr-2" />
+            <div className="bg-white dark:bg-gray-800/50 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 transition-colors duration-300">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center">
+                <TrendingUp className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
                 Your Stats
               </h2>
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Books Read</span>
-                  <span className="font-bold text-2xl text-purple-600">
+                  <span className="text-gray-600 dark:text-gray-400">Books Read</span>
+                  <span className="font-bold text-2xl text-purple-600 dark:text-purple-400">
                     {stats?.books_read ?? "--"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Books Uploaded</span>
-                  <span className="font-bold text-2xl text-orange-600">
+                  <span className="text-gray-600 dark:text-gray-400">Books Uploaded</span>
+                  <span className="font-bold text-2xl text-orange-600 dark:text-orange-400">
                     {stats?.books_uploaded ?? "--"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Hours Spent</span>
-                  <span className="font-bold text-2xl text-blue-600">
+                  <span className="text-gray-600 dark:text-gray-400">Hours Spent</span>
+                  <span className="font-bold text-2xl text-blue-600 dark:text-blue-400">
                     {stats?.total_time_hours ?? "--"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Badges Earned</span>
-                  <span className="font-bold text-2xl text-green-600">
+                  <span className="text-gray-600 dark:text-gray-400">Badges Earned</span>
+                  <span className="font-bold text-2xl text-green-600 dark:text-green-400">
                     {stats?.badges_earned ?? "--"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Quizzes Taken</span>
-                  <span className="font-bold text-2xl text-yellow-600">
+                  <span className="text-gray-600 dark:text-gray-400">Quizzes Taken</span>
+                  <span className="font-bold text-2xl text-yellow-600 dark:text-yellow-400">
                     {stats?.quizzes_taken ?? "--"}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-600">Avg. Quiz Score</span>
-                  <span className="font-bold text-2xl text-pink-600">
+                  <span className="text-gray-600 dark:text-gray-400">Avg. Quiz Score</span>
+                  <span className="font-bold text-2xl text-pink-600 dark:text-pink-400">
                     {stats?.average_quiz_score
                       ? stats.average_quiz_score.toFixed(1)
                       : "--"}

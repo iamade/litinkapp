@@ -44,6 +44,7 @@ export const useProjectPlotGeneration = ({ projectId, inputPrompt, projectType }
     genre?: string;
     tone?: string;
     audience?: string;
+    refinementPrompt?: string;
   }) => {
     if (!projectId || !inputPrompt) {
       toast.error('Project ID and prompt are required');
@@ -61,13 +62,19 @@ export const useProjectPlotGeneration = ({ projectId, inputPrompt, projectType }
           genre: options?.genre,
           tone: options?.tone,
           audience: options?.audience,
+          refinementPrompt: options?.refinementPrompt,
         }
       );
       
       // Extract plot_overview from response structure
       const plotData = result.plot_overview || result;
       setPlotOverview(plotData);
-      toast.success('Plot overview generated successfully!');
+      
+      if (options?.refinementPrompt) {
+        toast.success('Plot refined successfully!');
+      } else {
+        toast.success('Plot overview generated successfully!');
+      }
       
       // Refetch to ensure data is up to date
       await loadPlot();
@@ -77,6 +84,13 @@ export const useProjectPlotGeneration = ({ projectId, inputPrompt, projectType }
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  /**
+   * Refine the current plot with a follow-up prompt
+   */
+  const refinePlot = async (refinementPrompt: string) => {
+    return generatePlot({ refinementPrompt });
   };
 
   const loadPlot = useCallback(async () => {
@@ -128,6 +142,7 @@ export const useProjectPlotGeneration = ({ projectId, inputPrompt, projectType }
     isGenerating,
     isLoading,
     generatePlot,
+    refinePlot,
     loadPlot,
     deleteCharacter
   };

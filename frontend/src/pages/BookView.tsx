@@ -56,11 +56,11 @@ export default function BookView() {
   }, [id]);
 
   if (isLoading) {
-    return <div className="p-8 text-center">Loading...</div>;
+    return <div className="p-8 text-center text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-[#0F0F23] min-h-screen">Loading...</div>;
   }
 
   if (!book) {
-    return <div className="p-8 text-center text-red-500">Book not found.</div>;
+    return <div className="p-8 text-center text-red-500 bg-gray-50 dark:bg-[#0F0F23] min-h-screen">Book not found.</div>;
   }
 
   // Route to appropriate component based on book type

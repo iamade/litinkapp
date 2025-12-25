@@ -28,18 +28,53 @@ interface Character {
   image_url?: string;
 }
 
-export const usePlotGeneration = (bookId: string) => {
+interface UsePlotGenerationOptions {
+  isProject?: boolean;
+  inputPrompt?: string;
+  projectType?: string;
+}
+
+export const usePlotGeneration = (
+  bookOrProjectId: string,
+  options: UsePlotGenerationOptions = {}
+) => {
+  const { isProject = false, inputPrompt, projectType } = options;
   const [plotOverview, setPlotOverview] = useState<PlotOverview | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
-  const generatePlot = async () => {
-    if (!bookId) return;
+  const generatePlot = async (refinementPrompt?: string) => {
+    if (!bookOrProjectId) return;
     setIsGenerating(true);
     try {
-      const result = await userService.generatePlotOverview(bookId);
+      let result;
+      if (isProject) {
+        // Use project-specific plot generation
+        result = await userService.generateProjectPlotOverview(
+          bookOrProjectId,
+          inputPrompt || '',
+          { 
+            projectType,
+            refinementPrompt,
+          }
+        );
+      } else {
+        // Use book-specific plot generation (also supports refinement for projects passed as bookId)
+        result = await userService.generateProjectPlotOverview(
+          bookOrProjectId,
+          inputPrompt || '',
+          { 
+            projectType,
+            refinementPrompt,
+          }
+        );
+      }
       setPlotOverview(result);
-      toast.success('Plot overview generated successfully!');
+      if (refinementPrompt) {
+        toast.success('Plot refined successfully!');
+      } else {
+        toast.success('Plot overview generated successfully!');
+      }
       // Refetch plot overview to ensure data is up to date
       await loadPlot();
     } catch (error) {
@@ -49,26 +84,16 @@ export const usePlotGeneration = (bookId: string) => {
     }
   };
 
-  // const savePlot = async (plot: PlotOverview) => {
-  //   setIsLoading(true);
-  //   try {
-  //     await userService.savePlotOverview(bookId, plot);
-  //     setPlotOverview(plot);
-  //     toast.success('Plot overview saved!');
-  //   } catch (error) {
-  //     console.error('Error saving plot:', error);
-  //     toast.error('Failed to save plot overview');
-  //   } finally {
-  //     setIsLoading(false);
-  //   }
-  // };
-
   const loadPlot = useCallback(async () => {
-    if (!bookId) return;
+    if (!bookOrProjectId) return;
     setIsLoading(true);
     try {
-      const result = await userService.getPlotOverview(bookId);
-
+      let result;
+      if (isProject) {
+        result = await userService.getProjectPlotOverview(bookOrProjectId);
+      } else {
+        result = await userService.getPlotOverview(bookOrProjectId);
+      }
       setPlotOverview(result);
     } catch (error: any) {
       // Check if it's a 404 (no data found) - treat as success
@@ -82,7 +107,7 @@ export const usePlotGeneration = (bookId: string) => {
     } finally {
       setIsLoading(false);
     }
-  }, [bookId]);
+  }, [bookOrProjectId, isProject]);
 
   const deleteCharacter = async (characterId: string) => {
     try {

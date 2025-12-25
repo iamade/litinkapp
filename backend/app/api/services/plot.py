@@ -99,9 +99,14 @@ class PlotService:
         genre: Optional[str] = None,
         tone: Optional[str] = None,
         audience: Optional[str] = None,
+        refinement_prompt: Optional[str] = None,
+        existing_plot: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Generate a plot overview from a user prompt (for projects without books).
+
+        If refinement_prompt is provided along with existing_plot, the AI will
+        refine the existing plot based on the user's instructions.
         """
         try:
             # 1. Check subscription limits
@@ -113,9 +118,11 @@ class PlotService:
                 "prompt": input_prompt,
                 "project_type": project_type or "entertainment",
                 "project_id": str(project_id),
+                "refinement_prompt": refinement_prompt,
+                "existing_plot": existing_plot,
             }
 
-            # 3. Generate plot content from prompt
+            # 3. Generate plot content from prompt (or refine existing)
             generated_plot = await self._generate_plot_from_prompt_content(
                 prompt_context=prompt_context,
                 story_type=story_type,
@@ -164,11 +171,55 @@ class PlotService:
     ) -> Dict[str, Any]:
         """
         Generate plot content from a user prompt (no book context).
+        Supports refinement mode when refinement_prompt and existing_plot are provided.
         """
         user_prompt = prompt_context.get("prompt", "")
         project_type = prompt_context.get("project_type", "entertainment")
+        refinement_prompt = prompt_context.get("refinement_prompt")
+        existing_plot = prompt_context.get("existing_plot")
 
-        prompt = f"""
+        # Check if this is a refinement request
+        if refinement_prompt and existing_plot:
+            # REFINEMENT MODE: Use existing plot as context and apply user's changes
+            prompt = f"""
+You are a creative director refining an existing plot overview based on user feedback.
+
+ORIGINAL USER PROMPT:
+{user_prompt}
+
+CURRENT PLOT OVERVIEW:
+Logline: {existing_plot.get('logline', 'N/A')}
+Story Type: {existing_plot.get('story_type', 'N/A')}
+Genre: {existing_plot.get('genre', 'N/A')}
+Tone: {existing_plot.get('tone', 'N/A')}
+Audience: {existing_plot.get('audience', 'N/A')}
+Setting: {existing_plot.get('setting', 'N/A')}
+Themes: {', '.join(existing_plot.get('themes', [])) if existing_plot.get('themes') else 'N/A'}
+
+USER'S REFINEMENT REQUEST:
+{refinement_prompt}
+
+TASK:
+Refine the plot overview based on the user's feedback. Keep the core story intact but apply the requested changes.
+For example, if they ask for "Boondocks style animation", update the tone, setting, and logline to reflect that aesthetic.
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON object with the refined plot:
+{{
+    "logline": "...",
+    "themes": ["theme1", "theme2", ...],
+    "story_type": "...",
+    "script_story_type": "{project_type}",
+    "genre": "...",
+    "tone": "...",
+    "audience": "...",
+    "setting": "...",
+    "status": "completed"
+}}
+"""
+        else:
+            # INITIAL GENERATION MODE: Generate from scratch
+            prompt = f"""
 You are a creative director generating a plot overview for a {project_type} project.
 
 USER PROMPT:
@@ -212,6 +263,9 @@ Return ONLY a valid JSON object:
                 result["generation_method"] = "openrouter"
                 result["model_used"] = response.get("model")
                 result["generation_cost"] = response.get("cost", 0.0)
+                if refinement_prompt:
+                    result["refined"] = True
+                    result["refinement_applied"] = refinement_prompt
                 return result
             except json.JSONDecodeError:
                 logger.error("[PlotService] Failed to parse prompt plot JSON response")

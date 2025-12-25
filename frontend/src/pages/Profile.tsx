@@ -24,9 +24,9 @@ export default function Profile() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#0F0F23]">
         <div className="text-center">
-          <p className="text-xl text-gray-600 mb-4">
+          <p className="text-xl text-gray-600 dark:text-gray-400 mb-4">
             Please sign in to view your profile
           </p>
         </div>
@@ -146,7 +146,7 @@ export default function Profile() {
   };
 
   return (
-    <div className="min-h-screen py-8">
+    <div className="min-h-screen py-8 bg-gray-50 dark:bg-[#0F0F23] transition-colors duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Profile Header */}
         <div className="bg-gradient-to-br from-purple-600 via-blue-600 to-indigo-700 rounded-2xl p-8 text-white mb-8">
@@ -185,12 +185,12 @@ export default function Profile() {
             
             {/* Preferred Mode Selection (Only for users with both roles) */}
             {hasRole(user, "explorer") && (hasRole(user, "author") || hasRole(user, "creator")) && (
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center">
-                  <Target className="h-6 w-6 text-purple-600 mr-2" />
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center">
+                  <Target className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
                   Default Dashboard
                 </h2>
-                <p className="text-sm text-gray-600 mb-4">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                   Select which dashboard you want to see when you first log in.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -198,8 +198,8 @@ export default function Profile() {
                     onClick={() => switchMode('explorer')}
                     className={`flex items-center p-4 rounded-xl border-2 transition-all ${
                       mode === 'explorer'
-                        ? 'border-green-500 bg-green-50 text-green-700'
-                        : 'border-gray-200 hover:border-green-200 text-gray-600'
+                        ? 'border-green-500 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                        : 'border-gray-200 dark:border-gray-600 hover:border-green-200 text-gray-600 dark:text-gray-400'
                     }`}
                   >
                     <div className={`p-2 rounded-full mr-3 ${mode === 'explorer' ? 'bg-white' : 'bg-gray-100'}`}>
@@ -216,8 +216,8 @@ export default function Profile() {
                     onClick={() => switchMode('creator')}
                     className={`flex items-center p-4 rounded-xl border-2 transition-all ${
                       mode === 'creator'
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : 'border-gray-200 hover:border-blue-200 text-gray-600'
+                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                        : 'border-gray-200 dark:border-gray-600 hover:border-blue-200 text-gray-600 dark:text-gray-400'
                     }`}
                   >
                     <div className={`p-2 rounded-full mr-3 ${mode === 'creator' ? 'bg-white' : 'bg-gray-100'}`}>
@@ -235,62 +235,62 @@ export default function Profile() {
             
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
-                <BookOpen className="h-8 w-8 text-purple-600 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-gray-900">{stats.booksRead}</p>
-                <p className="text-sm text-gray-600">Books Read</p>
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 text-center">
+                <BookOpen className="h-8 w-8 text-purple-600 dark:text-purple-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.booksRead}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Books Read</p>
               </div>
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
-                <Upload className="h-8 w-8 text-orange-600 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-gray-900">{stats.booksUploaded}</p>
-                <p className="text-sm text-gray-600">Books Uploaded</p>
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 text-center">
+                <Upload className="h-8 w-8 text-orange-600 dark:text-orange-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.booksUploaded}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Books Uploaded</p>
               </div>
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
-                <Clock className="h-8 w-8 text-blue-600 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-gray-900">{stats.hoursSpent}</p>
-                <p className="text-sm text-gray-600">Hours Spent</p>
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 text-center">
+                <Clock className="h-8 w-8 text-blue-600 dark:text-blue-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.hoursSpent}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Hours Spent</p>
               </div>
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
-                <Award className="h-8 w-8 text-green-600 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-gray-900">{stats.badgesEarned}</p>
-                <p className="text-sm text-gray-600">Badges</p>
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 text-center">
+                <Award className="h-8 w-8 text-green-600 dark:text-green-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.badgesEarned}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Badges</p>
               </div>
             </div>
             
             {/* Additional Stats Row */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
-                <Zap className="h-8 w-8 text-orange-600 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-gray-900">{stats.streakDays}</p>
-                <p className="text-sm text-gray-600">Day Streak</p>
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6 text-center">
+                <Zap className="h-8 w-8 text-orange-600 dark:text-orange-400 mx-auto mb-2" />
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.streakDays}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Day Streak</p>
               </div>
             </div>
 
             {/* Recent Activity */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center">
-                <Calendar className="h-6 w-6 text-purple-600 mr-2" />
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+                <Calendar className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
                 Recent Activity
               </h2>
               <div className="space-y-4">
                 {recentActivity.map((activity) => (
                   <div
                     key={activity.id}
-                    className="flex items-start space-x-4 p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+                    className="flex items-start space-x-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                   >
                     <div className="flex-shrink-0">
-                      <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                        <activity.icon className="h-5 w-5 text-purple-600" />
+                      <div className="w-10 h-10 bg-purple-100 dark:bg-purple-900/50 rounded-full flex items-center justify-center">
+                        <activity.icon className="h-5 w-5 text-purple-600 dark:text-purple-400" />
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900">
+                      <h3 className="font-semibold text-gray-900 dark:text-white">
                         {activity.title}
                       </h3>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-gray-600 dark:text-gray-400">
                         {activity.description}
                       </p>
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
                         {activity.timestamp}
                       </p>
                     </div>
@@ -302,9 +302,9 @@ export default function Profile() {
 
           {/* Badges */}
           <div className="space-y-8">
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center">
-                <Trophy className="h-6 w-6 text-purple-600 mr-2" />
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+                <Trophy className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
                 Achievement Badges
               </h2>
               <div className="space-y-4">
@@ -364,20 +364,20 @@ export default function Profile() {
             </div>
 
             {/* Progress Goals */}
-            <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6">
-              <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center">
-                <Target className="h-6 w-6 text-purple-600 mr-2" />
+            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 p-6">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center">
+                <Target className="h-6 w-6 text-purple-600 dark:text-purple-400 mr-2" />
                 Progress Goals
               </h2>
               <div className="space-y-4">
                 <div>
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="font-medium text-gray-900">
+                    <span className="font-medium text-gray-900 dark:text-white">
                       Weekly Reading Goal
                     </span>
-                    <span className="text-gray-600">3/5 books</span>
+                    <span className="text-gray-600 dark:text-gray-400">3/5 books</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                     <div
                       className="bg-gradient-to-r from-green-500 to-blue-600 h-2 rounded-full"
                       style={{ width: "60%" }}
@@ -386,12 +386,12 @@ export default function Profile() {
                 </div>
                 <div>
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="font-medium text-gray-900">
+                    <span className="font-medium text-gray-900 dark:text-white">
                       Badge Collection
                     </span>
-                    <span className="text-gray-600">8/12 earned</span>
+                    <span className="text-gray-600 dark:text-gray-400">8/12 earned</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                     <div
                       className="bg-gradient-to-r from-purple-500 to-pink-600 h-2 rounded-full"
                       style={{ width: "67%" }}
@@ -400,12 +400,12 @@ export default function Profile() {
                 </div>
                 <div>
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="font-medium text-gray-900">
+                    <span className="font-medium text-gray-900 dark:text-white">
                       Learning Streak
                     </span>
-                    <span className="text-gray-600">15/30 days</span>
+                    <span className="text-gray-600 dark:text-gray-400">15/30 days</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                     <div
                       className="bg-gradient-to-r from-orange-500 to-yellow-600 h-2 rounded-full"
                       style={{ width: "50%" }}
