@@ -1,8 +1,7 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { useTheme } from "../contexts/ThemeContext";
-import { Mail, Lock, User, Eye, EyeOff, Shield, Sun, Moon } from "lucide-react";
+import { Mail, Lock, User, Eye, EyeOff, Shield } from "lucide-react";
 import { toast } from "react-hot-toast";
 import PasswordReset from "../components/PasswordReset";
 import { apiClient } from "../lib/api";
@@ -25,7 +24,8 @@ const FacebookIcon = () => (
 );
 
 export default function AuthPage() {
-  const [isLogin, setIsLogin] = useState(true);
+  const [searchParams] = useSearchParams();
+  const [isLogin, setIsLogin] = useState(searchParams.get('mode') !== 'register');
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,8 +40,12 @@ export default function AuthPage() {
   const [securityQuestion, setSecurityQuestion] = useState("");
   const [securityAnswer, setSecurityAnswer] = useState("");
   const { login, register, resendVerificationEmail } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+
+  // Sync mode with URL params
+  useEffect(() => {
+    setIsLogin(searchParams.get('mode') !== 'register');
+  }, [searchParams]);
 
   const toggleRole = (role: "author" | "explorer") => {
     setSelectedRoles(prev => {
@@ -148,40 +152,8 @@ export default function AuthPage() {
          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/10 dark:bg-blue-600/10 blur-[120px] rounded-full"></div>
       </div>
 
-      {/* Header / Nav */}
-      <header className="relative z-10 flex items-center justify-between px-8 py-6 max-w-7xl mx-auto w-full">
-        <div className="flex items-center gap-2">
-            <span className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Litinkai</span>
-        </div>
-        
-        <div className="flex items-center gap-4">
-             <button
-               onClick={toggleTheme}
-               className="p-2 rounded-full text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
-               aria-label="Toggle theme"
-             >
-               {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-             </button>
-
-             <div className="flex items-center bg-gray-200 dark:bg-white/5 rounded-full p-1">
-               <button 
-                 onClick={() => setIsLogin(true)}
-                 className={`px-6 py-2 rounded-full text-sm font-medium transition-all ${isLogin ? 'bg-white text-gray-900 shadow-sm dark:bg-[#1A1A2E] dark:text-white dark:border dark:border-purple-500/30' : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'}`}
-               >
-                  Login
-               </button>
-               <button 
-                 onClick={() => setIsLogin(false)}
-                 className={`px-6 py-2 rounded-full text-sm font-medium transition-all ${!isLogin ? 'bg-[#5B36F5] text-white shadow-lg' : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'}`}
-               >
-                  Register
-               </button>
-             </div>
-        </div>
-      </header>
-
       {/* Main Content */}
-      <div className="flex-1 flex items-center justify-center p-4 relative z-10">
+      <div className="flex-1 flex items-center justify-center p-4 relative z-10 pt-24">
         <div className="w-full max-w-md">
             {/* Glass Card */}
             <div className="bg-white/70 dark:bg-[#13132B]/80 backdrop-blur-xl border border-gray-200 dark:border-white/5 rounded-3xl p-8 shadow-2xl transition-all duration-300">

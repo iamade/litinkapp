@@ -182,12 +182,28 @@ export default function Navbar() {
                     <Moon className="h-5 w-5" />
                   )}
                 </button>
-                <Link
-                  to="/auth"
-                  className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-2 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 transition-all transform hover:scale-105"
-                >
-                  Sign In
-                </Link>
+                <div className="flex items-center bg-gray-200 dark:bg-white/5 rounded-full p-1">
+                  <Link
+                    to="/auth?mode=login"
+                    className={`px-6 py-2 rounded-full text-sm font-medium transition-all ${
+                      location.pathname === '/auth' && !location.search.includes('mode=register')
+                        ? 'bg-white text-gray-900 shadow-sm dark:bg-[#1A1A2E] dark:text-white dark:border dark:border-purple-500/30'
+                        : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                    }`}
+                  >
+                    Login
+                  </Link>
+                  <Link
+                    to="/auth?mode=register"
+                    className={`px-6 py-2 rounded-full text-sm font-medium transition-all ${
+                      location.search.includes('mode=register')
+                        ? 'bg-[#5B36F5] text-white shadow-lg'
+                        : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                    }`}
+                  >
+                    Register
+                  </Link>
+                </div>
               </>
             )}
           </div>

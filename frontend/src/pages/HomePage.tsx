@@ -486,8 +486,8 @@ export default function HomePage() {
             {/* Cinematic Simulation */}
             <div className="w-full h-full relative overflow-hidden group">
                <img 
-                src="/images/hero-1.png" 
-                alt="Cinematic Preview" 
+                src="/hero-characters.png" 
+                alt="AI-Generated Characters Cinematic Preview" 
                 className="w-full h-full object-cover animate-pan-zoom"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40"></div>
