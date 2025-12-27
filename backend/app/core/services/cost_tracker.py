@@ -16,27 +16,102 @@ class CostTrackerService:
     """Service for tracking and analyzing AI model costs"""
 
     # Model cost per 1M tokens or per generation (approximate USD)
+    # Updated to match new model configurations from pricing_new.md strategy
     MODEL_COSTS = {
-        # LLM Models (per 1M tokens)
+        # ===== TEXT & SCRIPT GENERATION MODELS (per 1M tokens) =====
+        # OpenAI Models
         "openai/gpt-4o": {"input": 2.50, "output": 10.00},
         "openai/gpt-4o-mini": {"input": 0.15, "output": 0.60},
+        "openai/chatgpt-4o-latest": {"input": 2.50, "output": 10.00},
+        "openai/gpt-4.5-preview": {
+            "input": 5.00,
+            "output": 15.00,
+        },  # Estimated premium pricing
+        "openai/gpt-5": {"input": 10.00, "output": 30.00},  # Estimated GPT-5 pricing
+        "openai/gpt-5.2-pro": {
+            "input": 15.00,
+            "output": 45.00,
+        },  # Estimated high-end pricing
+        "openai/gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
+        # Anthropic Models
         "anthropic/claude-3-opus-20240229": {"input": 15.00, "output": 75.00},
         "anthropic/claude-3.5-sonnet": {"input": 3.00, "output": 15.00},
+        "anthropic/claude-sonnet-4.5": {
+            "input": 3.00,
+            "output": 15.00,
+        },  # Latest Sonnet
+        "anthropic/claude-opus-4": {"input": 15.00, "output": 75.00},  # Claude Opus 4
+        "anthropic/claude-opus-4.5": {
+            "input": 15.00,
+            "output": 75.00,
+        },  # Claude Opus 4.5
         "anthropic/claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
-        "openai/gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
-        "deepseek/deepseek-chat": {"input": 0.14, "output": 0.28},
+        # Google Gemini Models
         "google/gemini-2.0-flash-exp:free": {"input": 0.00, "output": 0.00},
+        "google/gemini-2.5-pro": {"input": 1.25, "output": 5.00},  # Estimated
+        "google/gemini-3-flash-preview": {
+            "input": 0.50,
+            "output": 1.50,
+        },  # Estimated Gemini 3 Flash
+        "google/gemini-3-pro-preview": {
+            "input": 2.50,
+            "output": 10.00,
+        },  # Estimated Gemini 3 Pro
+        # DeepSeek Models
+        "deepseek/deepseek-chat": {"input": 0.14, "output": 0.28},
+        # Qwen Models
+        "qwen/qwen-2.5-72b-instruct": {
+            "input": 0.35,
+            "output": 0.70,
+        },  # Estimated for 72B model
+        "qwen/qwen3-coder": {
+            "input": 0.50,
+            "output": 1.00,
+        },  # Estimated for thinking model
+        # Baidu Models
+        "baidu/ernie-4.5-21b-a3b-thinking": {
+            "input": 0.40,
+            "output": 0.80,
+        },  # Estimated
+        # Meta Models
         "meta-llama/llama-3.3-70b-instruct:free": {"input": 0.00, "output": 0.00},
+        # Mistral Models
         "mistralai/mistral-nemo": {"input": 0.03, "output": 0.03},
-        # Image Models (per generation)
+        # ===== IMAGE GENERATION MODELS (per generation) =====
+        # Old models (keeping for backward compatibility)
         "runway_image": 0.05,
         "gen4_image": 0.03,
-        "nano-banana": 0.01,
-        # Video Models (per second of video)
+        # New Image Models (from pricing_new.md)
+        # Direct API Models
+        "hunyuan-image-3.0": 0.02,  # Hunyuan-Image-3.0 (cost-effective for free tier)
+        "nano-banana": 0.015,  # Nano Banana / Gemini-2.5
+        "nano-banana-pro": 0.04,  # Nano Banana Pro / Gemini-3
+        "gpt-image-1.5": 0.08,  # GPT-Image-1.5 (premium)
+        # ModelsLab Models
+        "flux-2-dev": 0.025,  # Flux-2-Dev
+        "flux-2-pro": 0.05,  # Flux-2-Pro
+        "flux-2-max": 0.08,  # Flux-2-Max (premium)
+        "flux-2-flex": 0.06,  # Flux-2-Flex
+        "seedream-4.5": 0.02,  # Seedream-4.5
+        # ===== VIDEO GENERATION MODELS (per second of video) =====
+        # Old models (keeping for backward compatibility)
         "veo2_pro": 0.15,
         "veo2": 0.08,
         "seedance-i2v": 0.05,
-        # Audio Models (per minute)
+        # New Video Models (from pricing_new.md)
+        # Google Veo Series (Direct API)
+        "veo-3-fast": 0.08,  # Veo-3-Fast
+        "veo-3-fast-audio": 0.12,  # Veo-3-Fast-Audio (with audio)
+        "veo-3-audio": 0.18,  # Veo-3-Audio (premium with audio)
+        "veo-3.1-fast-audio": 0.15,  # Veo-3.1-Fast-Audio (enhanced)
+        "veo-3.1-audio": 0.22,  # Veo-3.1-Audio (top-tier)
+        # ModelsLab Models
+        "seedance-v1-pro": 0.06,  # Seedance-v1-Pro
+        "kling-2.5-turbo": 0.05,  # Kling-2.5-Turbo
+        "kling-2.5-turbo-1080p": 0.07,  # Kling-2.5-Turbo-1080p
+        "kling-2.6-pro": 0.10,  # Kling-2.6-Pro
+        "wan2.5-i2v-preview": 0.12,  # Wan2.5-I2V-Preview
+        # ===== AUDIO GENERATION MODELS (per minute) =====
         "eleven_multilingual_v2": 0.30,
         "eleven_turbo_v2": 0.20,
         "eleven_english_v1": 0.15,

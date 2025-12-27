@@ -53,7 +53,7 @@ export default function SubscriptionModal({
       const session = await subscriptionService.createCheckoutSession(checkoutData);
 
       // Redirect to Stripe checkout
-      window.location.href = session.url;
+      window.location.href = session.checkout_url;
     } catch (error) {
       toast.error("Failed to start checkout process");
     } finally {

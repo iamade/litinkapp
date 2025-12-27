@@ -48,7 +48,7 @@ export interface CheckoutSessionCreate {
 
 export interface CheckoutSessionResponse {
   session_id: string;
-  url: string;
+  checkout_url: string;
 }
 
 export interface SubscriptionUsageStats {

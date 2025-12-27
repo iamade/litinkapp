@@ -102,7 +102,6 @@ class Settings(BaseSettings):
     MAILGUN_SENDER_NAME: str = "Litink"
     MAILGUN_SENDER_EMAIL: str = "noreply@litink.com"
 
-
     FRONTEND_URL: str = "http://localhost:3000"
 
     # Stripe Configuration
@@ -116,6 +115,7 @@ class Settings(BaseSettings):
     STRIPE_STANDARD_PRICE_ID: Optional[str] = None
     STRIPE_PREMIUM_PRICE_ID: Optional[str] = None
     STRIPE_PROFESSIONAL_PRICE_ID: Optional[str] = None
+    STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = None
     STRIPE_PRO_PRICE_ID: Optional[str] = None  # Keep for backward compatibility
 
     # Rate Limiting per Tier (requests per minute)

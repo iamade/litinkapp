@@ -113,7 +113,7 @@ class CheckoutSessionResponse(BaseModel):
     """Checkout session response"""
 
     session_id: str
-    url: str
+    checkout_url: str
 
 
 class WebhookEvent(BaseModel):

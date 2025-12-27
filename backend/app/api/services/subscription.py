@@ -365,9 +365,12 @@ class SubscriptionManager:
         try:
             # Get price ID for tier (you need to create these in Stripe Dashboard)
             price_ids = {
+                SubscriptionTier.FREE: settings.STRIPE_FREE_PRICE_ID,
                 SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID,
-                SubscriptionTier.PRO: settings.STRIPE_PRO_PRICE_ID,
-                # Add other tiers
+                SubscriptionTier.PRO: settings.STRIPE_STANDARD_PRICE_ID,
+                SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID,
+                SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID,
+                SubscriptionTier.ENTERPRISE: settings.STRIPE_ENTERPRISE_PRICE_ID,
             }
 
             price_id = price_ids.get(tier)
@@ -407,6 +410,11 @@ class SubscriptionManager:
             tier_str = session_data["metadata"]["tier"]
             tier = SubscriptionTier(tier_str)
 
+            # Get tier limits for this tier
+            tier_limits = self.TIER_LIMITS.get(
+                tier, self.TIER_LIMITS[SubscriptionTier.FREE]
+            )
+
             # Update or create user subscription in database
             statement = select(UserSubscription).where(
                 UserSubscription.user_id == user_id
@@ -421,6 +429,9 @@ class SubscriptionManager:
                     status=SubscriptionStatus.ACTIVE,
                     stripe_customer_id=session_data["customer"],
                     stripe_subscription_id=session_data["subscription"],
+                    monthly_video_limit=tier_limits["videos_per_month"],
+                    video_quality=tier_limits.get("max_resolution", "720p"),
+                    has_watermark=tier_limits.get("watermark", False),
                     current_period_start=datetime.now(),
                     current_period_end=datetime.now() + timedelta(days=30),
                 )
@@ -430,6 +441,9 @@ class SubscriptionManager:
                 subscription.status = SubscriptionStatus.ACTIVE
                 subscription.stripe_customer_id = session_data["customer"]
                 subscription.stripe_subscription_id = session_data["subscription"]
+                subscription.monthly_video_limit = tier_limits["videos_per_month"]
+                subscription.video_quality = tier_limits.get("max_resolution", "720p")
+                subscription.has_watermark = tier_limits.get("watermark", False)
                 subscription.current_period_start = datetime.now()
                 subscription.current_period_end = datetime.now() + timedelta(days=30)
                 self.session.add(subscription)
