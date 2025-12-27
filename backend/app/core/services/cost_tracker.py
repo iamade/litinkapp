@@ -155,7 +155,20 @@ class CostTrackerService:
         result = await self.session.exec(stmt)
         plots = result.all()
 
-        total_cost = sum(float(plot.generation_cost or 0) for plot in plots)
+        # PlotOverview doesn't have generation_cost field, so we estimate based on model_used
+        total_cost = 0.0
+        for plot in plots:
+            model_used = plot.model_used or "openai/gpt-4o-mini"
+            model_cost = self.MODEL_COSTS.get(
+                model_used, {"input": 0.15, "output": 0.60}
+            )
+            if isinstance(model_cost, dict):
+                # Estimate ~1000 tokens input, ~2000 tokens output per plot
+                total_cost += (model_cost["input"] * 0.001) + (
+                    model_cost["output"] * 0.002
+                )
+            else:
+                total_cost += model_cost
 
         # Estimate savings (simplified - would need more data in production)
         savings = total_cost * 0.15  # Assume 15% savings from fallbacks

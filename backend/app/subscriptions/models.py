@@ -11,6 +11,9 @@ class SubscriptionTier(str, Enum):
     FREE = "free"
     BASIC = "basic"
     PRO = "pro"
+    PREMIUM = "premium"
+    PROFESSIONAL = "professional"
+    ENTERPRISE = "enterprise"
 
 
 class SubscriptionStatus(str, Enum):

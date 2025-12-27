@@ -19,6 +19,7 @@ from app.core.services.metrics import MetricsService
 from app.core.services.alert import AlertService
 from app.core.config import settings
 from app.user_profile.models import Profile
+from app.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -410,30 +411,24 @@ async def get_verification_statistics(
     current_user: dict = Depends(get_current_superadmin),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get statistics about email verification"""
+    """Get statistics about user activation (verified users)"""
     try:
-        # Total users
-        total_stmt = select(func.count()).select_from(Profile)
+        # Total users (using User model, not Profile)
+        total_stmt = select(func.count()).select_from(User)
         total_result = await session.exec(total_stmt)
         total_users = total_result.one()
 
-        # Verified users
-        verified_stmt = select(func.count()).where(Profile.email_verified == True)
+        # Active/Verified users (is_active = true means verified)
+        verified_stmt = (
+            select(func.count()).select_from(User).where(User.is_active == True)
+        )
         verified_result = await session.exec(verified_stmt)
         verified_users = verified_result.one()
 
-        # Unverified users
+        # Inactive/Unverified users
         unverified_users = total_users - verified_users
 
-        # Users who verified within 24 hours
-        # This is complex in pure SQLAlchemy without raw SQL for interval math across DBs,
-        # but for Postgres we can use text() or func.
-        # "email_verified = true AND (email_verified_at - created_at) < interval '24 hours'"
-        # Assuming email_verified_at exists on Profile (it wasn't in the snippet I saw, but let's assume or skip)
-        # The snippet showed 'verification_token_sent_at' but not 'email_verified_at'.
-        # If it's not there, we can't query it.
-        # I'll skip the "verified within 24h" part if the column is missing, or use a placeholder.
-        # For now, I'll return 0 to be safe.
+        # Users who verified within 24 hours - simplified (not tracked precisely)
         verified_within_24h = 0
 
         verification_rate = (
@@ -466,40 +461,41 @@ async def list_all_users(
 ):
     """Get list of all users with their roles"""
     try:
-        stmt = select(Profile)
+        stmt = select(User)
 
         # Apply search filter if provided
         if search:
             stmt = stmt.where(
                 or_(
-                    col(Profile.email).ilike(f"%{search}%"),
-                    col(Profile.display_name).ilike(f"%{search}%"),
+                    col(User.email).ilike(f"%{search}%"),
+                    col(User.display_name).ilike(f"%{search}%"),
                 )
             )
 
-        # Apply role filter if provided
+        # Apply role filter if provided - use text() for JSON array containment
         if role_filter:
-            # Assuming roles is a JSONB array or similar.
-            # In SQLAlchemy/PG, we can use contains.
-            stmt = stmt.where(col(Profile.roles).contains([role_filter]))
+            # For JSON column, we need to cast to text and check if role is in the array
+            stmt = stmt.where(text(f"roles::text LIKE '%\"{role_filter}\"%'"))
 
         # Apply pagination
-        stmt = stmt.order_by(desc(Profile.created_at)).offset(offset).limit(limit)
+        stmt = stmt.order_by(desc(User.created_at)).offset(offset).limit(limit)
 
         result = await session.exec(stmt)
         users = result.all()
 
         # Get total count
-        count_stmt = select(func.count()).select_from(Profile)
+        count_stmt = select(func.count()).select_from(User)
         if search:
             count_stmt = count_stmt.where(
                 or_(
-                    col(Profile.email).ilike(f"%{search}%"),
-                    col(Profile.display_name).ilike(f"%{search}%"),
+                    col(User.email).ilike(f"%{search}%"),
+                    col(User.display_name).ilike(f"%{search}%"),
                 )
             )
         if role_filter:
-            count_stmt = count_stmt.where(col(Profile.roles).contains([role_filter]))
+            count_stmt = count_stmt.where(
+                text(f"roles::text LIKE '%\"{role_filter}\"%'")
+            )
 
         count_result = await session.exec(count_stmt)
         total = count_result.one()
@@ -759,34 +755,156 @@ async def get_user_deletion_preview(
 ):
     """Get preview of what will be deleted if user is removed"""
     try:
-        # Call the database function to get deletion preview
-        # Assuming get_user_deletion_preview is a stored procedure
-        result = await session.exec(
-            text("SELECT get_user_deletion_preview(:target_user_id) AS preview_data"),
-            params={"target_user_id": user_id},
-        )
-        preview_data = result.scalar_one_or_none()
+        # Convert string user_id to UUID
+        import uuid as uuid_module
 
-        if not preview_data:
+        try:
+            user_uuid = uuid_module.UUID(user_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid user ID format")
+
+        # Get the user first
+        user_stmt = select(User).where(User.id == user_uuid)
+        user_result = await session.exec(user_stmt)
+        user = user_result.first()
+
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Check if trying to delete primary superadmin
+        if user.email == "support@litinkai.com":
             raise HTTPException(
-                status_code=404, detail="User not found or preview unavailable"
+                status_code=403, detail="Cannot delete primary superadmin account"
             )
 
-        return preview_data
+        # Count related content - import models as needed
+        from app.books.models import Book, Chapter
+        from app.plots.models import PlotOverview, Character, ChapterScript
+        from app.videos.models import ImageGeneration, AudioGeneration, VideoSegment
+        from app.subscriptions.models import UserSubscription, UsageLog
+
+        # Get counts for each type of content (use user_uuid for all queries)
+        books_count = (
+            await session.exec(
+                select(func.count()).select_from(Book).where(Book.user_id == user_uuid)
+            )
+        ).one()
+
+        chapters_count = (
+            await session.exec(
+                select(func.count())
+                .select_from(Chapter)
+                .join(Book, Chapter.book_id == Book.id)
+                .where(Book.user_id == user_uuid)
+            )
+        ).one()
+
+        characters_count = (
+            await session.exec(
+                select(func.count())
+                .select_from(Character)
+                .where(Character.user_id == user_uuid)
+            )
+        ).one()
+
+        plot_overviews_count = (
+            await session.exec(
+                select(func.count())
+                .select_from(PlotOverview)
+                .where(PlotOverview.user_id == user_uuid)
+            )
+        ).one()
+
+        chapter_scripts_count = (
+            await session.exec(
+                select(func.count())
+                .select_from(ChapterScript)
+                .where(ChapterScript.user_id == user_uuid)
+            )
+        ).one()
+
+        image_generations_count = (
+            await session.exec(
+                select(func.count())
+                .select_from(ImageGeneration)
+                .where(ImageGeneration.user_id == user_uuid)
+            )
+        ).one()
+
+        audio_generations_count = (
+            await session.exec(
+                select(func.count())
+                .select_from(AudioGeneration)
+                .where(AudioGeneration.user_id == user_uuid)
+            )
+        ).one()
+
+        video_generations_count = (
+            await session.exec(
+                select(func.count())
+                .select_from(VideoSegment)
+                .where(VideoSegment.user_id == user_uuid)
+            )
+        ).one()
+
+        subscriptions_count = (
+            await session.exec(
+                select(func.count())
+                .select_from(UserSubscription)
+                .where(UserSubscription.user_id == user_uuid)
+            )
+        ).one()
+
+        usage_logs_count = (
+            await session.exec(
+                select(func.count())
+                .select_from(UsageLog)
+                .where(UsageLog.user_id == user_uuid)
+            )
+        ).one()
+
+        # Build the preview response
+        content_counts = {
+            "books": books_count,
+            "chapters": chapters_count,
+            "characters": characters_count,
+            "scripts": chapter_scripts_count,
+            "plot_overviews": plot_overviews_count,
+            "image_generations": image_generations_count,
+            "audio_generations": audio_generations_count,
+            "video_generations": video_generations_count,
+            "subscriptions": subscriptions_count,
+            "usage_logs": usage_logs_count,
+        }
+
+        # Generate warnings
+        warnings = []
+        total_content = sum(content_counts.values())
+        if total_content > 100:
+            warnings.append(
+                f"This user has {total_content} total items that will be deleted"
+            )
+        if subscriptions_count > 0:
+            warnings.append("User has active subscription(s)")
+
+        return {
+            "user_id": str(user.id),
+            "email": user.email,
+            "display_name": user.display_name,
+            "roles": [
+                r.value if hasattr(r, "value") else r for r in (user.roles or [])
+            ],
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "email_verified": user.is_active,
+            "content_counts": content_counts,
+            "can_delete": True,
+            "warnings": warnings,
+        }
     except HTTPException:
         raise
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error getting deletion preview for user {user_id}: {error_msg}")
-
-        # Handle specific errors
-        if "User not found" in error_msg:
-            raise HTTPException(status_code=404, detail="User not found")
-        if "Cannot delete primary superadmin" in error_msg:
-            raise HTTPException(
-                status_code=403, detail="Cannot delete primary superadmin account"
-            )
-
         raise HTTPException(
             status_code=500, detail=f"Failed to get deletion preview: {error_msg}"
         )

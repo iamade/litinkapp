@@ -171,11 +171,7 @@ async def get_subscription_tiers(session: AsyncSession = Depends(get_session)):
                 ),
                 "description": tier_info.get("description", ""),
                 "monthly_price": tier_info.get("monthly_price", 0),
-                "monthly_video_limit": (
-                    features.get("videos_per_month", 0)
-                    if features.get("videos_per_month") != "unlimited"
-                    else -1
-                ),
+                "monthly_video_limit": features.get("videos_per_month", 0),
                 "video_quality": tier_info.get(
                     "video_quality", features.get("max_resolution", "720p")
                 ),

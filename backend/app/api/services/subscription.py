@@ -28,15 +28,16 @@ class SubscriptionManager:
         SubscriptionTier.FREE: {
             "videos_per_month": 2,
             "books_upload_limit": 3,
-            "video_books_limit": 1,  # Can only generate videos for 1 book
-            "chapters_per_book": 2,  # Only 2 chapters max for video
-            "max_video_duration": 10800,  # 180 minutes in seconds
+            "video_books_limit": 1,
+            "chapters_per_book": 2,
+            "max_video_duration": 300,  # 5 minutes
             "max_resolution": "720p",
             "watermark": True,
             "priority": 0,
             "support": "community",
             "api_access": False,
             "model_selection": False,
+            "voice_cloning": False,
             "price_monthly": 0,
             "display_name": "Free",
             "description": "Perfect for trying out the platform",
@@ -46,7 +47,7 @@ class SubscriptionManager:
             "books_upload_limit": 10,
             "video_books_limit": 3,
             "chapters_per_book": "unlimited",
-            "max_video_duration": 10800,  # 180 minutes
+            "max_video_duration": 900,  # 15 minutes
             "max_resolution": "720p",
             "watermark": False,
             "priority": 1,
@@ -63,21 +64,69 @@ class SubscriptionManager:
             "books_upload_limit": 25,
             "video_books_limit": 10,
             "chapters_per_book": "unlimited",
-            "max_video_duration": 10800,  # 180 minutes
+            "max_video_duration": 1800,  # 30 minutes
             "max_resolution": "1080p",
             "watermark": False,
             "priority": 2,
             "support": "priority_email",
             "api_access": False,
-            "model_selection": True,  # Can select AI models
+            "model_selection": True,
             "voice_cloning": True,
             "price_monthly": 79,
-            "display_name": "Standard",  # Renamed from Pro to Standard
+            "display_name": "Standard",
             "description": "For serious content creators",
         },
-        # Future tiers (require DB migration):
-        # SubscriptionTier.PREMIUM: {...}
-        # SubscriptionTier.PROFESSIONAL: {...}
+        SubscriptionTier.PREMIUM: {
+            "videos_per_month": 60,
+            "books_upload_limit": 100,
+            "video_books_limit": 50,
+            "chapters_per_book": "unlimited",
+            "max_video_duration": 3600,  # 60 minutes
+            "max_resolution": "4K",
+            "watermark": False,
+            "priority": 3,
+            "support": "priority_email",
+            "api_access": True,
+            "model_selection": True,
+            "voice_cloning": True,
+            "price_monthly": 199,
+            "display_name": "Premium",
+            "description": "For power users",
+        },
+        SubscriptionTier.PROFESSIONAL: {
+            "videos_per_month": 150,
+            "books_upload_limit": "unlimited",
+            "video_books_limit": "unlimited",
+            "chapters_per_book": "unlimited",
+            "max_video_duration": 5400,  # 90 minutes
+            "max_resolution": "4K",
+            "watermark": False,
+            "priority": 4,
+            "support": "dedicated_rep",
+            "api_access": True,
+            "model_selection": True,
+            "voice_cloning": True,
+            "price_monthly": 499,
+            "display_name": "Professional",
+            "description": "For studios & agencies",
+        },
+        SubscriptionTier.ENTERPRISE: {
+            "videos_per_month": "unlimited",
+            "books_upload_limit": "unlimited",
+            "video_books_limit": "unlimited",
+            "chapters_per_book": "unlimited",
+            "max_video_duration": "unlimited",
+            "max_resolution": "8K",
+            "watermark": False,
+            "priority": 5,
+            "support": "24/7_dedicated",
+            "api_access": True,
+            "model_selection": True,
+            "voice_cloning": True,
+            "price_monthly": 0,  # Custom pricing
+            "display_name": "Enterprise",
+            "description": "For large organizations",
+        },
     }
 
     def get_all_tiers(self) -> List[Dict[str, Any]]:
