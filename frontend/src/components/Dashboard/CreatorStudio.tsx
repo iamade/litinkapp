@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { projectService, IntentAnalysisResult } from "../../services/projectService";
 import { toast } from "react-hot-toast";
+import ProjectFolder from "./ProjectFolder";
 
 interface UploadedBook {
   id: string;
@@ -274,37 +275,12 @@ export default function CreatorStudio() {
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {recentProjects.map((project) => (
-              <div 
-                key={project.id} 
+              <ProjectFolder 
+                key={project.id}
+                project={project}
+                onDelete={handleDeleteProject}
                 onClick={() => window.location.href = `/project/${project.id}`}
-                className="group border border-gray-200 dark:border-gray-700 rounded-xl p-4 hover:border-purple-200 dark:hover:border-purple-700 hover:shadow-md transition-all cursor-pointer relative bg-white dark:bg-gray-800"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className={`p-2 rounded-lg ${
-                    project.status === 'READY' || project.status === 'completed' || project.status === 'published' ? 'bg-green-100 text-green-600' : 
-                    project.status === 'FAILED' ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-600'
-                  }`}>
-                    {(project.status === 'READY' || project.status === 'completed' || project.status === 'published') ? <CheckCircle2 className="h-5 w-5" /> : <Loader2 className="h-5 w-5" />}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">{project.project_type || project.book_type}</span>
-                    <button
-                      onClick={(e) => handleDeleteProject(e, project.id)}
-                      className="text-gray-400 hover:text-red-500 p-1 rounded-full hover:bg-red-50 transition-colors"
-                      title="Delete Project"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-                <h4 className="font-semibold text-gray-900 dark:text-white mb-1 group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors truncate pr-8">{project.title}</h4>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 line-clamp-2">{project.description || "No description"}</p>
-                <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
-                  <span className="flex items-center gap-1">
-                    <BookOpen className="h-4 w-4" /> {project.pipeline_steps?.length || project.chapters?.length || 0} Steps
-                  </span>
-                </div>
-              </div>
+              />
             ))}
           </div>
         </div>

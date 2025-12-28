@@ -40,11 +40,6 @@ export default function Navbar() {
     //   showWhenLoggedIn: true,
     // },
     {
-      path: "/dashboard",
-      label: "Dashboard",
-      showWhenLoggedIn: true,
-    },
-    {
       path: "/explore",
       label: "Explore",
       showWhenLoggedIn: false,
@@ -92,46 +87,50 @@ export default function Navbar() {
           <div className="hidden md:flex items-center space-x-4">
             {user ? (
               <div className="flex items-center space-x-4">
-                {/* Mode Switcher - Only show if user has both roles */}
-                {canAccessCreatorMode && canAccessExplorerMode && (
+                {/* Mode Switcher - Show for all users based on their roles */}
+                {(canAccessCreatorMode || canAccessExplorerMode) && (
                   <div className="flex items-center bg-gray-100 dark:bg-white/5 rounded-lg p-1 border border-gray-200 dark:border-white/10">
-                    <button
-                      onClick={async () => {
-                        await switchMode('explorer');
-                        navigate('/dashboard');
-                      }}
-                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                        location.pathname.startsWith('/dashboard') || 
-                        location.pathname.startsWith('/explore') || 
-                        location.pathname.startsWith('/learn') || 
-                        location.pathname.startsWith('/subscription') ||
-                        location.pathname.startsWith('/book') ||
-                        (mode === 'explorer' && !location.pathname.startsWith('/creator') && !location.pathname.startsWith('/author') && !location.pathname.startsWith('/upload') && !location.pathname.startsWith('/project') && !location.pathname.startsWith('/profile'))
-                          ? 'bg-purple-600 text-white shadow-sm'
-                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <Compass className="h-4 w-4" />
-                      <span>Explorer</span>
-                    </button>
-                    <button
-                      onClick={async () => {
-                        await switchMode('creator');
-                        navigate('/creator');
-                      }}
-                      className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                        location.pathname.startsWith('/creator') || 
-                        location.pathname.startsWith('/author') || 
-                        location.pathname.startsWith('/upload') || 
-                        location.pathname.startsWith('/project') ||
-                        (mode === 'creator' && !location.pathname.startsWith('/dashboard') && !location.pathname.startsWith('/explore') && !location.pathname.startsWith('/learn') && !location.pathname.startsWith('/subscription') && !location.pathname.startsWith('/profile') && !location.pathname.startsWith('/book'))
-                          ? 'bg-purple-600 text-white shadow-sm'
-                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      <span>Creator</span>
-                    </button>
+                    {canAccessExplorerMode && (
+                      <button
+                        onClick={async () => {
+                          await switchMode('explorer');
+                          navigate('/dashboard');
+                        }}
+                        className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                          location.pathname.startsWith('/dashboard') || 
+                          location.pathname.startsWith('/explore') || 
+                          location.pathname.startsWith('/learn') || 
+                          location.pathname.startsWith('/subscription') ||
+                          location.pathname.startsWith('/book') ||
+                          (mode === 'explorer' && !location.pathname.startsWith('/creator') && !location.pathname.startsWith('/author') && !location.pathname.startsWith('/upload') && !location.pathname.startsWith('/project') && !location.pathname.startsWith('/profile'))
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                        }`}
+                      >
+                        <Compass className="h-4 w-4" />
+                        <span>Explorer</span>
+                      </button>
+                    )}
+                    {canAccessCreatorMode && (
+                      <button
+                        onClick={async () => {
+                          await switchMode('creator');
+                          navigate('/creator');
+                        }}
+                        className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                          location.pathname.startsWith('/creator') || 
+                          location.pathname.startsWith('/author') || 
+                          location.pathname.startsWith('/upload') || 
+                          location.pathname.startsWith('/project') ||
+                          (mode === 'creator' && !location.pathname.startsWith('/dashboard') && !location.pathname.startsWith('/explore') && !location.pathname.startsWith('/learn') && !location.pathname.startsWith('/subscription') && !location.pathname.startsWith('/profile') && !location.pathname.startsWith('/book'))
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                        }`}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        <span>Creator</span>
+                      </button>
+                    )}
                   </div>
                 )}
                 <button
@@ -267,50 +266,47 @@ export default function Navbar() {
               {user ? (
                 <>
                   {/* Mobile Mode Switcher */}
-                  {canAccessCreatorMode && canAccessExplorerMode && (
+                  {(canAccessCreatorMode || canAccessExplorerMode) && (
                     <div className="px-2 py-3 border-t border-b border-gray-200 dark:border-gray-700">
                       <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 px-2">Switch Mode</p>
                       <div className="flex space-x-2">
-                        <button
-                          onClick={async () => {
-                            await switchMode('explorer');
-                            setIsMenuOpen(false);
-                            navigate('/dashboard');
-                          }}
-                          className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                            mode === 'explorer'
-                              ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
-                              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                          }`}
-                        >
-                          <Compass className="h-4 w-4" />
-                          <span>Explorer</span>
-                        </button>
-                        <button
-                          onClick={async () => {
-                            await switchMode('creator');
-                            setIsMenuOpen(false);
-                            navigate('/creator');
-                          }}
-                          className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                            mode === 'creator'
-                              ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                              : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
-                          }`}
-                        >
-                          <Sparkles className="h-4 w-4" />
-                          <span>Creator</span>
-                        </button>
+                        {canAccessExplorerMode && (
+                          <button
+                            onClick={async () => {
+                              await switchMode('explorer');
+                              setIsMenuOpen(false);
+                              navigate('/dashboard');
+                            }}
+                            className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                              mode === 'explorer'
+                                ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                            }`}
+                          >
+                            <Compass className="h-4 w-4" />
+                            <span>Explorer</span>
+                          </button>
+                        )}
+                        {canAccessCreatorMode && (
+                          <button
+                            onClick={async () => {
+                              await switchMode('creator');
+                              setIsMenuOpen(false);
+                              navigate('/creator');
+                            }}
+                            className={`flex-1 flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                              mode === 'creator'
+                                ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+                            }`}
+                          >
+                            <Sparkles className="h-4 w-4" />
+                            <span>Creator</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
-                  <Link
-                    to="/dashboard"
-                    onClick={() => setIsMenuOpen(false)}
-                    className="text-base font-medium text-gray-700 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 transition-colors px-2 py-1"
-                  >
-                    Dashboard
-                  </Link>
                   {hasRole(user, "author") && (
                     <Link
                       to="/author"

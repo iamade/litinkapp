@@ -261,7 +261,10 @@ export default function OnboardingPage() {
           await apiClient.post("/users/me/onboarding", formData);
           
           toast.success("Profile setup complete!");
-          navigate("/dashboard");
+          
+          // Route based on user's selected role
+          const destination = formData.primaryRole === "creator" ? "/creator" : "/dashboard";
+          navigate(destination);
           window.location.reload(); // Refresh to update user context with new roles/status
       } catch (error) {
           console.error(error);
