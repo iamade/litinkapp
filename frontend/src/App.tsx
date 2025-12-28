@@ -18,6 +18,8 @@ import BookView from "./pages/BookView";
 import SubscriptionPage from "./pages/SubscriptionPage";
 import AdminDashboard from "./pages/AdminDashboard";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import OnboardingPage from "./pages/OnboardingPage";
+import ActivationPage from "./pages/ActivationPage";
 import { setLoadingContextSetter } from "./lib/api";
 import { VideoGenerationProvider } from "./contexts/VideoGenerationContext";
 import { ScriptSelectionProvider } from "./contexts/ScriptSelectionContext";
@@ -73,6 +75,8 @@ function App() {
                     <Route path="/subscription" element={<SubscriptionPage />} />
                     <Route path="/admin" element={<AdminDashboard />} />
                     <Route path="/reset-password" element={<ResetPasswordPage />} />
+                    <Route path="/onboarding" element={<OnboardingPage />} />
+                    <Route path="/auth/activate/:token" element={<ActivationPage />} />
                   </Routes>
                 </div>
               </Router>

@@ -60,21 +60,26 @@ class RoleChoicesSchema(str, Enum):
 
 class UserBaseSchema(SQLModel):
     email: FlexibleEmailStr = Field(unique=True, index=True, max_length=255)
-    display_name: str | None = Field(default=None, max_length=12, unique=True)
+    display_name: str | None = Field(
+        default=None, max_length=100, unique=True, nullable=True
+    )
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
-    first_name: str = Field(max_length=30)
+    first_name: str | None = Field(default=None, max_length=30, nullable=True)
     middle_name: str | None = Field(max_length=30, default=None)
-    last_name: str = Field(max_length=30)
+    last_name: str | None = Field(default=None, max_length=30, nullable=True)
     roles: List[RoleChoicesSchema] = Field(
         default=[RoleChoicesSchema.EXPLORER], sa_column=Column(JSON)
     )
     is_active: bool = False
     is_superuser: bool = False
-    security_question: SecurityQuestionsSchema = Field(max_length=30)
-    security_answer: str = Field(max_length=30)
+    security_question: SecurityQuestionsSchema | None = Field(
+        default=None, max_length=30, nullable=True
+    )
+    security_answer: str | None = Field(default=None, max_length=30, nullable=True)
     account_status: AccountStatusSchema = Field(default=AccountStatusSchema.INACTIVE)
     preferred_mode: str = Field(default="explorer")
+    onboarding_completed: bool = Field(default=False)
 
 
 class UserCreateSchema(UserBaseSchema):

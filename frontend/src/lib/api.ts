@@ -154,7 +154,11 @@ export const apiClient = {
       credentials: "include",
     });
 
-    if (response.status === 401) {
+
+    // Skip token refresh retry for public endpoints (auth, activation)
+    const isPublicEndpoint = endpoint.startsWith('/auth/');
+    
+    if (response.status === 401 && !isPublicEndpoint) {
       // Try refresh
       const refreshed = await refreshToken();
       if (refreshed) {
@@ -167,6 +171,7 @@ export const apiClient = {
       }
     }
 
+
     if (!response.ok) {
       let errorData: unknown = {};
       try {
@@ -174,6 +179,20 @@ export const apiClient = {
       } catch {
         // ignore
       }
+      
+      // Handle FastAPI 422 validation errors (array format)
+      if (response.status === 422 && Array.isArray((errorData as any).detail)) {
+        const validationErrors = (errorData as any).detail;
+        const errorMessages = validationErrors.map((err: any) => {
+          if (err.msg && err.loc) {
+            const field = err.loc[err.loc.length - 1]; // Get the field name
+            return `${field}: ${err.msg}`;
+          }
+          return err.msg || 'Validation error';
+        });
+        throw new Error(errorMessages.join(', '));
+      }
+      
       // Handle both string detail and object detail (with message property)
       const detail = (errorData as { detail?: string | { message?: string } }).detail;
       let errorMessage = "An API error occurred";

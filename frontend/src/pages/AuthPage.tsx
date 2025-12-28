@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { Mail, Lock, User, Eye, EyeOff, Shield } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { toast } from "react-hot-toast";
 import PasswordReset from "../components/PasswordReset";
 import { apiClient } from "../lib/api";
@@ -16,10 +16,17 @@ const GoogleIcon = () => (
   </svg>
 );
 
-// Helper for Facebook Icon
-const FacebookIcon = () => (
-  <svg className="w-5 h-5 text-[#1877F2]" fill="currentColor" viewBox="0 0 24 24">
-    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+// Helper for Apple Icon
+const AppleIcon = () => (
+  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.74 1.18 0 2.45-1.15 3.66-1.18 2.37.1 3.26 1.74 3.3.83 1.05.34 2.29 1.51 2.87-1.1-.64-2.82-.12-3.13 1.13-.53 2.14 1.15 4.98 3.51 5.38C19.78 17.5 18.5 19.46 17.05 20.28zm-2.82-14.7c.62-1.28 1.15-2.69.07-4.13-1.25.13-2.69.91-3.32 2.25-.61 1.25-1.12 2.75.12 4.07 1.22-.1 2.62-.97 3.13-2.19z" />
+  </svg>
+);
+
+// Helper for Microsoft Icon
+const MicrosoftIcon = () => (
+  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M11 11H1V1h10v10zm0 12H1V13h10v10zm12-12H13V1h10v10zm0 12H13V13h10v10z" fill="currentColor" />
   </svg>
 );
 
@@ -29,16 +36,10 @@ export default function AuthPage() {
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [username, setUsername] = useState("");
-  const [selectedRoles, setSelectedRoles] = useState<("author" | "explorer")[]>(["explorer"]);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [securityQuestion, setSecurityQuestion] = useState("");
-  const [securityAnswer, setSecurityAnswer] = useState("");
   const { login, register, resendVerificationEmail } = useAuth();
   const navigate = useNavigate();
 
@@ -47,15 +48,7 @@ export default function AuthPage() {
     setIsLogin(searchParams.get('mode') !== 'register');
   }, [searchParams]);
 
-  const toggleRole = (role: "author" | "explorer") => {
-    setSelectedRoles(prev => {
-      if (prev.includes(role)) {
-        return prev.length > 1 ? prev.filter(r => r !== role) : prev;
-      } else {
-        return [...prev, role];
-      }
-    });
-  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,12 +68,7 @@ export default function AuthPage() {
           setLoading(false);
           return;
         }
-        if (selectedRoles.length === 0) {
-          toast.error("Please select at least one profile type.");
-          setLoading(false);
-          return;
-        }
-        await register(username, email, password, confirmPassword, firstName, lastName, securityQuestion, securityAnswer, selectedRoles);
+        await register(email, password, confirmPassword);
         toast.success(
           "Account created successfully! Please check your email for verification."
         );
@@ -171,56 +159,6 @@ export default function AuthPage() {
 
                 <form className="space-y-5" onSubmit={handleSubmit}>
                     
-                    {!isLogin && (
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5 ml-1">First Name</label>
-                                <div className="relative">
-                                    <input
-                                        type="text"
-                                        required
-                                        value={firstName}
-                                        onChange={(e) => setFirstName(e.target.value)}
-                                        placeholder="First name"
-                                        className="w-full bg-white dark:bg-[#0A0A1B] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder-gray-400 dark:placeholder-gray-600 pl-10"
-                                    />
-                                    <User className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-3.5" />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5 ml-1">Last Name</label>
-                                <div className="relative">
-                                    <input
-                                        type="text"
-                                        required
-                                        value={lastName}
-                                        onChange={(e) => setLastName(e.target.value)}
-                                        placeholder="Last name"
-                                        className="w-full bg-white dark:bg-[#0A0A1B] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder-gray-400 dark:placeholder-gray-600 pl-10"
-                                    />
-                                    <User className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-3.5" />
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {!isLogin && (
-                         <div>
-                            <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5 ml-1">Username</label>
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    required
-                                    value={username}
-                                    onChange={(e) => setUsername(e.target.value)}
-                                    placeholder="Enter username"
-                                    className="w-full bg-white dark:bg-[#0A0A1B] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder-gray-400 dark:placeholder-gray-600 pl-10"
-                                />
-                                <User className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-3.5" />
-                            </div>
-                        </div>
-                    )}
-
                     <div>
                         <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5 ml-1">Email</label>
                         <div className="relative">
@@ -266,92 +204,29 @@ export default function AuthPage() {
                     </div>
 
                     {!isLogin && (
-                        <>
-                             <div>
-                                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5 ml-1">Confirm Password</label>
-                                <div className="relative">
-                                    <input
-                                        type={showConfirmPassword ? "text" : "password"}
-                                        required
-                                        value={confirmPassword}
-                                        onChange={(e) => setConfirmPassword(e.target.value)}
-                                        placeholder="Retype password"
-                                        className="w-full bg-white dark:bg-[#0A0A1B] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder-gray-400 dark:placeholder-gray-600 pl-10 pr-10"
-                                    />
-                                    <Lock className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-3.5" />
-                                     <button
-                                      type="button"
-                                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                      className="absolute right-3 top-3.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-                                    >
-                                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <div>
-                                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5 ml-1">Security Question</label>
-                                <div className="relative">
-                                    <div className="grid grid-cols-1 gap-3">
-                                        <div className="relative">
-                                            <select
-                                                required
-                                                value={securityQuestion}
-                                                onChange={(e) => setSecurityQuestion(e.target.value)}
-                                                className="w-full bg-white dark:bg-[#0A0A1B] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder-gray-400 dark:placeholder-gray-600 pl-10 appearance-none"
-                                            >
-                                                <option value="" className="bg-white dark:bg-[#1A1A2E]">Select Question</option>
-                                                <option value="mother_maiden_name" className="bg-white dark:bg-[#1A1A2E]">Mother's maiden name?</option>
-                                                <option value="childhood_friend" className="bg-white dark:bg-[#1A1A2E]">Childhood friend's name?</option>
-                                                <option value="favorite_color" className="bg-white dark:bg-[#1A1A2E]">Favorite color?</option>
-                                                <option value="birth_city" className="bg-white dark:bg-[#1A1A2E]">Birth city?</option>
-                                            </select>
-                                            <Shield className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-3.5" />
-                                        </div>
-                                        <div className="relative">
-                                            <input
-                                                type="text"
-                                                required
-                                                value={securityAnswer}
-                                                onChange={(e) => setSecurityAnswer(e.target.value)}
-                                                placeholder="Answer"
-                                                className="w-full bg-white dark:bg-[#0A0A1B] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder-gray-400 dark:placeholder-gray-600 pl-10"
-                                            />
-                                            <Shield className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-3.5" />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div className="p-3 bg-gray-50 dark:bg-white/5 rounded-xl border border-gray-200 dark:border-white/5">
-                                <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Profile Type</label>
-                                <div className="flex gap-2">
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1.5 ml-1">Confirm Password</label>
+                            <div className="relative">
+                                <input
+                                    type={showConfirmPassword ? "text" : "password"}
+                                    required
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    placeholder="Retype password"
+                                    className="w-full bg-white dark:bg-[#0A0A1B] border border-gray-200 dark:border-gray-800 text-gray-900 dark:text-white rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all placeholder-gray-400 dark:placeholder-gray-600 pl-10 pr-10"
+                                />
+                                <Lock className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute left-3 top-3.5" />
                                     <button
-                                        type="button"
-                                        onClick={() => toggleRole("explorer")}
-                                        className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-                                            selectedRoles.includes("explorer") 
-                                            ? "bg-green-500/20 text-green-700 dark:text-green-400 border border-green-500/50" 
-                                            : "bg-gray-100 dark:bg-black/20 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 border border-transparent"
-                                        }`}
-                                    >
-                                        Explorer
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => toggleRole("author")}
-                                        className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${
-                                            selectedRoles.includes("author") 
-                                            ? "bg-blue-500/20 text-blue-700 dark:text-blue-400 border border-blue-500/50" 
-                                            : "bg-gray-100 dark:bg-black/20 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 border border-transparent"
-                                        }`}
-                                    >
-                                        Creator
-                                    </button>
-                                </div>
+                                    type="button"
+                                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                    className="absolute right-3 top-3.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                                >
+                                    {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
                             </div>
-                        </>
+                        </div>
                     )}
+
 
                     <button
                         type="submit"
@@ -374,8 +249,11 @@ export default function AuthPage() {
                         <button type="button" className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                             <GoogleIcon />
                         </button>
-                         <button type="button" className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-                            <FacebookIcon />
+                        <button type="button" className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                            <AppleIcon />
+                        </button>
+                        <button type="button" className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                            <MicrosoftIcon />
                         </button>
                     </div>
 

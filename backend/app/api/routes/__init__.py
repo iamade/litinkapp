@@ -15,6 +15,7 @@ from .chapters import router as chapters_router
 from .merge import router as merge_router
 from .image_generations import router as image_generations_router
 from .admin import router as admin_router
+from .user_profile.onboarding import router as onboarding_router
 
 api_router = APIRouter()
 
@@ -41,3 +42,4 @@ api_router.include_router(home_router, tags=["home"])
 from .projects import router as projects_router
 
 api_router.include_router(projects_router, prefix="/projects", tags=["projects"])
+api_router.include_router(onboarding_router)

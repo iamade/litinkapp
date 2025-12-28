@@ -7,6 +7,7 @@ from sqlalchemy import text, func
 from pydantic import computed_field
 from app.auth.schema import UserBaseSchema, RoleChoicesSchema
 
+
 class User(UserBaseSchema, table=True):
     id: uuid.UUID = Field(
         sa_column=Column(
@@ -16,12 +17,13 @@ class User(UserBaseSchema, table=True):
         default_factory=uuid.uuid4,
     )
     hashed_password: str
+    onboarding_completed: bool = Field(default=False)
     failed_login_attempts: int = Field(default=0, sa_type=pg.SMALLINT)
     last_failed_login: datetime | None = Field(
         default=None, sa_column=Column(pg.TIMESTAMP(timezone=True))
     )
     # otp: str = Field(max_length=6, default="")
-    # otp_expiry_time: Optional[datetime] = None 
+    # otp_expiry_time: Optional[datetime] = None
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(
@@ -38,12 +40,12 @@ class User(UserBaseSchema, table=True):
             onupdate=func.current_timestamp(),
         ),
     )
-    
+
     @computed_field
     @property
     def full_name(self) -> str:
         full_name = f"{self.first_name} {self.middle_name + ' ' if self.middle_name else ''}{self.last_name}"
         return full_name.title().strip()
-    
+
     def has_role(self, role: RoleChoicesSchema) -> bool:
-        return role in self.roles 
+        return role in self.roles
