@@ -49,7 +49,27 @@ async def get_current_subscription(
             "updated_at": current_user.updated_at,
         }
 
-    return subscription
+    # Convert UUIDs to strings for response
+    return {
+        "id": str(subscription.id),
+        "user_id": str(subscription.user_id),
+        "tier": subscription.tier,
+        "status": subscription.status,
+        "stripe_customer_id": subscription.stripe_customer_id,
+        "stripe_subscription_id": subscription.stripe_subscription_id,
+        "stripe_price_id": subscription.stripe_price_id,
+        "monthly_video_limit": subscription.monthly_video_limit,
+        "video_quality": subscription.video_quality,
+        "has_watermark": subscription.has_watermark,
+        "current_period_start": subscription.current_period_start,
+        "current_period_end": subscription.current_period_end,
+        "videos_generated_this_period": subscription.videos_generated_this_period,
+        "next_billing_date": subscription.next_billing_date,
+        "cancel_at_period_end": subscription.cancel_at_period_end,
+        "cancelled_at": subscription.cancelled_at,
+        "created_at": subscription.created_at,
+        "updated_at": subscription.updated_at,
+    }
 
     # except Exception as e:
     #     print(f"[SubscriptionsAPI] Error getting current subscription: {e}")
@@ -171,11 +191,7 @@ async def get_subscription_tiers(session: AsyncSession = Depends(get_session)):
                 ),
                 "description": tier_info.get("description", ""),
                 "monthly_price": tier_info.get("monthly_price", 0),
-                "monthly_video_limit": (
-                    features.get("videos_per_month", 0)
-                    if features.get("videos_per_month") != "unlimited"
-                    else -1
-                ),
+                "monthly_video_limit": features.get("videos_per_month", 0),
                 "video_quality": tier_info.get(
                     "video_quality", features.get("max_resolution", "720p")
                 ),
@@ -216,6 +232,8 @@ async def cancel_subscription(
         result = await manager.cancel_subscription(
             current_user.id, cancel_at_period_end=cancel_data.cancel_at_period_end
         )
+        # Convert UUID to string
+        result["subscription_id"] = str(result["subscription_id"])
         return result
 
     except ValueError as e:

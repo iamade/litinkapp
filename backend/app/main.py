@@ -9,7 +9,7 @@ from app.api.main import api_router
 
 from app.core.config import settings
 from app.core.database import init_db
-
+from app.core.admin_seeder import seed_admin_users
 
 
 from app.core.logging import get_logger
@@ -55,6 +55,9 @@ async def lifespan(app: FastAPI):
     try:
         await init_db()
         logger.info("Database initialized successfully")
+
+        # Seed admin users if they don't exist
+        await seed_admin_users()
 
         await health_checker.add_service("database", health_checker.check_database)
         await health_checker.add_service("celery", health_checker.check_celery)
@@ -148,12 +151,10 @@ async def health_check():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"status": ServiceStatus.UNHEALTHY, "error": str(e)},
         )
-        
+
+
 # Include API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
-
-
-
 
 
 if __name__ == "__main__":

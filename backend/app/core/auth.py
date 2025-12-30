@@ -72,8 +72,13 @@ async def get_current_superadmin(
     current_user: User = Depends(get_current_active_user),
 ) -> User:
     """Verify that the current user has superadmin privileges"""
-    # Check if user has superadmin role
-    if not hasattr(current_user, "is_superadmin") or not current_user.is_superadmin:
+    from app.auth.schema import RoleChoicesSchema
+
+    # Check if user has superadmin role or is_superuser flag
+    has_superadmin_role = current_user.has_role(RoleChoicesSchema.SUPER_ADMIN)
+    is_superuser = getattr(current_user, "is_superuser", False)
+
+    if not has_superadmin_role and not is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required"
         )

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 from enum import Enum
 
@@ -8,6 +8,9 @@ class SubscriptionTier(str, Enum):
     FREE = "free"
     BASIC = "basic"
     PRO = "pro"
+    PREMIUM = "premium"
+    PROFESSIONAL = "professional"
+    ENTERPRISE = "enterprise"
 
 
 class SubscriptionStatus(str, Enum):
@@ -27,10 +30,10 @@ class SubscriptionTierInfo(BaseModel):
     monthly_price: float
     stripe_price_id: Optional[str] = None
     stripe_product_id: Optional[str] = None
-    monthly_video_limit: int
+    monthly_video_limit: Union[int, str]  # Allow "unlimited" or integer
     video_quality: str
     has_watermark: bool
-    max_video_duration: Optional[int] = None
+    max_video_duration: Optional[Union[int, str]] = None  # Allow "unlimited" or integer
     priority_processing: bool = False
     features: Dict[str, Any] = {}
     feature_highlights: List[str] = []
@@ -110,7 +113,7 @@ class CheckoutSessionResponse(BaseModel):
     """Checkout session response"""
 
     session_id: str
-    url: str
+    checkout_url: str
 
 
 class WebhookEvent(BaseModel):

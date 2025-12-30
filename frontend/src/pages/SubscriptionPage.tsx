@@ -12,17 +12,26 @@ import {
   subscriptionService
 } from "../services/subscriptionService";
 
+import CancelSubscriptionModal from "../components/Subscription/CancelSubscriptionModal";
+
 export default function SubscriptionPage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [tiers, setTiers] = useState<SubscriptionTier[]>([]);
   const [currentSubscription, setCurrentSubscription] = useState<UserSubscription | null>(null);
   const [usage, setUsage] = useState<SubscriptionUsageStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingData, setLoadingData] = useState(true);
   const [upgrading, setUpgrading] = useState<string | null>(null);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
+    // Wait for auth to finish loading before checking if user exists
+    if (loading) {
+      return; // Still loading auth, don't redirect yet
+    }
+
     if (!user) {
       navigate("/auth");
       return;
@@ -40,11 +49,11 @@ export default function SubscriptionPage() {
     } else if (paymentStatus === "cancelled") {
       toast.error("Payment was cancelled. You can try again anytime.");
     }
-  }, [user, navigate, location.search]);
+  }, [user, loading, navigate, location.search]);
 
   const loadData = async () => {
     try {
-      setLoading(true);
+      setLoadingData(true);
       const [tiersData, subscriptionData, usageData] = await Promise.all([
         subscriptionService.getSubscriptionTiers(),
         subscriptionService.getCurrentSubscription().catch(() => null), // Handle free tier gracefully
@@ -57,7 +66,7 @@ export default function SubscriptionPage() {
     } catch (error) {
       toast.error("Failed to load subscription information");
     } finally {
-      setLoading(false);
+      setLoadingData(false);
     }
   };
 
@@ -78,7 +87,7 @@ export default function SubscriptionPage() {
       const session = await subscriptionService.createCheckoutSession(checkoutData);
 
       // Redirect to Stripe checkout
-      window.location.href = session.url;
+      window.location.href = session.checkout_url;
     } catch (error) {
       toast.error("Failed to start checkout process");
       setUpgrading(null);
@@ -87,19 +96,17 @@ export default function SubscriptionPage() {
 
   const handleCancelSubscription = async () => {
     if (!currentSubscription) return;
-
-    const confirmed = window.confirm(
-      "Are you sure you want to cancel your subscription? You'll lose access to premium features at the end of your billing period."
-    );
-
-    if (!confirmed) return;
-
+    
+    setCancelling(true);
     try {
       await subscriptionService.cancelSubscription({ cancel_at_period_end: true });
       toast.success("Subscription cancelled. You'll retain access until the end of your billing period.");
+      setShowCancelModal(false);
       loadData(); // Reload to show updated status
     } catch (error) {
       toast.error("Failed to cancel subscription");
+    } finally {
+      setCancelling(false);
     }
   };
 
@@ -123,7 +130,7 @@ export default function SubscriptionPage() {
     );
   }
 
-  if (loading) {
+  if (loading || loadingData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#0F0F23]">
         <div className="flex items-center gap-3">
@@ -210,7 +217,7 @@ export default function SubscriptionPage() {
                   </button>
                 ) : (
                   <button
-                    onClick={handleCancelSubscription}
+                    onClick={() => setShowCancelModal(true)}
                     className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 transition-colors"
                   >
                     Cancel Subscription
@@ -294,6 +301,16 @@ export default function SubscriptionPage() {
             Contact Support
           </a>
         </div>
+
+        {/* Cancel Subscription Modal */}
+        <CancelSubscriptionModal
+          isOpen={showCancelModal}
+          onClose={() => setShowCancelModal(false)}
+          onConfirm={handleCancelSubscription}
+          tier={currentSubscription?.tier || ""}
+          periodEnd={currentSubscription?.current_period_end ? new Date(currentSubscription.current_period_end).toLocaleDateString() : undefined}
+          isLoading={cancelling}
+        />
       </div>
     </div>
   );

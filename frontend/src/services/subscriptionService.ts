@@ -1,16 +1,16 @@
 import { apiClient } from "../lib/api";
 
 export interface SubscriptionTier {
-  tier: "free" | "basic" | "pro";
+  tier: "free" | "basic" | "pro" | "premium" | "professional" | "enterprise";
   display_name: string;
   description?: string;
   monthly_price: number;
   stripe_price_id?: string;
   stripe_product_id?: string;
-  monthly_video_limit: number;
+  monthly_video_limit: number | "unlimited";
   video_quality: string;
   has_watermark: boolean;
-  max_video_duration?: number;
+  max_video_duration?: number | "unlimited";
   priority_processing: boolean;
   features: Record<string, unknown>;
   feature_highlights?: string[];
@@ -21,12 +21,12 @@ export interface SubscriptionTier {
 export interface UserSubscription {
   id: string;
   user_id: string;
-  tier: "free" | "basic" | "pro";
+  tier: "free" | "basic" | "pro" | "premium" | "professional" | "enterprise";
   status: "active" | "cancelled" | "expired" | "past_due" | "trialing";
   stripe_customer_id?: string;
   stripe_subscription_id?: string;
   stripe_price_id?: string;
-  monthly_video_limit: number;
+  monthly_video_limit: number | "unlimited";
   video_quality: string;
   has_watermark: boolean;
   current_period_start?: string;
@@ -40,7 +40,7 @@ export interface UserSubscription {
 }
 
 export interface CheckoutSessionCreate {
-  tier: "free" | "basic" | "pro";
+  tier: "free" | "basic" | "pro" | "premium" | "professional" | "enterprise";
   billing_period?: "monthly" | "annual";
   success_url: string;
   cancel_url: string;
@@ -48,7 +48,7 @@ export interface CheckoutSessionCreate {
 
 export interface CheckoutSessionResponse {
   session_id: string;
-  url: string;
+  checkout_url: string;
 }
 
 export interface SubscriptionUsageStats {

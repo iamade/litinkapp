@@ -26,128 +26,136 @@ class ModelConfig:
     cost_per_1k_output: Optional[float] = None
 
 
+# Text & Script Generation Strategy (LMSYS Creative Writing Leaderboard-based)
+# All models accessed via OpenRouter for reliable connectivity and fallback handling
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="google/gemini-2.0-flash-exp:free",
-        fallback="meta-llama/llama-3.3-70b-instruct:free",
-        fallback2="deepseek/deepseek-chat",
-        max_tokens=2000,
+        primary="deepseek/deepseek-chat",  # DeepSeek-v3.2-thinking
+        fallback="qwen/qwen-2.5-72b-instruct",  # Qwen (Efficient)
+        fallback2="openai/chatgpt-4o-latest",  # ChatGPT-4o-latest
+        max_tokens=4000,
         temperature=0.7,
-        cost_per_1k_input=0.0,
+        cost_per_1k_input=0.0,  # Free tier - no cost tracking
         cost_per_1k_output=0.0,
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="deepseek/deepseek-chat",
-        fallback="mistralai/mistral-nemo",
-        fallback2="meta-llama/llama-3.3-70b-instruct:free",
-        max_tokens=3000,
+        primary="qwen/qwen-2.5-72b-instruct",  # Qwen (Replacing Grok-4.1)
+        fallback="openai/chatgpt-4o-latest",  # ChatGPT-4o-latest
+        fallback2="baidu/ernie-4.5-21b-a3b-thinking",  # Ernie-5.0
+        max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.00014,
         cost_per_1k_output=0.00028,
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="anthropic/claude-3-haiku-20240307",
-        fallback="openai/gpt-3.5-turbo",
-        fallback2="deepseek/deepseek-chat",
-        max_tokens=4000,
+        primary="qwen/qwen3-coder",  # Qwen-Thinking (Replacing Grok-Thinking)
+        fallback="openai/gpt-4.5-preview",  # GPT-4.5-preview
+        fallback2="anthropic/claude-opus-4",  # Claude-Opus-4.1
+        max_tokens=8000,
         temperature=0.7,
         cost_per_1k_input=0.00025,
         cost_per_1k_output=0.00125,
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="openai/gpt-4o-mini",
-        fallback="anthropic/claude-3.5-sonnet",
-        fallback2="anthropic/claude-3-haiku-20240307",
+        primary="anthropic/claude-sonnet-4.5",  # Claude-Sonnet-4.5
+        fallback="google/gemini-3-flash-preview",  # Gemini-3-flash (Thinking)
+        fallback2="qwen/qwen3-coder",  # Qwen-Thinking
         max_tokens=8000,
-        temperature=0.7,
-        cost_per_1k_input=0.00015,
-        cost_per_1k_output=0.00060,
+        temperature=0.75,
+        cost_per_1k_input=0.00150,
+        cost_per_1k_output=0.00600,
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="openai/gpt-4o",
-        fallback="anthropic/claude-3-opus-20240229",
-        fallback2="openai/gpt-4o-mini",
+        primary="google/gemini-3-flash-preview",  # Gemini-3-flash
+        fallback="google/gemini-2.5-pro",  # Gemini-2.5-pro
+        fallback2="openai/gpt-5",  # GPT-5.1
         max_tokens=16000,
         temperature=0.8,
         cost_per_1k_input=0.00250,
         cost_per_1k_output=0.01000,
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="openai/gpt-4o",
-        fallback="anthropic/claude-3-opus-20240229",
-        fallback2="anthropic/claude-3.5-sonnet",
+        primary="google/gemini-3-pro-preview",  # Gemini-3-pro (#1 Creative)
+        fallback="anthropic/claude-opus-4.5",  # Claude-Opus-4.5
+        fallback2="openai/gpt-5.2-pro",  # GPT-5.1-high
         max_tokens=16000,
         temperature=0.8,
-        cost_per_1k_input=0.00250,
-        cost_per_1k_output=0.01000,
+        cost_per_1k_input=0.00500,
+        cost_per_1k_output=0.02000,
     ),
 }
 
 
+# Image Generation Strategy
+# Leveraging top performing models with optimal quality-to-cost ratios
+# ModelsLab used as primary gateway; Direct API for specific high-end models
 IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="gen4_image",
-        fallback="nano-banana",
-        fallback2="runway_image",
+        primary="hunyuan-image-3.0",  # Hunyuan-Image-3.0 (Direct API)
+        fallback="seedream-4.5",  # Seedream-4.5 (ModelsLab)
+        fallback2="flux-2-dev",  # Flux-2-Dev (ModelsLab)
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="gen4_image",
-        fallback="runway_image",
-        fallback2="nano-banana",
+        primary="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
+        fallback="flux-2-dev",  # Flux-2-Dev (ModelsLab)
+        fallback2="hunyuan-image-3.0",  # Hunyuan-Image-3.0 (Direct API)
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="runway_image",
-        fallback="gen4_image",
-        fallback2="nano-banana",
+        primary="flux-2-pro",  # Flux-2-Pro (ModelsLab)
+        fallback="flux-2-flex",  # Flux-2-Flex (Direct API)
+        fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="runway_image",
-        fallback="gen4_image",
-        fallback2="nano-banana",
+        primary="flux-2-max",  # Flux-2-Max (ModelsLab)
+        fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
+        fallback2="flux-2-pro",  # Flux-2-Pro (ModelsLab)
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="runway_image",
-        fallback="gen4_image",
-        fallback2=None,
+        primary="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
+        fallback="flux-2-max",  # Flux-2-Max (ModelsLab)
+        fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API)
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="runway_image",
-        fallback="gen4_image",
-        fallback2=None,
+        primary="gpt-image-1.5",  # GPT-Image-1.5 (Direct API)
+        fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
+        fallback2="flux-2-max",  # Flux-2-Max (ModelsLab)
     ),
 }
 
 
+# Video Generation Strategy
+# Optimizing for high-fidelity motion and consistency while managing compute costs
+# ModelsLab aggregates top video models; Google's Veo accessed directly for enterprise-grade performance
 VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="veo2",
-        fallback="seedance-i2v",
-        fallback2=None,
+        primary="seedance-v1-pro",  # Seedance-v1-Pro (ModelsLab)
+        fallback="veo-3-fast",  # Veo-3-Fast (Direct API)
+        fallback2="kling-2.5-turbo",  # Kling-2.5-Turbo (ModelsLab)
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="veo2",
-        fallback="seedance-i2v",
-        fallback2=None,
+        primary="kling-2.5-turbo-1080p",  # Kling-2.5-Turbo-1080p (ModelsLab)
+        fallback="seedance-v1-pro",  # Seedance-v1-Pro (ModelsLab)
+        fallback2="veo-3-fast",  # Veo-3-Fast (Direct API)
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="veo2",
-        fallback="veo2_pro",
-        fallback2="seedance-i2v",
+        primary="veo-3-fast-audio",  # Veo-3-Fast-Audio (Direct API)
+        fallback="kling-2.6-pro",  # Kling-2.6-Pro (ModelsLab)
+        fallback2="wan2.5-i2v-preview",  # Wan2.5-I2V-Preview (ModelsLab)
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="veo2_pro",
-        fallback="veo2",
-        fallback2="seedance-i2v",
+        primary="veo-3-audio",  # Veo-3-Audio (Direct API)
+        fallback="wan2.5-i2v-preview",  # Wan2.5-I2V-Preview (ModelsLab)
+        fallback2="veo-3-fast-audio",  # Veo-3-Fast-Audio (Direct API)
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="veo2_pro",
-        fallback="veo2",
-        fallback2="seedance-i2v",
+        primary="veo-3.1-fast-audio",  # Veo-3.1-Fast-Audio (Direct API)
+        fallback="veo-3-audio",  # Veo-3-Audio (Direct API)
+        fallback2="wan2.5-i2v-preview",  # Wan2.5-I2V-Preview (ModelsLab)
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="veo2_pro",
-        fallback="veo2",
-        fallback2="seedance-i2v",
+        primary="veo-3.1-audio",  # Veo-3.1-Audio (Direct API)
+        fallback="veo-3.1-fast-audio",  # Veo-3.1-Fast-Audio (Direct API)
+        fallback2="wan2.5-i2v-preview",  # Wan2.5-I2V-Preview (ModelsLab)
     ),
 }
 

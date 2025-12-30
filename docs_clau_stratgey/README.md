@@ -1,3 +1,8 @@
+Via Stripe Checkout (Full Flow)
+Use test card 4242 4242 4242 4242
+Test declined: 4000 0000 0000 0002
+Test 3D Secure: 4000 0027 6000 3184
+
 # LitInk AI - Documentation
 
 This folder contains design documents, architectural decisions, and strategic plans for the LitInk AI platform.

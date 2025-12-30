@@ -11,6 +11,9 @@ class SubscriptionTier(str, Enum):
     FREE = "free"
     BASIC = "basic"
     PRO = "pro"
+    PREMIUM = "premium"
+    PROFESSIONAL = "professional"
+    ENTERPRISE = "enterprise"
 
 
 class SubscriptionStatus(str, Enum):
@@ -52,6 +55,15 @@ class UserSubscription(SQLModel, table=True):
     stripe_customer_id: Optional[str] = Field(default=None, index=True)
     stripe_subscription_id: Optional[str] = Field(default=None, index=True)
     stripe_price_id: Optional[str] = Field(default=None)
+
+    # Tier-specific limits
+    monthly_video_limit: int = Field(default=2)  # Default to free tier
+    video_quality: str = Field(default="720p")
+    has_watermark: bool = Field(default=True)
+    videos_generated_this_period: int = Field(default=0)
+    next_billing_date: Optional[datetime] = Field(
+        default=None, sa_column=Column(pg.TIMESTAMP(timezone=True))
+    )
 
     current_period_start: Optional[datetime] = Field(
         default=None, sa_column=Column(pg.TIMESTAMP(timezone=True))

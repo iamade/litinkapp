@@ -173,17 +173,17 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     const [showFull, setShowFull] = useState(false);
     
     if (content.length <= maxChars) {
-      return <p className="text-gray-700 leading-relaxed">{content}</p>;
+      return <p className="text-gray-700 dark:text-gray-300 leading-relaxed">{content}</p>;
     }
 
     return (
       <div>
-        <p className="text-gray-700 leading-relaxed">
+        <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
           {showFull ? content : `${content.substring(0, maxChars)}...`}
         </p>
         <button
           onClick={() => setShowFull(!showFull)}
-          className="text-blue-600 hover:text-blue-800 text-sm mt-2 font-medium"
+          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm mt-2 font-medium"
         >
           {showFull ? "Show Less" : "Show More"}
         </button>
@@ -192,12 +192,12 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   };
 
   const renderScriptGenerationForm = () => (
-    <div className="bg-white rounded-lg border p-6 space-y-4">
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h4 className="text-lg font-semibold text-gray-900">Generate New Script</h4>
+        <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Generate New Script</h4>
         <button
           onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
-          className="flex items-center space-x-1 text-sm text-gray-600 hover:text-gray-800"
+          className="flex items-center space-x-1 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
         >
           <span>Advanced Options</span>
           {showAdvancedOptions ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
@@ -207,26 +207,26 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       {/* Basic Options */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Script Style</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Script Style</label>
           <select
             value={scriptStyle}
             onChange={(e) => setScriptStyle(e.target.value as 'cinematic_movie' | 'cinematic_narration')}
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="cinematic_movie">Character Dialogue</option>
             <option value="cinematic_narration">Voice-over Narration</option>
           </select>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {scriptStyle === 'cinematic_movie' 
               ? 'Interactive dialogue between characters' 
               : 'Narrative voice-over storytelling'}
           </p>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Script Story Type
             {plotOverview && (
-              <span className="text-xs text-gray-500 ml-2">(from plot overview)</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">(from plot overview)</span>
             )}
           </label>
           <input
@@ -240,9 +240,9 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               }));
             }}
             placeholder="e.g., hero's journey, mystery thriller, underdog story"
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-gray-500 dark:placeholder-gray-400"
           />
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             Narrative framework for the script
           </p>
           
@@ -250,14 +250,14 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Target Duration</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Target Duration</label>
           <select
             value={generationOptions.targetDuration || "auto"}
             onChange={(e) => setGenerationOptions(prev => ({
               ...prev,
               targetDuration: e.target.value === "auto" ? "auto" : parseInt(e.target.value) || "auto"
             }))}
-            className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="auto">Auto (Full Story)</option>
             <option value="3">3 minutes</option>
@@ -267,7 +267,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
             <option value="20">20 minutes</option>
             <option value="30">30 minutes</option>
           </select>
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {generationOptions.targetDuration === "auto"
               ? "Automatically determine duration based on content length"
               : `${generationOptions.targetDuration} minute target duration`}
@@ -277,10 +277,10 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
       {/* Advanced Options */}
       {showAdvancedOptions && (
-        <div className="space-y-4 pt-4 border-t">
+        <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Scene Count</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Scene Count</label>
               <input
                 type="number"
                 min="3"
@@ -290,7 +290,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                   ...prev, 
                   sceneCount: parseInt(e.target.value) || 5 
                 }))}
-                className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
             </div>
 
@@ -303,16 +303,16 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                   ...prev, 
                   includeCharacterProfiles: e.target.checked 
                 }))}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
               />
-              <label htmlFor="includeCharacterProfiles" className="ml-2 text-sm text-gray-700">
+              <label htmlFor="includeCharacterProfiles" className="ml-2 text-sm text-gray-700 dark:text-gray-300">
                 Include Character Profiles
               </label>
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Focus Areas</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Focus Areas</label>
             <div className="flex flex-wrap gap-2">
               {['Action', 'Dialogue', 'Character Development', 'Atmosphere', 'Tension', 'Comedy'].map((area) => (
                 <button
@@ -325,8 +325,8 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                   }))}
                   className={`px-3 py-1 rounded-full text-sm transition-colors ${
                     generationOptions.focusAreas.includes(area)
-                      ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                      : 'bg-gray-100 text-gray-700 border border-gray-300 hover:bg-gray-200'
+                      ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-700'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 hover:bg-gray-200 dark:hover:bg-gray-600'
                   }`}
                 >
                   {area}
@@ -361,15 +361,15 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
   const renderScriptsList = () => (
     <div className="space-y-4">
-      <h4 className="text-lg font-semibold text-gray-900">Generated Scripts</h4>
+      <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Generated Scripts</h4>
       
       {isLoading ? (
         <div className="flex items-center justify-center py-8">
           <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-600 border-t-transparent"></div>
-          <span className="ml-3">Loading scripts...</span>
+          <span className="ml-3 text-gray-700 dark:text-gray-300">Loading scripts...</span>
         </div>
       ) : generatedScripts.length === 0 ? (
-        <div className="text-center py-12 text-gray-500 bg-gray-50 rounded-lg">
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
           <FileText className="mx-auto h-12 w-12 mb-4 opacity-50" />
           <p className="text-lg font-medium">No scripts generated yet</p>
           <p className="text-sm">Generate your first script using the form above</p>
@@ -395,7 +395,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const renderScriptViewer = () => {
     if (!selectedScript) {
       return (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <FileText className="mx-auto h-12 w-12 mb-4 opacity-50" />
           <p>Select a script to view details</p>
         </div>
@@ -403,24 +403,24 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     }
 
     return (
-      <div className="bg-white rounded-lg border">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
         {/* Script Header */}
-        <div className="p-6 border-b">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-xl font-semibold text-gray-900">
+              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
                 {selectedScript.script_name || (selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script')}
               </h3>
-              <p className="text-gray-600">
+              <p className="text-gray-600 dark:text-gray-400">
                 {selectedScript.script_style === 'cinematic_movie' ? 'Character Dialogue Script' : 'Narration Script'} • Story Type: {selectedScript.scriptStoryType || 'N/A'} • {chapterTitle} • {selectedScript.scenes?.length || 0} scenes •
                 {selectedScript.characters?.length || 0} characters
               </p>
             </div>
             <div className="flex items-center space-x-2">
               <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                selectedScript.status === 'approved' ? 'bg-green-100 text-green-800' :
-                selectedScript.status === 'ready' ? 'bg-blue-100 text-blue-800' :
-                'bg-yellow-100 text-yellow-800'
+                selectedScript.status === 'approved' ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300' :
+                selectedScript.status === 'ready' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300' :
+                'bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300'
               }`}>
                 {selectedScript.status}
               </span>
@@ -435,8 +435,8 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                 onClick={() => setActiveView(view as typeof activeView)}
                 className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                   activeView === view
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                    ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                    : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
                 }`}
               >
                 {view.charAt(0).toUpperCase() + view.slice(1)}
@@ -499,35 +499,35 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     <div className="space-y-6">
       {/* Script Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="text-center p-4 bg-gray-50 rounded-lg">
-          <div className="text-2xl font-bold text-gray-900">{actCount}</div>
-          <div className="text-sm text-gray-600">Acts</div>
+        <div className="text-center p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <div className="text-2xl font-bold text-gray-900 dark:text-white">{actCount}</div>
+          <div className="text-sm text-gray-600 dark:text-gray-400">Acts</div>
         </div>
-        <div className="text-center p-4 bg-gray-50 rounded-lg">
-          <div className="text-2xl font-bold text-gray-900">{sceneCount}</div>
-          <div className="text-sm text-gray-600">Scenes</div>
+        <div className="text-center p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <div className="text-2xl font-bold text-gray-900 dark:text-white">{sceneCount}</div>
+          <div className="text-sm text-gray-600 dark:text-gray-400">Scenes</div>
         </div>
-        <div className="text-center p-4 bg-gray-50 rounded-lg">
-          <div className="text-2xl font-bold text-gray-900">{script.characters?.length || 0}</div>
-          <div className="text-sm text-gray-600">Characters</div>
+        <div className="text-center p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <div className="text-2xl font-bold text-gray-900 dark:text-white">{script.characters?.length || 0}</div>
+          <div className="text-sm text-gray-600 dark:text-gray-400">Characters</div>
         </div>
-        <div className="text-center p-4 bg-gray-50 rounded-lg">
-          <div className="text-2xl font-bold text-gray-900">
+        <div className="text-center p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <div className="text-2xl font-bold text-gray-900 dark:text-white">
             {script.scenes?.reduce((total, scene) => total + scene.duration, 0) || 5}m
           </div>
-          <div className="text-sm text-gray-600">Duration</div>
+          <div className="text-sm text-gray-600 dark:text-gray-400">Duration</div>
         </div>
       </div>
 
       {/* Characters */}
       {script.characters && script.characters.length > 0 && (
         <div>
-          <h4 className="text-lg font-semibold text-gray-900 mb-3">Characters</h4>
+          <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Characters</h4>
           <div className="flex flex-wrap gap-2">
             {script.characters.map((character, idx) => (
               <span
                 key={idx}
-                className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium"
+                className="px-3 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 rounded-full text-sm font-medium"
               >
                 {character}
               </span>
@@ -538,14 +538,14 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
       {/* Script Preview */}
       <div>
-        <h4 className="text-lg font-semibold text-gray-900 mb-3">Script Preview</h4>
-        <div className={`bg-gray-50 border rounded-lg p-4 overflow-y-auto ${showFullScript ? '' : 'max-h-96'}`}>
+        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Script Preview</h4>
+        <div className={`bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg p-4 overflow-y-auto ${showFullScript ? '' : 'max-h-96'}`}>
           {script.script && script.script.trim() ? (
-            <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono">
+            <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-mono">
               {showFullScript ? script.script : script.script.substring(0, 1000) + (script.script.length > 1000 ? '...' : '')}
             </pre>
           ) : (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
               <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
               <p className="text-sm">No script content available</p>
               <p className="text-xs mt-1">The script may still be generating or encountered an error.</p>
@@ -555,7 +555,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
         {script.script && script.script.length > 1000 && (
           <button
             onClick={() => setShowFullScript(!showFullScript)}
-            className="text-blue-600 hover:text-blue-800 text-sm mt-2 font-medium"
+            className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm mt-2 font-medium"
           >
             {showFullScript ? "Show Less" : "Show More"}
           </button>
@@ -610,29 +610,29 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
     return (
     <div className="space-y-6">
-      <h4 className="text-lg font-semibold text-gray-900">Acts Structure</h4>
+      <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Acts Structure</h4>
       
       {parsedActs.length > 0 ? (
         <div className="space-y-4">
           {parsedActs.map((act, idx) => (
-            <div key={idx} className="border rounded-lg p-4">
+            <div key={idx} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
-                <h5 className="text-lg font-medium text-gray-900">
+                <h5 className="text-lg font-medium text-gray-900 dark:text-white">
                   {act.title}
                 </h5>
-                <div className="flex items-center space-x-4 text-sm text-gray-600">
+                <div className="flex items-center space-x-4 text-sm text-gray-600 dark:text-gray-400">
                   <div className="flex items-center space-x-1">
                     <Camera className="w-4 h-4" />
                     <span>{act.scenes.length} scenes</span>
                   </div>
                 </div>
               </div>
-              <p className="text-gray-700 text-sm">{act.content}</p>
+              <p className="text-gray-700 dark:text-gray-300 text-sm">{act.content}</p>
             </div>
           ))}
         </div>
       ) : (
-        <div className="text-center py-8 text-gray-500">
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
           <p>No acts structure available</p>
           <p className="text-sm">Acts will be generated automatically in future updates</p>
         </div>
@@ -699,26 +699,26 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
     return (
     <div className="space-y-4">
-      <h4 className="text-lg font-semibold text-gray-900">Scenes Breakdown</h4>
+      <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Scenes Breakdown</h4>
       
       {parsedScenes.length > 0 ? (
         <div className="space-y-4">
           {parsedScenes.map((scene, idx) => (
-            <div key={idx} className="border rounded-lg p-4">
+            <div key={idx} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
               <div className="flex items-center justify-between mb-2">
-                <h5 className="font-medium text-gray-900">{scene.header}</h5>
+                <h5 className="font-medium text-gray-900 dark:text-white">{scene.header}</h5>
                 {scene.location && (
-                  <span className="text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                  <span className="text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded">
                     {scene.location}
                   </span>
                 )}
               </div>
-              <p className="text-sm text-gray-700">{scene.content}</p>
+              <p className="text-sm text-gray-700 dark:text-gray-300">{scene.content}</p>
             </div>
           ))}
         </div>
       ) : (
-        <div className="text-center py-8 text-gray-500">
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
           <Camera className="mx-auto h-8 w-8 mb-2 opacity-50" />
           <p>No scenes available</p>
         </div>
@@ -729,16 +729,16 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
   const renderDialogueView = (script: ChapterScript) => (
     <div className="space-y-4">
-      <h4 className="text-lg font-semibold text-gray-900">Full Script</h4>
+      <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Full Script</h4>
 
-      <div className="bg-white border rounded-lg p-6">
-        <div className="bg-gray-50 p-4 rounded-lg max-h-96 overflow-y-auto">
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
+        <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg max-h-96 overflow-y-auto">
           {script.script && script.script.trim() ? (
-            <pre className="whitespace-pre-wrap text-sm text-gray-700 font-mono leading-relaxed">
+            <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-mono leading-relaxed">
               {script.script}
             </pre>
           ) : (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
               <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
               <p className="text-sm">No script content available</p>
               <p className="text-xs mt-1">The script may still be generating or encountered an error.</p>
@@ -754,15 +754,15 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-xl font-semibold text-gray-900">Script Generation</h3>
-          <p className="text-gray-600">Create detailed scripts and scene breakdowns for {chapterTitle}</p>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Script Generation</h3>
+          <p className="text-gray-600 dark:text-gray-400">Create detailed scripts and scene breakdowns for {chapterTitle}</p>
         </div>
       </div>
 
       {/* Chapter Content */}
-      <div className="bg-white rounded-lg border p-6">
-        <h4 className="text-lg font-semibold text-gray-900 mb-4">{chapterTitle}</h4>
-        <div className="prose max-w-none text-gray-700">
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
+        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{chapterTitle}</h4>
+        <div className="prose max-w-none text-gray-700 dark:text-gray-300">
           <ChapterContent content={chapterContent} />
         </div>
       </div>
@@ -806,7 +806,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
   return (
     <div
       className={`border rounded-lg p-4 transition-all hover:shadow-md ${
-        isSelected ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
+        isSelected ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
       } ${isSwitching ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
       onClick={!isSwitching ? onSelect : undefined}
       onMouseEnter={() => !isSwitching && setShowActions(true)}
@@ -814,10 +814,10 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
     >
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1">
-          <h4 className="font-semibold text-gray-900">
+          <h4 className="font-semibold text-gray-900 dark:text-white">
             {script.script_name || (script.script_style === 'cinematic' ||script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration')}
           </h4>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             {script.script_style === 'cinematic' || script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Story Type: {(script as any).script_story_type || 'N/A'} • Created: {new Date(script.created_at).toLocaleDateString()}
           </p>
         </div>
@@ -834,7 +834,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
                   e.stopPropagation();
                   // Edit functionality
                 }}
-                className="p-1 text-gray-400 hover:text-blue-600"
+                className="p-1 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400"
               >
                 <Edit2 className="w-4 h-4" />
               </button>
@@ -843,7 +843,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
                   e.stopPropagation();
                   onDelete();
                 }}
-                className="p-1 text-gray-400 hover:text-red-600"
+                className="p-1 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -852,7 +852,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 text-sm text-gray-600 mb-3">
+      <div className="grid grid-cols-3 gap-4 text-sm text-gray-600 dark:text-gray-400 mb-3">
         <div>
           <span className="font-medium">Scenes:</span> {getSceneCount()}
         </div>
@@ -865,22 +865,22 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
       </div>
 
       {script.script && script.script.trim() ? (
-        <div className="bg-gray-50 p-3 rounded text-sm">
-          <p className="text-gray-700 line-clamp-3">
+        <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded text-sm">
+          <p className="text-gray-700 dark:text-gray-300 line-clamp-3">
             {script.script.substring(0, 200)}...
           </p>
         </div>
       ) : (
-        <div className="bg-gray-50 p-3 rounded text-sm text-center text-gray-500">
+        <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded text-sm text-center text-gray-500 dark:text-gray-400">
           <p className="text-xs">No preview available</p>
         </div>
       )}
 
       <div className="mt-3 flex items-center justify-between">
         <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-          script.status === 'approved' ? 'bg-green-100 text-green-800' :
-          script.status === 'ready' ? 'bg-blue-100 text-blue-800' :
-          'bg-yellow-100 text-yellow-800'
+          script.status === 'approved' ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300' :
+          script.status === 'ready' ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300' :
+          'bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300'
         }`}>
           {script.status}
         </span>
@@ -890,7 +890,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
             e.stopPropagation();
             if (!isSwitching) onSelect();
           }}
-          className={`text-blue-600 hover:text-blue-800 text-sm font-medium ${
+          className={`text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm font-medium ${
             isSwitching ? 'cursor-not-allowed opacity-50' : ''
           }`}
           disabled={isSwitching}

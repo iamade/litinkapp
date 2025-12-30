@@ -20,7 +20,9 @@ async def login(
     session: AsyncSession = Depends(get_session),
 ):
     try:
-        user = await user_auth_service.get_user_by_email(login_data.email, session)
+        user = await user_auth_service.get_user_by_email(
+            login_data.email, session, include_inactive=True
+        )
 
         if user:
             await user_auth_service.check_user_lockout(user, session)

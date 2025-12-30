@@ -15,10 +15,7 @@ interface User {
   roles: ("author" | "explorer" | "creator" | "superadmin")[];
   role?: "author" | "explorer" | "creator" | "superadmin";
   preferred_mode?: "explorer" | "creator";
-  onboarding_completed?: {
-    explorer?: boolean;
-    creator?: boolean;
-  };
+  onboarding_completed: boolean;
 }
 
 export const hasRole = (user: User | null, role: "author" | "explorer" | "creator" | "superadmin"): boolean => {
@@ -40,15 +37,15 @@ interface AuthContextType {
   user: User | null;
   login: (email: string, password: string) => Promise<void>;
   register: (
-    username: string,
     email: string,
     password: string,
     confirmPassword: string,
-    firstName: string,
-    lastName: string,
-    securityQuestion: string,
-    securityAnswer: string,
-    roles: ("author" | "explorer")[]
+    username?: string,
+    firstName?: string,
+    lastName?: string,
+    securityQuestion?: string,
+    securityAnswer?: string,
+    roles?: ("author" | "explorer")[]
   ) => Promise<void>;
   logout: () => void;
   loading: boolean;
@@ -95,6 +92,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
   }, []);
 
+  // Redirect to onboarding if needed
+  useEffect(() => {
+    if (user && user.onboarding_completed === false && window.location.pathname !== "/onboarding" && window.location.pathname !== "/auth") {
+         window.location.href = "/onboarding"; 
+    }
+  }, [user]);
+
   const login = async (email: string, password: string) => {
     await apiClient.post("/auth/login", { email, password });
     // After login, cookies are set. Fetch user profile.
@@ -103,15 +107,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const register = async (
-    username: string,
     email: string,
     password: string,
     confirmPassword: string,
-    firstName: string,
-    lastName: string,
-    securityQuestion: string,
-    securityAnswer: string,
-    roles: ("author" | "explorer")[]
+    username?: string,
+    firstName?: string,
+    lastName?: string,
+    securityQuestion?: string,
+    securityAnswer?: string,
+    roles: ("author" | "explorer")[] = ["explorer"]
   ) => {
     await apiClient.post("/auth/register", {
       display_name: username,

@@ -1,10 +1,29 @@
-from pydantic import EmailStr, field_validator
+from pydantic import field_validator
+from pydantic.functional_validators import AfterValidator
 from sqlmodel import SQLModel, Field
-from typing import Optional, List
+from typing import Optional, List, Annotated
 from fastapi import HTTPException, status
 from enum import Enum
 import uuid
+import re
 from sqlalchemy import Column, JSON
+
+
+def validate_email_flexible(v: str) -> str:
+    """Custom email validator that allows .local domains for development/testing."""
+    if not v:
+        raise ValueError("Email is required")
+
+    # Basic email format validation
+    email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    if not re.match(email_pattern, v):
+        raise ValueError("Invalid email format")
+
+    return v.lower()
+
+
+# Custom email type that allows .local domains
+FlexibleEmailStr = Annotated[str, AfterValidator(validate_email_flexible)]
 
 
 class SecurityQuestionsSchema(str, Enum):
@@ -40,22 +59,27 @@ class RoleChoicesSchema(str, Enum):
 
 
 class UserBaseSchema(SQLModel):
-    email: EmailStr = Field(unique=True, index=True, max_length=255)
-    display_name: str | None = Field(default=None, max_length=12, unique=True)
+    email: FlexibleEmailStr = Field(unique=True, index=True, max_length=255)
+    display_name: str | None = Field(
+        default=None, max_length=100, unique=True, nullable=True
+    )
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
-    first_name: str = Field(max_length=30)
+    first_name: str | None = Field(default=None, max_length=30, nullable=True)
     middle_name: str | None = Field(max_length=30, default=None)
-    last_name: str = Field(max_length=30)
+    last_name: str | None = Field(default=None, max_length=30, nullable=True)
     roles: List[RoleChoicesSchema] = Field(
         default=[RoleChoicesSchema.EXPLORER], sa_column=Column(JSON)
     )
     is_active: bool = False
     is_superuser: bool = False
-    security_question: SecurityQuestionsSchema = Field(max_length=30)
-    security_answer: str = Field(max_length=30)
+    security_question: SecurityQuestionsSchema | None = Field(
+        default=None, max_length=30, nullable=True
+    )
+    security_answer: str | None = Field(default=None, max_length=30, nullable=True)
     account_status: AccountStatusSchema = Field(default=AccountStatusSchema.INACTIVE)
     preferred_mode: str = Field(default="explorer")
+    onboarding_completed: bool = Field(default=False)
 
 
 class UserCreateSchema(UserBaseSchema):
@@ -90,11 +114,11 @@ class UserUpdateSchema(SQLModel):
 
 
 class EmailVerificationRequestSchema(SQLModel):
-    email: EmailStr
+    email: FlexibleEmailStr
 
 
 class UserLoginRequestSchema(SQLModel):
-    email: EmailStr
+    email: FlexibleEmailStr
     password: str = Field(
         min_length=8,
         max_length=40,
@@ -114,7 +138,7 @@ class TokenDataSchema(SQLModel):
 
 
 class PasswordResetRequestSchema(SQLModel):
-    email: EmailStr
+    email: FlexibleEmailStr
 
 
 class PasswordResetConfirmSchema(SQLModel):

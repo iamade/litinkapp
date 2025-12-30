@@ -1,6 +1,8 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional, ClassVar, Dict, Literal
 import os
+import json
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -20,7 +22,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
 
     # CORS PRODUCTION
-    ALLOWED_HOSTS: List[str] = [
+    ALLOWED_HOSTS: List[str] | str = [
         "http://localhost:3000",
         "http://localhost:5173",
         "https://localhost:5173",
@@ -32,12 +34,24 @@ class Settings(BaseSettings):
         "https://litinkapp.netlify.app",
     ]
 
+    @field_validator("ALLOWED_HOSTS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: str | List[str]) -> List[str] | str:
+        if isinstance(v, str):
+            if v.startswith("["):
+                try:
+                    return json.loads(v)
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, remove brackets and split by comma
+                    v = v.strip("[]")
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, list):
+            return v
+        raise ValueError(v)
+
     @property
     def get_allowed_hosts(self) -> List[str]:
         """Get allowed hosts from environment or use defaults"""
-        env_hosts = os.getenv("ALLOWED_HOSTS")
-        if env_hosts:
-            return [host.strip() for host in env_hosts.split(",")]
         return self.ALLOWED_HOSTS
 
     # Frontend URL for redirects
@@ -79,6 +93,25 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
+    # Social Auth
+    OAUTH_REDIRECT_BASE_URL: str = (
+        ""  # e.g. https://api.litinkai.com/api/v1/auth/callback
+    )
+
+    # Google
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+
+    # Microsoft
+    MICROSOFT_CLIENT_ID: Optional[str] = None
+    MICROSOFT_CLIENT_SECRET: Optional[str] = None
+
+    # Apple
+    APPLE_CLIENT_ID: Optional[str] = None
+    APPLE_TEAM_ID: Optional[str] = None
+    APPLE_KEY_ID: Optional[str] = None
+    APPLE_PRIVATE_KEY: Optional[str] = None
+
     # Blockchain
     ALGORAND_TOKEN: Optional[str] = None
     ALGORAND_SERVER: str = "https://testnet-api.algonode.cloud"
@@ -102,7 +135,6 @@ class Settings(BaseSettings):
     MAILGUN_SENDER_NAME: str = "Litink"
     MAILGUN_SENDER_EMAIL: str = "noreply@litink.com"
 
-
     FRONTEND_URL: str = "http://localhost:3000"
 
     # Stripe Configuration
@@ -116,6 +148,7 @@ class Settings(BaseSettings):
     STRIPE_STANDARD_PRICE_ID: Optional[str] = None
     STRIPE_PREMIUM_PRICE_ID: Optional[str] = None
     STRIPE_PROFESSIONAL_PRICE_ID: Optional[str] = None
+    STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = None
     STRIPE_PRO_PRICE_ID: Optional[str] = None  # Keep for backward compatibility
 
     # Rate Limiting per Tier (requests per minute)
@@ -168,6 +201,10 @@ class Settings(BaseSettings):
     MODELSLAB_API_KEY: str = os.getenv("MODELSLAB_API_KEY", "")
     # MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
     MODELSLAB_BASE_URL: str = "https://modelslab.com/api/v7"  # Updated to v7
+
+    # Gemini
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_BASE_URL: str = "https://gemini.google.com/api/v1"
 
     # OTP_EXPIRATION_MINUTES: int = 2 if ENVIRONMENT == "development" else 5
     LOGIN_ATTEMPTS: int = 3
