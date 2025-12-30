@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { toast } from "react-hot-toast";
 import PasswordReset from "../components/PasswordReset";
-import { apiClient } from "../lib/api";
+import { apiClient, API_BASE_URL } from "../lib/api";
 
 // Helper for Google Icon
 const GoogleIcon = () => (
@@ -246,13 +246,19 @@ export default function AuthPage() {
                     </div>
 
                     <div className="flex justify-center gap-4">
-                        <button type="button" className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                        <button 
+                            type="button" 
+                            onClick={() => window.location.href = `${API_BASE_URL}/auth/login/google`}
+                            className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        >
                             <GoogleIcon />
                         </button>
-                        <button type="button" className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-                            <AppleIcon />
-                        </button>
-                        <button type="button" className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                        {/* Apple Sign In hidden - not implemented yet */}
+                        <button 
+                            type="button" 
+                            onClick={() => window.location.href = `${API_BASE_URL}/auth/login/microsoft`}
+                            className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        >
                             <MicrosoftIcon />
                         </button>
                     </div>

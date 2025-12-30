@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.PROD 
+export const API_BASE_URL = import.meta.env.PROD 
   ? "https://litinkapp.onrender.com/api/v1"
   : "http://localhost:8000/api/v1";
 

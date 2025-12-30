@@ -6,6 +6,7 @@ from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy import text, func
 from pydantic import computed_field
 from app.auth.schema import UserBaseSchema, RoleChoicesSchema
+from app.auth.oauth_models import UserOAuth
 
 
 class User(UserBaseSchema, table=True):
