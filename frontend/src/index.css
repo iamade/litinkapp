@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg-dark: #0F0F23;
+  --color-card-dark: rgba(255, 255, 255, 0.05);
+  --color-text-primary: #F8FAFC;
+  --color-text-muted: #94A3B8;
+  --color-accent-purple: #8B5CF6;
+  --color-accent-pink: #EC4899;
+  --color-accent-cyan: #06B6D4;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 transition-colors duration-300;
+}
+
+.dark body {
+  background-color: var(--color-bg-dark);
+  color: var(--color-text-primary);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.text-gradient {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500;
+}
+
+.bg-gradient-primary {
+  @apply bg-gradient-to-r from-purple-600 to-pink-600;
+}
+
+@layer utilities {
+  .animate-slow-zoom {
+    animation: slow-zoom 20s infinite alternate;
+  }
+  
+  .animate-fade-in-up {
+    animation: fade-in-up 1s ease-out forwards;
+  }
+  
+  .delay-1000 {
+    animation-delay: 1000ms;
+  }
+  
+  .delay-2000 {
+    animation-delay: 2000ms;
+  }
+}
+
+@keyframes slow-zoom {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.15); }
+}
+
+@keyframes fade-in-up {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pan-zoom {
+  0% { transform: scale(1) translate(0, 0); }
+  33% { transform: scale(1.1) translate(-2%, 1%); }
+  66% { transform: scale(1.15) translate(1%, -2%); }
+  100% { transform: scale(1.2) translate(0, 0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@layer utilities {
+  .animate-pan-zoom {
+    animation: pan-zoom 30s infinite alternate linear;
+  }
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out forwards;
+  }
+  .animate-progress {
+    animation: progress 60s linear infinite;
+  }
+}
+
+@keyframes progress {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
