@@ -132,10 +132,7 @@ class Settings(BaseSettings):
     MAILGUN_API_KEY: Optional[str] = None
     MAILGUN_DOMAIN: Optional[str] = None
     MAILGUN_SENDER_EMAIL: str = "noreply@litinkai.com"
-    MAILGUN_SENDER_NAME: str = "Litink"
-    MAILGUN_SENDER_EMAIL: str = "noreply@litink.com"
-
-    FRONTEND_URL: str = "http://localhost:3000"
+    MAILGUN_SENDER_NAME: str = "Litink AI"
 
     # Stripe Configuration
     STRIPE_SECRET_KEY: Optional[str] = None

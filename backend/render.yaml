@@ -1,0 +1,124 @@
+# Render Blueprint for litinkapp
+# See https://render.com/docs/infrastructure-as-code
+
+services:
+  # Main FastAPI Web Service
+  - type: web
+    name: litinkapp-api
+    runtime: docker
+    repo: https://github.com/iamade/litinkapp
+    branch: main
+    dockerfilePath: ./backend/docker/local/fastapi/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: false
+      # Database (Supabase)
+      - key: DATABASE_URL
+        sync: false
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_DB
+        sync: false
+      - key: POSTGRES_HOST
+        sync: false
+      - key: POSTGRES_PORT
+        value: "5432"
+      # Redis (from Render add-on or external)
+      - key: REDIS_URL
+        fromService:
+          name: litinkapp-redis
+          type: redis
+          property: connectionString
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        value: "6379"
+      # Celery (using Redis)
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: litinkapp-redis
+          type: redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          name: litinkapp-redis
+          type: redis
+          property: connectionString
+      # Email
+      - key: MAIL_SERVICE
+        value: mailgun
+      - key: MAILGUN_API_KEY
+        sync: false
+      - key: MAILGUN_DOMAIN
+        sync: false
+      # Storage (AWS S3)
+      - key: USE_MINIO
+        value: "false"
+      - key: S3_ACCESS_KEY
+        sync: false
+      - key: S3_SECRET_KEY
+        sync: false
+      - key: S3_BUCKET_NAME
+        value: litink-books-prod
+      - key: S3_REGION
+        value: us-east-1
+      # Frontend
+      - key: FRONTEND_URL
+        value: https://litinkapp.netlify.app
+      - key: ALLOWED_HOSTS
+        value: '["https://litinkapp.netlify.app","https://www.litinkai.com"]'
+      # OAuth
+      - key: OAUTH_REDIRECT_BASE_URL
+        value: https://litinkapp.onrender.com/api/v1
+      # API Keys (sync: false means set manually in dashboard)
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+
+  # Celery Background Worker
+  - type: worker
+    name: litinkapp-worker
+    runtime: docker
+    repo: https://github.com/iamade/litinkapp
+    branch: main
+    dockerfilePath: ./backend/docker/local/fastapi/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: celery -A app.tasks.celery_app worker -l INFO --concurrency=2
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - fromGroup: litinkapp-shared
+
+# Redis Cache/Broker
+databases:
+  - name: litinkapp-redis
+    plan: free
+    ipAllowList: []
+
+# Environment variable groups for sharing between services
+envVarGroups:
+  - name: litinkapp-shared
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MAILGUN_API_KEY
+        sync: false
