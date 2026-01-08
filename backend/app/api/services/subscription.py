@@ -519,7 +519,9 @@ class SubscriptionManager:
         return {
             "can_generate": usage_check["can_generate"],
             "tier": usage_check["tier"],
-            "videos_used": usage_check["current_usage"]["videos"],
+            "videos_used": usage_check["current_usage"][
+                "video"
+            ],  # Fixed: key is "video" not "videos"
             "videos_limit": usage_check["limits"].get("videos_per_month"),
             "videos_remaining": usage_check["videos_remaining"],
         }

@@ -91,24 +91,25 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 # ModelsLab used as primary gateway; Direct API for specific high-end models
 IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="hunyuan-image-3.0",  # Hunyuan-Image-3.0 (Direct API)
-        fallback="seedream-4.5",  # Seedream-4.5 (ModelsLab)
-        fallback2="flux-2-dev",  # Flux-2-Dev (ModelsLab)
+        primary="flux-2-pro",  # Flux-2-Pro (ModelsLab V7)
+        fallback="seedream-t2i",  # Seedream (ModelsLab V7)
+        fallback2="flux-2-max",  # Flux-2-Max (ModelsLab V7)
+        # primary="hunyuan-image-3.0",  # Hunyuan-Image-3.0 (Direct API)
     ),
     ModelTier.BASIC: ModelConfig(
         primary="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
-        fallback="flux-2-dev",  # Flux-2-Dev (ModelsLab)
-        fallback2="hunyuan-image-3.0",  # Hunyuan-Image-3.0 (Direct API)
+        fallback="seedream-t2i",  # Seedream (ModelsLab V7)
+        fallback2="flux-2-max",  # Flux-2-Max (ModelsLab V7)
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="flux-2-pro",  # Flux-2-Pro (ModelsLab)
-        fallback="flux-2-flex",  # Flux-2-Flex (Direct API)
+        primary="flux-2-max",  # Flux-2-Max (ModelsLab V7)
+        fallback="seedream-t2i",  # Seedream (ModelsLab V7)
         fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="flux-2-max",  # Flux-2-Max (ModelsLab)
+        primary="flux-2-max",  # Flux-2-Max (ModelsLab V7)
         fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
-        fallback2="flux-2-pro",  # Flux-2-Pro (ModelsLab)
+        fallback2="seedream-t2i",  # Seedream (ModelsLab V7)
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)

@@ -272,6 +272,18 @@ class ImageGeneration(SQLModel, table=True):
             server_default=text("CURRENT_TIMESTAMP"),
         ),
     )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+    # Model field for tracking (also in DB)
+    model_id: Optional[str] = Field(default=None)
 
     # Relationships
     video_generation: VideoGeneration = Relationship(back_populates="image_generations")
