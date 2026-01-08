@@ -296,6 +296,7 @@ class Script(SQLModel, table=True):
     )
 
     script_style: str = Field(nullable=False)
+    script_name: Optional[str] = Field(default=None)
     script: str = Field(nullable=False)
     video_style: str = Field(nullable=False)
     status: str = Field(default="draft")

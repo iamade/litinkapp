@@ -292,6 +292,10 @@ export const userService = {
     return apiClient.delete(`/ai/delete-script/${scriptId}`);
   },
 
+  updateScript: async (scriptId: string, updates: Partial<GeneratedScript>) => {
+    return apiClient.patch<GeneratedScript>(`/ai/script/${scriptId}`, updates);
+  },
+
   // Video Generation Functions
   generateEntertainmentVideo: async (
     chapterId: string,
@@ -515,10 +519,22 @@ export const userService = {
   },
 
   // Plot and script methods (if not already present)
-  async generatePlotOverview(bookId: string) {
+  async generatePlotOverview(bookId: string, options?: {
+    refinementPrompt?: string;
+    storyType?: string;
+    genre?: string;
+    tone?: string;
+    audience?: string;
+  }) {
     return apiClient.post<any>(
       `/plots/books/${bookId}/generate`,
-      {}
+      {
+        refinement_prompt: options?.refinementPrompt,
+        story_type: options?.storyType,
+        genre: options?.genre,
+        tone: options?.tone,
+        audience: options?.audience,
+      }
     );
   },
 
@@ -550,6 +566,44 @@ export const userService = {
       `/plots/books/${bookId}/overview`
     );
     return response;
+  },
+
+  // Auto-add more characters to an existing plot (without replacing existing ones)
+  async autoAddCharacters(bookId: string): Promise<{
+    message: string;
+    characters_added: number;
+    total_characters: number;
+    new_characters?: Array<{
+      id: string;
+      name: string;
+      role: string;
+      physical_description: string;
+      personality: string;
+    }>;
+  }> {
+    return apiClient.post(
+      `/plots/books/${bookId}/auto-add-characters`,
+      {}
+    );
+  },
+
+  // Auto-add more characters to an existing project plot (for Creator mode)
+  async autoAddProjectCharacters(projectId: string): Promise<{
+    message: string;
+    characters_added: number;
+    total_characters: number;
+    new_characters?: Array<{
+      id: string;
+      name: string;
+      role: string;
+      physical_description: string;
+      personality: string;
+    }>;
+  }> {
+    return apiClient.post(
+      `/plots/projects/${projectId}/auto-add-characters`,
+      {}
+    );
   },
 
   // Get project plot overview (uses project-specific endpoint)

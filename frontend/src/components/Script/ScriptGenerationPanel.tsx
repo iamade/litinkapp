@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Edit2, Trash2, Clock, Camera, ChevronDown, ChevronRight } from 'lucide-react';
+import { FileText, Edit2, Trash2, Clock, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X } from 'lucide-react';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
 interface SceneDescription {
@@ -104,6 +104,15 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     isSwitching,
     selectScript,
   } = useScriptSelection();
+
+  const [scriptToDelete, setScriptToDelete] = useState<string | null>(null);
+
+  const confirmDelete = () => {
+    if (scriptToDelete) {
+      onDeleteScript(scriptToDelete);
+      setScriptToDelete(null);
+    }
+  };
 
   // Derive selected script from context
   const selectedScript = generatedScripts.find(script => script.id === selectedScriptId) || null;
@@ -384,7 +393,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               isSwitching={isSwitching}
               onSelect={() => onChooseScript(script.id)}
               onUpdate={(updates) => onUpdateScript(script.id, updates)}
-              onDelete={() => onDeleteScript(script.id)}
+              onDelete={() => setScriptToDelete(script.id)}
             />
           ))}
         </div>
@@ -775,6 +784,40 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
       {/* Selected Script Viewer */}
       {selectedScript && renderScriptViewer()}
+
+      {/* Delete Confirmation Modal */}
+      {scriptToDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-700 transform transition-all scale-100">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="p-3 bg-red-100 dark:bg-red-900/30 rounded-full">
+                <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Delete Script?</h3>
+            </div>
+            
+            <p className="text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">
+              Are you sure you want to delete this script? This action cannot be undone.
+            </p>
+            
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setScriptToDelete(null)}
+                className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2"
+              >
+                <Trash2 size={18} />
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -789,8 +832,25 @@ interface ScriptCardProps {
   onDelete: () => void;
 }
 
-const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching, onSelect, onDelete }) => {
+const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching, onSelect, onDelete, onUpdate }) => {
   const [showActions, setShowActions] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState(script.script_name || "");
+
+  useEffect(() => {
+    // Sync tempName with prop and handle defaults
+    const defaultName = script.script_style?.includes('cinematic') ? 'Character Dialogue' : 'Voice-over Narration';
+    setTempName(script.script_name || defaultName);
+  }, [script.script_name, script.script_style]);
+
+  const handleSaveName = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    if (tempName.trim()) {
+      onUpdate({ script_name: tempName });
+      setIsEditingName(false);
+    }
+  };
 
   // Count scenes from script text
   const getSceneCount = (): number => {
@@ -814,9 +874,24 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
     >
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1">
-          <h4 className="font-semibold text-gray-900 dark:text-white">
-            {script.script_name || (script.script_style === 'cinematic' ||script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration')}
-          </h4>
+          {isEditingName ? (
+            <form onSubmit={handleSaveName} onClick={e => e.stopPropagation()} className="flex items-center gap-1 mb-1">
+              <input
+                type="text"
+                value={tempName}
+                onChange={e => setTempName(e.target.value)}
+                className="flex-1 min-w-[200px] border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                autoFocus
+                onKeyDown={e => { if(e.key === 'Escape') { setIsEditingName(false); e.stopPropagation(); } }}
+              />
+              <button type="submit" className="p-1 hover:bg-green-100 rounded text-green-600 dark:hover:bg-green-900/30"><Check size={16}/></button>
+              <button type="button" onClick={() => setIsEditingName(false)} className="p-1 hover:bg-red-100 rounded text-red-600 dark:hover:bg-red-900/30"><X size={16}/></button>
+            </form>
+          ) : (
+            <h4 className="font-semibold text-gray-900 dark:text-white group flex items-center gap-2">
+              {script.script_name || (script.script_style?.includes('cinematic') ? 'Character Dialogue' : 'Voice-over Narration')}
+            </h4>
+          )}
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {script.script_style === 'cinematic' || script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Story Type: {(script as any).script_story_type || 'N/A'} • Created: {new Date(script.created_at).toLocaleDateString()}
           </p>
@@ -830,10 +905,12 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
           {showActions && (
             <div className="flex space-x-1">
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Edit functionality
-                }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const defaultName = script.script_style?.includes('cinematic') ? 'Character Dialogue' : 'Voice-over Narration';
+                    setTempName(script.script_name || defaultName);
+                    setIsEditingName(true);
+                  }}
                 className="p-1 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400"
               >
                 <Edit2 className="w-4 h-4" />

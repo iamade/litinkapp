@@ -1,12 +1,13 @@
 from datetime import datetime
 from typing import Optional
 import re
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Body
 from app.videos.schemas import VideoGenerationRequest, VideoGenerationResponse
 from app.api.services.character import CharacterService
 from app.api.services.plot import PlotService
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, update, delete, col, or_, text, func
+from sqlmodel import select, update, delete, col, or_, text, func, SQLModel
 from sqlalchemy.orm import selectinload
 from app.videos.models import (
     Script,
@@ -1378,9 +1379,57 @@ async def list_chapter_scripts(
         print(
             f"[DEBUG] list_chapter_scripts called for chapter_id: {chapter_id}, user_id: {current_user.id}"
         )
+
+        # Check if chapter_id is an Artifact and resolve to real Chapter ID if possible
+        search_ids = [chapter_id]
+        try:
+            from app.projects.models import Artifact, Project
+
+            # Check if it's an artifact
+            stmt = select(Artifact).where(Artifact.id == chapter_id)
+            artifact = (await session.exec(stmt)).first()
+
+            if artifact:
+                # Get project to check for book link
+                project = (
+                    await session.exec(
+                        select(Project).where(Project.id == artifact.project_id)
+                    )
+                ).first()
+                if project and project.book_id:
+                    # Try to find corresponding Chapter
+                    content_data = artifact.content or {}
+                    chapter_num = content_data.get("chapter_number")
+                    if chapter_num:
+                        chap_stmt = select(Chapter).where(
+                            Chapter.book_id == project.book_id,
+                            Chapter.chapter_number == chapter_num,
+                        )
+                        real_chapter = (await session.exec(chap_stmt)).first()
+                        if real_chapter:
+                            print(
+                                f"[ListScripts] Resolved Artifact {chapter_id} to Chapter {real_chapter.id}"
+                            )
+                            search_ids.append(str(real_chapter.id))
+        except Exception as resolve_err:
+            print(
+                f"[ListScripts] Warning: Error resolving artifact to chapter: {resolve_err}"
+            )
+
+        # Convert IDs to UUIDs for DB query
+        search_uuids = []
+        for sid in search_ids:
+            try:
+                search_uuids.append(uuid.UUID(str(sid)))
+            except ValueError:
+                pass
+
         stmt = (
             select(Script)
-            .where(Script.chapter_id == chapter_id, Script.user_id == current_user.id)
+            .where(
+                col(Script.chapter_id).in_(search_uuids),
+                Script.user_id == current_user.id,
+            )
             .order_by(col(Script.created_at).desc())
         )
         result = await session.exec(stmt)
@@ -2626,7 +2675,7 @@ async def generate_script_and_scenes(
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
 
-        # Verify chapter access
+        # Try to find chapter in Chapter table first (Explorer mode)
         stmt = (
             select(Chapter)
             .options(selectinload(Chapter.book))
@@ -2635,16 +2684,78 @@ async def generate_script_and_scenes(
         result = await session.exec(stmt)
         chapter_data = result.first()
 
-        if not chapter_data:
-            raise HTTPException(status_code=404, detail="Chapter not found")
+        book_data = None
+        chapter_content = None
+        chapter_title = None
+        book_id = None
+        is_artifact = False
 
-        book_data = chapter_data.book
+        if chapter_data:
+            # Found in Chapter table (Explorer mode or Creator mode with linked book)
+            book_data = chapter_data.book
+            chapter_content = chapter_data.content
+            chapter_title = chapter_data.title
+            book_id = chapter_data.book_id
+        else:
+            # Not in Chapter table - check Artifacts (Creator mode)
+            from app.projects.models import Artifact, Project
 
-        # Check access permissions
-        if book_data.status != "published" and book_data.user_id != current_user.id:
-            raise HTTPException(
-                status_code=403, detail="Not authorized to access this chapter"
-            )
+            stmt = select(Artifact).where(Artifact.id == chapter_id)
+            result = await session.exec(stmt)
+            artifact_data = result.first()
+
+            if artifact_data:
+                is_artifact = True
+                # Extract content from artifact
+                content_data = artifact_data.content or {}
+                chapter_content = content_data.get("content", "")
+                chapter_title = content_data.get("title", "Chapter")
+
+                # Get project for access control
+                stmt = select(Project).where(Project.id == artifact_data.project_id)
+                result = await session.exec(stmt)
+                project = result.first()
+
+                if project:
+                    if project.user_id != current_user.id:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Not authorized to access this chapter",
+                        )
+                    book_id = project.id  # Default to project_id
+
+                    # Try to resolve to real Chapter for RAG (if project has linked book)
+                    if project.book_id:
+                        chapter_num = content_data.get("chapter_number")
+                        if chapter_num:
+                            stmt = select(Chapter).where(
+                                Chapter.book_id == project.book_id,
+                                Chapter.chapter_number == chapter_num,
+                            )
+                            real_chapter = (await session.exec(stmt)).first()
+                            if real_chapter:
+                                print(
+                                    f"[ScriptGen] Resolved Artifact {chapter_id} to Chapter {real_chapter.id}"
+                                )
+                                chapter_id = (
+                                    real_chapter.id
+                                )  # Switch to real Chapter ID
+                                is_artifact = False  # Treat as normal chapter for RAG
+                                book_id = project.book_id  # Use real book ID
+                                # Update content from real chapter to be safe
+                                chapter_content = real_chapter.content
+                                chapter_title = real_chapter.title
+                else:
+                    raise HTTPException(status_code=404, detail="Project not found")
+            else:
+                raise HTTPException(status_code=404, detail="Chapter not found")
+
+        # Check access permissions (for regular chapters with books)
+        if book_data:
+            if book_data.status != "published" and book_data.user_id != current_user.id:
+                raise HTTPException(
+                    status_code=403, detail="Not authorized to access this chapter"
+                )
 
         # ✅ NEW: Check subscription tier and limits
         subscription_manager = SubscriptionManager(session)
@@ -2676,12 +2787,21 @@ async def generate_script_and_scenes(
 
         # Get chapter context for enhanced content
         rag_service = RAGService(session)
-        chapter_context = await rag_service.get_chapter_with_context(
-            chapter_id, include_adjacent=True
-        )
+        if not is_artifact:
+            # For regular chapters, use RAG to get context and adjacent chapters
+            chapter_context = await rag_service.get_chapter_with_context(
+                chapter_id, include_adjacent=True
+            )
+        else:
+            # For artifacts (Creator mode), use extracted content directly
+            # RAG/Embeddings might not be ready or applicable yet
+            chapter_context = {
+                "total_context": chapter_content,
+                "chapter": {"title": chapter_title, "content": chapter_content},
+            }
 
         # Prepare content for OpenRouter based on script style
-        content_for_script = chapter_context.get("total_context", chapter_data.content)
+        content_for_script = chapter_context.get("total_context", chapter_content)
 
         # Enhance with plot context if provided
         plot_enhanced = False
@@ -2691,7 +2811,7 @@ async def generate_script_and_scenes(
                 plot_info = await enhance_with_plot_context(
                     session,
                     current_user.id,
-                    chapter_data.book_id,
+                    book_id,
                     content_for_script,
                 )
                 if plot_info and plot_info["enhanced_content"]:
@@ -2718,7 +2838,7 @@ async def generate_script_and_scenes(
 
         # ✅ Generate script using OpenRouter with tier-appropriate model
         script_result = await openrouter_service.generate_script(
-            content=chapter_data.content,  # Use original content, plot context is handled separately
+            content=chapter_content,  # Use chapter content (works for both Chapter and Artifact)
             user_tier=user_model_tier,
             script_type=script_style,
             target_duration=target_duration,
@@ -2749,8 +2869,9 @@ async def generate_script_and_scenes(
             line_stripped = line.strip()
 
             # Check if this is an ACT-SCENE header (primary scene marker)
+            # Check if this is an ACT-SCENE header (primary scene marker) - supports both screenplay and narration styles
             act_scene_match = re.match(
-                r"^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?",
+                r"^(?:(?:\*?\*?ACT\s+[IVX0-9]+\s*-?\s*SCENE\s+\d+\*?\*?)|(?:###\s*.*\[.*\]))",
                 line_stripped,
                 re.IGNORECASE,
             )
@@ -2907,7 +3028,24 @@ Script to analyze:
 
         # Generate default script name if not provided
         if not script_name:
-            script_name = f"{script_style.title()} Script - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            try:
+                # Count existing scripts for this chapter
+                statement = select(func.count()).where(
+                    Script.chapter_id == uuid.UUID(chapter_id)
+                )
+                result = await session.exec(statement)
+                count = result.one()
+            except Exception as e:
+                print(f"Error counting scripts: {e}")
+                count = 0
+
+            style_display = script_style.replace("_", " ").title()
+            if "cinematic" in script_style.lower():
+                style_display = "Character Dialogue"
+            elif "narration" in script_style.lower():
+                style_display = "Voice-over Narration"
+
+            script_name = f"{style_display} {count + 1:03d}"
 
         # Enhanced script data with metadata
         script_data = {
@@ -3178,7 +3316,24 @@ async def save_script_and_scenes(
 
         # Generate default script name if not provided
         if not script_name:
-            script_name = f"{script_style.title()} Script - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            try:
+                # Count existing scripts for this chapter
+                statement = select(func.count()).where(
+                    Script.chapter_id == uuid.UUID(chapter_id)
+                )
+                result = await session.exec(statement)
+                count = result.one()
+            except Exception as e:
+                print(f"Error counting scripts: {e}")
+                count = 0
+
+            style_display = script_style.replace("_", " ").title()
+            if "cinematic" in script_style.lower():
+                style_display = "Character Dialogue"
+            elif "narration" in script_style.lower():
+                style_display = "Voice-over Narration"
+
+            script_name = f"{style_display} {count + 1:03d}"
 
         # Validate script style
         script_style = validate_script_style(script_style)
@@ -3266,33 +3421,91 @@ async def delete_script(
 ):
     """Delete a specific script by ID."""
     try:
+        print(f"[DEBUG] Deleting script {script_id} for user {current_user.id}")
+
+        try:
+            s_uuid = uuid.UUID(script_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid script ID format")
+
         # Verify script ownership
-        # Verify script ownership
-        stmt = select(Script).where(Script.id == script_id)
+        stmt = select(Script).where(Script.id == s_uuid)
         result = await session.exec(stmt)
         script_data = result.first()
 
         if not script_data:
+            print(f"[DEBUG] Script {script_id} not found in DB")
             raise HTTPException(status_code=404, detail="Script not found")
 
-        if str(script_data.user_id) != current_user.id:
+        if str(script_data.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to delete this script"
             )
 
-        # Delete the script
-        session.delete(script_data)
+        # Capture data before delete
+        style = script_data.script_style
+
+        # RAW DELETE
+        delete_stmt = delete(Script).where(Script.id == s_uuid)
+        await session.exec(delete_stmt)
         await session.commit()
+
+        # Verify deletion
+        verify_stmt = select(Script).where(Script.id == s_uuid)
+        verify_res = await session.exec(verify_stmt)
+        if verify_res.first():
+            print(f"[ERROR] Script {script_id} STILL EXISTS after delete commit!")
+            raise HTTPException(
+                status_code=500, detail="Database refused to delete script"
+            )
+
+        print(f"[DEBUG] Script {script_id} deleted and committed.")
 
         return {
             "message": "Script deleted successfully",
             "script_id": script_id,
-            "script_name": script_data.script_name or "Unnamed Script",
+            "script_style": style,
         }
     except HTTPException:
+        await session.rollback()
         raise
     except Exception as e:
         print(f"Error deleting script: {e}")
+        await session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ScriptUpdate(SQLModel):
+    script_name: Optional[str] = None
+
+
+@router.patch("/script/{script_id}")
+async def update_script(
+    script_id: str,
+    script_update: ScriptUpdate,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    try:
+        script = await session.get(Script, uuid.UUID(script_id))
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Check authorization
+        if str(script.user_id) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        if script_update.script_name is not None:
+            script.script_name = script_update.script_name
+
+        session.add(script)
+        await session.commit()
+        await session.refresh(script)
+
+        return script
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 

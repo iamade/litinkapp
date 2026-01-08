@@ -342,7 +342,7 @@ class CharacterService:
             import uuid
 
             image_record = ImageGeneration(
-                user_id=uuid.UUID(user_id),
+                user_id=uuid.UUID(str(user_id)),
                 image_type="character",
                 character_name=character.name,
                 character_id=character_id,
@@ -354,7 +354,7 @@ class CharacterService:
                     character, custom_prompt
                 ),
                 meta={
-                    "character_id": character_id,
+                    "character_id": str(character_id),
                     "image_type": "character_portrait",
                     "created_via": "character_service",
                 },
@@ -368,26 +368,14 @@ class CharacterService:
             if not record_id:
                 raise CharacterServiceError("Failed to create image generation record")
 
-            # Update character status to pending
-            char_stmt = (
-                update(Character)
-                .where(Character.id == character_id)
-                .values(
-                    image_generation_status="pending",
-                    updated_at=datetime.now(timezone.utc),
-                )
-            )
-            await self.session.exec(char_stmt)
-            await self.session.commit()
-
             # Queue the async task
             from app.tasks.image_tasks import generate_character_image_task
 
             task = generate_character_image_task.delay(
                 character_name=character.name,
                 character_description=character_description,
-                user_id=user_id,
-                character_id=character_id,
+                user_id=str(user_id),
+                character_id=str(character_id),
                 style=style,
                 aspect_ratio=aspect_ratio,
                 custom_prompt=custom_prompt,
@@ -402,7 +390,7 @@ class CharacterService:
                     resource_type="image",
                     cost_usd=0.0,
                     metadata={
-                        "character_id": character_id,
+                        "character_id": str(character_id),
                         "image_type": "character_portrait",
                         "task_id": task.id,
                     },
@@ -442,7 +430,7 @@ class CharacterService:
         Get the current status of character image generation.
         """
         try:
-            await self._validate_character_permissions(character_id, user_id)
+            await self._validate_character_permissions(character_id, str(user_id))
 
             stmt = select(Character).where(Character.id == character_id)
             result = await self.session.exec(stmt)
@@ -451,17 +439,20 @@ class CharacterService:
             if not character:
                 raise CharacterNotFoundError(f"Character {character_id} not found")
 
+            # Get status directly from Character model
             status = character.image_generation_status or "none"
             task_id = character.image_generation_task_id
             image_url = character.image_url
             metadata = character.image_metadata or {}
 
             response = {
-                "character_id": character_id,
+                "character_id": str(character_id),
                 "status": status,
                 "task_id": task_id,
                 "image_url": image_url,
                 "metadata": metadata,
+                "model_used": character.model_used,
+                "generation_method": character.generation_method,
             }
 
             if status == "failed" and metadata:
@@ -993,9 +984,17 @@ Return a JSON array of matches sorted by confidence:
             character_user_id = result.first()
 
             if not character_user_id:
+                logger.error(
+                    f"[CharacterService] Character {character_id} not found in database or has no user_id"
+                )
+                # Also log if the ID exists but somehow query failed (sanity check)
+                # But here we just know it's not found by ID
                 raise CharacterNotFoundError(f"Character {character_id} not found")
 
-            if str(character_user_id) != user_id:
+            if str(character_user_id) != str(user_id):
+                logger.error(
+                    f"[CharacterService] Access denied: Character {character_id} owned by {character_user_id} but requested by {user_id}"
+                )
                 raise PermissionDeniedError("Access denied to character")
 
             return True

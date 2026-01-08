@@ -58,6 +58,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [isCreatingCharacter, setIsCreatingCharacter] = useState(false);
   const [isGeneratingWithAI, setIsGeneratingWithAI] = useState(false);
+  const [isAutoAddingCharacters, setIsAutoAddingCharacters] = useState(false);
   const [newCharacter, setNewCharacter] = useState({
     name: '',
     role: '',
@@ -645,6 +646,49 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
             >
               <Plus className="w-4 h-4" />
               <span>Create Character</span>
+            </button>
+            <button
+              onClick={async () => {
+                if (isAutoAddingCharacters) return;
+                setIsAutoAddingCharacters(true);
+                const loadingToast = toast.loading(isProject 
+                  ? 'AI is generating more characters...' 
+                  : 'AI is finding more characters from the book...');
+                try {
+                  // Call correct endpoint based on whether it's a project or book
+                  const result = isProject 
+                    ? await userService.autoAddProjectCharacters(bookId)
+                    : await userService.autoAddCharacters(bookId);
+                  if (result.characters_added > 0) {
+                    toast.success(result.message, { id: loadingToast });
+                    // Reload plot to show new characters
+                    await loadPlot();
+                    if (onCharacterChange) {
+                      await onCharacterChange();
+                    }
+                  } else {
+                    toast.success(result.message, { id: loadingToast });
+                  }
+                } catch (error: any) {
+                  toast.error(error?.message || 'Failed to add characters', { id: loadingToast });
+                } finally {
+                  setIsAutoAddingCharacters(false);
+                }
+              }}
+              disabled={isAutoAddingCharacters || !plotOverview?.id}
+              className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-purple-400 text-sm"
+            >
+              {isAutoAddingCharacters ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Adding...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Auto Add Characters</span>
+                </>
+              )}
             </button>
           </div>
         </div>

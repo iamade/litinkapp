@@ -69,6 +69,16 @@ class Project(SQLModel, table=True):
     input_prompt: Optional[str] = Field(default=None, sa_column=Column(pg.TEXT))
     source_material_url: Optional[str] = Field(default=None)  # Link to uploaded file
 
+    # Optional link to Book (when content is uploaded and processed)
+    book_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("books.id", ondelete="SET NULL"),
+            index=True,
+        ),
+    )
+
     # Progress Tracking
     current_step: Optional[str] = Field(default=None)
     pipeline_steps: List[str] = Field(default=[], sa_column=Column(pg.ARRAY(pg.TEXT)))
@@ -108,7 +118,12 @@ class Artifact(SQLModel, table=True):
         default_factory=uuid.uuid4,
     )
     project_id: uuid.UUID = Field(
-        sa_column=Column(pg.UUID(as_uuid=True), ForeignKey("projects.id"), index=True),
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("projects.id", ondelete="CASCADE"),
+            index=True,
+            nullable=False,
+        ),
     )
 
     artifact_type: ArtifactType = Field(

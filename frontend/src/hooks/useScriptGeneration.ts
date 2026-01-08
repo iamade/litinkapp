@@ -191,8 +191,8 @@ export const useScriptGeneration = (chapterId: string) => {
         setSelectedScript(prev => prev ? { ...prev, ...updates } : null);
       }
 
-      // TODO: Send update to backend
-      // await userService.updateScript(scriptId, updates);
+      // Send update to backend
+      await userService.updateScript(scriptId, updates as any);
       
       toast.success('Script updated successfully!');
     } catch (error) {
@@ -203,7 +203,7 @@ export const useScriptGeneration = (chapterId: string) => {
   };
 
   const deleteScript = async (scriptId: string) => {
-    if (!confirm('Are you sure you want to delete this script?')) return;
+    // Confirmation handled by UI component now
 
     try {
       // Remove locally first

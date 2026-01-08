@@ -56,6 +56,10 @@ export const apiClient = {
     return withLoading(() => this.request<T>(endpoint, "PUT", body));
   },
 
+  async patch<T>(endpoint: string, body: unknown): Promise<T> {
+    return withLoading(() => this.request<T>(endpoint, "PATCH", body));
+  },
+
   async delete<T>(endpoint: string, body?: unknown): Promise<T> {
     return withLoading(() => this.request<T>(endpoint, "DELETE", body));
   },

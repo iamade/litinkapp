@@ -50,6 +50,7 @@ interface ImageGenerationOptions {
 }
 
 interface ImagesPanelProps {
+  chapterId: string;
   chapterTitle: string;
   selectedScript: unknown;
   plotOverview: { characters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string }> } | null;
@@ -57,6 +58,7 @@ interface ImagesPanelProps {
 }
 
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
+  chapterId,
   chapterTitle,
   selectedScript,
   plotOverview,
@@ -64,7 +66,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 }) => {
   const {
     selectedScriptId,
-    stableSelectedChapterId,
     versionToken,
     isSwitching
   } = useScriptSelection();
@@ -102,26 +103,26 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     generateAllSceneImages,
     generateAllCharacterImages,
     setCharacterImage
-  } = useImageGeneration(stableSelectedChapterId ?? '', selectedScriptId);
+  } = useImageGeneration(chapterId, selectedScriptId);
 
   // Trigger refresh on selection/version changes
   useEffect(() => {
-    if (!stableSelectedChapterId) {
+    if (!chapterId) {
       return;
     }
     loadImages();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stableSelectedChapterId, versionToken]);
+  }, [chapterId, versionToken]);
 
   // Empty state when no script or chapter is selected
-  if (!selectedScriptId || !stableSelectedChapterId) {
+  if (!selectedScriptId || !chapterId) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-500">
         <div className="text-center">
           <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
           <p className="text-lg font-medium">Select a script to view images</p>
           <p className="text-sm">Choose a script from the sidebar to generate and view scene images</p>
-          {!stableSelectedChapterId && (
+          {!chapterId && (
             <p className="text-xs text-orange-500 mt-2">Chapter ID not available</p>
           )}
         </div>
@@ -133,39 +134,97 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const isDisabled = isSwitching;
 
 
-  // Get scenes from selected script and normalize format
+  // Get scenes from selected script by parsing script text (like ScriptGenerationPanel does)
   const scenes = React.useMemo(() => {
-    if (typeof selectedScript === "object" && selectedScript !== null && "scene_descriptions" in selectedScript) {
-      const sceneDescriptions = (selectedScript as { scene_descriptions?: any[] }).scene_descriptions || [];
+    if (typeof selectedScript !== "object" || selectedScript === null) {
+      return [];
+    }
 
-      // Transform scene_descriptions to proper scene objects
-      return sceneDescriptions.map((scene, idx) => {
-        // If it's already an object with the right structure, return it
+    const script = selectedScript as { script?: string; scene_descriptions?: any[]; scenes?: any[] };
+    const scriptText = script.script || '';
+    const parsedScenes: { scene_number: number; visual_description: string; description: string; header: string; location: string }[] = [];
+
+    // First try to parse scenes from structured scenes array
+    if (script.scenes && Array.isArray(script.scenes) && script.scenes.length > 0) {
+      return script.scenes.map((scene: any, idx: number) => ({
+        scene_number: scene.scene_number || idx + 1,
+        visual_description: scene.visual_description || scene.description || '',
+        description: scene.description || scene.visual_description || '',
+        header: scene.header || `Scene ${idx + 1}`,
+        location: scene.location || ''
+      }));
+    }
+
+    // Parse scenes from script text using ACT-SCENE headers (most reliable)
+    const scenePattern = /(\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?)/gi;
+    const matches = [...scriptText.matchAll(scenePattern)];
+
+    if (matches.length > 0) {
+      matches.forEach((match, idx) => {
+        const startIdx = match.index!;
+        const endIdx = idx < matches.length - 1 ? matches[idx + 1].index! : scriptText.length;
+        const sceneContent = scriptText.substring(startIdx, endIdx).trim();
+
+        // Extract location (INT./EXT. line)
+        const locationMatch = sceneContent.match(/(?:INT\.|EXT\.)[^\n]+/i);
+        const location = locationMatch ? locationMatch[0] : '';
+
+        // Get content for visual description (excluding header and location)
+        const lines = sceneContent.split('\n').slice(1, 6);
+        const contentLines = lines.filter(l => l.trim() && !l.trim().match(/^(?:INT\.|EXT\.)/i));
+        const content = contentLines.join(' ').substring(0, 300);
+
+        parsedScenes.push({
+          scene_number: idx + 1,
+          visual_description: content || location || `Scene ${idx + 1}`,
+          description: content || location || `Scene ${idx + 1}`,
+          header: match[0].replace(/\*/g, '').trim(),
+          location: location
+        });
+      });
+
+      return parsedScenes;
+    }
+
+    // Fallback to scene_descriptions if available
+    if (script.scene_descriptions && Array.isArray(script.scene_descriptions) && script.scene_descriptions.length > 0) {
+      // Filter out duplicates - only count entries that have ACT header or every other one
+      const filteredDescriptions = script.scene_descriptions.filter((desc: any, idx: number) => {
+        const text = typeof desc === 'string' ? desc : desc?.visual_description || '';
+        return text.match(/^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE/i) || idx % 2 === 0;
+      });
+
+      return filteredDescriptions.map((scene: any, idx: number) => {
         if (typeof scene === 'object' && scene !== null && ('visual_description' in scene || 'description' in scene)) {
           return {
             scene_number: scene.scene_number || idx + 1,
             visual_description: scene.visual_description || scene.description || '',
-            ...scene
+            description: scene.description || scene.visual_description || '',
+            header: `Scene ${idx + 1}`,
+            location: ''
           };
         }
 
-        // If it's a string, convert it to an object
         if (typeof scene === 'string') {
           return {
             scene_number: idx + 1,
             visual_description: scene,
-            description: scene
+            description: scene,
+            header: `Scene ${idx + 1}`,
+            location: ''
           };
         }
 
-        // Fallback for any other format
         return {
           scene_number: idx + 1,
           visual_description: String(scene),
-          description: String(scene)
+          description: String(scene),
+          header: `Scene ${idx + 1}`,
+          location: ''
         };
       });
     }
+
     return [];
   }, [selectedScript]);
 
@@ -593,59 +652,63 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             <p className="text-lg font-medium">No scenes available</p>
             <p className="text-sm">Generate a script first to create scene images</p>
           </div>
-        ) : !hasImages ? (
-          <div className="text-center py-8 text-gray-500">
-            <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
-            <p className="text-lg font-medium">No images generated yet</p>
-            <p className="text-sm">Generate images for the current chapter scenes</p>
-          </div>
         ) : (
-          <div className={`${
-            viewMode === 'grid'
-              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
-              : 'space-y-4'
-          }`}>
-            {scenes.map((scene: any, idx: number) => {
-              const sceneNumber = scene.scene_number || idx + 1;
-              const sceneImage = getSceneImage(sceneNumber);
-              const isSelected = sceneImage?.id ? selectedSceneIds.has(sceneImage.id) : false;
+          <>
+            {!hasImages && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <p className="text-sm text-blue-800">
+                  <strong>{scenes.length} scene{scenes.length !== 1 ? 's' : ''}</strong> found in the selected script.
+                  Generate images individually or use "Generate All Scenes" button.
+                </p>
+              </div>
+            )}
+            <div className={`${
+              viewMode === 'grid'
+                ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6'
+                : 'space-y-4'
+            }`}>
+              {scenes.map((scene: any, idx: number) => {
+                const sceneNumber = scene.scene_number || idx + 1;
+                const sceneImage = getSceneImage(sceneNumber);
+                const isSelected = sceneImage?.id ? selectedSceneIds.has(sceneImage.id) : false;
 
-              return (
-                <SceneImageCard
-                  key={sceneNumber}
-                  scene={scene}
-                  sceneImage={sceneImage}
-                  isGenerating={generatingScenes.has(sceneNumber)}
-                  viewMode={viewMode}
-                  isSelected={isSelected}
-                  onSelect={(selected) => {
-                    if (!sceneImage?.id) return;
-                    setSelectedSceneIds(prev => {
-                      const newSet = new Set(prev);
-                      if (selected) {
-                        newSet.add(sceneImage.id);
-                      } else {
-                        newSet.delete(sceneImage.id);
-                      }
-                      return newSet;
-                    });
-                  }}
-                  onGenerate={() => generateSceneImage(
-                    sceneNumber,
-                    scene.visual_description || scene.description || '',
-                    generationOptions
-                  )}
-                  onRegenerate={() => regenerateImage(
-                    'scene',
-                    sceneNumber,
-                    generationOptions
-                  )}
-                  onDelete={() => deleteImage('scene', sceneNumber)}
-                  onView={() => setSelectedImage(sceneImage?.imageUrl || null)}
-                />
-              );
-            })}
-          </div>
+                return (
+                  <SceneImageCard
+                    key={sceneNumber}
+                    scene={scene}
+                    sceneImage={sceneImage}
+                    isGenerating={generatingScenes.has(sceneNumber)}
+                    viewMode={viewMode}
+                    isSelected={isSelected}
+                    onSelect={(selected) => {
+                      if (!sceneImage?.id) return;
+                      setSelectedSceneIds(prev => {
+                        const newSet = new Set(prev);
+                        if (selected) {
+                          newSet.add(sceneImage.id);
+                        } else {
+                          newSet.delete(sceneImage.id);
+                        }
+                        return newSet;
+                      });
+                    }}
+                    onGenerate={() => generateSceneImage(
+                      sceneNumber,
+                      scene.visual_description || scene.description || '',
+                      generationOptions
+                    )}
+                    onRegenerate={() => regenerateImage(
+                      'scene',
+                      sceneNumber,
+                      generationOptions
+                    )}
+                    onDelete={() => deleteImage('scene', sceneNumber)}
+                    onView={() => setSelectedImage(sceneImage?.imageUrl || null)}
+                  />
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     );

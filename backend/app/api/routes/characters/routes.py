@@ -30,7 +30,7 @@ async def get_character(
     try:
         character_service = CharacterService(session)
         character = await character_service.get_character_by_id(
-            character_id, current_user["id"]
+            character_id, current_user.id
         )
 
         if not character:
@@ -62,7 +62,7 @@ async def update_character(
     try:
         character_service = CharacterService(session)
         updated_character = await character_service.update_character(
-            character_id=character_id, user_id=current_user["id"], updates=updates
+            character_id=character_id, user_id=current_user.id, updates=updates
         )
 
         return updated_character
@@ -89,7 +89,7 @@ async def delete_character(
     try:
         character_service = CharacterService(session)
         success = await character_service.delete_character(
-            character_id, current_user["id"]
+            character_id, current_user.id
         )
 
         if not success:
@@ -127,7 +127,7 @@ async def bulk_delete_characters(
         for character_id in character_ids:
             try:
                 success = await character_service.delete_character(
-                    character_id, current_user["id"]
+                    character_id, current_user.id
                 )
                 if success:
                     deleted_count += 1
@@ -180,7 +180,7 @@ async def generate_character_details_with_ai(
             await character_service.generate_character_details_from_book(
                 character_name=character_name.strip(),
                 book_id=book_id,
-                user_id=current_user["id"],
+                user_id=current_user.id,
                 role=role,
             )
         )
@@ -216,7 +216,7 @@ async def create_character(
         character_service = CharacterService(session)
         character = await character_service.create_character(
             plot_overview_id=plot_overview_id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             character_data=character_data,
         )
 
@@ -244,7 +244,7 @@ async def get_characters_by_plot(
     try:
         character_service = CharacterService(session)
         characters = await character_service.get_characters_by_plot(
-            plot_overview_id, current_user["id"]
+            plot_overview_id, current_user.id
         )
 
         return characters
@@ -272,7 +272,7 @@ async def analyze_character_archetypes(
         # Get character data first
         character_service = CharacterService(session)
         character = await character_service.get_character_by_id(
-            character_id, current_user["id"]
+            character_id, current_user.id
         )
 
         if not character:
@@ -287,7 +287,7 @@ async def analyze_character_archetypes(
         # Update character with archetype analysis
         await character_service.update_character(
             character_id=character_id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             updates=CharacterUpdate(archetypes=archetype_match.archetype_id),
         )
 
@@ -334,7 +334,7 @@ async def generate_character_image(
 
         result = await character_service.generate_character_image(
             character_id=character_id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             custom_prompt=request.prompt,
             style=style,
             aspect_ratio=aspect_ratio,
@@ -371,7 +371,7 @@ async def get_character_image_status(
     try:
         character_service = CharacterService(session)
         status = await character_service.get_character_image_status(
-            character_id=character_id, user_id=current_user["id"]
+            character_id=character_id, user_id=current_user.id
         )
 
         return status

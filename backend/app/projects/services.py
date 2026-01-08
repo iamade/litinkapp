@@ -18,6 +18,7 @@ from app.projects.schemas import (
 )
 from fastapi import UploadFile
 from app.core.services.file import BookStructureDetector, FileService
+from app.core.services.embeddings import EmbeddingsService
 
 
 class IntentService:
@@ -194,7 +195,32 @@ class ProjectService:
                 # Since this is the core value add, we should probably fail if extraction completely dies.
                 raise e
 
-            # 5. Create Project
+            # 5. Create Book with source_mode='creator' for RAG integration
+            # This allows Creator mode to use the same RAG/embedding pipeline as Explorer mode
+            from app.books.models import Book as BookModel, Chapter as ChapterModel
+
+            book = BookModel(
+                title=(
+                    os.path.splitext(file.filename)[0].replace("_", " ").title()
+                    if file.filename
+                    else "New Book"
+                ),
+                user_id=user_id,
+                book_type=(
+                    project_type.value
+                    if hasattr(project_type, "value")
+                    else "entertainment"
+                ),
+                source_mode="creator",  # Mark as Creator mode book (won't show in Explorer)
+                status="ready",
+                description=input_prompt or f"Uploaded from {file.filename}",
+                original_file_storage_path=remote_path,
+            )
+            self.session.add(book)
+            await self.session.commit()
+            await self.session.refresh(book)
+
+            # 6. Create Project and link to book
             project = Project(
                 title=(
                     os.path.splitext(file.filename)[0].replace("_", " ").title()
@@ -206,6 +232,7 @@ class ProjectService:
                 workflow_mode=WorkflowMode.CREATOR,
                 status=ProjectStatus.DRAFT,
                 source_material_url=file_url,
+                book_id=book.id,  # Link project to book for RAG access
                 pipeline_steps=["plot", "chapters", "script"],
                 current_step="chapters",
                 input_prompt=input_prompt or f"Uploaded from {file.filename}",
@@ -214,7 +241,12 @@ class ProjectService:
             await self.session.commit()
             await self.session.refresh(project)
 
-            # 6. Create Artifacts from Extracted Data
+            # Update book with project_id (bi-directional link)
+            book.project_id = project.id
+            self.session.add(book)
+            await self.session.commit()
+
+            # 7. Create Chapters in Book (for RAG) AND Artifacts in Project
             try:
                 chapters = []
                 structure_type = "flat"
@@ -236,20 +268,50 @@ class ProjectService:
                         chapters = extracted_data
 
                 print(
-                    f"[PROJECT UPLOAD] Creating artifacts for {len(chapters)} chapters..."
+                    f"[PROJECT UPLOAD] Creating {len(chapters)} chapters + artifacts..."
                 )
 
                 for idx, chapter in enumerate(chapters):
-                    # Artifact content
+                    chapter_title = chapter.get("title", f"Chapter {idx+1}")
+                    chapter_content = chapter.get("content", "")
+                    chapter_number = chapter.get("number", idx + 1)
+                    chapter_summary = chapter.get("summary", "")
+
+                    # Create Chapter in Book table (for RAG/embeddings)
+                    book_chapter = ChapterModel(
+                        book_id=book.id,
+                        title=chapter_title,
+                        content=chapter_content,
+                        chapter_number=chapter_number,
+                        summary=chapter_summary,
+                    )
+                    self.session.add(book_chapter)
+                    await self.session.flush()  # Flush to get ID
+
+                    # Generate embeddings for the chapter (RAG)
+                    try:
+                        embeddings_service = EmbeddingsService(self.session)
+                        await embeddings_service.create_chapter_embeddings(
+                            book_chapter.id, chapter_content
+                        )
+                        print(
+                            f"[PROJECT UPLOAD] Generated embeddings for chapter {chapter_number}"
+                        )
+                    except Exception as e:
+                        print(
+                            f"[PROJECT UPLOAD] Error generating embeddings for chapter {chapter_number}: {e}"
+                        )
+
+                    # Create Artifact in Project (for UI display)
                     artifact = Artifact(
                         project_id=project.id,
                         artifact_type=ArtifactType.CHAPTER.value,
                         version=1,
                         content={
-                            "title": chapter.get("title", f"Chapter {idx+1}"),
-                            "content": chapter.get("content", ""),
-                            "chapter_number": chapter.get("number", idx + 1),
-                            "summary": chapter.get("summary", ""),
+                            "title": chapter_title,
+                            "content": chapter_content,
+                            "chapter_number": chapter_number,
+                            "summary": chapter_summary,
                         },
                         generation_metadata={
                             "source": "upload_extraction",
@@ -261,8 +323,12 @@ class ProjectService:
                     )
                     self.session.add(artifact)
 
+                # Update book's total_chapters
+                book.total_chapters = len(chapters)
+                self.session.add(book)
+
                 await self.session.commit()
-                print("[PROJECT UPLOAD] Artifacts saved successfully.")
+                print(f"[PROJECT UPLOAD] {len(chapters)} chapters + artifacts saved.")
             except Exception as e:
                 print(f"[PROJECT UPLOAD] Error creating artifacts: {e}")
                 # Use verify_partial_success or raise?

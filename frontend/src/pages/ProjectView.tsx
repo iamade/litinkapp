@@ -382,6 +382,7 @@ const ProjectView: React.FC = () => {
         }
         return (
           <ImagesPanel
+            chapterId={selectedChapter.id}
             chapterTitle={selectedChapter.content.title}
             selectedScript={selectedScript}
             plotOverview={plotOverview}

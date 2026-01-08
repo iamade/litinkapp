@@ -59,12 +59,10 @@ export const usePlotGeneration = (
           }
         );
       } else {
-        // Use book-specific plot generation (also supports refinement for projects passed as bookId)
-        result = await userService.generateProjectPlotOverview(
+        // Use book-specific plot generation (with refinement support)
+        result = await userService.generatePlotOverview(
           bookOrProjectId,
-          inputPrompt || '',
           { 
-            projectType,
             refinementPrompt,
           }
         );

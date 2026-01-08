@@ -115,6 +115,12 @@ class Character(SQLModel, table=True):
 
     image_url: Optional[str] = Field(default=None)
     image_generation_prompt: Optional[str] = Field(default=None)
+    image_generation_status: Optional[str] = Field(
+        default=None
+    )  # pending, generating, completed, failed
+    image_generation_task_id: Optional[str] = Field(default=None)  # Celery task ID
+    generation_method: Optional[str] = Field(default=None)  # async_celery, sync, etc.
+    model_used: Optional[str] = Field(default=None)  # AI model used for generation
 
     image_metadata: Dict[str, Any] = Field(
         default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))

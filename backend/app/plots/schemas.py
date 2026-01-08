@@ -1,7 +1,8 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from decimal import Decimal
+import uuid
 
 
 # PlotOverview Schemas
@@ -98,10 +99,10 @@ class CharacterBase(BaseModel):
 
 
 class CharacterResponse(CharacterBase):
-    id: str = Field(..., description="Unique identifier")
-    plot_overview_id: str
-    book_id: str
-    user_id: str
+    id: Union[str, uuid.UUID] = Field(..., description="Unique identifier")
+    plot_overview_id: Union[str, uuid.UUID]
+    book_id: Union[str, uuid.UUID]
+    user_id: Union[str, uuid.UUID]
     created_at: datetime
     updated_at: datetime
 
@@ -261,6 +262,11 @@ class PlotGenerationRequest(BaseModel):
     genre: Optional[str] = Field(None, max_length=100, description="Desired genre")
     tone: Optional[str] = Field(None, max_length=100, description="Desired tone")
     audience: Optional[str] = Field(None, max_length=100, description="Target audience")
+    refinement_prompt: Optional[str] = Field(
+        None,
+        max_length=2000,
+        description="Follow-up prompt to refine/customize an existing plot (e.g., 'generate more characters')",
+    )
 
 
 class ProjectPlotGenerationRequest(BaseModel):

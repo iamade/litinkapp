@@ -38,10 +38,19 @@ class PlotService:
         self.rag_service = RAGService(session)
 
     async def generate_plot_overview(
-        self, user_id: uuid.UUID, book_id: uuid.UUID, plot_data: PlotOverviewCreate
+        self,
+        user_id: uuid.UUID,
+        book_id: uuid.UUID,
+        plot_data: PlotOverviewCreate,
+        refinement_prompt: Optional[str] = None,
+        existing_plot: Optional[Dict[str, Any]] = None,
+        existing_characters: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Generate a plot overview based on book content and user input.
+
+        If refinement_prompt is provided with existing_plot/existing_characters,
+        performs additive generation (adds new characters without removing existing ones).
         """
         try:
             # 1. Check subscription limits
@@ -64,15 +73,34 @@ class PlotService:
                     )
                 )
 
-            # Generate plot overview
-            generated_plot = await self._generate_plot_content(
-                book_context, plot_data.model_dump(), model_tier
-            )
+            # If refinement is requested, use existing plot as base
+            if refinement_prompt and existing_plot:
+                # Use existing plot data as base
+                generated_plot = existing_plot.copy()
 
-            # 4. Generate characters
-            generated_characters = await self._generate_characters(
-                book_context, generated_plot, model_tier
-            )
+                # Generate additional characters based on refinement prompt
+                additional_characters = await self._generate_characters_from_refinement(
+                    book_context=book_context,
+                    existing_plot=existing_plot,
+                    existing_characters=existing_characters or [],
+                    refinement_prompt=refinement_prompt,
+                    model_tier=model_tier,
+                )
+
+                # Combine existing + new characters
+                generated_characters = (
+                    existing_characters or []
+                ) + additional_characters
+            else:
+                # Generate plot overview from scratch
+                generated_plot = await self._generate_plot_content(
+                    book_context, plot_data.model_dump(), model_tier
+                )
+
+                # 4. Generate characters
+                generated_characters = await self._generate_characters(
+                    book_context, generated_plot, model_tier
+                )
 
             # 5. Store results
             result = await self._store_plot_overview(
@@ -101,9 +129,15 @@ class PlotService:
         audience: Optional[str] = None,
         refinement_prompt: Optional[str] = None,
         existing_plot: Optional[Dict[str, Any]] = None,
+        book_id: Optional[
+            uuid.UUID
+        ] = None,  # Optional linked book for character extraction
     ) -> Dict[str, Any]:
         """
-        Generate a plot overview from a user prompt (for projects without books).
+        Generate a plot overview from a user prompt (for projects).
+
+        If book_id is provided, characters are extracted from book content.
+        Otherwise, characters are generated from the prompt.
 
         If refinement_prompt is provided along with existing_plot, the AI will
         refine the existing plot based on the user's instructions.
@@ -113,7 +147,16 @@ class PlotService:
             user_tier = await self.subscription_manager.get_user_tier(user_id)
             model_tier = self._map_subscription_to_model_tier(user_tier)
 
-            # 2. Create a prompt-based context (no book/chapters)
+            # 2. Check if we have a linked book for content extraction
+            book_context = None
+            if book_id:
+                book_context = await self._get_book_context_for_plot(book_id)
+                if book_context:
+                    logger.info(
+                        f"[PlotService] Using book context for project {project_id}"
+                    )
+
+            # 3. Create a prompt-based context
             prompt_context = {
                 "prompt": input_prompt,
                 "project_type": project_type or "entertainment",
@@ -122,7 +165,7 @@ class PlotService:
                 "existing_plot": existing_plot,
             }
 
-            # 3. Generate plot content from prompt (or refine existing)
+            # 4. Generate plot content from prompt (or refine existing)
             generated_plot = await self._generate_plot_from_prompt_content(
                 prompt_context=prompt_context,
                 story_type=story_type,
@@ -132,21 +175,32 @@ class PlotService:
                 model_tier=model_tier,
             )
 
-            # 4. Generate characters from the prompt
-            generated_characters = await self._generate_characters_from_prompt(
-                prompt_context=prompt_context,
-                plot_data=generated_plot,
-                model_tier=model_tier,
-            )
+            # 5. Generate characters - use book content if available, otherwise use prompt
+            if book_context:
+                # Use book content for character extraction (like Explorer mode)
+                logger.info("[PlotService] Extracting characters from book content")
+                generated_characters = await self._generate_characters(
+                    book_context=book_context,
+                    plot_data=generated_plot,
+                    model_tier=model_tier,
+                )
+            else:
+                # No book - generate characters from prompt (AI invents)
+                logger.info("[PlotService] Generating characters from prompt")
+                generated_characters = await self._generate_characters_from_prompt(
+                    prompt_context=prompt_context,
+                    plot_data=generated_plot,
+                    model_tier=model_tier,
+                )
 
-            # 5. Store results (using project_id as a pseudo book_id for now)
-            # Note: We're storing with project_id in the book_id field - may need to update model later
+            # 6. Store results (using project_id as a pseudo book_id for now)
             result = await self._store_plot_overview(
                 generated_plot,
                 generated_characters,
                 user_id,
                 project_id,  # Using project_id where book_id would go
-                {
+                book_context
+                or {
                     "book": {
                         "title": input_prompt[:100],
                         "genre": genre or "entertainment",
@@ -332,6 +386,430 @@ If no specific characters are needed (e.g., for a product ad), return an empty a
         else:
             logger.warning("[PlotService] Character generation from prompt failed")
             return []
+
+    async def _generate_characters_from_refinement(
+        self,
+        book_context: Dict[str, Any],
+        existing_plot: Dict[str, Any],
+        existing_characters: List[Dict[str, Any]],
+        refinement_prompt: str,
+        model_tier: ModelTier,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate additional characters based on a refinement prompt.
+        This method generates NEW characters to ADD to the existing ones.
+        """
+        book = book_context.get("book", {})
+        chapters_summary = book_context.get("chapters_summary", "")[:2000]
+
+        # Format existing characters for the prompt
+        existing_char_names = [c.get("name", "") for c in existing_characters]
+        existing_char_summary = "\n".join(
+            [
+                f"- {c.get('name', 'Unknown')}: {c.get('role', 'character')} - {c.get('personality', '')[:100]}"
+                for c in existing_characters
+            ]
+        )
+
+        prompt = f"""
+You are helping refine a plot by generating ADDITIONAL characters based on user feedback.
+
+BOOK: {book.get('title', 'Unknown')}
+PLOT LOGLINE: {existing_plot.get('logline', '')}
+
+CONTENT SUMMARY:
+{chapters_summary}
+
+EXISTING CHARACTERS (DO NOT REGENERATE THESE):
+{existing_char_summary}
+
+USER'S REFINEMENT REQUEST:
+{refinement_prompt}
+
+TASK:
+Based on the user's request, generate ADDITIONAL characters that are NOT already listed above.
+If the user asks to "generate more characters", analyze the book content and identify characters that were missed.
+Focus on characters who actually appear in the story, not locations or objects.
+
+IMPORTANT:
+- Do NOT include characters whose names are: {', '.join(existing_char_names)}
+- Only generate NEW characters not already in the list
+- If no new characters can be identified, return an empty array: []
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON array of NEW character objects:
+[
+    {{
+        "name": "Character Name",
+        "role": "protagonist/antagonist/supporting/minor",
+        "character_arc": "Description of development",
+        "physical_description": "Appearance details",
+        "personality": "Personality traits",
+        "want": "External goal",
+        "need": "Internal need",
+        "lie": "False belief",
+        "ghost": "Past trauma"
+    }}
+]
+"""
+
+        response = await self.openrouter.analyze_content(
+            content=prompt, user_tier=model_tier, analysis_type="character_generation"
+        )
+
+        if response.get("status") == "success":
+            result = response.get("result", "")
+            if result:
+                new_characters = self._parse_character_generation_response(result)
+                # Filter out any characters that somehow still match existing names
+                filtered_chars = [
+                    c
+                    for c in new_characters
+                    if c.get("name", "").lower()
+                    not in [n.lower() for n in existing_char_names]
+                ]
+                logger.info(
+                    f"[PlotService] Generated {len(filtered_chars)} new characters from refinement"
+                )
+                return filtered_chars
+            else:
+                logger.warning(
+                    "[PlotService] Character refinement returned empty result"
+                )
+                return []
+        else:
+            error_msg = response.get("error", "Unknown error")
+            logger.warning(f"[PlotService] Character refinement failed: {error_msg}")
+            return []
+
+    async def add_characters_to_plot(
+        self,
+        user_id: uuid.UUID,
+        book_id: uuid.UUID,
+        plot_overview_id: uuid.UUID,
+    ) -> Dict[str, Any]:
+        """
+        Generate and add new characters to an existing plot.
+
+        This method ADDS characters to the existing PlotOverview without
+        replacing or removing existing characters.
+        """
+        try:
+            # Get subscription tier for model selection
+            user_tier = await self.subscription_manager.get_user_tier(user_id)
+            model_tier = self._map_subscription_to_model_tier(user_tier)
+
+            # Get book context
+            book_context = await self._get_book_context_for_plot(book_id)
+            if not book_context:
+                raise ValueError(f"Book {book_id} not found")
+
+            # Get existing plot and characters
+            existing_plot = await self.get_plot_overview(
+                user_id=user_id, book_id=book_id
+            )
+            if not existing_plot:
+                raise ValueError("No existing plot found")
+
+            existing_characters = []
+            if hasattr(existing_plot, "characters") and existing_plot.characters:
+                existing_characters = [
+                    {
+                        "name": char.name,
+                        "role": char.role,
+                        "physical_description": char.physical_description or "",
+                        "personality": char.personality or "",
+                    }
+                    for char in existing_plot.characters
+                ]
+
+            # Generate additional characters
+            new_characters = await self._generate_characters_from_refinement(
+                book_context=book_context,
+                existing_plot={
+                    "logline": existing_plot.logline,
+                    "story_type": existing_plot.story_type,
+                    "genre": existing_plot.genre,
+                    "tone": existing_plot.tone,
+                    "setting": existing_plot.setting,
+                },
+                existing_characters=existing_characters,
+                refinement_prompt="Generate more characters from the book content. Find additional characters that were not included in the initial generation.",
+                model_tier=model_tier,
+            )
+
+            if not new_characters:
+                return {
+                    "message": "No additional characters could be identified from the book content.",
+                    "characters_added": 0,
+                    "total_characters": len(existing_characters),
+                }
+
+            # Store new characters (add to existing plot, not replace)
+            stored_characters = []
+            for char_data in new_characters:
+                character = Character(
+                    plot_overview_id=plot_overview_id,
+                    book_id=book_id,
+                    user_id=user_id,
+                    name=char_data.get("name", "Unknown"),
+                    role=char_data.get("role", "supporting"),
+                    character_arc=char_data.get("character_arc", ""),
+                    physical_description=char_data.get("physical_description", ""),
+                    personality=char_data.get("personality", ""),
+                    archetypes=char_data.get("archetypes", []),
+                    want=char_data.get("want", ""),
+                    need=char_data.get("need", ""),
+                    lie=char_data.get("lie", ""),
+                    ghost=char_data.get("ghost", ""),
+                )
+
+                self.session.add(character)
+                await self.session.commit()
+                await self.session.refresh(character)
+
+                stored_characters.append(
+                    {
+                        "id": str(character.id),
+                        "name": character.name,
+                        "role": character.role,
+                        "physical_description": character.physical_description,
+                        "personality": character.personality,
+                    }
+                )
+
+            logger.info(
+                f"[PlotService] Added {len(stored_characters)} new characters to plot {plot_overview_id}"
+            )
+
+            return {
+                "message": f"Successfully added {len(stored_characters)} new character(s).",
+                "characters_added": len(stored_characters),
+                "total_characters": len(existing_characters) + len(stored_characters),
+                "new_characters": stored_characters,
+            }
+
+        except Exception as e:
+            logger.error(f"[PlotService] Error adding characters to plot: {str(e)}")
+            raise PlotGenerationError(f"Failed to add characters: {str(e)}")
+
+    async def add_characters_to_project(
+        self,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+        plot_overview_id: uuid.UUID,
+        input_prompt: str,
+        book_id: Optional[uuid.UUID] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate and add new characters to an existing project plot.
+
+        This method ADDS characters to the existing PlotOverview without
+        replacing or removing existing characters.
+
+        If book_id is provided, uses actual book content for character extraction.
+        Otherwise, uses the project's input_prompt (AI invents characters).
+        """
+        try:
+            # Get subscription tier for model selection
+            user_tier = await self.subscription_manager.get_user_tier(user_id)
+            model_tier = self._map_subscription_to_model_tier(user_tier)
+
+            # Get existing plot and characters
+            existing_plot = await self.get_plot_overview(
+                user_id=user_id, book_id=project_id
+            )
+            if not existing_plot:
+                raise ValueError("No existing plot found")
+
+            existing_characters = []
+            if hasattr(existing_plot, "characters") and existing_plot.characters:
+                existing_characters = [
+                    {
+                        "name": char.name,
+                        "role": char.role,
+                        "physical_description": char.physical_description or "",
+                        "personality": char.personality or "",
+                    }
+                    for char in existing_plot.characters
+                ]
+
+            # Check if we have book content to use
+            book_context = None
+            if book_id:
+                book_context = await self._get_book_context_for_plot(book_id)
+                if book_context:
+                    logger.info(
+                        f"[PlotService] Using book context for project {project_id}"
+                    )
+
+            # Format existing characters for the prompt
+            existing_char_names = [c.get("name", "") for c in existing_characters]
+            existing_char_summary = "\n".join(
+                [
+                    f"- {c.get('name', 'Unknown')}: {c.get('role', 'character')} - {c.get('personality', '')[:100]}"
+                    for c in existing_characters
+                ]
+            )
+
+            # Build prompt based on whether we have book content or just input prompt
+            if book_context:
+                # BOOK-BASED EXTRACTION: Use actual book content
+                book = book_context.get("book", {})
+                chapters_summary = book_context.get("chapters_summary", "")[:2000]
+
+                prompt = f"""
+You are extracting ADDITIONAL characters from book content.
+
+BOOK TITLE: {book.get('title', 'Unknown')}
+PLOT LOGLINE: {existing_plot.logline}
+
+BOOK CONTENT SUMMARY:
+{chapters_summary}
+
+EXISTING CHARACTERS (DO NOT REGENERATE THESE):
+{existing_char_summary}
+
+TASK:
+Analyze the book content and extract ADDITIONAL characters that are mentioned or appear in the story.
+Focus on characters who actually appear in the text, not invented ones.
+
+IMPORTANT:
+- Do NOT include characters whose names are: {', '.join(existing_char_names)}
+- Only extract NEW characters from the book content
+- Focus on characters who actually appear in the story
+- Aim for 2-5 new characters
+- If no more characters can be found, return an empty array: []
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON array of NEW character objects:
+[
+    {{
+        "name": "Character Name",
+        "role": "protagonist/antagonist/supporting/minor",
+        "character_arc": "Description of development",
+        "physical_description": "Appearance details",
+        "personality": "Personality traits",
+        "want": "External goal",
+        "need": "Internal need",
+        "lie": "False belief",
+        "ghost": "Past trauma"
+    }}
+]
+"""
+            else:
+                # PROMPT-BASED GENERATION: AI invents characters
+                prompt = f"""
+You are helping refine a creative project by generating ADDITIONAL characters based on the original prompt.
+
+ORIGINAL PROJECT PROMPT:
+{input_prompt}
+
+PLOT LOGLINE: {existing_plot.logline}
+
+EXISTING CHARACTERS (DO NOT REGENERATE THESE):
+{existing_char_summary}
+
+TASK:
+Based on the project prompt, generate ADDITIONAL characters that would enhance the story.
+These should be NEW characters that complement or add conflict to the existing cast.
+
+IMPORTANT:
+- Do NOT include characters whose names are: {', '.join(existing_char_names)}
+- Only generate NEW characters not already in the list
+- Aim for 2-5 new characters
+- If the story seems complete, return an empty array: []
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON array of NEW character objects:
+[
+    {{
+        "name": "Character Name",
+        "role": "protagonist/antagonist/supporting/minor",
+        "character_arc": "Description of development",
+        "physical_description": "Appearance details",
+        "personality": "Personality traits",
+        "want": "External goal",
+        "need": "Internal need",
+        "lie": "False belief",
+        "ghost": "Past trauma"
+    }}
+]
+"""
+
+            response = await self.openrouter.analyze_content(
+                content=prompt,
+                user_tier=model_tier,
+                analysis_type="character_generation",
+            )
+
+            new_characters = []
+            if response.get("status") == "success":
+                result = response.get("result", "")
+                if result:
+                    new_characters = self._parse_character_generation_response(result)
+                    # Filter out any characters that somehow still match existing names
+                    new_characters = [
+                        c
+                        for c in new_characters
+                        if c.get("name", "").lower()
+                        not in [n.lower() for n in existing_char_names]
+                    ]
+
+            if not new_characters:
+                return {
+                    "message": "No additional characters could be identified for this project.",
+                    "characters_added": 0,
+                    "total_characters": len(existing_characters),
+                }
+
+            # Store new characters (add to existing plot, not replace)
+            stored_characters = []
+            for char_data in new_characters:
+                character = Character(
+                    plot_overview_id=plot_overview_id,
+                    book_id=project_id,  # project_id stored in book_id field
+                    user_id=user_id,
+                    name=char_data.get("name", "Unknown"),
+                    role=char_data.get("role", "supporting"),
+                    character_arc=char_data.get("character_arc", ""),
+                    physical_description=char_data.get("physical_description", ""),
+                    personality=char_data.get("personality", ""),
+                    archetypes=char_data.get("archetypes", []),
+                    want=char_data.get("want", ""),
+                    need=char_data.get("need", ""),
+                    lie=char_data.get("lie", ""),
+                    ghost=char_data.get("ghost", ""),
+                )
+
+                self.session.add(character)
+                await self.session.commit()
+                await self.session.refresh(character)
+
+                stored_characters.append(
+                    {
+                        "id": str(character.id),
+                        "name": character.name,
+                        "role": character.role,
+                        "physical_description": character.physical_description,
+                        "personality": character.personality,
+                    }
+                )
+
+            logger.info(
+                f"[PlotService] Added {len(stored_characters)} new characters to project {project_id}"
+            )
+
+            return {
+                "message": f"Successfully added {len(stored_characters)} new character(s).",
+                "characters_added": len(stored_characters),
+                "total_characters": len(existing_characters) + len(stored_characters),
+                "new_characters": stored_characters,
+            }
+
+        except Exception as e:
+            logger.error(f"[PlotService] Error adding characters to project: {str(e)}")
+            raise PlotGenerationError(f"Failed to add characters: {str(e)}")
 
     async def _get_book_context_for_plot(self, book_id: uuid.UUID) -> Dict[str, Any]:
         """
@@ -861,16 +1339,16 @@ Return a JSON object with:
                     plot_overview_id=plot_id,
                     book_id=book_id,
                     user_id=user_id,
-                    name=char_data["name"],
-                    role=char_data["role"],
-                    character_arc=char_data["character_arc"],
-                    physical_description=char_data["physical_description"],
-                    personality=char_data["personality"],
+                    name=char_data.get("name", "Unknown"),
+                    role=char_data.get("role", "supporting"),
+                    character_arc=char_data.get("character_arc", ""),
+                    physical_description=char_data.get("physical_description", ""),
+                    personality=char_data.get("personality", ""),
                     archetypes=char_data.get("archetypes", []),
-                    want=char_data["want"],
-                    need=char_data["need"],
-                    lie=char_data["lie"],
-                    ghost=char_data["ghost"],
+                    want=char_data.get("want", ""),
+                    need=char_data.get("need", ""),
+                    lie=char_data.get("lie", ""),
+                    ghost=char_data.get("ghost", ""),
                 )
 
                 # Insert character

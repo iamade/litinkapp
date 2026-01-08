@@ -27,6 +27,7 @@ class SubscriptionManager:
     TIER_LIMITS = {
         SubscriptionTier.FREE: {
             "videos_per_month": 2,
+            "images_per_month": 50,  # For testing character images
             "books_upload_limit": 3,
             "video_books_limit": 1,
             "chapters_per_book": 2,
@@ -334,26 +335,29 @@ class SubscriptionManager:
         usage_logs = result.all()
 
         usage_count = len(usage_logs)
-        limit_count = limits.get("videos_per_month", 0)
+
+        # Use correct limit key based on resource type
+        limit_key = f"{resource_type}s_per_month"  # e.g., "videos_per_month", "images_per_month"
+        limit_count = limits.get(limit_key, limits.get("videos_per_month", 0))
 
         is_unlimited = limit_count == "unlimited"
         can_generate = True
-        videos_remaining = "unlimited"
+        remaining = "unlimited"
 
         if not is_unlimited:
             can_generate = usage_count < limit_count
-            videos_remaining = max(0, limit_count - usage_count)
+            remaining = max(0, limit_count - usage_count)
 
         return {
             "tier": tier.value,
             "limits": limits,
             "current_usage": {
-                "videos": usage_count,
+                resource_type: usage_count,
                 "period_start": current_period_start.isoformat(),
                 "period_end": (current_period_start + timedelta(days=30)).isoformat(),
             },
             "can_generate": can_generate,
-            "videos_remaining": videos_remaining,
+            f"{resource_type}s_remaining": remaining,
         }
 
     async def create_checkout_session(
