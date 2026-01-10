@@ -1,15 +1,22 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional, ClassVar, Dict, Literal
 import os
+from pathlib import Path
 import json
 from pydantic import field_validator
+
+# Calculate absolute path to .env.local from this file's location
+# config.py is in backend/app/core/, .env.local is in backend/.envs/
+_CONFIG_DIR = Path(__file__).parent  # backend/app/core/
+_BACKEND_ROOT = _CONFIG_DIR.parent.parent  # backend/
+_ENV_FILE = _BACKEND_ROOT / ".envs" / ".env.local"
 
 
 class Settings(BaseSettings):
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
 
     model_config = SettingsConfigDict(
-        env_file="../../.envs/.env.local", env_ignore_empty=True, extra="ignore"
+        env_file=str(_ENV_FILE), env_ignore_empty=True, extra="ignore"
     )
 
     # Basic settings
@@ -196,7 +203,7 @@ class Settings(BaseSettings):
 
     # ModelsLab
     MODELSLAB_API_KEY: str = os.getenv("MODELSLAB_API_KEY", "")
-    # MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
+    
     MODELSLAB_BASE_URL: str = "https://modelslab.com/api/v7"  # Updated to v7
 
     # Gemini

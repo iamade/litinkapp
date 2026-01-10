@@ -24,34 +24,55 @@ class ModelsLabV7ImageService:
         self.image_endpoint = f"{self.base_url}/images/text-to-image"
         self.fetch_endpoint = f"{self.base_url}/images/fetch"
 
-        # ✅ Available models for V7
-        self.image_models = {
-            "gen4": "gen4_image",
-            "runway": "runway_image",
-            "cinematic": "gen4_image",
-            "realistic": "gen4_image",
-            "artistic": "gen4_image",
+        # ✅ Models that use width/height parameters
+        self.width_height_models = {"seedream-t2i"}
+
+        # ✅ Models that use aspect_ratio parameter
+        self.aspect_ratio_models = {
+            "seedream-4",
+            "imagen-4",
+            "seedream-4.5",
+            "imagen-4.0-ultra",
+            "nano-banana-pro",
+            "qwen-image-2512",
+            "gpt-image-1.5",
+            "nano-banana",
         }
 
-        # Tier-based model mapping now uses centralized configuration
-        # Kept for backward compatibility but prefer using get_model_config()
+        # ✅ Models that only need prompt + model_id (no size parameters)
+        self.minimal_models = {"nano-banana-t2i"}
+
+        # ✅ Available models for V7
+        self.image_models = {
+            "seedream-t2i": "seedream-t2i",
+            "seedream-4": "seedream-4",
+            "imagen-4": "imagen-4",
+            "nano-banana-t2i": "nano-banana-t2i",
+            "seedream-4.5": "seedream-4.5",
+            "imagen-4.0-ultra": "imagen-4.0-ultra",
+            "nano-banana-pro": "nano-banana-pro",
+            "qwen-image-2512": "qwen-image-2512",
+            "gpt-image-1.5": "gpt-image-1.5",
+            "nano-banana": "nano-banana",
+        }
+
+        # ✅ Updated tier-based model mapping matching model_config.py
         self.tier_model_mapping = {
-            "free": "gen4_image",
-            "basic": "gen4_image",
-            "standard": "runway_image",
-            "pro": "runway_image",
-            "premium": "runway_image",
-            "professional": "runway_image",
-            "enterprise": "runway_image",
+            "free": "seedream-t2i",
+            "basic": "seedream-4",
+            "standard": "imagen-4",
+            "premium": "nano-banana-t2i",
+            "professional": "seedream-4.5",
+            "enterprise": "qwen-image-2512",
         }
 
         logger.info(
-            f"[MODELSLAB V7 IMAGE] Initialized with image models: {self.image_models}"
+            f"[MODELSLAB V7 IMAGE] Initialized with models: {list(self.image_models.keys())}"
         )
         logger.info(
             f"[MODELSLAB V7 IMAGE] Tier model mapping: {self.tier_model_mapping}"
         )
-        logger.info(f"[MODELSLAB V7 IMAGE] Default model_id: gen4_image")
+        logger.info(f"[MODELSLAB V7 IMAGE] Default model_id: seedream-t2i")
 
         # ✅ Aspect ratio presets
         self.aspect_ratios = {
@@ -74,7 +95,7 @@ class ModelsLabV7ImageService:
         model_id: Optional[str] = None,
         user_tier: Optional[str] = None,
         wait_for_completion: bool = True,
-        max_wait_time: int = 60,
+        max_wait_time: int = 1200,  # Increased to 20 minutes
     ) -> Dict[str, Any]:
         """Generate image using ModelsLab V7 API with automatic fallback"""
 
@@ -100,7 +121,7 @@ class ModelsLabV7ImageService:
             )
         else:
             if model_id is None:
-                model_id = "gen4_image"
+                model_id = "seedream-t2i"  # Default to FREE tier model
 
             return await self._execute_generation(
                 prompt=prompt,
@@ -110,6 +131,64 @@ class ModelsLabV7ImageService:
                 max_wait_time=max_wait_time,
             )
 
+    def _aspect_ratio_to_dimensions(self, aspect_ratio: str) -> tuple[str, str]:
+        """Convert aspect ratio string to width and height dimensions.
+
+        The ModelsLab API expects width and height as string parameters,
+        not aspect_ratio. This method converts common aspect ratios to
+        appropriate dimensions.
+        """
+        # Mapping of aspect ratios to (width, height) in pixels
+        dimension_map = {
+            "1:1": ("1024", "1024"),
+            "3:4": ("768", "1024"),  # Portrait
+            "4:3": ("1024", "768"),  # Landscape
+            "16:9": ("1024", "576"),  # Widescreen
+            "9:16": ("576", "1024"),  # Vertical/Mobile
+            "21:9": ("1024", "439"),  # Ultra-wide
+            "1920:1080": ("1920", "1080"),  # Full HD Landscape
+            "1080:1920": ("1080", "1920"),  # Full HD Portrait
+            "1080:1080": ("1080", "1080"),  # Instagram Square
+        }
+
+        # Check if it's already in the map
+        if aspect_ratio in dimension_map:
+            return dimension_map[aspect_ratio]
+
+        # Try to parse custom aspect ratio (e.g., "16:9")
+        try:
+            if ":" in aspect_ratio:
+                parts = aspect_ratio.split(":")
+                if len(parts) == 2:
+                    w_ratio = float(parts[0])
+                    h_ratio = float(parts[1])
+
+                    # Calculate dimensions maintaining max 1024 on largest side
+                    if w_ratio >= h_ratio:
+                        width = 1024
+                        height = int(1024 * (h_ratio / w_ratio))
+                    else:
+                        height = 1024
+                        width = int(1024 * (w_ratio / h_ratio))
+
+                    return (str(width), str(height))
+        except (ValueError, ZeroDivisionError):
+            pass
+
+        # Default to square if parsing fails
+        logger.warning(
+            f"[MODELSLAB V7 IMAGE] Unknown aspect ratio '{aspect_ratio}', defaulting to 1024x1024"
+        )
+        return ("1024", "1024")
+
+    def _uses_width_height(self, model_id: str) -> bool:
+        """Check if the model uses width/height parameters"""
+        return model_id in self.width_height_models
+
+    def _uses_aspect_ratio(self, model_id: str) -> bool:
+        """Check if the model uses aspect_ratio parameter"""
+        return model_id in self.aspect_ratio_models
+
     async def _execute_generation(
         self,
         prompt: str,
@@ -118,20 +197,47 @@ class ModelsLabV7ImageService:
         wait_for_completion: bool = True,
         max_wait_time: int = 60,
     ) -> Dict[str, Any]:
-        """Execute the actual image generation with specified model"""
+        """Execute the actual image generation with specified model using V7 API"""
 
         try:
-            payload = {
-                "prompt": prompt,
-                "aspect_ratio": aspect_ratio,
-                "model_id": model_id,
-                "key": self.api_key,
-            }
+            # Build payload based on model type
+            if self._uses_width_height(model_id):
+                # Models like seedream-t2i use width/height parameters
+                width, height = self._aspect_ratio_to_dimensions(aspect_ratio)
+                payload = {
+                    "prompt": prompt,
+                    "model_id": model_id,
+                    "width": width,  # String format
+                    "height": height,  # String format
+                    "key": self.api_key,
+                }
+                logger.info(
+                    f"[MODELSLAB V7 IMAGE] Using width/height: {width}x{height}"
+                )
+            elif model_id in self.minimal_models:
+                # Models like nano-banana-t2i only need prompt + model_id
+                payload = {
+                    "prompt": prompt,
+                    "model_id": model_id,
+                    "key": self.api_key,
+                }
+                logger.info(
+                    f"[MODELSLAB V7 IMAGE] Using minimal params (prompt + model_id only)"
+                )
+            else:
+                # Models like seedream-4, imagen-4 use aspect_ratio parameter
+                payload = {
+                    "prompt": prompt,
+                    "model_id": model_id,
+                    "aspect_ratio": aspect_ratio,
+                    "key": self.api_key,
+                }
+                logger.info(f"[MODELSLAB V7 IMAGE] Using aspect_ratio: {aspect_ratio}")
 
             logger.info(f"[MODELSLAB V7 IMAGE] Generating image with model: {model_id}")
-            logger.info(f"[MODELSLAB V7 IMAGE] Aspect ratio: {aspect_ratio}")
             logger.info(f"[MODELSLAB V7 IMAGE] Prompt: {prompt[:100]}...")
-            logger.info(f"[DEBUG] API payload model_id: {payload.get('model_id')}")
+            logger.info(f"[DEBUG] API endpoint: {self.image_endpoint}")
+            logger.info(f"[DEBUG] API payload: {payload}")
 
             async with aiohttp.ClientSession() as session:
                 # Submit generation request with extended timeout
@@ -167,7 +273,7 @@ class ModelsLabV7ImageService:
 
                         if fetch_url:
                             completed_result = await self._wait_for_completion(
-                                session, fetch_url, request_id, max_wait_time
+                                session, fetch_url, request_id, max_wait_time, model_id
                             )
                             return completed_result
                         else:
@@ -176,7 +282,7 @@ class ModelsLabV7ImageService:
                             )
 
                     # Handle immediate response (if synchronous)
-                    return self._process_image_response(result)
+                    return self._process_image_response(result, model_id)
 
         except asyncio.TimeoutError as e:
             error_msg = f"Request timeout after 60s waiting for ModelsLab API response"
@@ -192,7 +298,8 @@ class ModelsLabV7ImageService:
         session: aiohttp.ClientSession,
         fetch_url: str,
         request_id: str,
-        max_wait_time: int = 60,
+        max_wait_time: int = 1200,  # Increased to 20 minutes
+        model_id: str = "unknown",
     ) -> Dict[str, Any]:
         """Wait for async image generation to complete"""
 
@@ -222,7 +329,7 @@ class ModelsLabV7ImageService:
                             logger.info(
                                 f"[MODELSLAB V7 IMAGE] ✅ Generation completed: {request_id}"
                             )
-                            return self._process_image_response(result)
+                            return self._process_image_response(result, model_id)
                         elif result.get("status") == "processing":
                             logger.info(
                                 f"[MODELSLAB V7 IMAGE] ⏳ Still processing: {request_id}"
@@ -292,7 +399,7 @@ class ModelsLabV7ImageService:
                 model_id=None,
                 user_tier=user_tier,
                 wait_for_completion=True,
-                max_wait_time=120,
+                max_wait_time=1200,  # Increased to 20 minutes
             )
 
             # Add character metadata
@@ -346,7 +453,7 @@ class ModelsLabV7ImageService:
                 model_id=None,
                 user_tier=user_tier,
                 wait_for_completion=True,
-                max_wait_time=120,
+                max_wait_time=1200,  # Increased to 20 minutes
             )
 
             # Add scene metadata
@@ -578,7 +685,9 @@ class ModelsLabV7ImageService:
         """Get aspect ratio string from preset name"""
         return self.aspect_ratios.get(ratio_name, ratio_name)
 
-    def _process_image_response(self, response: Dict[str, Any]) -> Dict[str, Any]:
+    def _process_image_response(
+        self, response: Dict[str, Any], model_id: str = "unknown"
+    ) -> Dict[str, Any]:
         """Process and standardize image API response"""
 
         try:
@@ -598,7 +707,7 @@ class ModelsLabV7ImageService:
                         "image_url": image_url,
                         "meta": meta,
                         "generation_time": response.get("generation_time", 0),
-                        "model_used": response.get("model_id", "gen4_image"),
+                        "model_used": model_id,  # Use the model we sent, not API response
                     }
                 else:
                     raise Exception("No image URLs in successful response")
@@ -771,11 +880,11 @@ class ModelsLabV7ImageService:
 
                         if fetch_url:
                             completed_result = await self._wait_for_completion(
-                                session, fetch_url, request_id, max_wait_time
+                                session, fetch_url, request_id, max_wait_time, model_id
                             )
                             return completed_result
 
-                    return self._process_image_response(result)
+                    return self._process_image_response(result, model_id)
 
         except Exception as e:
             logger.error(f"[NANO BANANA ERROR]: {str(e)}")

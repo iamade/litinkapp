@@ -725,11 +725,22 @@ class StandaloneImageService:
             record.generation_time_seconds = generation_result.get("generation_time")
             record.meta = merged_metadata
 
-            # Extract dimensions if available
+            # Extract dimensions if available - convert to int for database
             if generation_result.get("meta"):
                 meta = generation_result["meta"]
-                record.width = meta.get("width")
-                record.height = meta.get("height")
+                # Convert string dimensions to integers for database
+                width_val = meta.get("width")
+                height_val = meta.get("height")
+                if width_val is not None:
+                    try:
+                        record.width = int(width_val)
+                    except (ValueError, TypeError):
+                        record.width = None
+                if height_val is not None:
+                    try:
+                        record.height = int(height_val)
+                    except (ValueError, TypeError):
+                        record.height = None
                 record.file_size_bytes = meta.get("file_size_bytes")
 
             record.updated_at = datetime.now()

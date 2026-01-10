@@ -26,8 +26,8 @@ celery_app.conf.update(
     result_backend_max_retires=10,
     result_expires=3600,  # 1 hour
     # Task execution limits
-    task_time_limit=5 * 60,  # 5 minutes hard limit
-    task_soft_time_limit=5 * 60,  # 5 minutes soft limit
+    task_time_limit=25 * 60,  # 25 minutes hard limit (supports 20min image gen)
+    task_soft_time_limit=25 * 60,  # 25 minutes soft limit
     # Reliability settings
     task_acks_late=True,  # Acknowledge tasks after completion
     task_reject_on_worker_lost=True,  # Reject tasks if worker crashes
@@ -41,11 +41,22 @@ celery_app.conf.update(
     # Queue settings
     task_default_queue="litink_tasks",
     task_create_missing_queues=True,
+    # Explicit task routes to ensure correct queue
+    task_routes={
+        "app.tasks.image_tasks.*": {"queue": "litink_tasks"},
+        "app.tasks.video_tasks.*": {"queue": "litink_tasks"},
+        "app.tasks.audio_tasks.*": {"queue": "litink_tasks"},
+        "app.tasks.ai_tasks.*": {"queue": "litink_tasks"},
+        "app.tasks.blockchain_tasks.*": {"queue": "litink_tasks"},
+        "app.tasks.merge_tasks.*": {"queue": "litink_tasks"},
+        "app.tasks.lipsync_tasks.*": {"queue": "litink_tasks"},
+        "send_email_task": {"queue": "litink_tasks"},
+    },
     # Timezone settings (from original config)
     timezone="UTC",
     enable_utc=True,
-    # # Connection retry
-    # broker_connection_retry_on_startup=True,
+    # Connection retry on startup
+    broker_connection_retry_on_startup=True,
     # Logging format
     worker_log_format="[%(asctime)s:%(levelname)s/%(processName)s][%(task_name)s(%(task_id)s)] %(message)s",
 )
@@ -60,8 +71,7 @@ celery_app.autodiscover_tasks(
         "app.tasks.video_tasks",
         "app.tasks.merge_tasks",
         "app.tasks.lipsync_tasks",
-        "app.core.emails",  # Added from your new config
+        "app.core.emails",
     ],
-    related_name="tasks",
     force=True,
 )

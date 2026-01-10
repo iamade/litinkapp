@@ -1,9 +1,8 @@
 from typing import Dict, Any, List, Optional
 import uuid
 import json
-import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import get_session
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -11,6 +10,7 @@ from sqlmodel import select, update, delete
 from app.core.services.openrouter import OpenRouterService, ModelTier
 from app.api.services.subscription import SubscriptionManager
 from app.core.services.modelslab_v7_image import ModelsLabV7ImageService
+from app.core.services.embeddings import EmbeddingsService
 from app.plots.models import Character, PlotOverview, CharacterArchetype
 from app.books.models import Book
 from app.videos.models import Script, ImageGeneration
@@ -21,8 +21,9 @@ from app.plots.schemas import (
     CharacterArchetypeResponse,
     CharacterArchetypeMatch,
 )
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CharacterServiceError(Exception):
@@ -68,6 +69,7 @@ class CharacterService:
         self.openrouter = OpenRouterService()
         self.subscription_manager = SubscriptionManager(self.session)
         self.image_service = ModelsLabV7ImageService()
+        self.embeddings_service = EmbeddingsService(self.session)
 
         # Default archetypes for initial setup
         self._default_archetypes = self._get_default_archetypes()
@@ -97,8 +99,10 @@ class CharacterService:
                 f"[CharacterService] Using model tier: {model_tier.value} for user tier: {user_tier.value}"
             )
 
-            # Get book context
-            book_context = await self._get_book_context_for_character(book_id)
+            # Get book context (uses RAG if available)
+            book_context = await self._get_book_context_for_character(
+                book_id=book_id, character_name=character_name
+            )
             if not book_context:
                 raise CharacterServiceError("Unable to retrieve book context")
 
@@ -370,18 +374,36 @@ class CharacterService:
 
             # Queue the async task
             from app.tasks.image_tasks import generate_character_image_task
+            from app.tasks.celery_app import celery_app
 
-            task = generate_character_image_task.delay(
-                character_name=character.name,
-                character_description=character_description,
-                user_id=str(user_id),
-                character_id=str(character_id),
-                style=style,
-                aspect_ratio=aspect_ratio,
-                custom_prompt=custom_prompt,
-                record_id=record_id,
-                user_tier=user_tier,
+            # Debug: Log Celery configuration
+            logger.info(
+                f"[CharacterService] Celery broker URL: {celery_app.conf.broker_url}"
             )
+            logger.info(
+                f"[CharacterService] Celery default queue: {celery_app.conf.task_default_queue}"
+            )
+
+            try:
+                task = generate_character_image_task.delay(
+                    character_name=character.name,
+                    character_description=character_description,
+                    user_id=str(user_id),
+                    character_id=str(character_id),
+                    style=style,
+                    aspect_ratio=aspect_ratio,
+                    custom_prompt=custom_prompt,
+                    record_id=record_id,
+                    user_tier=user_tier,
+                )
+                logger.info(
+                    f"[CharacterService] Task dispatched successfully! Task ID: {task.id}"
+                )
+            except Exception as dispatch_error:
+                logger.error(
+                    f"[CharacterService] FAILED to dispatch task: {dispatch_error}"
+                )
+                raise
 
             # Record usage immediately (image generation is queued)
             try:
@@ -762,7 +784,10 @@ class CharacterService:
             if not plot_overview:
                 raise PermissionDeniedError("Plot overview not found or access denied")
 
-            book_id = plot_overview.book_id
+            # Convert asyncpg UUID to Python UUID for proper serialization
+            book_id = (
+                uuid.UUID(str(plot_overview.book_id)) if plot_overview.book_id else None
+            )
 
             # Create character record
             character = Character(
@@ -793,7 +818,30 @@ class CharacterService:
             await self.session.commit()
             await self.session.refresh(character)
 
-            return CharacterResponse.model_validate(character)
+            # Manually construct response to handle asyncpg UUID conversion
+            return CharacterResponse(
+                id=str(character.id),
+                plot_overview_id=str(character.plot_overview_id),
+                book_id=str(character.book_id) if character.book_id else None,
+                user_id=str(character.user_id),
+                name=character.name,
+                role=character.role or "",
+                character_arc=character.character_arc or "",
+                physical_description=character.physical_description or "",
+                personality=character.personality or "",
+                archetypes=character.archetypes or [],
+                want=character.want or "",
+                need=character.need or "",
+                lie=character.lie or "",
+                ghost=character.ghost or "",
+                image_url=character.image_url,
+                image_generation_prompt=character.image_generation_prompt,
+                image_metadata=character.image_metadata or {},
+                generation_method=character.generation_method or "manual",
+                model_used=character.model_used,
+                created_at=character.created_at,
+                updated_at=character.updated_at,
+            )
 
         except PermissionDeniedError:
             raise
@@ -1267,26 +1315,76 @@ Return a JSON array of matches sorted by confidence:
         ]
 
     async def _get_book_context_for_character(
-        self, book_id: str
+        self, book_id: str, character_name: str = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get book context including chapters for character detail generation.
+        Uses RAG with vector embeddings for semantic search when available,
+        falls back to simple chapter retrieval otherwise.
         """
         try:
-            # Get book information
-            book_stmt = select(Book).where(Book.id == book_id)
+            # Convert book_id to UUID if it's a string
+            book_uuid = uuid.UUID(book_id) if isinstance(book_id, str) else book_id
+
+            logger.info(f"[CharacterService] Looking up book with ID: {book_uuid}")
+
+            # Get book information - first try by book.id
+            book_stmt = select(Book).where(Book.id == book_uuid)
             book_result = await self.session.exec(book_stmt)
             book = book_result.first()
 
+            # If not found by book.id, try by project_id (Creator mode)
             if not book:
+                logger.info(
+                    f"[CharacterService] Book not found by ID, trying project_id: {book_uuid}"
+                )
+                book_stmt = select(Book).where(Book.project_id == book_uuid)
+                book_result = await self.session.exec(book_stmt)
+                book = book_result.first()
+
+            if not book:
+                logger.warning(
+                    f"[CharacterService] Book not found with ID or project_id: {book_uuid}"
+                )
                 return None
 
-            # Get chapter summaries (limit to first 5 chapters for context)
+            book_info = {
+                "id": str(book.id),
+                "title": book.title,
+                "author": book.author_name or "",
+                "genre": getattr(book, "genre", "") or "",
+                "description": book.description or "",
+                "book_type": book.book_type or "fiction",
+            }
+
+            # Try RAG-based semantic search first if character name provided
+            if character_name:
+                try:
+                    rag_context = await self._get_rag_context_for_character(
+                        book_id=book_id, character_name=character_name
+                    )
+                    if rag_context:
+                        logger.info(
+                            f"[CharacterService] Using RAG context for character: {character_name} "
+                            f"(found {len(rag_context)} relevant chunks)"
+                        )
+                        return {
+                            "book": book_info,
+                            "chapters_summary": rag_context,
+                            "total_chapters": -1,  # Indicates RAG mode
+                            "context_source": "rag",
+                        }
+                except Exception as rag_error:
+                    logger.warning(
+                        f"[CharacterService] RAG search failed, falling back to simple method: {rag_error}"
+                    )
+
+            # Fallback: Get chapter summaries (limit to first 5 chapters for context)
             from app.books.models import Chapter
 
             chapters_stmt = (
                 select(Chapter)
-                .where(Chapter.book_id == book_id)
+                .where(Chapter.book_id == book_uuid)
                 .order_by(Chapter.chapter_number)
                 .limit(5)
             )
@@ -1301,21 +1399,84 @@ Return a JSON array of matches sorted by confidence:
                     f"Chapter {chapter.chapter_number}: {chapter.title}\n{content_preview}"
                 )
 
+            logger.info(
+                f"[CharacterService] Using simple context for character (no embeddings or RAG failed)"
+            )
+
             return {
-                "book": {
-                    "id": str(book.id),
-                    "title": book.title,
-                    "author": book.author or "",
-                    "genre": book.genre or "",
-                    "description": book.description or "",
-                    "book_type": book.book_type or "fiction",
-                },
+                "book": book_info,
                 "chapters_summary": "\n\n".join(context_parts),
                 "total_chapters": len(chapters),
+                "context_source": "simple",
             }
 
         except Exception as e:
             logger.error(f"[CharacterService] Error getting book context: {str(e)}")
+            return None
+
+    async def _get_rag_context_for_character(
+        self, book_id: str, character_name: str
+    ) -> Optional[str]:
+        """
+        Use vector embeddings to semantically search for content mentioning the character.
+        Returns combined context from the most relevant text chunks.
+        """
+        try:
+            # Create search query that focuses on finding character mentions
+            search_query = (
+                f"{character_name} character description personality appearance role"
+            )
+
+            # Use EmbeddingsService to search similar chapters
+            similar_chunks = await self.embeddings_service.search_similar_chapters(
+                query=search_query,
+                book_id=uuid.UUID(book_id),
+                limit=10,  # Get top 10 most relevant chunks
+                threshold=0.5,  # Lower threshold to get more results
+            )
+
+            if not similar_chunks:
+                logger.info(
+                    f"[CharacterService] No embeddings found for book {book_id}, "
+                    "will use fallback method"
+                )
+                return None
+
+            # Build context from relevant chunks
+            context_parts = []
+            seen_chunks = set()  # Avoid duplicate content
+
+            for chunk in similar_chunks:
+                content = chunk.get("content_chunk", "")
+                # Deduplicate by first 100 chars
+                chunk_signature = content[:100] if content else ""
+                if chunk_signature in seen_chunks:
+                    continue
+                seen_chunks.add(chunk_signature)
+
+                chapter_info = chunk.get("chapter", {})
+                chapter_title = chapter_info.get("title", "Unknown Chapter")
+                chapter_number = chapter_info.get("chapter_number", "?")
+
+                context_parts.append(
+                    f"[From Chapter {chapter_number}: {chapter_title}]\n{content}"
+                )
+
+            if not context_parts:
+                return None
+
+            # Combine all relevant context
+            combined_context = "\n\n---\n\n".join(context_parts)
+
+            logger.info(
+                f"[CharacterService] RAG found {len(context_parts)} relevant chunks "
+                f"for character '{character_name}'"
+            )
+
+            return combined_context
+
+        except Exception as e:
+            logger.error(f"[CharacterService] RAG context error: {str(e)}")
             return None
 
     def _build_character_detail_prompt(

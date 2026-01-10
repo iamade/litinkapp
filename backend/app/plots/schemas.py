@@ -101,13 +101,17 @@ class CharacterBase(BaseModel):
 class CharacterResponse(CharacterBase):
     id: Union[str, uuid.UUID] = Field(..., description="Unique identifier")
     plot_overview_id: Union[str, uuid.UUID]
-    book_id: Union[str, uuid.UUID]
+    book_id: Optional[Union[str, uuid.UUID]] = None
     user_id: Union[str, uuid.UUID]
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+        # Handle asyncpg UUID serialization
+        json_encoders = {
+            uuid.UUID: lambda v: str(v),
+        }
 
 
 class PlotOverviewResponse(PlotOverviewBase):

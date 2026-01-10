@@ -54,6 +54,10 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
+  // Regenerate image confirmation modal state
+  const [showRegenerateModal, setShowRegenerateModal] = useState(false);
+  const [pendingRegenerateCharacterId, setPendingRegenerateCharacterId] = useState<string | null>(null);
+
   // Create character modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [isCreatingCharacter, setIsCreatingCharacter] = useState(false);
@@ -136,13 +140,10 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
 
       // Check if physical description changed significantly
       const character = plotOverview?.characters.find((c: any) => c.id === characterId);
-      if (character && updates.physical_description && updates.physical_description !== character.physical_description) {
-        const shouldRegenerate = window.confirm(
-          "Character description changed. Would you like to regenerate the character image?"
-        );
-        if (shouldRegenerate && character.image_url) {
-          await handleRegenerateImage(characterId);
-        }
+      if (character && updates.physical_description && updates.physical_description !== character.physical_description && character.image_url) {
+        // Show regenerate modal instead of window.confirm
+        setPendingRegenerateCharacterId(characterId);
+        setShowRegenerateModal(true);
       }
 
       // Reload plot to get updated data
@@ -152,6 +153,19 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       toast.error("Failed to update character");
       throw error;
     }
+  };
+
+  const handleConfirmRegenerate = async () => {
+    if (pendingRegenerateCharacterId) {
+      await handleRegenerateImage(pendingRegenerateCharacterId);
+    }
+    setShowRegenerateModal(false);
+    setPendingRegenerateCharacterId(null);
+  };
+
+  const handleCancelRegenerate = () => {
+    setShowRegenerateModal(false);
+    setPendingRegenerateCharacterId(null);
   };
 
   const handleGenerateImage = async (characterId: string) => {
@@ -166,8 +180,10 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
         // Start polling for status
         pollCharacterImageStatus(characterId);
       }
-    } catch (error) {
-      toast.error("Failed to queue character image generation");
+    } catch (error: any) {
+      // Extract the actual error message from the API response
+      const errorMessage = error?.message || "Failed to queue character image generation";
+      toast.error(errorMessage);
       setGeneratingImages(prev => {
         const newSet = new Set(prev);
         newSet.delete(characterId);
@@ -330,6 +346,36 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       toast.error("Failed to delete characters");
     } finally {
       setIsBulkDeleting(false);
+    }
+  };
+
+  // Generate images for selected characters
+  const handleGenerateSelectedImages = async () => {
+    if (selectedCharacters.size === 0) return;
+
+    const selectedIds = Array.from(selectedCharacters);
+    const charactersToGenerate = plotOverview?.characters?.filter(
+      (char: Character) => selectedIds.includes(char.id) && !char.image_url
+    ) || [];
+
+    if (charactersToGenerate.length === 0) {
+      toast.error("All selected characters already have images");
+      return;
+    }
+
+    toast.success(`Generating images for ${charactersToGenerate.length} selected character${charactersToGenerate.length !== 1 ? 's' : ''}...`);
+
+    // Generate images in parallel
+    const promises = charactersToGenerate.map((character: Character) =>
+      handleGenerateImage(character.id)
+    );
+
+    try {
+      await Promise.allSettled(promises);
+      toast.success("Image generation completed for selected characters");
+      setSelectedCharacters(new Set()); // Clear selection after generation
+    } catch (error) {
+      toast.error("Some images failed to generate");
     }
   };
 
@@ -614,13 +660,23 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
           </div>
           <div className="flex items-center space-x-2">
             {selectedCharacters.size > 0 && (
-              <button
-                onClick={() => setShowBulkDeleteModal(true)}
-                className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>Delete Selected ({selectedCharacters.size})</span>
-              </button>
+              <>
+                <button
+                  onClick={handleGenerateSelectedImages}
+                  disabled={generatingImages.size > 0}
+                  className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 text-sm"
+                >
+                  <Wand2 className="w-4 h-4" />
+                  <span>Generate Selected ({selectedCharacters.size})</span>
+                </button>
+                <button
+                  onClick={() => setShowBulkDeleteModal(true)}
+                  className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>Delete Selected ({selectedCharacters.size})</span>
+                </button>
+              </>
             )}
             {hasCharacters && (
               <button
@@ -773,13 +829,13 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       {/* Create Character Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-gray-900">Create New Character</h3>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Create New Character</h3>
               <button
                 onClick={() => setShowCreateModal(false)}
                 disabled={isCreatingCharacter}
-                className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl font-bold"
               >
                 ×
               </button>
@@ -787,7 +843,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Character Name *
                 </label>
                 <div className="flex gap-2">
@@ -795,7 +851,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                     type="text"
                     value={newCharacter.name}
                     onChange={(e) => setNewCharacter(prev => ({ ...prev, name: e.target.value }))}
-                    className="flex-1 px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Enter character name"
                     disabled={isCreatingCharacter || isGeneratingWithAI}
                   />
@@ -818,19 +874,19 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                     )}
                   </button>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Enter a character name, then click AI Assist to generate details from the book
                 </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Role
                 </label>
                 <select
                   value={newCharacter.role}
                   onChange={(e) => setNewCharacter(prev => ({ ...prev, role: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   disabled={isCreatingCharacter || isGeneratingWithAI}
                 >
                   <option value="">Select role</option>
@@ -843,13 +899,13 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Physical Description
                 </label>
                 <textarea
                   value={newCharacter.physical_description}
                   onChange={(e) => setNewCharacter(prev => ({ ...prev, physical_description: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={3}
                   placeholder="Describe the character's appearance"
                   disabled={isCreatingCharacter || isGeneratingWithAI}
@@ -857,13 +913,13 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Personality
                 </label>
                 <textarea
                   value={newCharacter.personality}
                   onChange={(e) => setNewCharacter(prev => ({ ...prev, personality: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={3}
                   placeholder="Describe the character's personality traits"
                   disabled={isCreatingCharacter || isGeneratingWithAI}
@@ -871,13 +927,13 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Character Arc
                 </label>
                 <textarea
                   value={newCharacter.character_arc}
                   onChange={(e) => setNewCharacter(prev => ({ ...prev, character_arc: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   rows={2}
                   placeholder="How does this character change throughout the story?"
                   disabled={isCreatingCharacter || isGeneratingWithAI}
@@ -886,27 +942,27 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Want
                   </label>
                   <input
                     type="text"
                     value={newCharacter.want}
                     onChange={(e) => setNewCharacter(prev => ({ ...prev, want: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="What they want"
                     disabled={isCreatingCharacter || isGeneratingWithAI}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Need
                   </label>
                   <input
                     type="text"
                     value={newCharacter.need}
                     onChange={(e) => setNewCharacter(prev => ({ ...prev, need: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="What they need"
                     disabled={isCreatingCharacter || isGeneratingWithAI}
                   />
@@ -915,27 +971,27 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Lie They Believe
                   </label>
                   <input
                     type="text"
                     value={newCharacter.lie}
                     onChange={(e) => setNewCharacter(prev => ({ ...prev, lie: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Their false belief"
                     disabled={isCreatingCharacter || isGeneratingWithAI}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Ghost (Past Trauma)
                   </label>
                   <input
                     type="text"
                     value={newCharacter.ghost}
                     onChange={(e) => setNewCharacter(prev => ({ ...prev, ghost: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="Their past trauma"
                     disabled={isCreatingCharacter || isGeneratingWithAI}
                   />
@@ -947,7 +1003,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
               <button
                 onClick={() => setShowCreateModal(false)}
                 disabled={isCreatingCharacter || isGeneratingWithAI}
-                className="flex-1 px-4 py-3 bg-gray-200 text-gray-700 rounded-xl font-medium hover:bg-gray-300 transition-all disabled:opacity-50"
+                className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-all disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -999,6 +1055,39 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                 className="flex-1 px-4 py-3 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all disabled:opacity-50"
               >
                 {isBulkDeleting ? "Deleting..." : `Yes, Delete ${selectedCharacters.size}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Regenerate Image Confirmation Modal */}
+      {showRegenerateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center">
+                <Wand2 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Regenerate Image?</h3>
+            </div>
+
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
+              Character description changed. Would you like to regenerate the character image to match the new description?
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancelRegenerate}
+                className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+              >
+                No, Keep Current
+              </button>
+              <button
+                onClick={handleConfirmRegenerate}
+                className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
+              >
+                Yes, Regenerate
               </button>
             </div>
           </div>

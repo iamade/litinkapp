@@ -12,7 +12,11 @@ import {
   Loader2,
   Eye,
   Plus,
-  Wand2
+  Wand2,
+  Edit2,
+  X,
+  UserPlus,
+  Check
 } from 'lucide-react';
 import { userService } from '../../services/userService';
 import { Tables } from '../../types/supabase';
@@ -53,7 +57,7 @@ interface ImagesPanelProps {
   chapterId: string;
   chapterTitle: string;
   selectedScript: unknown;
-  plotOverview: { characters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string }> } | null;
+  plotOverview: { characters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string; image_url?: string }> } | null;
   onRefreshPlotOverview?: () => void | Promise<void>;
 }
 
@@ -87,6 +91,15 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     includeBackground: true,
     lightingMood: 'natural'
   });
+
+  // Character management state
+  const [excludedCharacters, setExcludedCharacters] = useState<Set<string>>(new Set());
+  const [characterRenames, setCharacterRenames] = useState<Map<string, string>>(new Map());
+  const [importedFromPlot, setImportedFromPlot] = useState<string[]>([]);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingCharacter, setEditingCharacter] = useState<string | null>(null);
+  const [editInputValue, setEditInputValue] = useState('');
 
   const {
     sceneImages,
@@ -230,23 +243,25 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
   // Get characters from selected script and enrich with plot overview data
   const characters = React.useMemo(() => {
+    let baseCharacters: any[] = [];
+    
     // First priority: characters from the selected script
     if (typeof selectedScript === "object" && selectedScript !== null && "characters" in selectedScript) {
       const scriptCharacters = (selectedScript as { characters?: any[] }).characters || [];
       if (scriptCharacters.length > 0) {
         // Convert to normalized format and enrich with plot overview data
-        return scriptCharacters.map(char => {
+        baseCharacters = scriptCharacters.map((char) => {
           const charName = typeof char === 'string' ? char : char.name;
 
-          // Try to find matching character in plot overview (case-insensitive, fuzzy match)
+          // Try to find matching character in plot overview for enriched data
           const plotChar = plotOverview?.characters?.find(pc => {
-            const plotName = pc.name.toLowerCase().trim();
-            const scriptName = charName.toLowerCase().trim();
+            const plotName = pc.name.toLowerCase();
+            const scriptName = charName.toLowerCase();
 
             // Exact match
             if (plotName === scriptName) return true;
 
-            // Check if one is substring of other (e.g., "Dumbledore" matches "Albus Dumbledore")
+            // Partial match (e.g., "Harry" matches "Harry Potter")
             if (plotName.includes(scriptName) || scriptName.includes(plotName)) return true;
 
             // Check first name match (e.g., "Harry" matches "Harry Potter")
@@ -260,26 +275,127 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           // Merge script character with plot overview data if found
           if (plotChar) {
             return {
-              name: charName,
               ...plotChar,
+              originalName: charName,
               // Keep original name from script for display
               displayName: charName
             };
           }
 
           // Return basic character if not found in plot overview
-          return typeof char === 'string' ? { name: char, displayName: char } : { ...char, displayName: char.name };
+          return typeof char === 'string' 
+            ? { name: char, originalName: char, displayName: char } 
+            : { ...char, originalName: char.name, displayName: char.name };
         });
       }
     }
 
-    // Fallback: use plot overview characters
-    if (plotOverview?.characters && plotOverview.characters.length > 0) {
-      return plotOverview.characters.map(char => ({ ...char, displayName: char.name }));
+    // If no script characters, use plot overview characters
+    if (baseCharacters.length === 0 && plotOverview?.characters && plotOverview.characters.length > 0) {
+      baseCharacters = plotOverview.characters.map(char => ({ 
+        ...char, 
+        originalName: char.name,
+        displayName: char.name 
+      }));
     }
 
-    return [];
-  }, [selectedScriptId, selectedScript, plotOverview]);
+    // Add manually imported characters from Plot Overview
+    if (importedFromPlot.length > 0 && plotOverview?.characters) {
+      const importedChars = plotOverview.characters
+        .filter(pc => importedFromPlot.includes(pc.name))
+        .filter(pc => !baseCharacters.some(bc => bc.name === pc.name)) // Avoid duplicates
+        .map(char => ({
+          ...char,
+          originalName: char.name,
+          displayName: char.name,
+          importedFromPlot: true
+        }));
+      baseCharacters = [...baseCharacters, ...importedChars];
+    }
+
+    // Filter out excluded characters
+    baseCharacters = baseCharacters.filter(char => {
+      const charKey = char.originalName || char.name;
+      return !excludedCharacters.has(charKey);
+    });
+
+    // Apply renames
+    baseCharacters = baseCharacters.map(char => {
+      const charKey = char.originalName || char.name;
+      const newName = characterRenames.get(charKey);
+      if (newName) {
+        return { ...char, displayName: newName };
+      }
+      return char;
+    });
+
+    return baseCharacters;
+  }, [selectedScriptId, selectedScript, plotOverview, excludedCharacters, characterRenames, importedFromPlot]);
+
+  // Get plot overview characters that are not already in the list
+  const availableForImport = React.useMemo(() => {
+    if (!plotOverview?.characters) return [];
+    const existingNames = new Set(characters.map(c => c.name));
+    const excludedNames = excludedCharacters;
+    return plotOverview.characters.filter(pc => 
+      !existingNames.has(pc.name) && !excludedNames.has(pc.name)
+    );
+  }, [plotOverview, characters, excludedCharacters]);
+
+  // Handler: Edit/rename a character
+  const handleEditCharacter = (originalName: string, newName: string) => {
+    if (!newName.trim()) {
+      toast.error('Character name cannot be empty');
+      return;
+    }
+    setCharacterRenames(prev => {
+      const updated = new Map(prev);
+      updated.set(originalName, newName.trim());
+      return updated;
+    });
+    setShowEditModal(false);
+    setEditingCharacter(null);
+    setEditInputValue('');
+    toast.success(`Renamed "${originalName}" to "${newName}"`);
+  };
+
+  // Handler: Delete/exclude a character
+  const handleExcludeCharacter = (characterName: string) => {
+    setExcludedCharacters(prev => {
+      const updated = new Set(prev);
+      updated.add(characterName);
+      return updated;
+    });
+    toast.success(`Removed "${characterName}" from list`);
+  };
+
+  // Handler: Restore an excluded character
+  const handleRestoreCharacter = (characterName: string) => {
+    setExcludedCharacters(prev => {
+      const updated = new Set(prev);
+      updated.delete(characterName);
+      return updated;
+    });
+    toast.success(`Restored "${characterName}"`);
+  };
+
+  // Handler: Import characters from Plot Overview
+  const handleImportFromPlot = (characterNames: string[]) => {
+    setImportedFromPlot(prev => {
+      const updated = [...prev, ...characterNames.filter(n => !prev.includes(n))];
+      return updated;
+    });
+    setShowImportModal(false);
+    toast.success(`Imported ${characterNames.length} character(s) from Plot Overview`);
+  };
+
+  // Handler: Open edit modal
+  const openEditModal = (characterName: string, currentDisplayName: string) => {
+    setEditingCharacter(characterName);
+    setEditInputValue(currentDisplayName);
+    setShowEditModal(true);
+  };
+
 
   const handleGenerateAllScenes = async () => {
     if (!scenes.length) {

@@ -106,6 +106,10 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   } = useScriptSelection();
 
   const [scriptToDelete, setScriptToDelete] = useState<string | null>(null);
+  
+  // Character editing state
+  const [editingCharacterIdx, setEditingCharacterIdx] = useState<number | null>(null);
+  const [editingCharacterName, setEditingCharacterName] = useState('');
 
   const confirmDelete = () => {
     if (scriptToDelete) {
@@ -531,15 +535,89 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       {/* Characters */}
       {script.characters && script.characters.length > 0 && (
         <div>
-          <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Characters</h4>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Characters</h4>
+            <span className="text-sm text-gray-500 dark:text-gray-400">Click to edit, × to remove</span>
+          </div>
           <div className="flex flex-wrap gap-2">
             {script.characters.map((character, idx) => (
-              <span
-                key={idx}
-                className="px-3 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 rounded-full text-sm font-medium"
-              >
-                {character}
-              </span>
+              editingCharacterIdx === idx ? (
+                <div key={idx} className="flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/50 rounded-full">
+                  <input
+                    type="text"
+                    value={editingCharacterName}
+                    onChange={(e) => setEditingCharacterName(e.target.value)}
+                    className="w-32 px-2 py-0.5 text-sm rounded border border-blue-300 dark:border-blue-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (editingCharacterName.trim() && selectedScript) {
+                          const newCharacters = [...script.characters];
+                          newCharacters[idx] = editingCharacterName.trim();
+                          onUpdateScript(selectedScript.id, { characters: newCharacters });
+                        }
+                        setEditingCharacterIdx(null);
+                        setEditingCharacterName('');
+                      } else if (e.key === 'Escape') {
+                        setEditingCharacterIdx(null);
+                        setEditingCharacterName('');
+                      }
+                    }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (editingCharacterName.trim() && selectedScript) {
+                        const newCharacters = [...script.characters];
+                        newCharacters[idx] = editingCharacterName.trim();
+                        onUpdateScript(selectedScript.id, { characters: newCharacters });
+                      }
+                      setEditingCharacterIdx(null);
+                      setEditingCharacterName('');
+                    }}
+                    className="p-0.5 hover:bg-green-200 dark:hover:bg-green-800 rounded text-green-600 dark:text-green-400"
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingCharacterIdx(null);
+                      setEditingCharacterName('');
+                    }}
+                    className="p-0.5 hover:bg-red-200 dark:hover:bg-red-800 rounded text-red-600 dark:text-red-400"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ) : (
+                <span
+                  key={idx}
+                  className="group inline-flex items-center gap-1 px-3 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 rounded-full text-sm font-medium hover:bg-blue-200 dark:hover:bg-blue-900/70 cursor-pointer transition-colors"
+                >
+                  <span
+                    onClick={() => {
+                      setEditingCharacterIdx(idx);
+                      setEditingCharacterName(character);
+                    }}
+                    title="Click to edit"
+                  >
+                    {character}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (selectedScript) {
+                        const newCharacters = script.characters.filter((_, i) => i !== idx);
+                        onUpdateScript(selectedScript.id, { characters: newCharacters });
+                      }
+                    }}
+                    className="ml-1 p-0.5 opacity-0 group-hover:opacity-100 hover:bg-red-200 dark:hover:bg-red-800 rounded text-red-600 dark:text-red-400 transition-opacity"
+                    title="Remove character"
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              )
             ))}
           </div>
         </div>

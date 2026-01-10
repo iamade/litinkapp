@@ -1652,8 +1652,11 @@ Return the enhanced script.
                     need=char_data.need,
                     lie=char_data.lie,
                     ghost=char_data.ghost,
-                    generation_method="openrouter",
-                    model_used=plot_data.model_used,
+                    image_url=char_data.image_url,  # Include image URL
+                    image_generation_prompt=char_data.image_generation_prompt,
+                    image_metadata=char_data.image_metadata,
+                    generation_method=char_data.generation_method or "openrouter",
+                    model_used=char_data.model_used or plot_data.model_used,
                     created_at=char_data.created_at,
                     updated_at=char_data.updated_at,
                 )

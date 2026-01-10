@@ -91,35 +91,41 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 # ModelsLab used as primary gateway; Direct API for specific high-end models
 IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="flux-2-pro",  # Flux-2-Pro (ModelsLab V7)
-        fallback="seedream-t2i",  # Seedream (ModelsLab V7)
-        fallback2="flux-2-max",  # Flux-2-Max (ModelsLab V7)
-        # primary="hunyuan-image-3.0",  # Hunyuan-Image-3.0 (Direct API)
+        primary="seedream-t2i",  # Seedream (ModelsLab V7) Per image generation will cost $0.033
+        fallback="seedream-4",  # Seedream-4 (ModelsLab V7) Per image generation will cost $0.033
+        fallback2="imagen-4",  # imagen-4 (ModelsLab API) Per image generation will cost 0.044$
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
-        fallback="seedream-t2i",  # Seedream (ModelsLab V7)
-        fallback2="flux-2-max",  # Flux-2-Max (ModelsLab V7)
+        primary="seedream-4",  # Seedream-4 (ModelsLab V7) Per image generation will cost $0.033
+        fallback="imagen-4",  # imagen-4 (ModelsLab API) Per image generation will cost 0.044$
+        fallback2="nano-banana-t2i",  # nano-banana-t2i (ModelsLab V7) working Your request will cost $0.046
+        # fallback2="qwen-image-2512",  # Qwen-Image-2512 (Direct API)
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="flux-2-max",  # Flux-2-Max (ModelsLab V7)
-        fallback="seedream-t2i",  # Seedream (ModelsLab V7)
-        fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
+        primary="imagen-4",  # imagen-4 (ModelsLab API) Per image generation will cost 0.044$
+        fallback="nano-banana-t2i",  # nano-banana-t2i (ModelsLab V7) working Your request will cost $0.046
+        fallback2="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
+        # fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="flux-2-max",  # Flux-2-Max (ModelsLab V7)
-        fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
-        fallback2="seedream-t2i",  # Seedream (ModelsLab V7)
+        primary="nano-banana-t2i",  # nano-banana-t2i (ModelsLab V7) working Your request will cost $0.046
+        fallback="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
+        fallback2="imagen-4.0-ultra",  #  imagen-4.0-ultra (ModelsLab API) Per image generation will cost 0.072
+        # fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
-        fallback="flux-2-max",  # Flux-2-Max (ModelsLab)
-        fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API)
+        primary="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06 
+        fallback="imagen-4.0-ultra",  #  imagen-4.0-ultra (ModelsLab API) Per image generation will cost 0.072$
+        fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
+        #  fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API
+       
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="gpt-image-1.5",  # GPT-Image-1.5 (Direct API)
-        fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
-        fallback2="flux-2-max",  # Flux-2-Max (ModelsLab)
+        primary="qwen-image-2512",  # Qwen-Image-2512 (Direct API)
+        fallback="gpt-image-1.5",  # GPT-Image-1.5 (Direct API)
+        fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
+        # fallback3="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
+        
     ),
 }
 

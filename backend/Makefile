@@ -23,7 +23,7 @@ down:
 
 # Rebuild development without debugger
 rebuild-dev:
-	DEBUG=false ENVIRONMENT=development docker compose -f local.yml up --build -d --remove-orphans
+	DEBUG=false ENVIRONMENT=development docker compose -f local.yml build --no-cache
 
 # Rebuild production
 rebuild:

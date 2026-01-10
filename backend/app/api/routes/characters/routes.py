@@ -216,7 +216,9 @@ async def create_character(
         character_service = CharacterService(session)
         character = await character_service.create_character(
             plot_overview_id=plot_overview_id,
-            user_id=current_user.id,
+            user_id=str(
+                current_user.id
+            ),  # Convert to string to avoid asyncpg UUID issues
             character_data=character_data,
         )
 
