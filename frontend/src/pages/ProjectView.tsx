@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { projectService, Project } from "../services/projectService";
+import { userService } from "../services/userService";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-hot-toast";
 import { 
@@ -16,7 +17,10 @@ import {
   Music,
   Video,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Edit2,
+  Check,
+  X
 } from "lucide-react";
 
 // Import generation panels
@@ -43,10 +47,20 @@ interface ChapterArtifact {
     content: string;
     chapter_number: number;
     summary?: string;
+    chapter_id?: string;  // Actual chapter ID from books.chapters table
   };
   version: number;
   project_id: string;
 }
+
+// Helper to get the actual chapter ID for API calls
+// For uploaded books, content.chapter_id contains the real chapter table ID
+// For prompt-only projects, we use the artifact/project ID
+const getActualChapterId = (chapter: ChapterArtifact | null): string => {
+  if (!chapter) return '';
+  // Prefer content.chapter_id (actual Chapter table ID) if available
+  return chapter.content?.chapter_id || chapter.id;
+};
 
 interface WorkflowProgress {
   plot: "idle" | "generating" | "completed" | "error";
@@ -57,6 +71,51 @@ interface WorkflowProgress {
 }
 
 type WorkflowTab = "plot" | "script" | "images" | "audio" | "video";
+
+interface ChapterContentModalProps {
+  chapter: ChapterArtifact | null;
+  onClose: () => void;
+}
+
+const ChapterContentModal: React.FC<ChapterContentModalProps> = ({ chapter, onClose }) => {
+  if (!chapter) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <div>
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+              Chapter {chapter.content.chapter_number}
+            </span>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+              {chapter.content.title}
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors text-gray-500 dark:text-gray-400"
+          >
+            <X size={24} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="prose dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+            {chapter.content.content}
+          </div>
+        </div>
+        <div className="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 rounded-b-2xl flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-6 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-white font-medium rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const ProjectView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -73,6 +132,11 @@ const ProjectView: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [workflowProgress, setWorkflowProgress] = useState<Record<string, WorkflowProgress>>({});
   const [videoStatus, setVideoStatus] = useState<string | null>("idle");
+  const [isLimitModalOpen, setIsLimitModalOpen] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+
+  const [editedTitle, setEditedTitle] = useState("");
+  const [viewChapter, setViewChapter] = useState<ChapterArtifact | null>(null);
 
   // Context hooks
   const { selectChapter, selectedScriptId } = useScriptSelection();
@@ -184,7 +248,7 @@ const ProjectView: React.FC = () => {
     selectScript,
     updateScript,
     deleteScript
-  } = useScriptGeneration(selectedChapter?.id || '');
+  } = useScriptGeneration(getActualChapterId(selectedChapter));
 
   // Derive selectedScript
   const selectedScript = React.useMemo(() => {
@@ -197,14 +261,14 @@ const ProjectView: React.FC = () => {
     characterImages,
     isLoading: isLoadingImages,
     loadImages,
-  } = useImageGeneration(selectedChapter?.id || '', selectedScriptId || null);
+  } = useImageGeneration(getActualChapterId(selectedChapter), selectedScriptId || null);
 
   const {
     files,
     isLoading: isLoadingAudio,
     loadAudio,
   } = useAudioGeneration({
-    chapterId: selectedChapter?.id || '',
+    chapterId: getActualChapterId(selectedChapter),
     scriptId: selectedScript?.id,
   });
 
@@ -358,7 +422,7 @@ const ProjectView: React.FC = () => {
         }
         return (
           <ScriptGenerationPanel
-            chapterId={selectedChapter.id}
+            chapterId={getActualChapterId(selectedChapter)}
             chapterTitle={selectedChapter.content.title}
             chapterContent={selectedChapter.content.content}
             generatedScripts={generatedScripts}
@@ -368,6 +432,13 @@ const ProjectView: React.FC = () => {
             onUpdateScript={updateScript}
             onDeleteScript={deleteScript}
             plotOverview={plotOverview}
+            onCreatePlotCharacter={async (name: string) => {
+              if (!id) throw new Error('No project ID');
+              const result = await userService.createProjectCharacter(id, name);
+              // Refresh plot overview to get updated characters list
+              await loadPlot();
+              return result;
+            }}
           />
         );
 
@@ -382,7 +453,7 @@ const ProjectView: React.FC = () => {
         }
         return (
           <ImagesPanel
-            chapterId={selectedChapter.id}
+            chapterId={getActualChapterId(selectedChapter)}
             chapterTitle={selectedChapter.content.title}
             selectedScript={selectedScript}
             plotOverview={plotOverview}
@@ -401,7 +472,7 @@ const ProjectView: React.FC = () => {
         }
         return (
           <AudioPanel
-            chapterId={selectedChapter.id}
+            chapterId={getActualChapterId(selectedChapter)}
             chapterTitle={selectedChapter.content.title}
             selectedScript={selectedScript}
             plotOverview={plotOverview}
@@ -419,7 +490,7 @@ const ProjectView: React.FC = () => {
         }
         return (
           <VideoProductionPanel
-            chapterId={selectedChapter.id}
+            chapterId={getActualChapterId(selectedChapter)}
             chapterTitle={selectedChapter.content.title}
             imageUrls={generatedImageUrls}
             audioFiles={generatedAudioFiles}
@@ -433,6 +504,36 @@ const ProjectView: React.FC = () => {
       default:
         return <div>Tab content not implemented</div>;
     }
+  };
+
+
+
+  const handleStartRename = () => {
+    setEditedTitle(project?.title || "");
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveRename = async () => {
+    if (!project || !editedTitle.trim()) {
+      setIsEditingTitle(false);
+      return;
+    }
+
+    try {
+      const updatedProject = await projectService.updateProject(project.id, {
+        title: editedTitle.trim()
+      });
+      setProject(updatedProject);
+      toast.success("Project renamed successfully");
+      setIsEditingTitle(false);
+    } catch (error) {
+      console.error("Failed to rename project:", error);
+      toast.error("Failed to rename project");
+    }
+  };
+
+  const handleCancelRename = () => {
+    setIsEditingTitle(false);
   };
 
   if (loading) {
@@ -659,16 +760,52 @@ const ProjectView: React.FC = () => {
                 <ArrowLeft size={20} />
               </button>
               <div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  {project.title}
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                    project.status === 'completed' ? 'bg-green-100 text-green-700 border-green-200' :
-                    project.status === 'published' ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                    'bg-gray-100 text-gray-600 border-gray-200'
-                  }`}>
-                    {project.status.replace('_', ' ')}
-                  </span>
-                </h1>
+                {isEditingTitle ? (
+                  <div className="flex items-center gap-2 mb-1">
+                    <input
+                      type="text"
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      className="text-xl font-bold text-gray-900 dark:text-white bg-transparent border-b-2 border-purple-500 focus:outline-none min-w-[200px]"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveRename();
+                        if (e.key === 'Escape') handleCancelRename();
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleSaveRename(); }}
+                      className="p-1 hover:bg-green-100 dark:hover:bg-green-900 rounded-full text-green-600 dark:text-green-400"
+                    >
+                      <Check size={18} />
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleCancelRename(); }}
+                      className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded-full text-red-600 dark:text-red-400"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                ) : (
+                  <div 
+                    className="flex items-center gap-3 mb-1 group cursor-pointer -ml-2 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    onClick={handleStartRename}
+                    title="Click to rename project"
+                  >
+                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+                      {project.title}
+                    </h1>
+                    <Edit2 size={16} className="text-gray-400 group-hover:text-purple-600 transition-colors" />
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                      project.status === 'completed' ? 'bg-green-100 text-green-700 border-green-200' :
+                      project.status === 'published' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                      'bg-gray-100 text-gray-600 border-gray-200'
+                    }`}>
+                      {project.status.replace('_', ' ')}
+                    </span>
+                  </div>
+                )}
                 <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-4">
                   <span className="flex items-center gap-1">
                     <Clock size={12} />
@@ -735,7 +872,14 @@ const ProjectView: React.FC = () => {
                           {chapter.content.content}
                         </p>
                       </div>
-                      <button className="p-2 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewChapter(chapter);
+                        }}
+                        className="p-2 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="View full chapter content"
+                      >
                         <ExternalLink size={18} />
                       </button>
                     </div>
@@ -761,9 +905,7 @@ const ProjectView: React.FC = () => {
                   <Play size={18} />
                   Start Generation
                 </button>
-                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg transition-colors">
-                  View Source Material
-                </button>
+
               </div>
             </div>
 
@@ -792,6 +934,12 @@ const ProjectView: React.FC = () => {
           </div>
         </div>
       </div>
+      
+      {/* Chapter View Modal */}
+      <ChapterContentModal 
+        chapter={viewChapter} 
+        onClose={() => setViewChapter(null)} 
+      />
     </div>
   );
 };

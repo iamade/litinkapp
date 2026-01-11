@@ -21,6 +21,7 @@ interface ChapterScript {
   script: string;
   scene_descriptions: SceneDescription[];
   characters: string[];
+  character_ids?: string[];  // UUIDs of linked plot characters
   character_details: string;
   acts: Act[];
   beats: Beat[];
@@ -99,6 +100,7 @@ export const useScriptGeneration = (chapterId: string) => {
           script: script.script,
           scene_descriptions: (script.scene_descriptions || []) as unknown as SceneDescription[],
           characters: script.characters || [],
+          character_ids: script.character_ids || [],  // Load linked character IDs
           character_details: script.character_details || '',
           acts: script.acts || [],
           beats: script.beats || [],
@@ -136,7 +138,8 @@ export const useScriptGeneration = (chapterId: string) => {
           includeCharacterProfiles: options.includeCharacterProfiles,
           sceneCount: options.sceneCount,
           focusAreas: options.focusAreas,
-          scriptStoryType: options.scriptStoryType
+          scriptStoryType: options.scriptStoryType,
+          customLogline: options.customLogline
         }
       );
       

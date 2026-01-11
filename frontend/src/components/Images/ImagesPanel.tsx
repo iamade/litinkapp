@@ -884,8 +884,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 : 'space-y-4'
             }`}>
               {characters.map((character) => {
-                const characterKey = typeof character === "string" ? character : character.name;
-                const displayName = typeof character === "object" && character.displayName ? character.displayName : characterKey;
+                // Use originalName for image lookup (persisted key), name for display/matching
+                const characterKey = typeof character === "string" ? character : (character.originalName || character.name);
+                const displayName = typeof character === "object" && character.displayName ? character.displayName : (character.name || characterKey);
 
                 // Check for script-specific image first, then fall back to plot overview image
                 let characterImage = filteredCharacterImages?.[characterKey];
@@ -934,7 +935,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
                             // Persist to database
                             try {
-                              await userService.linkCharacterImage(stableSelectedChapterId!, {
+                              await userService.linkCharacterImage(chapterId, {
                                 character_name: characterKey,
                                 image_url: plotChar.image_url,
                                 script_id: selectedScriptId ?? undefined,

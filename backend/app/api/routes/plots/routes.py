@@ -288,6 +288,100 @@ async def auto_add_characters(
         )
 
 
+@router.post("/books/{book_id}/characters")
+async def create_character_placeholder(
+    book_id: uuid.UUID,
+    character_name: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Create a placeholder character in the plot overview.
+
+    This is used when linking script characters to plot characters,
+    and the character doesn't exist in the plot yet.
+
+    - **book_id**: ID of the book
+    - **character_name**: Name of the character to create
+    """
+    try:
+        # Validate book ownership
+        statement = select(Book).where(Book.id == book_id)
+        result = await session.exec(statement)
+        book = result.first()
+
+        if not book:
+            raise HTTPException(status_code=404, detail="Book not found")
+
+        if book.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to access this book"
+            )
+
+        # Get plot overview
+        statement = select(PlotOverview).where(
+            PlotOverview.book_id == book_id, PlotOverview.user_id == current_user.id
+        )
+        result = await session.exec(statement)
+        plot_overview = result.first()
+
+        if not plot_overview:
+            raise HTTPException(
+                status_code=404,
+                detail="No plot overview found. Please generate a plot first.",
+            )
+
+        # Check if character already exists
+        statement = select(Character).where(
+            Character.plot_overview_id == plot_overview.id,
+            Character.name == character_name,
+        )
+        result = await session.exec(statement)
+        existing_char = result.first()
+
+        if existing_char:
+            # Return existing character instead of creating new one
+            return {
+                "id": str(existing_char.id),
+                "name": existing_char.name,
+                "role": existing_char.role,
+                "physical_description": existing_char.physical_description,
+                "personality": existing_char.personality,
+                "image_url": existing_char.image_url,
+                "message": "Character already exists",
+            }
+
+        # Create placeholder character
+        new_character = Character(
+            plot_overview_id=plot_overview.id,
+            name=character_name,
+            role="supporting",  # Default role
+            physical_description="",
+            personality="",
+        )
+
+        session.add(new_character)
+        await session.commit()
+        await session.refresh(new_character)
+
+        return {
+            "id": str(new_character.id),
+            "name": new_character.name,
+            "role": new_character.role,
+            "physical_description": new_character.physical_description,
+            "personality": new_character.personality,
+            "image_url": new_character.image_url,
+            "message": "Character placeholder created successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create character: {str(e)}"
+        )
+
+
 @router.put("/{plot_id}", response_model=PlotOverviewResponse)
 async def update_plot_overview(
     plot_id: uuid.UUID,
@@ -581,4 +675,101 @@ async def auto_add_project_characters(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to add characters: {str(e)}"
+        )
+
+
+@router.post("/projects/{project_id}/characters")
+async def create_project_character_placeholder(
+    project_id: uuid.UUID,
+    character_name: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Create a placeholder character in the project's plot overview.
+
+    This is used when linking script characters to plot characters in Creator mode,
+    and the character doesn't exist in the plot yet.
+
+    - **project_id**: ID of the project
+    - **character_name**: Name of the character to create
+    """
+    try:
+        # Validate project ownership
+        statement = select(Project).where(Project.id == project_id)
+        result = await session.exec(statement)
+        project = result.first()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if project.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to access this project"
+            )
+
+        # Get plot overview (project_id is stored in book_id field)
+        statement = select(PlotOverview).where(
+            PlotOverview.book_id == project_id, PlotOverview.user_id == current_user.id
+        )
+        result = await session.exec(statement)
+        plot_overview = result.first()
+
+        if not plot_overview:
+            raise HTTPException(
+                status_code=404,
+                detail="No plot overview found. Please generate a plot first.",
+            )
+
+        # Check if character already exists
+        statement = select(Character).where(
+            Character.plot_overview_id == plot_overview.id,
+            Character.name == character_name,
+        )
+        result = await session.exec(statement)
+        existing_char = result.first()
+
+        if existing_char:
+            # Return existing character instead of creating new one
+            return {
+                "id": str(existing_char.id),
+                "name": existing_char.name,
+                "role": existing_char.role,
+                "physical_description": existing_char.physical_description,
+                "personality": existing_char.personality,
+                "image_url": existing_char.image_url,
+                "message": "Character already exists",
+            }
+
+        # Create placeholder character
+        # For projects, we use project_id as book_id since Character requires it
+        new_character = Character(
+            plot_overview_id=plot_overview.id,
+            book_id=project_id,  # Use project_id to satisfy NOT NULL constraint
+            user_id=current_user.id,  # Required field
+            name=character_name,
+            role="supporting",  # Default role
+            physical_description="",
+            personality="",
+        )
+
+        session.add(new_character)
+        await session.commit()
+        await session.refresh(new_character)
+
+        return {
+            "id": str(new_character.id),
+            "name": new_character.name,
+            "role": new_character.role,
+            "physical_description": new_character.physical_description,
+            "personality": new_character.personality,
+            "image_url": new_character.image_url,
+            "message": "Character placeholder created successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create character: {str(e)}"
         )

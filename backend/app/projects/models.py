@@ -103,7 +103,10 @@ class Project(SQLModel, table=True):
     )
 
     # Relationships
-    artifacts: List["Artifact"] = Relationship(back_populates="project")
+    artifacts: List["Artifact"] = Relationship(
+        back_populates="project",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
 
 
 class Artifact(SQLModel, table=True):

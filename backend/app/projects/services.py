@@ -19,6 +19,7 @@ from app.projects.schemas import (
 from fastapi import UploadFile
 from app.core.services.file import BookStructureDetector, FileService
 from app.core.services.embeddings import EmbeddingsService
+from app.api.services.plot import PlotService
 
 
 class IntentService:
@@ -303,6 +304,7 @@ class ProjectService:
                         )
 
                     # Create Artifact in Project (for UI display)
+                    # Include the actual chapter_id from books.chapters table for API calls
                     artifact = Artifact(
                         project_id=project.id,
                         artifact_type=ArtifactType.CHAPTER.value,
@@ -312,6 +314,9 @@ class ProjectService:
                             "content": chapter_content,
                             "chapter_number": chapter_number,
                             "summary": chapter_summary,
+                            "chapter_id": str(
+                                book_chapter.id
+                            ),  # Actual Chapter ID for API calls
                         },
                         generation_metadata={
                             "source": "upload_extraction",
@@ -319,6 +324,9 @@ class ProjectService:
                             "section_title": chapter.get(
                                 "section_title"
                             ),  # if available
+                            "book_chapter_id": str(
+                                book_chapter.id
+                            ),  # Also store in metadata
                         },
                     )
                     self.session.add(artifact)
@@ -329,6 +337,31 @@ class ProjectService:
 
                 await self.session.commit()
                 print(f"[PROJECT UPLOAD] {len(chapters)} chapters + artifacts saved.")
+
+                # 8. Generate Plot Overview if input_prompt is provided
+                if input_prompt:
+                    try:
+                        print(
+                            f"[PROJECT UPLOAD] Generating plot overview with prompt: {input_prompt[:50]}..."
+                        )
+                        plot_service = PlotService(self.session)
+                        project_type_str = (
+                            project_type.value
+                            if hasattr(project_type, "value")
+                            else str(project_type)
+                        )
+
+                        await plot_service.generate_plot_from_prompt(
+                            user_id=user_id,
+                            project_id=project.id,
+                            input_prompt=input_prompt,
+                            project_type=project_type_str,
+                            book_id=book.id,
+                        )
+                        print("[PROJECT UPLOAD] Plot generation successful.")
+                    except Exception as e:
+                        print(f"[PROJECT UPLOAD] Plot generation failed: {e}")
+                        # Continue without failing the whole upload
             except Exception as e:
                 print(f"[PROJECT UPLOAD] Error creating artifacts: {e}")
                 # Use verify_partial_success or raise?

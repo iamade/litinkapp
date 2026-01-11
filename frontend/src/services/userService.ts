@@ -262,6 +262,7 @@ export const userService = {
       sceneCount?: number;
       focusAreas?: string[];
       scriptStoryType?: string;
+      customLogline?: string;
     }
   ): Promise<ScriptResult> => {
     const requestPayload = {
@@ -272,8 +273,16 @@ export const userService = {
       scene_count: options?.sceneCount,
       focus_areas: options?.focusAreas,
       scriptStoryType: options?.scriptStoryType,
+      custom_logline: options?.customLogline,
     };
     return apiClient.post<ScriptResult>(`/ai/generate-script-and-scenes`, requestPayload);
+  },
+
+  updatePlotOverview: async (
+    plotId: string,
+    updates: { logline?: string; [key: string]: any }
+  ) => {
+    return apiClient.put(`/plots/${plotId}`, updates);
   },
 
   getChapterScripts: async (
@@ -362,6 +371,44 @@ export const userService = {
     return apiClient.post(
       `/chapters/${chapterId}/images/characters/link`,
       request
+    );
+  },
+
+  // Create a placeholder character in plot overview (for books)
+  async createPlotCharacter(
+    bookId: string,
+    characterName: string
+  ): Promise<{
+    id: string;
+    name: string;
+    role?: string;
+    physical_description?: string;
+    personality?: string;
+    image_url?: string;
+    message: string;
+  }> {
+    return apiClient.post(
+      `/plots/books/${bookId}/characters?character_name=${encodeURIComponent(characterName)}`,
+      {}
+    );
+  },
+
+  // Create a placeholder character in project plot overview (for Creator mode)
+  async createProjectCharacter(
+    projectId: string,
+    characterName: string
+  ): Promise<{
+    id: string;
+    name: string;
+    role?: string;
+    physical_description?: string;
+    personality?: string;
+    image_url?: string;
+    message: string;
+  }> {
+    return apiClient.post(
+      `/plots/projects/${projectId}/characters?character_name=${encodeURIComponent(characterName)}`,
+      {}
     );
   },
 

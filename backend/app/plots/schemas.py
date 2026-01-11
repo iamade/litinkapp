@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from decimal import Decimal
@@ -9,6 +9,9 @@ import uuid
 class PlotOverviewBase(BaseModel):
     logline: Optional[str] = Field(
         None, max_length=1000, description="One-sentence summary of the plot"
+    )
+    original_prompt: Optional[str] = Field(
+        None, max_length=2000, description="The original prompt provided by the user"
     )
     themes: Optional[List[str]] = Field(None, description="Key themes in the story")
     story_type: Optional[str] = Field(
@@ -25,6 +28,19 @@ class PlotOverviewBase(BaseModel):
     )
     audience: Optional[str] = Field(None, max_length=100, description="Target audience")
     setting: Optional[str] = Field(None, max_length=500, description="Story setting")
+    medium: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Production medium (Animation, Live Action, Hybrid, Puppetry, Stop-Motion)",
+    )
+    format: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Content format (Film, TV Series, Limited Series, Short Film, etc.)",
+    )
+    vibe_style: Optional[str] = Field(
+        None, max_length=200, description="Vibe/Style (Satire, Cinematic, Sitcom, etc.)"
+    )
     generation_method: Optional[str] = Field(
         None, max_length=100, description="Method used for generation"
     )
@@ -41,6 +57,7 @@ class PlotOverviewCreate(PlotOverviewBase):
 
 class PlotOverviewUpdate(BaseModel):
     logline: Optional[str] = Field(None, max_length=1000)
+    original_prompt: Optional[str] = Field(None, max_length=2000)
     themes: Optional[List[str]] = None
     story_type: Optional[str] = Field(None, max_length=100)
     script_story_type: Optional[str] = Field(None, max_length=100)
@@ -48,6 +65,9 @@ class PlotOverviewUpdate(BaseModel):
     tone: Optional[str] = Field(None, max_length=100)
     audience: Optional[str] = Field(None, max_length=100)
     setting: Optional[str] = Field(None, max_length=500)
+    medium: Optional[str] = Field(None, max_length=100)
+    format: Optional[str] = Field(None, max_length=100)
+    vibe_style: Optional[str] = Field(None, max_length=200)
     generation_method: Optional[str] = Field(None, max_length=100)
     model_used: Optional[str] = Field(None, max_length=100)
     generation_cost: Optional[Decimal] = None
@@ -124,6 +144,13 @@ class PlotOverviewResponse(PlotOverviewBase):
 
     class Config:
         from_attributes = True
+
+    @field_validator("id", "book_id", "user_id", mode="before")
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        if isinstance(v, uuid.UUID):
+            return str(v)
+        return v
 
 
 class CharacterCreate(CharacterBase):

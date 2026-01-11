@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { BookOpen, Loader2, AlertCircle, Wand2, Users, Plus, Trash2, Search, X, Sparkles } from "lucide-react";
+import { BookOpen, Loader2, AlertCircle, Wand2, Users, Plus, Trash2, Search, X, Sparkles, ChevronDown, ChevronRight } from "lucide-react";
 import { usePlotGeneration } from "../../hooks/usePlotGeneration";
 import CharacterCard from "./CharacterCard";
 import { userService } from "../../services/userService";
@@ -15,6 +15,8 @@ interface PlotOverviewPanelProps {
   inputPrompt?: string;
   /** Project type for project-based plot generation */
   projectType?: string;
+  /** User mode: 'explorer' or 'creator'. Customize plot section only shows for creator mode */
+  mode?: 'explorer' | 'creator';
 }
 
 interface Character {
@@ -37,9 +39,10 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   onCharacterChange,
   isProject = false,
   inputPrompt,
-  projectType
+  projectType,
+  mode = 'creator'
 }) => {
-  const { plotOverview, isGenerating, isLoading, generatePlot, loadPlot, deleteCharacter } =
+  const { plotOverview, isGenerating, isLoading, isUpdating, generatePlot, loadPlot, deleteCharacter, updatePlot } =
     usePlotGeneration(bookId, { isProject, inputPrompt, projectType });
 
   const [deletingCharacterId, setDeletingCharacterId] = useState<string | null>(null);
@@ -80,6 +83,126 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   
   // Refinement prompt state
   const [refinementPrompt, setRefinementPrompt] = useState('');
+  
+  // Editing state for click-to-edit fields
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
+  
+  // AI Reimagine section collapsed state
+  const [isAiReimaginExpanded, setIsAiReimaginExpanded] = useState(false);
+  
+  // Inline EditableField component for click-to-edit
+  const EditableField: React.FC<{
+    fieldKey: string;
+    value: string | undefined;
+    label: string;
+    isTextarea?: boolean;
+    options?: string[];
+  }> = ({ fieldKey, value, label, isTextarea = false, options }) => {
+    const isEditing = editingField === fieldKey;
+    const isCreatorMode = mode === 'creator';
+    
+    const handleStartEdit = () => {
+      if (!isCreatorMode) return;
+      setEditingField(fieldKey);
+      setEditValue(value || '');
+    };
+    
+    const handleSave = async () => {
+      if (editValue !== value) {
+        await updatePlot({ [fieldKey]: editValue });
+      }
+      setEditingField(null);
+      setEditValue('');
+    };
+    
+    const handleCancel = () => {
+      setEditingField(null);
+      setEditValue('');
+    };
+    
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && !isTextarea) {
+        e.preventDefault();
+        handleSave();
+      } else if (e.key === 'Escape') {
+        handleCancel();
+      }
+    };
+    
+    if (isEditing) {
+      return (
+        <div className="space-y-2">
+          {options ? (
+            // Combo box: input with datalist for suggestions
+            <div className="relative">
+              <input
+                type="text"
+                list={`${fieldKey}-options`}
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Type or select..."
+                className="w-full border border-blue-400 dark:border-blue-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                autoFocus
+              />
+              <datalist id={`${fieldKey}-options`}>
+                {options.map((opt) => (
+                  <option key={opt} value={opt} />
+                ))}
+              </datalist>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Select from suggestions or type custom value
+              </p>
+            </div>
+          ) : isTextarea ? (
+            <textarea
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="w-full border border-blue-400 dark:border-blue-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 resize-none"
+              rows={3}
+              autoFocus
+            />
+          ) : (
+            <input
+              type="text"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="w-full border border-blue-400 dark:border-blue-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+              autoFocus
+            />
+          )}
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={handleCancel}
+              className="px-3 py-1 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={isUpdating}
+              className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-blue-400"
+            >
+              {isUpdating ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    
+    return (
+      <p
+        onClick={handleStartEdit}
+        className={`text-gray-700 dark:text-gray-300 ${isCreatorMode ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-1 -mx-1 transition-colors' : ''}`}
+        title={isCreatorMode ? 'Click to edit' : undefined}
+      >
+        {value || <span className="text-gray-400 italic">Not set</span>}
+      </p>
+    );
+  };
 
   // Filter characters based on search query
   const filteredCharacters = useMemo(() => {
@@ -210,6 +333,16 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
             return newSet;
           });
           await loadPlot();
+          
+          // Notify parent to refresh other components (Script tab, Images tab, etc.)
+          if (onCharacterChange) {
+            try {
+              await onCharacterChange();
+            } catch (callbackError) {
+              console.warn('onCharacterChange callback failed:', callbackError);
+            }
+          }
+          
           toast.success("Character image generated successfully");
           return;
         } else if (status.status === 'failed') {
@@ -527,6 +660,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   const normalizedGenre = plotOverview.genre?.toLowerCase() || "";
   const charactersWithoutImages = plotOverview.characters?.filter((char: Character) => !char.image_url).length || 0;
   const hasCharacters = plotOverview.characters && plotOverview.characters.length > 0;
+  
+  // Use stored original_prompt or fallback to project input_prompt
+  const displayPrompt = plotOverview.original_prompt || inputPrompt;
 
   return (
     <div className="space-y-8">
@@ -554,33 +690,64 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
           </button>
         </div>
         
-        {/* Refinement Prompt Input */}
-        <div className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/30 dark:to-blue-900/30 border border-purple-200 dark:border-purple-700 rounded-lg p-4">
-          <label className="block text-sm font-medium text-purple-900 dark:text-purple-300 mb-2">
-            🎯 Customize Your Plot (Optional)
-          </label>
-          <textarea
-            value={refinementPrompt}
-            onChange={(e) => setRefinementPrompt(e.target.value)}
-            placeholder="Describe changes you'd like, e.g., 'Make it Boondocks style animation' or 'Add more dramatic tension' or 'Change the protagonist to be older'"
-            className="w-full border border-purple-300 dark:border-purple-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none text-sm placeholder-gray-500 dark:placeholder-gray-400"
-            rows={2}
-            disabled={isGenerating}
-          />
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Enter your customization prompt and click "{refinementPrompt ? 'Refine Plot' : 'Regenerate'}" to apply changes.
-          </p>
-        </div>
+        {/* AI Reimagine Section - Collapsible, creator mode only */}
+        {mode === 'creator' && (
+          <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setIsAiReimaginExpanded(!isAiReimaginExpanded)}
+              className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                ✨ AI Reimagine (optional) - Regenerate with creative direction
+              </span>
+              {isAiReimaginExpanded ? (
+                <ChevronDown className="w-4 h-4 text-gray-500" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-gray-500" />
+              )}
+            </button>
+            {isAiReimaginExpanded && (
+              <div className="p-4 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border-t border-gray-200 dark:border-gray-700">
+                <textarea
+                  value={refinementPrompt}
+                  onChange={(e) => setRefinementPrompt(e.target.value)}
+                  placeholder="Describe changes you'd like, e.g., 'Make it Boondocks style animation' or 'Add more dramatic tension'"
+                  className="w-full border border-purple-300 dark:border-purple-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-none text-sm placeholder-gray-500 dark:placeholder-gray-400"
+                  rows={2}
+                  disabled={isGenerating}
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  💡 Use this for broad creative changes. AI will regenerate all plot fields based on your prompt.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Plot Overview Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Left Column */}
         <div className="space-y-4">
+          {/* Original Prompt */}
+          {displayPrompt && (
+            <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+               <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Original Creative Prompt</h4>
+               <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                 This prompt guides the creative direction of the plot.
+               </p>
+               <EditableField 
+                 fieldKey="original_prompt" 
+                 value={displayPrompt} 
+                 label="Original Creative Prompt" 
+                 isTextarea 
+               />
+            </div>
+          )}
           {/* Logline */}
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
             <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Logline</h4>
-            <p className="text-gray-700 dark:text-gray-300">{plotOverview.logline}</p>
+            <EditableField fieldKey="logline" value={plotOverview.logline} label="Logline" isTextarea />
           </div>
           {/* Genre, Tone, Audience */}
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
@@ -590,31 +757,36 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 mb-1">
                   Genre
                 </label>
-                <p className="text-gray-700 dark:text-gray-300">{plotOverview.genre}</p>
+                <EditableField fieldKey="genre" value={plotOverview.genre} label="Genre" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 mb-1">
                   Tone
                 </label>
-                <p className="text-gray-700 dark:text-gray-300">{plotOverview.tone}</p>
+                <EditableField fieldKey="tone" value={plotOverview.tone} label="Tone" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-400 mb-1">
                   Audience
                 </label>
-                <p className="text-gray-700 dark:text-gray-300">{plotOverview.audience}</p>
+                <EditableField fieldKey="audience" value={plotOverview.audience} label="Audience" />
               </div>
             </div>
           </div>
           {/* Setting */}
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
             <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Setting</h4>
-            <p className="text-gray-700 dark:text-gray-300">{plotOverview.setting}</p>
+            <EditableField fieldKey="setting" value={plotOverview.setting} label="Setting" isTextarea />
           </div>
           {/* Script Story Type */}
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
             <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Script Story Type</h4>
-            <p className="text-gray-700 dark:text-gray-300">{plotOverview.script_story_type}</p>
+            <EditableField 
+              fieldKey="script_story_type" 
+              value={plotOverview.script_story_type} 
+              label="Script Story Type"
+              options={['fiction', 'non-fiction', 'documentary', 'hybrid']}
+            />
           </div>
         </div>
 
@@ -638,7 +810,57 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
           {/* Story Type */}
           <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
             <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Story Type</h4>
-            <p className="text-gray-700 dark:text-gray-300">{plotOverview.story_type}</p>
+            <EditableField fieldKey="story_type" value={plotOverview.story_type} label="Story Type" />
+          </div>
+          
+          {/* Medium - NEW */}
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Medium</h4>
+            <EditableField 
+              fieldKey="medium" 
+              value={(plotOverview as any).medium} 
+              label="Medium"
+              options={['Animation', 'Live Action', 'Hybrid / Mixed Media', 'Puppetry / Animatronics', 'Stop-Motion']}
+            />
+          </div>
+          
+          {/* Format - NEW */}
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Format</h4>
+            <EditableField 
+              fieldKey="format" 
+              value={(plotOverview as any).format} 
+              label="Format"
+              options={['Film', 'TV Series', 'Limited Series / Miniseries', 'Anthology Series', 'Short Film', 'Special', 'Featurette']}
+            />
+          </div>
+          
+          {/* Vibe/Style - NEW */}
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+            <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Vibe / Style</h4>
+            <EditableField 
+              fieldKey="vibe_style" 
+              value={(plotOverview as any).vibe_style} 
+              label="Vibe/Style"
+              options={[
+                'Satire / Social Commentary',
+                'Cinematic / Fantasy',
+                'Sitcom / Comedy',
+                'Sitcom / Rom-Com',
+                'Cinematic / Crime Thriller',
+                'Cinematic / Superhero',
+                'Anthology / Sci-Fi',
+                'Cinematic / Horror',
+                'Cinematic / Crime Drama',
+                'Documentary Style',
+                'Action / Adventure',
+                'Family / Animated',
+                'Dramedy',
+                'Dark Comedy',
+                'Psychological Thriller',
+                'Coming-of-Age'
+              ]}
+            />
           </div>
         </div>
       </div>
@@ -790,6 +1012,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                 character={character}
                 isGeneratingImage={generatingImages.has(character.id)}
                 isSelected={selectedCharacters.has(character.id)}
+                bookId={plotOverview?.book_id}
                 onToggleSelect={handleToggleSelect}
                 onUpdate={handleUpdateCharacter}
                 onDelete={handleDeleteClick}

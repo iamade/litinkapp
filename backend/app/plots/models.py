@@ -24,6 +24,7 @@ class PlotOverview(SQLModel, table=True):
         sa_column=Column(pg.UUID(as_uuid=True), nullable=False, index=True)
     )
     logline: Optional[str] = Field(default=None)
+    original_prompt: Optional[str] = Field(default=None)
 
     # JSON fields
     themes: List[str] = Field(
@@ -36,6 +37,15 @@ class PlotOverview(SQLModel, table=True):
     tone: Optional[str] = Field(default=None)
     audience: Optional[str] = Field(default=None)
     setting: Optional[str] = Field(default=None)
+
+    # New categorization fields
+    medium: Optional[str] = Field(
+        default=None
+    )  # Animation, Live Action, Hybrid, Puppetry, Stop-Motion
+    format: Optional[str] = Field(
+        default=None
+    )  # Film, TV Series, Limited Series, Short Film, etc.
+    vibe_style: Optional[str] = Field(default=None)  # Satire, Cinematic, Sitcom, etc.
 
     generation_method: Optional[str] = Field(default=None)
     model_used: Optional[str] = Field(default=None)

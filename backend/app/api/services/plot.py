@@ -166,14 +166,34 @@ class PlotService:
             }
 
             # 4. Generate plot content from prompt (or refine existing)
-            generated_plot = await self._generate_plot_from_prompt_content(
-                prompt_context=prompt_context,
-                story_type=story_type,
-                genre=genre,
-                tone=tone,
-                audience=audience,
-                model_tier=model_tier,
-            )
+            if book_context:
+                # Use book content for detailed generation (like Explorer mode)
+                logger.info(
+                    "[PlotService] Using book content for detailed plot generation"
+                )
+                generated_plot = await self._generate_plot_content(
+                    book_context=book_context,
+                    plot_data={
+                        "logline": prompt_context.get("prompt"),
+                        "original_prompt": prompt_context.get("prompt"),
+                        "project_type": prompt_context.get("project_type"),
+                        "story_type": story_type,
+                        "genre": genre,
+                        "tone": tone,
+                        "audience": audience,
+                    },
+                    model_tier=model_tier,
+                )
+            else:
+                # Prompt-only: use simpler generation
+                generated_plot = await self._generate_plot_from_prompt_content(
+                    prompt_context=prompt_context,
+                    story_type=story_type,
+                    genre=genre,
+                    tone=tone,
+                    audience=audience,
+                    model_tier=model_tier,
+                )
 
             # 5. Generate characters - use book content if available, otherwise use prompt
             if book_context:
@@ -249,13 +269,20 @@ Tone: {existing_plot.get('tone', 'N/A')}
 Audience: {existing_plot.get('audience', 'N/A')}
 Setting: {existing_plot.get('setting', 'N/A')}
 Themes: {', '.join(existing_plot.get('themes', [])) if existing_plot.get('themes') else 'N/A'}
+Medium: {existing_plot.get('medium', 'N/A')}
+Format: {existing_plot.get('format', 'N/A')}
+Vibe/Style: {existing_plot.get('vibe_style', 'N/A')}
 
 USER'S REFINEMENT REQUEST:
 {refinement_prompt}
 
 TASK:
 Refine the plot overview based on the user's feedback. Keep the core story intact but apply the requested changes.
-For example, if they ask for "Boondocks style animation", update the tone, setting, and logline to reflect that aesthetic.
+For example, if they ask for "Boondocks style animation", update the tone, setting, medium, and vibe_style to reflect that aesthetic.
+
+MEDIUM OPTIONS: Animation, Live Action, Hybrid / Mixed Media, Puppetry / Animatronics, Stop-Motion
+FORMAT OPTIONS: Film, TV Series, Limited Series / Miniseries, Anthology Series, Short Film, Special, Featurette
+VIBE/STYLE OPTIONS: Satire / Social Commentary, Cinematic / Fantasy, Sitcom / Comedy, Sitcom / Rom-Com, Cinematic / Crime Thriller, Documentary Style, Action / Adventure, Horror / Thriller, etc.
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON object with the refined plot:
@@ -268,6 +295,9 @@ Return ONLY a valid JSON object with the refined plot:
     "tone": "...",
     "audience": "...",
     "setting": "...",
+    "medium": "...",
+    "format": "...",
+    "vibe_style": "...",
     "status": "completed"
 }}
 """
@@ -291,18 +321,28 @@ Generate a comprehensive plot overview for this creative project including:
 2. Themes (list of 3-5 major themes)
 3. Setting Description
 4. Story Arc Summary
+5. Medium (production method)
+6. Format (content structure)
+7. Vibe/Style (creative aesthetic)
+
+MEDIUM OPTIONS: Animation, Live Action, Hybrid / Mixed Media, Puppetry / Animatronics, Stop-Motion
+FORMAT OPTIONS: Film, TV Series, Limited Series / Miniseries, Anthology Series, Short Film, Special, Featurette
+VIBE/STYLE OPTIONS: Satire / Social Commentary, Cinematic / Fantasy, Sitcom / Comedy, Sitcom / Rom-Com, Cinematic / Crime Thriller, Documentary Style, Action / Adventure, Horror / Thriller, etc.
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON object:
 {{
     "logline": "...",
     "themes": ["theme1", "theme2", ...],
-    "story_type": "{story_type or 'engaging narrative'}",
+    "story_type": "Identified story structure",
     "script_story_type": "{project_type}",
-    "genre": "{genre or 'general'}",
-    "tone": "{tone or 'professional'}",
-    "audience": "{audience or 'general'}",
+    "genre": "Primary genre identified from prompt",
+    "tone": "Overall tone of the project",
+    "audience": "Primary target audience",
     "setting": "...",
+    "medium": "...",
+    "format": "...",
+    "vibe_style": "...",
     "status": "completed"
 }}
 """
@@ -357,6 +397,15 @@ Based on this creative project, identify and profile any key characters or perso
 PROJECT PROMPT: {user_prompt}
 PROJECT TYPE: {project_type}
 LOGLINE: {plot_data.get('logline', '')}
+MEDIUM: {plot_data.get('medium', 'Not specified')}
+VIBE/STYLE: {plot_data.get('vibe_style', 'Not specified')}
+
+CREATIVE DIRECTION:
+Design characters that fit the specified medium and vibe/style. For example:
+- Animation: Consider exaggerated features, expressive designs
+- Live Action: Focus on realistic, grounded character traits
+- Satire/Comedy: Include comedic flaws, ironic traits
+- Crime Thriller: Add moral complexity, hidden motivations
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON array of character objects:
@@ -365,8 +414,8 @@ Return ONLY a valid JSON array of character objects:
         "name": "Character/Persona Name",
         "role": "protagonist",
         "character_arc": "Brief description",
-        "physical_description": "Appearance if relevant",
-        "personality": "Key traits",
+        "physical_description": "Appearance if relevant (consider the medium)",
+        "personality": "Key traits (consider the vibe/style)",
         "want": "Goal",
         "need": "Internal need",
         "lie": "False belief",
@@ -416,6 +465,8 @@ You are helping refine a plot by generating ADDITIONAL characters based on user 
 
 BOOK: {book.get('title', 'Unknown')}
 PLOT LOGLINE: {existing_plot.get('logline', '')}
+MEDIUM: {existing_plot.get('medium', 'Not specified')}
+VIBE/STYLE: {existing_plot.get('vibe_style', 'Not specified')}
 
 CONTENT SUMMARY:
 {chapters_summary}
@@ -426,6 +477,13 @@ EXISTING CHARACTERS (DO NOT REGENERATE THESE):
 USER'S REFINEMENT REQUEST:
 {refinement_prompt}
 
+CREATIVE DIRECTION:
+Design characters that fit the specified medium and vibe/style:
+- For Animation: exaggerated features, distinctive visual designs
+- For Live Action: realistic, grounded traits
+- For Satire/Comedy: comedic flaws, ironic personality traits
+- For Thriller/Drama: moral complexity, hidden motivations
+
 TASK:
 Based on the user's request, generate ADDITIONAL characters that are NOT already listed above.
 If the user asks to "generate more characters", analyze the book content and identify characters that were missed.
@@ -434,6 +492,7 @@ Focus on characters who actually appear in the story, not locations or objects.
 IMPORTANT:
 - Do NOT include characters whose names are: {', '.join(existing_char_names)}
 - Only generate NEW characters not already in the list
+- Match characters to the medium and vibe/style
 - If no new characters can be identified, return an empty array: []
 
 RESPONSE FORMAT:
@@ -443,8 +502,8 @@ Return ONLY a valid JSON array of NEW character objects:
         "name": "Character Name",
         "role": "protagonist/antagonist/supporting/minor",
         "character_arc": "Description of development",
-        "physical_description": "Appearance details",
-        "personality": "Personality traits",
+        "physical_description": "Appearance details (suited to the medium)",
+        "personality": "Personality traits (suited to the vibe/style)",
         "want": "External goal",
         "need": "Internal need",
         "lie": "False belief",
@@ -876,27 +935,37 @@ Target Audience: {plot_data.get('audience', 'General')}
 CONTENT SUMMARY:
 {chapters_summary}
 
-USER NOTES:
-{plot_data.get('logline', '')}
+ADAPTATION INSTRUCTIONS (IMPORTANT - ADAPT STORY TO THIS FORMAT):
+{plot_data.get('original_prompt') or plot_data.get('logline', '')}
 
 TASK:
 Generate a structured plot overview including:
-1. Logline (1-2 sentences)
+1. Logline (1-2 detailed sentences capturing the protagonist, conflict, and stakes)
 2. Themes (list of 3-5 major themes)
 3. Story Arc Summary (3 paragraphs: Setup, Confrontation, Resolution)
-4. Setting Description
+4. Setting Description (detailed description of time, place, and atmosphere)
+5. Medium (the ideal production method for this story)
+6. Format (content structure/length)
+7. Vibe/Style (creative aesthetic that fits the story)
+
+MEDIUM OPTIONS: Animation, Live Action, Hybrid / Mixed Media, Puppetry / Animatronics, Stop-Motion
+FORMAT OPTIONS: Film, TV Series, Limited Series / Miniseries, Anthology Series, Short Film, Special, Featurette
+VIBE/STYLE OPTIONS: Satire / Social Commentary, Cinematic / Fantasy, Sitcom / Comedy, Drama, Action / Adventure, Horror / Thriller, Coming-of-Age, Magical Realism, Epic, etc.
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON object with the following keys:
 {{
-    "logline": "...",
+    "logline": "Detailed 1-2 sentence summary capture protagonist, conflict, and stakes...",
     "themes": ["theme1", "theme2", ...],
-    "story_type": "{plot_data.get('story_type', 'Hero\'s Journey')}",
+    "story_type": "Identified story structure (e.g. Hero's Journey, 3-Act Structure)",
     "script_story_type": "fiction",
-    "genre": "{plot_data.get('genre') or book.get('genre', 'General')}",
-    "tone": "{plot_data.get('tone', 'Engaging')}",
-    "audience": "{plot_data.get('audience', 'General')}",
-    "setting": "...",
+    "genre": "Primary genre identified from content/instructions",
+    "tone": "Overall tone of the story",
+    "audience": "Primary target audience",
+    "setting": "Detailed setting description...",
+    "medium": "Recommended production medium...",
+    "format": "Recommended format...",
+    "vibe_style": "Creative aesthetic...",
     "status": "completed"
 }}
 """
@@ -971,9 +1040,19 @@ Based on the book content and plot overview, identify and profile the key charac
 
 BOOK: {book.get('title', '')}
 PLOT LOGLINE: {plot_data.get('logline', '')}
+MEDIUM: {plot_data.get('medium', 'Not specified')}
+VIBE/STYLE: {plot_data.get('vibe_style', 'Not specified')}
 
 CONTENT SUMMARY:
 {chapters_summary}
+
+CREATIVE DIRECTION:
+Design character profiles that fit the specified medium and vibe/style:
+- Animation: Consider exaggerated features, distinctive visual designs, expressive personalities
+- Live Action: Focus on realistic, grounded character traits and natural descriptions
+- Satire/Comedy: Include comedic flaws, ironic personality traits, witty dialogue potential
+- Crime Thriller: Add moral complexity, hidden motivations, psychological depth
+- Fantasy: Include fantastical elements, unique abilities or traits
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON array of character objects:
@@ -982,8 +1061,8 @@ Return ONLY a valid JSON array of character objects:
         "name": "Character Name",
         "role": "protagonist",
         "character_arc": "Description of development",
-        "physical_description": "Appearance details",
-        "personality": "Personality traits",
+        "physical_description": "Appearance details (designed for the medium)",
+        "personality": "Personality traits (matching the vibe/style)",
         "want": "External goal",
         "need": "Internal need",
         "lie": "False belief",
@@ -993,6 +1072,7 @@ Return ONLY a valid JSON array of character objects:
 
 Extract main and important supporting characters (aim for 5-10 key characters).
 Focus on characters who actually appear in the story, not locations or objects.
+Ensure character descriptions are tailored to the medium and vibe/style.
 """
 
         response = await self.openrouter.analyze_content(
@@ -1310,6 +1390,7 @@ Return a JSON object with:
                 user_id=user_id,
                 logline=plot_data.get("logline")
                 or f"A compelling {plot_data.get('genre', 'fiction')} story about personal growth and discovery.",
+                original_prompt=plot_data.get("original_prompt"),
                 themes=themes_value,
                 story_type=plot_data.get("story_type") or "hero's journey",
                 script_story_type=plot_data.get("script_story_type")
@@ -1320,6 +1401,9 @@ Return a JSON object with:
                 tone=plot_data.get("tone") or "hopeful",
                 audience=plot_data.get("audience") or "adult",
                 setting=plot_data.get("setting") or "Contemporary world",
+                medium=plot_data.get("medium"),
+                format=plot_data.get("format"),
+                vibe_style=plot_data.get("vibe_style"),
                 generation_method=plot_data.get("generation_method", "openrouter"),
                 model_used=plot_data.get("model_used"),
                 status=plot_data.get("status", "completed"),
@@ -1395,6 +1479,7 @@ Return a JSON object with:
                 book_id=str(plot_overview.book_id),
                 user_id=str(plot_overview.user_id),
                 logline=plot_overview.logline,
+                original_prompt=plot_overview.original_prompt,
                 themes=plot_overview.themes,
                 story_type=plot_overview.story_type,
                 script_story_type=plot_overview.script_story_type,
@@ -1723,6 +1808,10 @@ Return the enhanced script.
                 "model_used",
                 "status",
                 "version",
+                "medium",
+                "format",
+                "vibe_style",
+                "original_prompt",
             ]:
                 if hasattr(updates, field) and getattr(updates, field) is not None:
                     setattr(current_data, field, getattr(updates, field))

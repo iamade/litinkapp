@@ -58,4 +58,8 @@ export const projectService = {
   deleteProject: async (id: string) => {
     return await apiClient.delete(`/projects/${id}`);
   },
+
+  updateProject: async (id: string, data: Partial<Project>) => {
+    return await apiClient.patch<Project>(`/projects/${id}`, data);
+  },
 };

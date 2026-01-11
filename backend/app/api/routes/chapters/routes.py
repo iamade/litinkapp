@@ -41,6 +41,7 @@ from app.books.models import Book, Chapter
 from app.videos.models import ImageGeneration, AudioGeneration, Script, AudioExport
 from app.api.services.subscription import SubscriptionManager
 from app.auth.models import User
+from app.projects.models import Project
 
 router = APIRouter()
 
@@ -48,32 +49,58 @@ router = APIRouter()
 async def verify_chapter_access(
     chapter_id: str, user_id: str, session: AsyncSession
 ) -> Dict[str, Any]:
-    """Verify user has access to the chapter and return chapter data"""
+    """Verify user has access to the chapter and return chapter data.
+
+    For prompt-only projects, the frontend uses the project ID as the "chapter ID".
+    This function first checks for a Chapter record, and if not found, falls back
+    to checking for a Project record to support prompt-only projects.
+    """
     try:
         # Get chapter with book info
         stmt = select(Chapter, Book).join(Book).where(Chapter.id == chapter_id)
         result = await session.exec(stmt)
         chapter_book = result.first()
 
-        if not chapter_book:
-            raise HTTPException(status_code=404, detail="Chapter not found")
+        if chapter_book:
+            chapter, book = chapter_book
 
-        chapter, book = chapter_book
+            # Check access permissions (published books or owned by user)
+            if book.status != "READY" and str(book.user_id) != user_id:
+                raise HTTPException(
+                    status_code=403, detail="Not authorized to access this chapter"
+                )
 
-        # Check access permissions (published books or owned by user)
-        if book.status != "READY" and str(book.user_id) != user_id:
-            raise HTTPException(
-                status_code=403, detail="Not authorized to access this chapter"
-            )
+            # Convert to dict for compatibility with existing code
+            chapter_data = chapter.model_dump()
+            return chapter_data
 
-        # Convert to dict for compatibility with existing code
-        chapter_data = chapter.model_dump()
-        # Add book data if needed, or just return chapter_data
-        # The original code returned chapter_data with nested books
-        # We can simulate that or update callers.
-        # Callers use: chapter_data.get("ai_generated_content")
-        # So model_dump is fine.
-        return chapter_data
+        # No chapter found - check if this is a Project ID (for prompt-only projects)
+        project_stmt = select(Project).where(Project.id == chapter_id)
+        project_result = await session.exec(project_stmt)
+        project = project_result.first()
+
+        if project:
+            # Check access permissions for project
+            if str(project.user_id) != user_id:
+                raise HTTPException(
+                    status_code=403, detail="Not authorized to access this project"
+                )
+
+            # Return a virtual chapter-like dict for prompt-only projects
+            virtual_chapter_data = {
+                "id": str(project.id),
+                "title": project.title,
+                "content": project.input_prompt or "",
+                "chapter_number": 1,
+                "book_id": str(project.book_id) if project.book_id else None,
+                "ai_generated_content": {},
+                "is_virtual": True,  # Flag to indicate this is a project, not a real chapter
+                "project_id": str(project.id),
+            }
+            return virtual_chapter_data
+
+        # Neither chapter nor project found
+        raise HTTPException(status_code=404, detail="Chapter not found")
 
     except HTTPException:
         raise

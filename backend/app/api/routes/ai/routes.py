@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 import re
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Body
@@ -262,7 +262,11 @@ def get_available_script_styles() -> dict:
 
 
 async def enhance_with_plot_context(
-    session: AsyncSession, user_id: str, book_id: str, chapter_content: str
+    session: AsyncSession,
+    user_id: str,
+    book_id: str,
+    chapter_content: str,
+    custom_logline: Optional[str] = None,
 ) -> dict:
     """Enhanced plot context integration for script generation"""
     try:
@@ -271,36 +275,47 @@ async def enhance_with_plot_context(
             user_id=user_id, book_id=book_id
         )
 
-        if not plot_overview:
+        if not plot_overview and not custom_logline:
             return {"enhanced_content": None, "plot_info": None}
 
-        # Get characters for this plot
-        character_service = CharacterService(session)
-        characters = await character_service.get_characters_by_plot(
-            plot_overview.id, user_id
-        )
+        # Get characters for this plot if plot exists
+        characters = []
+        if plot_overview:
+            character_service = CharacterService(session)
+            characters = await character_service.get_characters_by_plot(
+                plot_overview.id, user_id
+            )
 
         # Build comprehensive plot context
         plot_context_parts = []
 
         # Plot overview section
         plot_context_parts.append("PLOT OVERVIEW:")
-        if plot_overview.logline:
-            plot_context_parts.append(f"Logline: {plot_overview.logline}")
-        if plot_overview.themes:
-            plot_context_parts.append(f"Themes: {', '.join(plot_overview.themes)}")
-        if plot_overview.story_type:
-            plot_context_parts.append(f"Story Type: {plot_overview.story_type}")
-        if plot_overview.genre:
-            plot_context_parts.append(f"Genre: {plot_overview.genre}")
-        if plot_overview.tone:
-            plot_context_parts.append(f"Tone: {plot_overview.tone}")
-        if plot_overview.setting:
-            plot_context_parts.append(f"Setting: {plot_overview.setting}")
-        if plot_overview.target_audience:
+
+        # Use custom logline if provided, otherwise fallback to DB
+        if custom_logline:
+            plot_context_parts.append(f"Logline: {custom_logline}")
             plot_context_parts.append(
-                f"Target Audience: {plot_overview.target_audience}"
+                f"(NOTE: This logline overrides original plot logline)"
             )
+        elif plot_overview and plot_overview.logline:
+            plot_context_parts.append(f"Logline: {plot_overview.logline}")
+
+        if plot_overview:
+            if plot_overview.themes:
+                plot_context_parts.append(f"Themes: {', '.join(plot_overview.themes)}")
+            if plot_overview.story_type:
+                plot_context_parts.append(f"Story Type: {plot_overview.story_type}")
+            if plot_overview.genre:
+                plot_context_parts.append(f"Genre: {plot_overview.genre}")
+            if plot_overview.tone:
+                plot_context_parts.append(f"Tone: {plot_overview.tone}")
+            if plot_overview.setting:
+                plot_context_parts.append(f"Setting: {plot_overview.setting}")
+            if plot_overview.target_audience:
+                plot_context_parts.append(
+                    f"Target Audience: {plot_overview.target_audience}"
+                )
 
         # Characters section
         if characters:
@@ -2662,15 +2677,14 @@ async def generate_script_and_scenes(
         chapter_id = request.get("chapter_id")
         script_style = validate_script_style(request.get("script_style", "cinematic"))
         script_name = request.get("script_name")  # Optional custom name for the script
-        plot_context = request.get(
-            "plot_context"
-        )  # Optional plot context for enhanced generation
+        plot_context = request.get("plot_context")  # Optional flag/context
+        custom_logline = request.get(
+            "custom_logline"
+        )  # User's specific instructions/logline
         script_story_type = request.get("scriptStoryType")  # Extract script story type
 
         print(f"[DEBUG] generate_script_and_scenes - received request: {request}")
-        print(
-            f"[DEBUG] generate_script_and_scenes - scriptStoryType: {script_story_type}"
-        )
+        print(f"[DEBUG] Custom Logline: {custom_logline}")
 
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
@@ -2803,18 +2817,27 @@ async def generate_script_and_scenes(
         # Prepare content for OpenRouter based on script style
         content_for_script = chapter_context.get("total_context", chapter_content)
 
-        # Enhance with plot context if provided
+        # Enhance with plot context (Always attempt if we have a book_id, or if custom_logline is provided)
         plot_enhanced = False
         plot_info = None
-        if plot_context:
+
+        # We should try to enhance if explicitly requested OR if we have custom logline OR by default?
+        # Let's say we always try to enhance if it's a book chapter to get better results.
+        # But previous logic used `if plot_context`. Let's assume frontend now sends plot_context=True usually,
+        # OR we trigger it if `custom_logline` is present.
+
+        should_enhance = plot_context or custom_logline
+
+        if should_enhance:
             try:
                 plot_info = await enhance_with_plot_context(
                     session,
                     current_user.id,
                     book_id,
                     content_for_script,
+                    custom_logline=custom_logline,
                 )
-                if plot_info and plot_info["enhanced_content"]:
+                if plot_info and plot_info.get("enhanced_content"):
                     content_for_script = plot_info["enhanced_content"]
                     plot_enhanced = True
                     print(
@@ -3477,6 +3500,10 @@ async def delete_script(
 
 class ScriptUpdate(SQLModel):
     script_name: Optional[str] = None
+    characters: Optional[List[str]] = None
+    character_ids: Optional[List[str]] = None  # UUIDs of linked plot characters
+    character_details: Optional[str] = None
+    status: Optional[str] = None
 
 
 @router.patch("/script/{script_id}")
@@ -3495,8 +3522,21 @@ async def update_script(
         if str(script.user_id) != str(current_user.id):
             raise HTTPException(status_code=403, detail="Not authorized")
 
+        # Update all provided fields
         if script_update.script_name is not None:
             script.script_name = script_update.script_name
+
+        if script_update.characters is not None:
+            script.characters = script_update.characters
+
+        if script_update.character_ids is not None:
+            script.character_ids = script_update.character_ids
+
+        if script_update.character_details is not None:
+            script.character_details = script_update.character_details
+
+        if script_update.status is not None:
+            script.status = script_update.status
 
         session.add(script)
         await session.commit()
