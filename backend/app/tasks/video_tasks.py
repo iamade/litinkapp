@@ -1,13 +1,15 @@
 from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List, Optional
-from app.core.services.modelslab_video import ModelsLabVideoService
+
 from app.api.services.video import VideoService
 from app.core.database import async_session, engine
 from sqlmodel import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.videos.models import VideoGeneration, VideoSegment
+from app.subscription.models import UserSubscription
+from app.core.model_config import get_model_config, ModelConfig
 import json
 
 from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
@@ -416,6 +418,25 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             await session.execute(update_query, {"id": video_generation_id})
             await session.commit()
 
+            # Get user subscription tier for model config
+            user_tier = "free"
+            async with session.begin_nested():  # Use nested transaction or just query
+                # Re-using session within transaction is fine
+                pass
+
+            # Simple query for subscription
+            sub_query = text(
+                "SELECT tier FROM user_subscriptions WHERE user_id = :user_id"
+            )
+            sub_result = await session.execute(sub_query, {"user_id": user_id})
+            sub_record = sub_result.first()
+            if sub_record:
+                user_tier = sub_record[0]
+
+            # Get Video Model Config
+            video_config = get_model_config("video", user_tier)
+            print(f"[VIDEO CONFIG] Tier: {user_tier}, Config: {video_config}")
+
             # Get script data and generated assets
             script_data = video_gen.get("script_data", {})
             audio_files = video_gen.get("audio_files", {})
@@ -525,8 +546,10 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
                 audio_files,
                 image_data,
                 video_style,
+                video_style,
                 script_data,
                 user_id,
+                model_config=video_config,
                 session=session,
             )
 
@@ -706,6 +729,7 @@ async def generate_scene_videos(
     video_style: str,
     script_data: Dict[str, Any] = None,
     user_id: str = None,
+    model_config: Optional[ModelConfig] = None,
     session: AsyncSession = None,
 ) -> List[Dict[str, Any]]:
     """Generate videos for each scene using V7 Veo 2 image-to-video with sequential processing and key scene shots"""
@@ -718,7 +742,13 @@ async def generate_scene_videos(
         raise Exception("Session required for generate_scene_videos")
 
     scene_images = image_data.get("scene_images", [])  # Fixed key mismatch
-    model_id = modelslab_service.get_video_model_for_style(video_style)
+
+    # Determine Model ID from Config or fallback
+    primary_model_id = "seedance-1-5-pro"  # Default fallback
+    if model_config and model_config.primary:
+        primary_model_id = model_config.primary
+
+    print(f"[SCENE VIDEOS] Using Primary Model: {primary_model_id}")
 
     # Parse script for enhanced prompt generation if script data is available
     parsed_components = None
@@ -797,44 +827,38 @@ async def generate_scene_videos(
                         video_results.append(None)
                         continue
 
-            # Extract dialogue for this scene and generate audio
-            scene_dialogue_data = await extract_scene_dialogue_and_generate_audio(
-                video_gen_id,
-                scene_id,
-                scene_description,
-                script_data or {},
-                user_id,
-                session=session,
-            )
+            # Find audio for lip sync / audio-reactive
+            scene_audio = find_scene_audio(scene_id, audio_files)
+            init_audio_url = scene_audio.get("audio_url") if scene_audio else None
 
-            # Find audio for lip sync (legacy support)
-            scene_audio = find_scene_audio(
-                scene_id,
-                audio_files,
-                script_data.get("script_style") if script_data else None,
-            )
+            # Decide on Model: Dialogue (Audio) vs Narration (Visual Only)
+            # If we have init_audio, we MIGHT want to use a specific lip-sync capable model if the primary isn't one
+            # But per plan, tiers like Standard+ use Omni/Wan which support it.
+            # Free/Basic might use seedance (no lip sync) or wan2.5 (lip sync).
 
-            # ✅ Generate video using V7 Veo 2 with enhanced prompt generation
-            result = await modelslab_service.enhance_video_for_scene(
-                scene_description=scene_description,
+            # Use the tier's primary model
+            current_model_id = primary_model_id
+
+            logger_msg = f"[SCENE VIDEOS V7] Generating video for {scene_id} using {current_model_id}"
+            if init_audio_url:
+                logger_msg += " with Audio Reactive/Lip Sync"
+            print(logger_msg)
+
+            # ✅ Generate video using ModelsLab Service
+            result = await modelslab_service.generate_image_to_video(
                 image_url=starting_image_url,
-                audio_url=scene_audio.get("audio_url") if scene_audio else None,
-                dialogue_audio=scene_dialogue_data.get("dialogue_audio", []),
-                style=video_style,
-                include_lipsync=bool(scene_audio)
-                or bool(scene_dialogue_data.get("dialogue_audio")),
-                script_style=script_data.get("script_style") if script_data else None,
-                script_data=(
-                    {"parsed_components": parsed_components}
-                    if parsed_components
-                    else None
-                ),
+                prompt=scene_description,  # Could use enhanced prompt here if needed
+                model_id=current_model_id,
+                negative_prompt="",
+                init_audio=init_audio_url if init_audio_url else None,
             )
+
+            # Process result (Adapt old verify logic to new direct call result)
+            # generate_image_to_video returns dict with status/video_url or error
 
             if result.get("status") == "success":
-                enhanced_video = result.get("enhanced_video", {})
-                video_url = enhanced_video.get("video_url")
-                has_lipsync = enhanced_video.get("has_lipsync", False)
+                video_url = result.get("video_url")
+                has_lipsync = bool(init_audio_url)
 
                 if video_url:
                     # Extract the last frame as key scene shot for the next scene
@@ -896,20 +920,15 @@ async def generate_scene_videos(
                                 "generation_method": "veo2_image_to_video_sequential",
                                 "status": "completed",
                                 "processing_service": "modelslab_v7",
-                                "processing_model": model_id,
+                                "processing_model": current_model_id,
                                 "metadata": json.dumps(
                                     {
-                                        "model_id": model_id,
+                                        "model_id": current_model_id,
                                         "video_style": video_style,
                                         "service": "modelslab_v7",
                                         "has_lipsync": has_lipsync,
                                         "veo2_enhanced": True,
-                                        "dialogue_audio_count": len(
-                                            scene_dialogue_data.get(
-                                                "dialogue_audio", []
-                                            )
-                                        ),
-                                        "character_dialogue_integrated": True,
+                                        "character_dialogue_integrated": has_lipsync,
                                         "sequential_processing": True,
                                         "scene_sequence": i + 1,
                                         "used_previous_key_scene": i > 0,
@@ -934,7 +953,7 @@ async def generate_scene_videos(
                             "duration": 5.0,
                             "source_image": starting_image_url,
                             "method": "veo2_image_to_video_sequential",
-                            "model": model_id,
+                            "model": current_model_id,
                             "has_lipsync": has_lipsync,
                             "scene_sequence": i + 1,
                         }

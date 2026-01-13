@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Edit2, Trash2, Clock, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Link2 } from 'lucide-react';
+import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User } from 'lucide-react';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
 
@@ -84,7 +84,7 @@ interface ScriptGenerationPanelProps {
     logline?: string;
     original_prompt?: string;
   } | null;
-  onCreatePlotCharacter?: (name: string) => Promise<PlotCharacter>;  // Create placeholder in plot
+  onCreatePlotCharacter?: (name: string, entityType?: 'character' | 'object' | 'location') => Promise<PlotCharacter>;  // Create placeholder in plot
 }
 
 interface ScriptGenerationOptions {
@@ -148,7 +148,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [scriptStoryType, setScriptStoryType] = useState<string>(
     plotOverview?.script_story_type || plotOverview?.story_type || "hero's journey"
   );
-  const [logline, setLogline] = useState<string>(plotOverview?.original_prompt || plotOverview?.logline || "");
+  const [logline, setLogline] = useState<string>((plotOverview as any)?.creative_directive || plotOverview?.logline || plotOverview?.original_prompt || "");
   const [generationOptions, setGenerationOptions] = useState<ScriptGenerationOptions>({
     includeCharacterProfiles: true,
     targetDuration: "auto",
@@ -184,7 +184,6 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     }
   }, [plotOverview?.script_story_type, plotOverview?.story_type]);
   const [activeView, setActiveView] = useState<'overview' | 'acts' | 'scenes' | 'dialogue'>('overview');
-  const [expandedScenes, setExpandedScenes] = useState<Set<number>>(new Set());
   const [showFullScript, setShowFullScript] = useState(false);
   const [isAddingCharacter, setIsAddingCharacter] = useState(false);
   const [newCharacterName, setNewCharacterName] = useState('');
@@ -194,18 +193,6 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       ...generationOptions,
       scriptStoryType: scriptStoryType,
       customLogline: logline
-    });
-  };
-
-  const toggleSceneExpansion = (sceneNumber: number) => {
-    setExpandedScenes(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(sceneNumber)) {
-        newSet.delete(sceneNumber);
-      } else {
-        newSet.add(sceneNumber);
-      }
-      return newSet;
     });
   };
 
@@ -263,6 +250,50 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               : 'Narrative voice-over storytelling'}
           </p>
         </div>
+        {/* Original User Prompt - Reference (read-only) */}
+        {plotOverview?.original_prompt && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Original User Prompt <span className="text-xs text-gray-500">(Reference)</span>
+            </label>
+            <div className="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
+              {plotOverview.original_prompt}
+            </div>
+          </div>
+        )}
+
+        {/* Story Logline - Reference (read-only) */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Story Logline <span className="text-xs text-gray-500">(Reference)</span>
+          </label>
+          <div className="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
+            {plotOverview?.logline || 'Not yet generated'}
+          </div>
+        </div>
+
+ {/* Creative Directive / Style Guide - Editable */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Creative Directive / Style Guide
+            <span className="text-xs text-blue-600 dark:text-blue-400 ml-2">(Used for script generation)</span>
+          </label>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            This combines your prompt and logline. Edit to customize the creative direction for this script.
+          </p>
+          <textarea
+            value={logline}
+            onChange={(e) => {
+              setLogline(e.target.value);
+              setGenerationOptions(prev => ({
+                ...prev,
+                customLogline: e.target.value
+              }));
+            }}
+            placeholder="Combined creative direction for this script..."
+            className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent min-h-[100px] resize-y"
+          />
+        </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Script Story Type
@@ -316,26 +347,6 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
         </div>
       </div>
 
-      <div className="md:col-span-2">
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Logline / Style Guide
-        </label>
-        <textarea
-          value={logline}
-          onChange={(e) => {
-            setLogline(e.target.value);
-            setGenerationOptions(prev => ({
-              ...prev,
-              customLogline: e.target.value
-            }));
-          }}
-          placeholder="Enter a logline or specific instructions (e.g., 'Make it Boondocks animation style'). This will update your Plot Overview."
-          className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-gray-500 dark:placeholder-gray-400 min-h-[80px]"
-        />
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          This controls the creative direction. Changes here will be saved to your Plot Overview.
-        </p>
-      </div>
 
       {/* Advanced Options */}
       {showAdvancedOptions && (
@@ -594,131 +605,156 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
             Click to link with Plot Overview • ✓ = linked • ⚠ = not linked
           </span>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {script.characters?.map((character, idx) => {
-            // Check if this character is linked to a plot character
-            const linkedCharacterId = script.character_ids?.[idx];
-            const linkedPlotChar = linkedCharacterId 
-              ? plotOverview?.characters?.find(c => c.id === linkedCharacterId)
-              : null;
-            const isLinked = !!linkedPlotChar;
 
-            return editingCharacterIdx === idx ? (
-              <CharacterDropdown
-                key={idx}
-                value={editingCharacterName}
-                plotCharacters={plotOverview?.characters || []}
-                linkedCharacterId={linkedCharacterId}
-                onSelect={(plotChar) => {
-                  if (selectedScript) {
-                    // Update character name to match plot character
-                    const newCharacters = [...script.characters];
-                    newCharacters[idx] = plotChar.name;
-                    
-                    // Update character_ids to link to plot character
-                    const newCharacterIds = [...(script.character_ids || [])];
-                    // Ensure array is long enough
-                    while (newCharacterIds.length <= idx) {
-                      newCharacterIds.push('');
-                    }
-                    newCharacterIds[idx] = plotChar.id;
-                    
-                    onUpdateScript(selectedScript.id, { 
-                      characters: newCharacters,
-                      character_ids: newCharacterIds
-                    });
-                  }
-                  setEditingCharacterIdx(null);
-                  setEditingCharacterName('');
-                }}
-                onCreateNew={async (name) => {
-                  if (onCreatePlotCharacter && selectedScript) {
-                    try {
-                      const newChar = await onCreatePlotCharacter(name);
-                      // Link the new character
-                      const newCharacters = [...script.characters];
-                      newCharacters[idx] = newChar.name;
-                      
-                      const newCharacterIds = [...(script.character_ids || [])];
-                      while (newCharacterIds.length <= idx) {
-                        newCharacterIds.push('');
+        
+        {(() => {
+           // Helper to process entities with their original checks
+           const entities = (script.characters || []).map((name, idx) => {
+             const linkedCharacterId = script.character_ids?.[idx];
+             const linkedPlotChar = linkedCharacterId 
+                 ? plotOverview?.characters?.find(c => c.id === linkedCharacterId)
+                 : null;
+             return { name, idx, linkedPlotChar, linkedCharacterId };
+           });
+
+           const objectsLocations = entities.filter(e => e.linkedPlotChar && (e.linkedPlotChar.entity_type === 'object' || e.linkedPlotChar.entity_type === 'location'));
+           // Everything else goes to characters (unlinked ones are assumed characters until linked otherwise)
+           const characters = entities.filter(e => !e.linkedPlotChar || (e.linkedPlotChar.entity_type !== 'object' && e.linkedPlotChar.entity_type !== 'location'));
+
+           const renderEntityPill = (entity: typeof entities[0]) => {
+              const { name, idx, linkedPlotChar, linkedCharacterId } = entity;
+              const isLinked = !!linkedPlotChar;
+              
+              return editingCharacterIdx === idx ? (
+                  <CharacterDropdown
+                    key={idx}
+                    value={editingCharacterName}
+                    plotCharacters={plotOverview?.characters || []}
+                    linkedCharacterId={linkedCharacterId}
+                    onSelect={(plotChar) => {
+                      if (selectedScript) {
+                        const newCharacters = [...script.characters];
+                        newCharacters[idx] = plotChar.name;
+                        
+                        const newCharacterIds = [...(script.character_ids || [])];
+                        while (newCharacterIds.length <= idx) newCharacterIds.push('');
+                        newCharacterIds[idx] = plotChar.id;
+                        
+                        onUpdateScript(selectedScript.id, { 
+                          characters: newCharacters,
+                          character_ids: newCharacterIds
+                        });
                       }
-                      newCharacterIds[idx] = newChar.id;
-                      
-                      onUpdateScript(selectedScript.id, { 
-                        characters: newCharacters,
-                        character_ids: newCharacterIds
-                      });
-                    } catch (error) {
-                      console.error('Failed to create character:', error);
-                    }
-                  }
-                  setEditingCharacterIdx(null);
-                  setEditingCharacterName('');
-                }}
-                onCancel={() => {
-                  setEditingCharacterIdx(null);
-                  setEditingCharacterName('');
-                }}
-              />
-            ) : (
-              <span
-                key={idx}
-                className={`group inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-                  isLinked 
-                    ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300'
-                    : 'bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300'
-                }`}
-              >
-                {/* Linked status indicator */}
-                <span className="text-xs mr-1">
-                  {isLinked ? '✓' : '⚠'}
-                </span>
-                
-                <span
-                  onClick={() => {
-                    setEditingCharacterIdx(idx);
-                    setEditingCharacterName(character);
-                  }}
-                  title={isLinked ? `Linked to: ${linkedPlotChar?.name}` : 'Click to link with Plot Overview'}
-                  className="cursor-pointer hover:underline"
-                >
-                  {character}
-                </span>
-                
-                {/* Show linked character's image if available */}
-                {linkedPlotChar?.image_url && (
-                  <img 
-                    src={linkedPlotChar.image_url} 
-                    alt={linkedPlotChar.name}
-                    className="w-5 h-5 rounded-full object-cover ml-1"
+                      setEditingCharacterIdx(null);
+                      setEditingCharacterName('');
+                    }}
+                    onCreateNew={async (name, entityType = 'character') => {
+                      if (onCreatePlotCharacter && selectedScript) {
+                          try {
+                            const newChar = await onCreatePlotCharacter(name, entityType);
+                            const newCharacters = [...script.characters];
+                            newCharacters[idx] = newChar.name;
+                            
+                            const newCharacterIds = [...(script.character_ids || [])];
+                            while (newCharacterIds.length <= idx) newCharacterIds.push('');
+                            newCharacterIds[idx] = newChar.id;
+                            
+                            onUpdateScript(selectedScript.id, { 
+                              characters: newCharacters,
+                              character_ids: newCharacterIds
+                            });
+                          } catch (error) {
+                            console.error('Failed to create character:', error);
+                          }
+                      }
+                      setEditingCharacterIdx(null);
+                      setEditingCharacterName('');
+                    }}
+                    onCancel={() => {
+                      setEditingCharacterIdx(null);
+                      setEditingCharacterName('');
+                    }}
                   />
-                )}
-                
-                {/* Delete button */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (selectedScript) {
-                      // Remove character from arrays
-                      const newCharacters = script.characters.filter((_, i) => i !== idx);
-                      const newCharacterIds = (script.character_ids || []).filter((_, i) => i !== idx);
-                      onUpdateScript(selectedScript.id, {
-                        characters: newCharacters,
-                        character_ids: newCharacterIds
-                      });
-                    }
-                  }}
-                  className="ml-1 p-0.5 rounded-full hover:bg-red-200 dark:hover:bg-red-800/50 text-gray-500 hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Remove character from script"
-                >
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </span>
-            );
-          })}
+                ) : (
+                  <span
+                    key={idx}
+                    className={`group inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                      isLinked 
+                        ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300'
+                        : 'bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300'
+                    }`}
+                  >
+                    <span className="text-xs mr-1">
+                      {isLinked ? '✓' : '⚠'}
+                    </span>
+                    
+                    <span
+                      onClick={() => {
+                        setEditingCharacterIdx(idx);
+                        setEditingCharacterName(name);
+                      }}
+                      title={isLinked ? `Linked to: ${linkedPlotChar?.name}` : 'Click to link with Plot Overview'}
+                      className="cursor-pointer hover:underline flex items-center gap-1"
+                    >
+                      {/* Icon based on type if linked */}
+                      {linkedPlotChar?.entity_type === 'location' && <MapPin className="w-3 h-3" />}
+                      {linkedPlotChar?.entity_type === 'object' && <Box className="w-3 h-3" />}
+                      {!linkedPlotChar?.entity_type && <User className="w-3 h-3 opacity-50" />}
+                      {name}
+                    </span>
+                    
+                    {linkedPlotChar?.image_url && (
+                      <img 
+                        src={linkedPlotChar.image_url} 
+                        alt={linkedPlotChar.name}
+                        className="w-5 h-5 rounded-full object-cover ml-1"
+                      />
+                    )}
+                    
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (selectedScript) {
+                          const newCharacters = script.characters.filter((_, i) => i !== idx);
+                          const newCharacterIds = (script.character_ids || []).filter((_, i) => i !== idx);
+                          onUpdateScript(selectedScript.id, {
+                            characters: newCharacters,
+                            character_ids: newCharacterIds
+                          });
+                        }
+                      }}
+                      className="ml-1 p-0.5 rounded-full hover:bg-red-200 dark:hover:bg-red-800/50 text-gray-500 hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove from script"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </span>
+                );
+           };
+
+           return (
+             <div className="space-y-4">
+               {/* Character List */}
+               <div className="flex flex-wrap gap-2">
+                 {characters.map(renderEntityPill)}
+               </div>
+
+               {/* Object/Location List */}
+               {objectsLocations.length > 0 && (
+                 <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                       <Box className="w-4 h-4" /> Objects & Locations
+                    </h5>
+                    <div className="flex flex-wrap gap-2">
+                       {objectsLocations.map(renderEntityPill)}
+                    </div>
+                 </div>
+               )}
+             </div>
+           );
+        })()}
+          
+          {/* Add Character Button/Input - Keeps existing logic but visually separated */}
           
           {/* Add Character Button/Input */}
           {isAddingCharacter ? (
@@ -784,7 +820,6 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               Add
             </button>
           )}
-        </div>
       </div>
 
       {/* Script Preview */}
@@ -1221,78 +1256,5 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
   );
 };
 
-// Scene Detail Card Component
-interface SceneDetailCardProps {
-  scene: SceneDescription;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
-}
-
-const SceneDetailCard: React.FC<SceneDetailCardProps> = ({
-  scene,
-  isExpanded,
-  onToggleExpand,
-}) => {
-  return (
-    <div className="border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={onToggleExpand}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-          </button>
-          <h5 className="font-medium text-gray-900">
-            Scene {scene.scene_number}: {scene.location}
-          </h5>
-        </div>
-        <div className="flex items-center space-x-4 text-sm text-gray-600">
-          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
-            {scene.time_of_day}
-          </span>
-          <div className="flex items-center space-x-1">
-            <Clock className="w-4 h-4" />
-            <span>{scene.estimated_duration}s</span>
-          </div>
-        </div>
-      </div>
-
-      <p className="text-sm text-gray-700 mb-3">{scene.visual_description}</p>
-
-      {isExpanded && (
-        <div className="space-y-3 pt-3 border-t">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Key Actions</label>
-              <p className="text-sm text-gray-700">{scene.key_actions}</p>
-            </div>
-            
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Audio Requirements</label>
-              <p className="text-sm text-gray-700">{scene.audio_requirements}</p>
-            </div>
-          </div>
-
-          {scene.characters && scene.characters.length > 0 && (
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Characters</label>
-              <div className="flex flex-wrap gap-1">
-                {scene.characters.map((character, idx) => (
-                  <span
-                    key={idx}
-                    className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs"
-                  >
-                    {character}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
+// Scene Detail Card Component removed as it was unused
 export default ScriptGenerationPanel;

@@ -794,6 +794,10 @@ async def async_generate_character_image_task(
                 user_tier=user_tier,
             )
 
+            # Check for error in result (fallback manager returns dict on error)
+            if result.get("status") == "error":
+                raise Exception(result.get("error", "Unknown error from image service"))
+
             image_url = result.get("image_url")
             generation_time = result.get("generation_time", 0)
             model_used = result.get("model_used", "gen4_image")
@@ -974,6 +978,8 @@ def generate_scene_image_task(
     custom_prompt: Optional[str] = None,
     user_tier: Optional[str] = None,
     retry_count: int = 0,
+    character_ids: Optional[List[str]] = None,
+    character_image_urls: Optional[List[str]] = None,
 ) -> None:
     """
     Asynchronous Celery task for generating scene images with retry mechanism.
@@ -990,6 +996,8 @@ def generate_scene_image_task(
         custom_prompt: Optional custom prompt additions
         user_tier: User subscription tier for model selection
         retry_count: Current retry count for exponential backoff
+        character_ids: Optional list of character image IDs to use as style references
+        character_image_urls: Optional list of direct character image URLs
     """
     return asyncio.run(
         async_generate_scene_image_task(
@@ -1003,7 +1011,10 @@ def generate_scene_image_task(
             aspect_ratio,
             custom_prompt,
             user_tier,
-            retry_count,
+            retry_count=retry_count,
+            character_ids=character_ids,
+            character_image_urls=character_image_urls,
+            task_instance=self,
         )
     )
 
@@ -1020,6 +1031,9 @@ async def async_generate_scene_image_task(
     custom_prompt: Optional[str] = None,
     user_tier: Optional[str] = None,
     retry_count: int = 0,
+    character_ids: Optional[List[str]] = None,
+    character_image_urls: Optional[List[str]] = None,
+    task_instance: Any = None,
 ):
     """Async implementation of scene image generation task"""
     import random
@@ -1031,7 +1045,7 @@ async def async_generate_scene_image_task(
                 f"[SceneImageTask] Starting generation for scene {scene_number}"
             )
             logger.info(
-                f"[SceneImageTask] Parameters: user={user_id}, chapter={chapter_id}, script={script_id}, record={record_id}, tier={user_tier}, retry={retry_count}"
+                f"[SceneImageTask] Parameters: user={user_id}, chapter={chapter_id}, characters={len(character_ids) if character_ids else 0}, direct_urls={len(character_image_urls) if character_image_urls else 0}"
             )
 
             # Verify record exists
@@ -1048,21 +1062,32 @@ async def async_generate_scene_image_task(
 
             # Update status to in_progress with transaction safety
             try:
+                # Fetch existing meta to update safely
+                meta_query = text("SELECT meta FROM image_generations WHERE id = :id")
+                meta_result = await session.execute(meta_query, {"id": record_id})
+                meta_row = meta_result.mappings().first()
+                current_meta = meta_row.get("meta") if meta_row else {}
+                if current_meta is None:
+                    current_meta = {}
+
+                # Update meta in Python
+                current_meta["last_attempted_at"] = datetime.utcnow().isoformat()
+                current_meta["retry_count"] = retry_count
+
+                # Update with full JSON object
                 status_update_query = text(
                     """
                     UPDATE image_generations 
                     SET status = 'in_progress', 
-                        progress = 0, 
-                        last_attempted_at = :last_attempted, 
-                        retry_count = :retry_count 
+                        progress = 0,
+                        meta = :meta
                     WHERE id = :id
                 """
                 )
                 await session.execute(
                     status_update_query,
                     {
-                        "last_attempted": datetime.utcnow().isoformat(),
-                        "retry_count": retry_count,
+                        "meta": json.dumps(current_meta),
                         "id": record_id,
                     },
                 )
@@ -1085,14 +1110,62 @@ async def async_generate_scene_image_task(
 
             logger.info(f"[SceneImageTask] Final prompt: {final_description[:100]}...")
 
-            result = await ModelsLabV7ImageService().generate_scene_image(
+            # Fetch character image URLs if IDs are provided
+            resolved_character_urls = []
+            if character_ids and len(character_ids) > 0:
+                try:
+                    # Construct query to get image URLs for the character IDs
+                    # Ensure we claim types properly for list parameter if needed,
+                    # but easiest is to pass tuple or list depending on driver support.
+                    # SQLModel/SQLAlchemy async usually handles list for IN clause with efficient binding.
+                    # Or we can loop if few. Given strict tiers, max is likely small (1-2).
+
+                    # Safer: fetch one by one or construct safe query
+                    char_query_text = "SELECT image_url FROM image_generations WHERE id = ANY(:ids) AND status = 'completed'"
+                    char_result = await session.execute(
+                        text(char_query_text), {"ids": character_ids}
+                    )
+                    resolved_character_urls = [
+                        row[0] for row in char_result.fetchall() if row[0]
+                    ]
+
+                    logger.info(
+                        f"[SceneImageTask] Resolved {len(resolved_character_urls)} character URLs from {len(character_ids)} IDs"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[SceneImageTask] Failed to resolve character images: {e}"
+                    )
+                    # Proceed without resolved characters rather than failing completely
+                    resolved_character_urls = []
+
+            # Combine resolved URLs with direct URLs
+            final_character_urls = list(resolved_character_urls)
+            if character_image_urls:
+                final_character_urls.extend(character_image_urls)
+
+            # Remove duplicates while preserving order
+            final_character_urls = list(dict.fromkeys(final_character_urls))
+
+            if final_character_urls:
+                logger.info(
+                    f"[SceneImageTask] Using {len(final_character_urls)} total character references (Resolved: {len(resolved_character_urls)}, Direct: {len(character_image_urls) if character_image_urls else 0})"
+                )
+
+            image_service = ModelsLabV7ImageService()
+            result = await image_service.generate_scene_image(
                 scene_description=final_description,
                 style=style or "cinematic",
                 aspect_ratio=aspect_ratio or "16:9",
                 user_tier=user_tier,
+                character_image_urls=final_character_urls,
             )
 
             # Extract result data
+            # Check for error in result (fallback manager returns dict on error)
+            if result.get("status") == "error":
+                raise Exception(result.get("error", "Unknown error from image service"))
+
             image_url = result.get("image_url")
             generation_time = result.get("generation_time", 0)
             model_used = result.get("model_used", "gen4_image")
@@ -1103,13 +1176,11 @@ async def async_generate_scene_image_task(
             # Prepare metadata with scene info
             existing_metadata = {}
             try:
-                meta_query = text(
-                    "SELECT metadata FROM image_generations WHERE id = :id"
-                )
+                meta_query = text("SELECT meta FROM image_generations WHERE id = :id")
                 meta_result = await session.execute(meta_query, {"id": record_id})
                 meta_row = meta_result.mappings().first()
-                if meta_row and meta_row.get("metadata"):
-                    existing_metadata = meta_row["metadata"]
+                if meta_row and meta_row.get("meta"):
+                    existing_metadata = meta_row["meta"]
             except Exception as meta_error:
                 logger.warning(
                     f"[SceneImageTask] Could not fetch existing metadata: {meta_error}"
@@ -1146,8 +1217,8 @@ async def async_generate_scene_image_task(
                         script_id = :script_id, 
                         scene_number = :scene_number, 
                         image_type = 'scene', 
-                        metadata = :metadata, 
-                        retry_count = :retry_count 
+                        meta = :meta,
+                        image_prompt = :image_prompt
                     WHERE id = :id
                 """
                 )
@@ -1156,14 +1227,20 @@ async def async_generate_scene_image_task(
                     success_update_query,
                     {
                         "image_url": image_url,
-                        "updated_at": datetime.utcnow().isoformat(),
+                        "updated_at": datetime.utcnow(),
                         "generation_time": generation_time,
                         "model_id": model_used,
                         "chapter_id": chapter_id,
                         "script_id": script_id,
                         "scene_number": scene_number,
-                        "metadata": json.dumps(merged_metadata),
-                        "retry_count": retry_count,
+                        "scene_number": scene_number,
+                        "meta": json.dumps(merged_metadata),
+                        "image_prompt": final_description,
+                        # Store retry count in meta via jsonb_set logic if needed, but since we are replacing metadata,
+                        # we can just assume it's part of the merged_metadata if we want.
+                        # However, the previous query structure used `metadata = :metadata`.
+                        # Let's ensure retry_count is in metadata if we want it preserved.
+                        # For now, just remove the explicit column update.
                         "id": record_id,
                     },
                 )
@@ -1221,6 +1298,17 @@ async def async_generate_scene_image_task(
 
             # Update record with error before retry attempt
             try:
+                # Fetch existing meta
+                meta_query = text("SELECT meta FROM image_generations WHERE id = :id")
+                meta_result = await session.execute(meta_query, {"id": record_id})
+                meta_row = meta_result.mappings().first()
+                current_meta = meta_row.get("meta") if meta_row else {}
+                if current_meta is None:
+                    current_meta = {}
+
+                # Update meta in Python
+                current_meta["retry_count"] = retry_count
+
                 # Only set status to failed if not retryable or max retries exceeded
                 if not is_retryable or retry_count >= 3:
                     error_update_query = text(
@@ -1228,8 +1316,8 @@ async def async_generate_scene_image_task(
                         UPDATE image_generations 
                         SET error_message = :error_message, 
                             updated_at = :updated_at, 
-                            retry_count = :retry_count, 
-                            status = 'failed' 
+                            status = 'failed',
+                            meta = :meta
                         WHERE id = :id
                     """
                     )
@@ -1241,8 +1329,9 @@ async def async_generate_scene_image_task(
                         """
                         UPDATE image_generations 
                         SET error_message = :error_message, 
-                            updated_at = :updated_at, 
-                            retry_count = :retry_count 
+                            updated_at = :updated_at,
+                            status = 'failed',
+                            meta = :meta
                         WHERE id = :id
                     """
                     )
@@ -1251,14 +1340,15 @@ async def async_generate_scene_image_task(
                     error_update_query,
                     {
                         "error_message": error_message,
-                        "updated_at": datetime.utcnow().isoformat(),
-                        "retry_count": retry_count,
+                        "updated_at": datetime.utcnow(),
+                        "meta": json.dumps(current_meta),
                         "id": record_id,
                     },
                 )
                 await session.commit()
 
             except Exception as db_error:
+                await session.rollback()
                 logger.error(
                     f"[SceneImageTask] Failed to update record with error: {db_error}"
                 )
@@ -1276,32 +1366,51 @@ async def async_generate_scene_image_task(
 
                 # Increment retry count in DB before retrying
                 try:
+                    # Fetch existing meta
+                    meta_query = text(
+                        "SELECT meta FROM image_generations WHERE id = :id"
+                    )
+                    meta_result = await session.execute(meta_query, {"id": record_id})
+                    meta_row = meta_result.mappings().first()
+                    current_meta = meta_row.get("meta") if meta_row else {}
+                    if current_meta is None:
+                        current_meta = {}
+
+                    # Update meta in Python
+                    current_meta["retry_count"] = retry_count + 1
+                    current_meta["last_attempted_at"] = datetime.utcnow().isoformat()
+
                     retry_update_query = text(
                         """
                         UPDATE image_generations 
-                        SET retry_count = :retry_count, 
-                            last_attempted_at = :last_attempted 
+                        SET meta = :meta
                         WHERE id = :id
                     """
                     )
+
                     await session.execute(
                         retry_update_query,
                         {
-                            "retry_count": retry_count + 1,
-                            "last_attempted": datetime.utcnow(),
+                            "meta": json.dumps(current_meta),
                             "id": record_id,
                         },
                     )
                     await session.commit()
 
                     # Retry the task
-                    raise self.retry(exc=e, countdown=backoff_seconds)
+                    if task_instance:
+                        raise task_instance.retry(exc=e, countdown=backoff_seconds)
+                    else:
+                        logger.warning(
+                            "[SceneImageTask] No task instance available for retry"
+                        )
                 except Exception as db_error:
                     logger.error(f"Error updating retry count: {db_error}")
                     # Still retry even if DB update fails
-                    raise self.retry(exc=e, countdown=backoff_seconds)
+                    if task_instance:
+                        raise task_instance.retry(exc=e, countdown=backoff_seconds)
 
-        logger.error(
-            f"[SceneImageTask] Final failure for record {record_id}: {error_message}"
-        )
-        raise Exception(error_message)
+            logger.error(
+                f"[SceneImageTask] Final failure for record {record_id}: {error_message}"
+            )
+            raise Exception(error_message)

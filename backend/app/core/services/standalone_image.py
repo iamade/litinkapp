@@ -52,6 +52,7 @@ class StandaloneImageService:
         script_id: Optional[str] = None,
         chapter_id: Optional[str] = None,  # Added for scene metadata tracking
         scene_number: Optional[int] = None,  # Added for scene metadata tracking
+        character_ids: Optional[List[str]] = None,  # Added for character references
     ) -> Dict[str, Any]:
         """
         Generate a standalone scene image and store in database.
@@ -65,6 +66,7 @@ class StandaloneImageService:
             script_id: Optional script ID for linking
             chapter_id: Optional chapter ID for metadata tracking
             scene_number: Optional scene number for ordering
+            character_ids: Optional list of character image IDs to use as style references
 
         Returns:
             Dict containing image data and database record info
@@ -95,12 +97,33 @@ class StandaloneImageService:
             # Build enhanced prompt
             prompt = self._build_scene_prompt(scene_description, style, custom_prompt)
 
+            # Resolve character IDs to URLs if provided
+            character_image_urls = []
+            if character_ids:
+                try:
+                    # Fetch valid image URLs for the provided IDs
+                    query = (
+                        select(ImageGeneration.image_url)
+                        .where(col(ImageGeneration.id).in_(character_ids))
+                        .where(ImageGeneration.image_url != None)
+                    )
+                    result = await self.session.exec(query)
+                    character_image_urls = result.all()
+                    logger.info(
+                        f"[StandaloneImageService] Resolved {len(character_image_urls)} character reference images"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[StandaloneImageService] Failed to resolve character IDs: {e}"
+                    )
+
             # Generate image using ModelsLab service with tier-based model selection
             generation_result = await self.image_service.generate_scene_image(
                 scene_description=prompt,
                 style=style,
                 aspect_ratio=aspect_ratio,
                 user_tier=user_tier,
+                character_image_urls=character_image_urls,
             )
 
             # Update database record with results

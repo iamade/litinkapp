@@ -48,6 +48,37 @@ export const projectService = {
     return await apiClient.get<Project>(`/projects/${id}`);
   },
 
+  generateSceneImage: async (
+    projectId: string, 
+    sceneNumber: number, 
+    data: { 
+      scene_description: string; 
+      style: string; 
+      aspect_ratio: string; 
+      custom_prompt?: string;
+      script_id?: string;
+      character_ids?: string[];
+      character_image_urls?: string[];
+    }
+  ) => {
+    return await apiClient.post<any>(
+      `/chapters/${projectId}/images/scenes/${sceneNumber}`,
+      data
+    );
+  },
+
+  updateSceneDescription: async (
+    chapterId: string,
+    scriptId: string,
+    sceneNumber: number,
+    sceneDescription: string
+  ) => {
+    return await apiClient.put(
+      `/chapters/${chapterId}/scripts/${scriptId}/scenes/${sceneNumber}`,
+      { scene_description: sceneDescription }
+    );
+  },
+
   analyzeIntent: async (prompt: string, fileName?: string) => {
     return await apiClient.post<IntentAnalysisResult>("/projects/analyze-intent", {
       prompt,

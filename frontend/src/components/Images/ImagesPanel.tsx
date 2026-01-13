@@ -23,35 +23,10 @@ import { Tables } from '../../types/supabase';
 import { toast } from 'react-hot-toast';
 import { useImageGeneration } from '../../hooks/useImageGeneration';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
+import { SceneImage, CharacterImage, ImageGenerationOptions } from './types';
 
-interface SceneImage {
-  sceneNumber: number;
-  imageUrl: string;
-  prompt: string;
-  characters: string[];
-  generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
-  generatedAt?: string;
-  id?: string;
-  script_id?: string;
-}
-
-interface CharacterImage {
-  name: string;
-  imageUrl: string;
-  prompt: string;
-  generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
-  generatedAt?: string;
-  id?: string;
-}
-
-interface ImageGenerationOptions {
-  style: 'realistic' | 'cartoon' | 'cinematic' | 'fantasy' | 'sketch';
-  quality: 'standard' | 'hd';
-  aspectRatio: '16:9' | '4:3' | '1:1' | '9:16';
-  useCharacterReferences: boolean;
-  includeBackground: boolean;
-  lightingMood: string;
-}
+import { projectService } from '../../services/projectService';
+import SceneGenerationModal from './SceneGenerationModal';
 
 interface ImagesPanelProps {
   chapterId: string;
@@ -65,8 +40,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   chapterId,
   chapterTitle,
   selectedScript,
-  plotOverview,
-  onRefreshPlotOverview
+  plotOverview
 }) => {
   const {
     selectedScriptId,
@@ -92,14 +66,19 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     lightingMood: 'natural'
   });
 
+  // Scene Generation Modal State
+  const [showSceneGenerationModal, setShowSceneGenerationModal] = useState(false);
+  const [selectedSceneForGeneration, setSelectedSceneForGeneration] = useState<{
+    sceneNumber: number;
+    description: string;
+    isRegenerate: boolean;
+  } | null>(null);
+
   // Character management state
   const [excludedCharacters, setExcludedCharacters] = useState<Set<string>>(new Set());
-  const [characterRenames, setCharacterRenames] = useState<Map<string, string>>(new Map());
-  const [importedFromPlot, setImportedFromPlot] = useState<string[]>([]);
-  const [showImportModal, setShowImportModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingCharacter, setEditingCharacter] = useState<string | null>(null);
-  const [editInputValue, setEditInputValue] = useState('');
+  const [characterRenames] = useState<Map<string, string>>(new Map());
+
+
 
   const {
     sceneImages,
@@ -255,19 +234,75 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
           // Try to find matching character in plot overview for enriched data
           const plotChar = plotOverview?.characters?.find(pc => {
-            const plotName = pc.name.toLowerCase();
-            const scriptName = charName.toLowerCase();
+            // Normalize strings for comparison
+            const normalizeName = (n: string) => n.trim().toLowerCase().replace(/[.,]/g, '');
+            const pName = normalizeName(pc.name);
+            const sName = normalizeName(charName);
 
             // Exact match
-            if (plotName === scriptName) return true;
+            if (pName === sName) return true;
 
             // Partial match (e.g., "Harry" matches "Harry Potter")
-            if (plotName.includes(scriptName) || scriptName.includes(plotName)) return true;
+            // Ensure we aren't matching just on common prefixes
+            if (pName.includes(sName) || sName.includes(pName)) {
+              return true;
+            }
 
-            // Check first name match (e.g., "Harry" matches "Harry Potter")
-            const plotFirstName = plotName.split(' ')[0];
-            const scriptFirstName = scriptName.split(' ')[0];
-            if (plotFirstName === scriptFirstName && plotFirstName.length > 2) return true;
+            // Remove common honorifics/titles for first name check
+            const honorifics = ['mr', 'mrs', 'ms', 'dr', 'prof', 'professor', 'sir', 'lady', 'lord', 'king', 'queen', 'father', 'mother', 'uncle', 'aunt'];
+
+
+            // Tokenize and check for conflicts
+            const tokenize = (name: string) => name.split(' ').filter(p => !honorifics.includes(p));
+            const pTokens = tokenize(pName);
+            const sTokens = tokenize(sName);
+
+            // Check for strict honorific mismatch (e.g. Mr vs Mrs)
+            // We use the original non-normalized names to detect 'Mr.' vs 'Mrs.' accurately if needed, 
+            // but normalized 'mr' vs 'mrs' works too.
+            const maleTitles = ['mr', 'lord', 'sir', 'king', 'father', 'uncle'];
+            const femaleTitles = ['mrs', 'miss', 'ms', 'lady', 'queen', 'mother', 'aunt'];
+            
+            const hasTitle = (name: string, titles: string[]) => 
+                name.split(' ').some(part => titles.includes(part));
+
+            if (
+                (hasTitle(pName, maleTitles) && hasTitle(sName, femaleTitles)) ||
+                (hasTitle(pName, femaleTitles) && hasTitle(sName, maleTitles))
+            ) {
+                return false;
+            }
+
+            // If empty tokens (rare), no match unless exact match handled above
+            if (pTokens.length === 0 || sTokens.length === 0) return false;
+
+            // Check intersection
+            const intersection = pTokens.filter(t => sTokens.includes(t));
+            
+            // If they share no significant words, it's not a match
+            if (intersection.length === 0) return false;
+
+            // If they share words, verify no CONFLICTing unique words
+            // e.g. "Lily Potter" vs "Harry Potter". Intersection="potter".
+            // UniqueP="harry", UniqueS="lily". Both distinct and non-empty => Conflict.
+            const uniqueP = pTokens.filter(t => !intersection.includes(t));
+            const uniqueS = sTokens.filter(t => !intersection.includes(t));
+
+            if (uniqueP.length > 0 && uniqueS.length > 0) {
+                // Strong conflict if both have unique parts remaining
+                // Exception: "Dumbledore" matching "Albus Dumbledore"? 
+                // pTokens=[albus, dumbledore], sTokens=[dumbledore]. Intersection=[dumbledore].
+                // uniqueP=[albus], uniqueS=[]. No conflict. Match.
+                
+                // Exception: "Professor McGonagall" vs "Minerva McGonagall"?
+                // p=[minerva, mcgonagall], s=[professor, mcgonagall] (prof removed) -> s=[mcgonagall].
+                // No conflict.
+                
+                return false;
+            }
+
+            // If we are here, one is a subset of the other (or exact match tokens)
+            return true;
 
             return false;
           });
@@ -299,19 +334,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       }));
     }
 
-    // Add manually imported characters from Plot Overview
-    if (importedFromPlot.length > 0 && plotOverview?.characters) {
-      const importedChars = plotOverview.characters
-        .filter(pc => importedFromPlot.includes(pc.name))
-        .filter(pc => !baseCharacters.some(bc => bc.name === pc.name)) // Avoid duplicates
-        .map(char => ({
-          ...char,
-          originalName: char.name,
-          displayName: char.name,
-          importedFromPlot: true
-        }));
-      baseCharacters = [...baseCharacters, ...importedChars];
-    }
+
 
     // Filter out excluded characters
     baseCharacters = baseCharacters.filter(char => {
@@ -330,71 +353,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     });
 
     return baseCharacters;
-  }, [selectedScriptId, selectedScript, plotOverview, excludedCharacters, characterRenames, importedFromPlot]);
+  }, [selectedScriptId, selectedScript, plotOverview, excludedCharacters, characterRenames]);
 
-  // Get plot overview characters that are not already in the list
-  const availableForImport = React.useMemo(() => {
-    if (!plotOverview?.characters) return [];
-    const existingNames = new Set(characters.map(c => c.name));
-    const excludedNames = excludedCharacters;
-    return plotOverview.characters.filter(pc => 
-      !existingNames.has(pc.name) && !excludedNames.has(pc.name)
-    );
-  }, [plotOverview, characters, excludedCharacters]);
+ 
 
-  // Handler: Edit/rename a character
-  const handleEditCharacter = (originalName: string, newName: string) => {
-    if (!newName.trim()) {
-      toast.error('Character name cannot be empty');
-      return;
-    }
-    setCharacterRenames(prev => {
-      const updated = new Map(prev);
-      updated.set(originalName, newName.trim());
-      return updated;
-    });
-    setShowEditModal(false);
-    setEditingCharacter(null);
-    setEditInputValue('');
-    toast.success(`Renamed "${originalName}" to "${newName}"`);
-  };
 
-  // Handler: Delete/exclude a character
-  const handleExcludeCharacter = (characterName: string) => {
-    setExcludedCharacters(prev => {
-      const updated = new Set(prev);
-      updated.add(characterName);
-      return updated;
-    });
-    toast.success(`Removed "${characterName}" from list`);
-  };
 
-  // Handler: Restore an excluded character
-  const handleRestoreCharacter = (characterName: string) => {
-    setExcludedCharacters(prev => {
-      const updated = new Set(prev);
-      updated.delete(characterName);
-      return updated;
-    });
-    toast.success(`Restored "${characterName}"`);
-  };
 
-  // Handler: Import characters from Plot Overview
-  const handleImportFromPlot = (characterNames: string[]) => {
-    setImportedFromPlot(prev => {
-      const updated = [...prev, ...characterNames.filter(n => !prev.includes(n))];
-      return updated;
-    });
-    setShowImportModal(false);
-    toast.success(`Imported ${characterNames.length} character(s) from Plot Overview`);
-  };
 
-  // Handler: Open edit modal
-  const openEditModal = (characterName: string, currentDisplayName: string) => {
-    setEditingCharacter(characterName);
-    setEditInputValue(currentDisplayName);
-    setShowEditModal(true);
-  };
+
+
+
+
 
 
   const handleGenerateAllScenes = async () => {
@@ -453,8 +423,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const renderHeader = () => (
     <div className="flex items-center justify-between mb-6">
       <div>
-        <h3 className="text-xl font-semibold text-gray-900">Scene Images</h3>
-        <p className="text-gray-600">Generate character and scene visualizations for {chapterTitle}</p>
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Scene Images</h3>
+        <p className="text-gray-600 dark:text-gray-300">Generate character and scene visualizations for {chapterTitle}</p>
         {isSwitching && (
           <div className="flex items-center space-x-2 mt-1 text-sm text-blue-600">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -628,15 +598,17 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   );
 
   const handleSelectAllScenes = () => {
-    const filteredSceneImages = Object.entries(sceneImages || {}).reduce((acc, [key, image]) => {
-      const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+    const filteredSceneImages = Object.entries(sceneImages || {}).reduce((acc, [key, images]) => {
+      const firstImage = images?.[0];
+      const normalizedScriptId = firstImage?.script_id ?? (firstImage as any)?.scriptId;
       if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
-        acc[key] = image;
+        acc[key] = images;
       }
       return acc;
-    }, {} as Record<string | number, SceneImage>);
+    }, {} as Record<string | number, SceneImage[]>);
 
     const allIds = Object.values(filteredSceneImages)
+      .flat()
       .filter(img => img.id)
       .map(img => img.id!);
 
@@ -671,33 +643,123 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     setDeleteAction(null);
   };
 
+  // Handle opening the generation modal
+  const handleGenerateSceneImage = (
+    sceneNumber: number, 
+    isRef = false,
+    currentDescription = ""
+  ) => {
+    setSelectedSceneForGeneration({
+      sceneNumber,
+      description: currentDescription,
+      isRegenerate: isRef
+    });
+    setShowSceneGenerationModal(true);
+  };
+
+  // Handle actual generation from modal
+  const handleModalGenerate = async (description: string, characterIds: string[]) => {
+    if (!selectedSceneForGeneration) return;
+
+    const { sceneNumber } = selectedSceneForGeneration;
+    const currentChapterId = chapterId; // Use prop directly since we have it
+    
+    if (!currentChapterId) {
+        console.error("No chapter ID");
+        return;
+    }
+
+    // Close modal immediately
+    setShowSceneGenerationModal(false);
+    setSelectedSceneForGeneration(null);
+
+
+
+    try {
+      // 1. Update scene description first
+      await projectService.updateSceneDescription(
+        currentChapterId,
+        selectedScriptId!, // scriptId
+        sceneNumber,
+        description
+      );
+
+      // 2. Resolve character URLs from IDs/Names
+      const resolvedImageUrls: string[] = [];
+      const resolvedIds: string[] = [];
+
+      characterIds.forEach(idOrName => {
+        // Find character by ID or Name
+        // Note: characters list contains both script characters and plot characters merged
+        const char = characters.find(c => 
+          c.id === idOrName || 
+          c.name === idOrName || 
+          c.originalName === idOrName ||
+          c.displayName === idOrName
+        );
+
+        if (char) {
+          const imageUrl = char.imageUrl || char.image_url;
+          if (imageUrl) {
+            resolvedImageUrls.push(imageUrl);
+          }
+          
+          // Still pass valid UUIDs as IDs for backward compatibility/logging
+          if (char.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(char.id)) {
+            resolvedIds.push(char.id);
+          }
+        }
+      });
+
+      console.log(`[ImagesPanel] Resolved ${resolvedImageUrls.length} image URLs from ${characterIds.length} selections`);
+
+      // 3. Generate image using hook (handles polling automatically)
+      // Call generateSceneImage with both IDs and URLs
+      await generateSceneImage(
+        sceneNumber,
+        description,
+        generationOptions,
+        resolvedIds.length > 0 ? resolvedIds : characterIds, // usage of characterIds as fallback if no valid UUIDs
+        resolvedImageUrls
+      );
+      
+    } catch (error) {
+      console.error('Error generating scene image:', error);
+      toast.error("Failed to start scene image generation.");
+
+    }
+  };
+
   const renderScenesTab = () => {
     // Filter images by selected script_id, accepting both script_id and scriptId fields
     const filteredSceneImages = Object.entries(sceneImages || {}).reduce((acc, [key, image]) => {
-      const normalizedScriptId = image.script_id ?? (image as any).scriptId;
+      // image is SceneImage[]
+      const firstImage = image[0];
+      const normalizedScriptId = firstImage?.script_id ?? (firstImage as any)?.scriptId;
       if (!selectedScriptId || normalizedScriptId === selectedScriptId) {
         acc[key] = image;
       }
       return acc;
-    }, {} as Record<string | number, SceneImage>);
+    }, {} as Record<string | number, SceneImage[]>);
 
     // Create a lookup helper that works with both composite keys and plain scene numbers
-    const getSceneImage = (sceneNumber: number): SceneImage | undefined => {
+    const getSceneImages = (sceneNumber: number): SceneImage[] => {
       // Try composite key first (preferred)
       const compositeKey = `${selectedScriptId}_${sceneNumber}`;
       if (filteredSceneImages[compositeKey]) {
         return filteredSceneImages[compositeKey];
       }
-      // Fallback to plain scene number for backwards compatibility
+      // Fallback to plain scene number
       if (filteredSceneImages[sceneNumber]) {
         return filteredSceneImages[sceneNumber];
       }
-      return undefined;
+      return [];
     };
 
     const sourceSceneImages = filteredSceneImages;
     const hasImages = Object.keys(sourceSceneImages).length > 0;
     const allSceneIds = Object.values(sourceSceneImages)
+      .flat() // Flatten arrays of images
       .filter(img => img.id)
       .map(img => img.id!);
     const isAllSelected = allSceneIds.length > 0 && selectedSceneIds.size === allSceneIds.length;
@@ -785,41 +847,39 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             }`}>
               {scenes.map((scene: any, idx: number) => {
                 const sceneNumber = scene.scene_number || idx + 1;
-                const sceneImage = getSceneImage(sceneNumber);
-                const isSelected = sceneImage?.id ? selectedSceneIds.has(sceneImage.id) : false;
-
+                const images = getSceneImages(sceneNumber);
+                
                 return (
                   <SceneImageCard
                     key={sceneNumber}
                     scene={scene}
-                    sceneImage={sceneImage}
+                    sceneImages={images}
                     isGenerating={generatingScenes.has(sceneNumber)}
-                    viewMode={viewMode}
-                    isSelected={isSelected}
-                    onSelect={(selected) => {
-                      if (!sceneImage?.id) return;
+                    selectedIds={selectedSceneIds}
+                    onSelect={(selected, imageId) => {
+                      if (!imageId) return;
                       setSelectedSceneIds(prev => {
                         const newSet = new Set(prev);
                         if (selected) {
-                          newSet.add(sceneImage.id);
+                          newSet.add(imageId);
                         } else {
-                          newSet.delete(sceneImage.id);
+                          newSet.delete(imageId);
                         }
                         return newSet;
                       });
                     }}
-                    onGenerate={() => generateSceneImage(
+                    onGenerate={() => handleGenerateSceneImage(
                       sceneNumber,
-                      scene.visual_description || scene.description || '',
-                      generationOptions
+                      false,
+                      scene.visual_description
                     )}
-                    onRegenerate={() => regenerateImage(
-                      'scene',
+                    onRegenerate={() => handleGenerateSceneImage(
                       sceneNumber,
-                      generationOptions
+                      true,
+                      scene.visual_description
                     )}
-                    onDelete={() => deleteImage('scene', sceneNumber)}
-                    onView={() => setSelectedImage(sceneImage?.imageUrl || null)}
+                    onDelete={(imageId) => deleteImage('scene', sceneNumber, imageId)}
+                    onView={(url) => setSelectedImage(url)}
                   />
                 );
               })}
@@ -894,16 +954,19 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 // If no script-specific image, check if plot overview has an image
                 const plotImageUrl = typeof character === "object" && character.image_url ? character.image_url : null;
 
-                if (!characterImage && plotImageUrl) {
-                  // Create a pseudo-image object from plot overview
-                  characterImage = {
-                    name: characterKey,
-                    imageUrl: plotImageUrl,
-                    prompt: '',
-                    generationStatus: 'completed',
-                    id: undefined
-                  } as CharacterImage;
-                }
+                  // Check if this is a derived/fallback image
+                  const isFallbackImage = !characterImage && !!plotImageUrl;
+
+                  if (isFallbackImage) {
+                    // Create a pseudo-image object from plot overview
+                    characterImage = {
+                      name: characterKey,
+                      imageUrl: plotImageUrl!,
+                      prompt: '',
+                      generationStatus: 'completed',
+                      id: undefined
+                    } as CharacterImage;
+                  }
 
                 return (
                   <CharacterImageCard
@@ -966,7 +1029,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
                       generateCharacterImage(characterKey, description, generationOptions);
                     }}
-                    onRegenerate={() => regenerateImage('character', characterKey, generationOptions)}
+                    onRegenerate={() => {
+                      if (characterImage?.id && !isFallbackImage) {
+                        regenerateImage('character', characterKey, generationOptions);
+                      } else {
+                        // For fallback images or missing IDs, treat regenerate as generate new
+                        const description =
+                        typeof character === "object" && character.physical_description && character.personality && character.role
+                          ? `${character.physical_description}. ${character.personality}. ${character.role}`
+                          : `Portrait of ${characterKey}, detailed character design`;
+                        generateCharacterImage(characterKey, description, generationOptions);
+                      }
+                    }}
                     onDelete={() => deleteImage('character', characterKey)}
                     onView={() => setSelectedImage(characterImage?.imageUrl || null)}
                   />
@@ -1039,6 +1113,24 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           confirmButtonClass="bg-red-600 hover:bg-red-700"
         />
       )}
+
+      {/* Scene Generation Modal */}
+      <SceneGenerationModal 
+        isOpen={showSceneGenerationModal}
+        onClose={() => setShowSceneGenerationModal(false)}
+        sceneNumber={selectedSceneForGeneration?.sceneNumber || 0}
+        initialDescription={selectedSceneForGeneration?.description || ''}
+        chapterTitle={chapterTitle}
+        availableCharacters={characters.filter(c => c.image_url || c.imageUrl).map(c => ({
+          name: c.name,
+          imageUrl: c.image_url || c.imageUrl || '',
+          id: c.id || c.name,
+          prompt: '',
+          generationStatus: 'completed'
+        }))}
+        onGenerate={handleModalGenerate}
+        isGenerating={generatingScenes.has(selectedSceneForGeneration?.sceneNumber || -1)}
+      />
     </div>
   );
 };
@@ -1046,127 +1138,134 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 // Scene Image Card Component
 interface SceneImageCardProps {
   scene: any;
-  sceneImage?: SceneImage;
+  sceneImages?: SceneImage[];
   isGenerating: boolean;
-  viewMode: 'grid' | 'list';
-  isSelected?: boolean;
-  onSelect?: (selected: boolean) => void;
+  selectedIds?: Set<string>;
+  onSelect?: (selected: boolean, imageId: string) => void;
   onGenerate: () => void;
   onRegenerate: () => void;
-  onDelete: () => void;
-  onView: () => void;
+  onDelete: (imageId: string) => void;
+  onView: (imageUrl: string) => void;
 }
 
 const SceneImageCard: React.FC<SceneImageCardProps> = ({
   scene,
-  sceneImage,
+  sceneImages = [],
   isGenerating,
-  viewMode,
-  isSelected = false,
+  selectedIds,
   onSelect,
   onGenerate,
   onRegenerate,
   onDelete,
-  onView
+  onView,
 }) => {
-  if (viewMode === 'list') {
-    return (
-      <div className="bg-white border rounded-lg p-4">
-        <div className="flex items-center space-x-4">
-          <div className="flex-shrink-0">
-            <ImageThumbnail
-              imageUrl={sceneImage?.imageUrl}
-              isGenerating={isGenerating}
-              alt={`Scene ${scene.scene_number}`}
-              size="small"
-            />
-          </div>
-          
-          <div className="flex-1 min-w-0">
-            <h5 className="font-medium text-gray-900 truncate">
-              Scene {scene.scene_number}: {scene.location}
-            </h5>
-            <p className="text-sm text-gray-600 line-clamp-2">
-              {scene.visual_description}
-            </p>
-            {scene.characters && scene.characters.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-2">
-                {scene.characters.slice(0, 3).map((char: string, idx: number) => (
-                  <span key={idx} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
-                    {char}
-                  </span>
-                ))}
-                {scene.characters.length > 3 && (
-                  <span className="px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded">
-                    +{scene.characters.length - 3} more
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
+  const [currentIndex, setCurrentIndex] = useState(0);
 
-          <div className="flex items-center space-x-2">
-            <ImageActions
-              hasImage={!!sceneImage?.imageUrl}
-              isGenerating={isGenerating}
-              onGenerate={onGenerate}
-              onRegenerate={onRegenerate}
-              onDelete={onDelete}
-              onView={onView}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Reset index if images change significantly (e.g. filtered out)
+  useEffect(() => {
+    if (currentIndex >= sceneImages.length && sceneImages.length > 0) {
+      setCurrentIndex(0);
+    }
+  }, [sceneImages.length, currentIndex]);
+
+  const currentImage = sceneImages[currentIndex];
+  // If no images but generating, we might want to show a placeholder state or use the "generating" status from the parent
+  // However, the hook now prepends a temporary image with 'generating' status, so currentImage should exist if generating.
+  
+  // Handlers for carousel navigation
+  const handlePrev = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentIndex((prev) => (prev > 0 ? prev - 1 : sceneImages.length - 1));
+  };
+
+  const handleNext = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentIndex((prev) => (prev < sceneImages.length - 1 ? prev + 1 : 0));
+  };
+
+  // Determine effective status for display
+  const displayStatus = isGenerating ? 'generating' : currentImage?.generationStatus;
+  
+  // Calculate if the CURRENT image is selected
+  // The parent passes `isSelected` which might be for the scene in general or specific image?
+  // The parent logic for `isSelected` passed a boolean based on a specific image ID.
+  // We need to change how `isSelected` is determined or genericized.
+  // Actually, we should probably check selection state inside here or rely on parent passing "is CURRENT image selected".
+  // For now, let's assume `isSelected` passed from parent matches the `currentImage.id`.
 
   return (
-    <div className="bg-white border rounded-lg overflow-hidden">
-      <div className="aspect-video relative">
+    <div className="bg-white border rounded-lg overflow-hidden group">
+      <div className="aspect-video relative bg-gray-100">
         <ImageThumbnail
-          imageUrl={sceneImage?.imageUrl}
-          isGenerating={isGenerating}
-          alt={`Scene ${scene.scene_number}`}
+          imageUrl={currentImage?.imageUrl}
+          isGenerating={isGenerating || displayStatus === 'generating'}
+          status={displayStatus}
+          alt={`Scene ${scene.scene_number} - Image ${currentIndex + 1}`}
           size="large"
         />
 
-        <div className="absolute top-2 left-2">
+        <div className="absolute top-2 left-2 flex items-center space-x-2">
           <span className="px-2 py-1 bg-black bg-opacity-70 text-white text-xs rounded">
             Scene {scene.scene_number}
           </span>
+          {sceneImages.length > 1 && (
+             <span className="px-2 py-1 bg-black bg-opacity-50 text-white text-xs rounded">
+               {currentIndex + 1} / {sceneImages.length}
+             </span>
+          )}
         </div>
 
-        {sceneImage?.id && (
+        {/* Carousel Controls */}
+        {sceneImages.length > 1 && (
+            <>
+                <button 
+                    onClick={handlePrev}
+                    className="absolute left-2 top-1/2 transform -translate-y-1/2 p-1 bg-black bg-opacity-30 hover:bg-opacity-70 text-white rounded-full transition-all opacity-0 group-hover:opacity-100"
+                >
+                    <div className="w-6 h-6 flex items-center justify-center">‹</div>
+                </button>
+                <button 
+                    onClick={handleNext}
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 bg-black bg-opacity-30 hover:bg-opacity-70 text-white rounded-full transition-all opacity-0 group-hover:opacity-100"
+                >
+                     <div className="w-6 h-6 flex items-center justify-center">›</div>
+                </button>
+            </>
+        )}
+
+        {/* Selection Checkbox for CURRENT Image */}
+        {currentImage?.id && (currentImage.generationStatus === 'completed' || currentImage.generationStatus === 'failed' || currentImage.imageUrl) && (
           <div className="absolute top-2 left-1/2 transform -translate-x-1/2">
             <input
               type="checkbox"
-              checked={isSelected}
-              onChange={(e) => onSelect?.(e.target.checked)}
-              className="w-4 h-4 text-blue-600 bg-white border-2 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-              aria-label={`Select scene ${scene.scene_number}`}
+              checked={selectedIds?.has(currentImage.id) ?? false} 
+              onChange={(e) => onSelect?.(e.target.checked, currentImage.id!)}
+              className="w-4 h-4 text-blue-600 bg-white border-2 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer shadow-sm"
+              aria-label={`Select scene ${scene.scene_number} image ${currentIndex + 1}`}
             />
           </div>
         )}
 
         <div className="absolute top-2 right-2">
           <ImageActions
-            hasImage={!!sceneImage?.imageUrl}
-            isGenerating={isGenerating}
+            hasImage={!!currentImage?.imageUrl}
+            isGenerating={isGenerating || displayStatus === 'generating'}
             onGenerate={onGenerate}
             onRegenerate={onRegenerate}
-            onDelete={onDelete}
-            onView={onView}
+            onDelete={currentImage?.id ? () => onDelete(currentImage.id!) : undefined}
+            onView={() => currentImage?.imageUrl && onView(currentImage.imageUrl)}
             compact
           />
         </div>
       </div>
 
       <div className="p-4">
-        <h5 className="font-medium text-gray-900 mb-2">
+        <h5 className="font-medium text-gray-900 mb-2 truncate" title={scene.location}>
           {scene.location}
         </h5>
-        <p className="text-sm text-gray-600 line-clamp-3 mb-3">
-          {scene.visual_description}
+        
+        <p className="text-sm text-gray-600 line-clamp-3 mb-3 h-10">
+          {currentImage?.prompt || scene.visual_description}
         </p>
         
         {scene.characters && scene.characters.length > 0 && (
@@ -1232,6 +1331,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
             <ImageThumbnail
               imageUrl={characterImage?.imageUrl}
               isGenerating={isGenerating}
+              status={characterImage?.generationStatus}
               alt={characterName}
               size="small"
             />
@@ -1282,6 +1382,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
         <ImageThumbnail
           imageUrl={characterImage?.imageUrl}
           isGenerating={isGenerating}
+          status={characterImage?.generationStatus}
           alt={characterName}
           size="large"
         />
@@ -1396,6 +1497,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
 interface ImageThumbnailProps {
   imageUrl?: string;
   isGenerating: boolean;
+  status?: string;
   alt: string;
   size: 'small' | 'large';
 }
@@ -1403,6 +1505,7 @@ interface ImageThumbnailProps {
 const ImageThumbnail: React.FC<ImageThumbnailProps> = ({ 
   imageUrl, 
   isGenerating, 
+  status,
   alt, 
   size 
 }) => {
@@ -1410,17 +1513,30 @@ const ImageThumbnail: React.FC<ImageThumbnailProps> = ({
     ? 'w-16 h-16' 
     : 'w-full h-full';
 
-  if (isGenerating) {
+  const isLoading = isGenerating || status === 'pending' || status === 'in_progress' || status === 'generating';
+
+  if (isLoading) {
     return (
       <div className={`${sizeClasses} bg-gray-100 flex items-center justify-center rounded-md`}>
         <div className="text-center">
-          <Loader2 className="w-6 h-6 animate-spin text-gray-400 mx-auto mb-2" />
-          <span className="text-xs text-gray-500">Generating...</span>
+          <Loader2 className="w-6 h-6 animate-spin text-blue-500 mx-auto mb-2" />
+          <span className="text-xs text-blue-600 font-medium">Generating...</span>
         </div>
       </div>
     );
   }
 
+
+  if (status === 'failed') {
+    return (
+      <div className={`${sizeClasses} bg-red-50 flex items-center justify-center rounded-md border border-red-100`}>
+        <div className="text-center px-2">
+          <X className="w-6 h-6 text-red-400 mx-auto mb-1" />
+          <span className="text-xs text-red-500 font-medium block">Generation Failed</span>
+        </div>
+      </div>
+    );
+  }
 
   if (imageUrl) {
     return (
@@ -1599,9 +1715,7 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose }
       </div>
     </div>
   );
-};
-
-// Confirmation Modal Component
+};// Confirmation Modal Component
 interface ConfirmationModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -1667,6 +1781,7 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           </div>
         </div>
       </div>
+
     </div>
   );
 };

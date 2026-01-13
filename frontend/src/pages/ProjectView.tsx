@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { projectService, Project } from "../services/projectService";
 import { userService } from "../services/userService";
-import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-hot-toast";
 import { 
   ArrowLeft, 
@@ -120,7 +119,7 @@ const ChapterContentModal: React.FC<ChapterContentModalProps> = ({ chapter, onCl
 const ProjectView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  // user removed from useAuth
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [artifacts, setArtifacts] = useState<any[]>([]);
@@ -132,7 +131,7 @@ const ProjectView: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [workflowProgress, setWorkflowProgress] = useState<Record<string, WorkflowProgress>>({});
   const [videoStatus, setVideoStatus] = useState<string | null>("idle");
-  const [isLimitModalOpen, setIsLimitModalOpen] = useState(false);
+  // isLimitModalOpen states removed as unused
   const [isEditingTitle, setIsEditingTitle] = useState(false);
 
   const [editedTitle, setEditedTitle] = useState("");
@@ -217,8 +216,6 @@ const ProjectView: React.FC = () => {
   // Plot generation hook - use project ID with isProject flag
   const {
     plotOverview,
-    isGenerating: isGeneratingPlot,
-    generatePlot,
     loadPlot
   } = usePlotGeneration(id || '', {
     isProject: true,
@@ -245,7 +242,6 @@ const ProjectView: React.FC = () => {
     isGeneratingScript,
     loadScripts,
     generateScript,
-    selectScript,
     updateScript,
     deleteScript
   } = useScriptGeneration(getActualChapterId(selectedChapter));
@@ -258,14 +254,11 @@ const ProjectView: React.FC = () => {
   // Image and audio generation hooks
   const {
     sceneImages,
-    characterImages,
-    isLoading: isLoadingImages,
     loadImages,
   } = useImageGeneration(getActualChapterId(selectedChapter), selectedScriptId || null);
 
   const {
     files,
-    isLoading: isLoadingAudio,
     loadAudio,
   } = useAudioGeneration({
     chapterId: getActualChapterId(selectedChapter),
@@ -289,7 +282,11 @@ const ProjectView: React.FC = () => {
 
   useEffect(() => {
     const imageUrls = Object.values(sceneImages)
-      .filter((img: any) => img.imageUrl)
+      .flat()
+      .filter((img: any) => {
+        const normalizedScriptId = img.script_id || img.scriptId;
+        return img.imageUrl && (!selectedScriptId || normalizedScriptId === selectedScriptId);
+      })
       .sort((a: any, b: any) => a.sceneNumber - b.sceneNumber)
       .map((img: any) => img.imageUrl);
     setGeneratedImageUrls(imageUrls);
@@ -432,12 +429,12 @@ const ProjectView: React.FC = () => {
             onUpdateScript={updateScript}
             onDeleteScript={deleteScript}
             plotOverview={plotOverview}
-            onCreatePlotCharacter={async (name: string) => {
+            onCreatePlotCharacter={async (name: string, entityType: 'character' | 'object' | 'location' = 'character') => {
               if (!id) throw new Error('No project ID');
-              const result = await userService.createProjectCharacter(id, name);
+              const result = await userService.createProjectCharacter(id, name, entityType);
               // Refresh plot overview to get updated characters list
               await loadPlot();
-              return result;
+              return { ...result, entity_type: result.entity_type as 'character' | 'object' | 'location' };
             }}
           />
         );

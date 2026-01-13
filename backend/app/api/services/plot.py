@@ -17,6 +17,7 @@ from app.plots.schemas import (
     CharacterResponse,
 )
 from app.books.models import Book, Chapter
+from app.videos.models import ImageGeneration
 from app.plots.models import PlotOverview, Character, ChapterScript
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,19 @@ class PlotService:
                 generated_plot = await self._generate_plot_content(
                     book_context, plot_data.model_dump(), model_tier
                 )
+
+                # CRITICAL FIX: Inject original_prompt back into generated_plot
+                # so it's available for _store_plot_overview to create creative_directive
+                if plot_data.original_prompt:
+                    generated_plot["original_prompt"] = plot_data.original_prompt
+                    # Also pre-construct creative_directive so _generate_characters can use it immediately
+                    logline = generated_plot.get("logline", "")
+                    if logline:
+                        generated_plot["creative_directive"] = (
+                            f"{plot_data.original_prompt}\n\nStory Summary: {logline}"
+                        )
+                    else:
+                        generated_plot["creative_directive"] = plot_data.original_prompt
 
                 # 4. Generate characters
                 generated_characters = await self._generate_characters(
@@ -194,6 +208,17 @@ class PlotService:
                     audience=audience,
                     model_tier=model_tier,
                 )
+
+            # Fix: Inject original_prompt and creative_directive
+            if input_prompt:
+                generated_plot["original_prompt"] = input_prompt
+                logline = generated_plot.get("logline", "")
+                if logline:
+                    generated_plot["creative_directive"] = (
+                        f"{input_prompt}\n\nStory Summary: {logline}"
+                    )
+                else:
+                    generated_plot["creative_directive"] = input_prompt
 
             # 5. Generate characters - use book content if available, otherwise use prompt
             if book_context:
@@ -939,23 +964,46 @@ ADAPTATION INSTRUCTIONS (IMPORTANT - ADAPT STORY TO THIS FORMAT):
 {plot_data.get('original_prompt') or plot_data.get('logline', '')}
 
 TASK:
-Generate a structured plot overview including:
-1. Logline (1-2 detailed sentences capturing the protagonist, conflict, and stakes)
-2. Themes (list of 3-5 major themes)
-3. Story Arc Summary (3 paragraphs: Setup, Confrontation, Resolution)
-4. Setting Description (detailed description of time, place, and atmosphere)
-5. Medium (the ideal production method for this story)
-6. Format (content structure/length)
-7. Vibe/Style (creative aesthetic that fits the story)
+Generate a structured plot overview with intelligent field deduction.
 
-MEDIUM OPTIONS: Animation, Live Action, Hybrid / Mixed Media, Puppetry / Animatronics, Stop-Motion
-FORMAT OPTIONS: Film, TV Series, Limited Series / Miniseries, Anthology Series, Short Film, Special, Featurette
-VIBE/STYLE OPTIONS: Satire / Social Commentary, Cinematic / Fantasy, Sitcom / Comedy, Drama, Action / Adventure, Horror / Thriller, Coming-of-Age, Magical Realism, Epic, etc.
+**CRITICAL: DEDUCE MEDIUM, FORMAT, AND VIBE/STYLE FROM ADAPTATION INSTRUCTIONS**
+
+Analyze the ADAPTATION INSTRUCTIONS above to intelligently determine:
+
+**MEDIUM** - Production format detection:
+- Keywords: "animation", "animated", "cartoon", "Boondocks style" → "Animation"
+- Keywords: "live action", "film", "movie", "realistic" → "Live Action"
+- Keywords: "anime" → "Anime"
+- Keywords: "hybrid", "mixed media" → "Hybrid / Mixed Media"
+- DEFAULT if unclear: "Live Action"
+
+**FORMAT** - Content structure detection:
+- Keywords: "series", "episodes", "show", "TV" → "Series"
+- Keywords: "movie", "film", "feature" → "Film"
+- Keywords: "short", "short film" → "Short"
+- Keywords: "miniseries", "limited series" → "Miniseries"
+- DEFAULT if unclear: "Film"
+
+**VIBE/STYLE** - Creative aesthetic detection:
+- Keywords: "Boondocks", "satire", "satirical" → "Satirical / Comedy"  
+- Keywords: "dark", "noir", "gritty" → "Dark / Gritty"
+- Keywords: "fantasy", "magical" → "Fantasy / Magical"
+- Keywords: "thriller", "suspense" → "Thriller / Suspense"
+- Keywords: "cinematic", "epic" → "Cinematic / Epic"
+- Keywords: "comedy", "funny" → "Comedy / Humorous"
+- DEFAULT: Combine genre + tone (e.g., "{plot_data.get('genre', 'Fiction')} / {plot_data.get('tone', 'Engaging')}")
+
+**DEDUCTION RULES:**
+1. ALWAYS analyze adaptation instructions FIRST for keywords
+2. Be creative and specific - use exact phrasing from user when possible
+3. Support custom values beyond predefined options
+4. If instructions mention a specific style, reflect it in ALL fields
+5. Combine multiple vibes with " / " if applicable
 
 RESPONSE FORMAT:
-Return ONLY a valid JSON object with the following keys:
+Return ONLY a valid JSON object:
 {{
-    "logline": "Detailed 1-2 sentence summary capture protagonist, conflict, and stakes...",
+    "logline": "1-2 detailed sentences with protagonist, conflict, stakes",
     "themes": ["theme1", "theme2", ...],
     "story_type": "Identified story structure (e.g. Hero's Journey, 3-Act Structure)",
     "script_story_type": "fiction",
@@ -1031,28 +1079,45 @@ Return ONLY a valid JSON object with the following keys:
     ) -> List[Dict[str, Any]]:
         """
         Generate character profiles based on the book and plot.
+        Uses creative_directive to blend user's creative vision with source material.
         """
         book = book_context.get("book", {})
         chapters_summary = book_context.get("chapters_summary", "")[:2000]
 
+        # Use creative_directive if available, fallback to logline
+        creative_direction = plot_data.get("creative_directive") or plot_data.get(
+            "logline", ""
+        )
+
         prompt = f"""
-Based on the book content and plot overview, identify and profile the key characters.
+Based on the book content and creative direction, design character profiles that blend the source material with the creative vision.
 
 BOOK: {book.get('title', '')}
-PLOT LOGLINE: {plot_data.get('logline', '')}
+CREATIVE DIRECTION: {creative_direction}
 MEDIUM: {plot_data.get('medium', 'Not specified')}
 VIBE/STYLE: {plot_data.get('vibe_style', 'Not specified')}
 
 CONTENT SUMMARY:
 {chapters_summary}
 
-CREATIVE DIRECTION:
-Design character profiles that fit the specified medium and vibe/style:
-- Animation: Consider exaggerated features, distinctive visual designs, expressive personalities
-- Live Action: Focus on realistic, grounded character traits and natural descriptions
-- Satire/Comedy: Include comedic flaws, ironic personality traits, witty dialogue potential
-- Crime Thriller: Add moral complexity, hidden motivations, psychological depth
-- Fantasy: Include fantastical elements, unique abilities or traits
+TASK:
+Design character profiles that harmoniously blend:
+1. The source material's characters and themes
+2. The creative direction's style and tone
+3. The specified medium's requirements
+
+CREATIVE DIRECTION GUIDANCE:
+- Reinterpret characters through the lens of the creative direction
+- If the direction specifies a style (e.g., "Boondocks-style animation"), adapt character traits accordingly
+- Balance faithfulness to source with creative transformation
+- Consider how the medium and vibe/style affect character design
+
+MEDIUM-SPECIFIC DESIGN:
+- Animation: Exaggerated features, distinctive visual designs, expressive personalities
+- Live Action: Realistic, grounded traits, natural descriptions
+- Satire/Comedy: Comedic flaws, ironic traits, witty dialogue potential
+- Crime Thriller: Moral complexity, hidden motivations, psychological depth
+- Fantasy: Fantastical elements, unique abilities or traits
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON array of character objects:
@@ -1070,9 +1135,8 @@ Return ONLY a valid JSON array of character objects:
     }}
 ]
 
-Extract main and important supporting characters (aim for 5-10 key characters).
+Extract 5-10 key characters who fit both the source material AND the creative direction.
 Focus on characters who actually appear in the story, not locations or objects.
-Ensure character descriptions are tailored to the medium and vibe/style.
 """
 
         response = await self.openrouter.analyze_content(
@@ -1385,12 +1449,32 @@ Return a JSON object with:
                 f"[PlotService] Storing themes - type: {type(themes_value)}, value: {themes_value}"
             )
 
+            # Auto-generate creative_directive by combining prompt + logline
+            original_prompt = plot_data.get("original_prompt")
+            logline = (
+                plot_data.get("logline")
+                or f"A compelling {plot_data.get('genre', 'fiction')} story about personal growth and discovery."
+            )
+
+            if original_prompt and logline:
+                creative_directive = f"{original_prompt}\n\nStory Summary: {logline}"
+            elif original_prompt:
+                creative_directive = original_prompt
+            elif logline:
+                creative_directive = logline
+            else:
+                creative_directive = None
+
+            logger.info(
+                f"[PlotService] Generated creative_directive: {creative_directive[:100] if creative_directive else 'None'}..."
+            )
+
             plot_overview = PlotOverview(
                 book_id=book_id,
                 user_id=user_id,
-                logline=plot_data.get("logline")
-                or f"A compelling {plot_data.get('genre', 'fiction')} story about personal growth and discovery.",
-                original_prompt=plot_data.get("original_prompt"),
+                logline=logline,
+                original_prompt=original_prompt,
+                creative_directive=creative_directive,  # NEW: Store combined directive
                 themes=themes_value,
                 story_type=plot_data.get("story_type") or "hero's journey",
                 script_story_type=plot_data.get("script_story_type")
@@ -1480,6 +1564,7 @@ Return a JSON object with:
                 user_id=str(plot_overview.user_id),
                 logline=plot_overview.logline,
                 original_prompt=plot_overview.original_prompt,
+                creative_directive=plot_overview.creative_directive,  # NEW: Include in response
                 themes=plot_overview.themes,
                 story_type=plot_overview.story_type,
                 script_story_type=plot_overview.script_story_type,
@@ -1487,6 +1572,9 @@ Return a JSON object with:
                 tone=plot_overview.tone,
                 audience=plot_overview.audience,
                 setting=plot_overview.setting,
+                medium=plot_overview.medium,  # Added missing field
+                format=plot_overview.format,  # Added missing field
+                vibe_style=plot_overview.vibe_style,  # Added missing field
                 generation_method=plot_overview.generation_method,
                 model_used=plot_overview.model_used,
                 generation_cost=0.0,  # Not stored in model currently
@@ -1720,8 +1808,28 @@ Return the enhanced script.
             result = await self.session.exec(statement)
             characters_data = result.all()
 
+            # Fetch images for all characters
+            char_ids = [str(c.id) for c in characters_data]
+            images_by_char = {}
+            if char_ids:
+                stmt_images = (
+                    select(ImageGeneration)
+                    .where(ImageGeneration.character_id.in_(char_ids))
+                    .order_by(ImageGeneration.created_at.desc())
+                )
+                images_result = await self.session.exec(stmt_images)
+                all_images = images_result.all()
+
+                for img in all_images:
+                    if img.character_id not in images_by_char:
+                        images_by_char[img.character_id] = []
+                    images_by_char[img.character_id].append(img)
+
             characters = []
             for char_data in characters_data:
+                # Get images for this character
+                char_images = images_by_char.get(str(char_data.id), [])
+
                 char_response = CharacterResponse(
                     id=str(char_data.id),
                     plot_overview_id=str(char_data.plot_overview_id),
@@ -1729,6 +1837,7 @@ Return the enhanced script.
                     user_id=str(char_data.user_id),
                     name=char_data.name,
                     role=char_data.role,
+                    entity_type=char_data.entity_type,  # Ensure entity_type is passed
                     character_arc=char_data.character_arc,
                     physical_description=char_data.physical_description,
                     personality=char_data.personality,
@@ -1737,13 +1846,24 @@ Return the enhanced script.
                     need=char_data.need,
                     lie=char_data.lie,
                     ghost=char_data.ghost,
-                    image_url=char_data.image_url,  # Include image URL
+                    image_url=char_data.image_url,
                     image_generation_prompt=char_data.image_generation_prompt,
                     image_metadata=char_data.image_metadata,
                     generation_method=char_data.generation_method or "openrouter",
                     model_used=char_data.model_used or plot_data.model_used,
                     created_at=char_data.created_at,
                     updated_at=char_data.updated_at,
+                    images=[
+                        {
+                            "id": str(img.id),
+                            "image_url": img.image_url,
+                            "status": img.status,
+                            "created_at": img.created_at,
+                            "model_used": getattr(img, "model_id", None),
+                            "generation_method": "async",
+                        }
+                        for img in char_images
+                    ],
                 )
                 characters.append(char_response)
 
@@ -1753,6 +1873,8 @@ Return the enhanced script.
                 book_id=str(plot_data.book_id),
                 user_id=str(plot_data.user_id),
                 logline=plot_data.logline,
+                original_prompt=plot_data.original_prompt,
+                creative_directive=plot_data.creative_directive,  # NEW: Include creative_directive
                 themes=plot_data.themes,
                 story_type=plot_data.story_type,
                 script_story_type=plot_data.script_story_type,
@@ -1760,6 +1882,9 @@ Return the enhanced script.
                 tone=plot_data.tone,
                 audience=plot_data.audience,
                 setting=plot_data.setting,
+                medium=plot_data.medium,  # Added missing field
+                format=plot_data.format,  # Added missing field
+                vibe_style=plot_data.vibe_style,  # Added missing field
                 generation_method=plot_data.generation_method,
                 model_used=plot_data.model_used,
                 generation_cost=0.0,
@@ -1822,8 +1947,28 @@ Return the enhanced script.
             result = await self.session.exec(statement)
             characters_data = result.all()
 
+            # Fetch images for all characters
+            char_ids = [str(c.id) for c in characters_data]
+            images_by_char = {}
+            if char_ids:
+                stmt_images = (
+                    select(ImageGeneration)
+                    .where(ImageGeneration.character_id.in_(char_ids))
+                    .order_by(ImageGeneration.created_at.desc())
+                )
+                images_result = await self.session.exec(stmt_images)
+                all_images = images_result.all()
+
+                for img in all_images:
+                    if img.character_id not in images_by_char:
+                        images_by_char[img.character_id] = []
+                    images_by_char[img.character_id].append(img)
+
             characters = []
             for char_data in characters_data:
+                # Get images for this character
+                char_images = images_by_char.get(str(char_data.id), [])
+
                 char_response = CharacterResponse(
                     id=char_data.id,
                     plot_overview_id=char_data.plot_overview_id,
@@ -1831,6 +1976,7 @@ Return the enhanced script.
                     user_id=char_data.user_id,
                     name=char_data.name,
                     role=char_data.role,
+                    entity_type=char_data.entity_type,
                     character_arc=char_data.character_arc,
                     physical_description=char_data.physical_description,
                     personality=char_data.personality,
@@ -1839,10 +1985,24 @@ Return the enhanced script.
                     need=char_data.need,
                     lie=char_data.lie,
                     ghost=char_data.ghost,
+                    image_url=char_data.image_url,
+                    image_generation_prompt=char_data.image_generation_prompt,
+                    image_metadata=char_data.image_metadata,
                     generation_method="openrouter",
                     model_used=current_data.model_used,
                     created_at=char_data.created_at,
                     updated_at=char_data.updated_at,
+                    images=[
+                        {
+                            "id": str(img.id),
+                            "image_url": img.image_url,
+                            "status": img.status,
+                            "created_at": img.created_at,
+                            "model_used": getattr(img, "model_id", None),
+                            "generation_method": "async",
+                        }
+                        for img in char_images
+                    ],
                 )
                 characters.append(char_response)
 

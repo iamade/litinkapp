@@ -25,6 +25,9 @@ class PlotOverview(SQLModel, table=True):
     )
     logline: Optional[str] = Field(default=None)
     original_prompt: Optional[str] = Field(default=None)
+    creative_directive: Optional[str] = Field(
+        default=None
+    )  # Combined prompt + logline for AI operations
 
     # JSON fields
     themes: List[str] = Field(
@@ -112,6 +115,9 @@ class Character(SQLModel, table=True):
     character_arc: Optional[str] = Field(default=None)
     physical_description: Optional[str] = Field(default=None)
     personality: Optional[str] = Field(default=None)
+
+    # New field for distinguishing characters from objects
+    entity_type: str = Field(default="character")  # 'character' or 'object'
 
     # JSON fields
     archetypes: List[str] = Field(

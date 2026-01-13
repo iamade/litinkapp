@@ -292,6 +292,7 @@ async def auto_add_characters(
 async def create_character_placeholder(
     book_id: uuid.UUID,
     character_name: str,
+    entity_type: Optional[str] = "character",
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -303,6 +304,7 @@ async def create_character_placeholder(
 
     - **book_id**: ID of the book
     - **character_name**: Name of the character to create
+    - **entity_type**: Type of entity ('character', 'object', 'location')
     """
     try:
         # Validate book ownership
@@ -347,6 +349,7 @@ async def create_character_placeholder(
                 "role": existing_char.role,
                 "physical_description": existing_char.physical_description,
                 "personality": existing_char.personality,
+                "entity_type": existing_char.entity_type,
                 "image_url": existing_char.image_url,
                 "message": "Character already exists",
             }
@@ -355,7 +358,8 @@ async def create_character_placeholder(
         new_character = Character(
             plot_overview_id=plot_overview.id,
             name=character_name,
-            role="supporting",  # Default role
+            entity_type=entity_type,
+            role="supporting" if entity_type == "character" else "object",
             physical_description="",
             personality="",
         )
@@ -368,6 +372,7 @@ async def create_character_placeholder(
             "id": str(new_character.id),
             "name": new_character.name,
             "role": new_character.role,
+            "entity_type": new_character.entity_type,
             "physical_description": new_character.physical_description,
             "personality": new_character.personality,
             "image_url": new_character.image_url,
@@ -682,6 +687,7 @@ async def auto_add_project_characters(
 async def create_project_character_placeholder(
     project_id: uuid.UUID,
     character_name: str,
+    entity_type: Optional[str] = "character",
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -693,6 +699,7 @@ async def create_project_character_placeholder(
 
     - **project_id**: ID of the project
     - **character_name**: Name of the character to create
+    - **entity_type**: Type of entity ('character', 'object', 'location')
     """
     try:
         # Validate project ownership
@@ -737,6 +744,7 @@ async def create_project_character_placeholder(
                 "role": existing_char.role,
                 "physical_description": existing_char.physical_description,
                 "personality": existing_char.personality,
+                "entity_type": existing_char.entity_type,
                 "image_url": existing_char.image_url,
                 "message": "Character already exists",
             }
@@ -748,7 +756,8 @@ async def create_project_character_placeholder(
             book_id=project_id,  # Use project_id to satisfy NOT NULL constraint
             user_id=current_user.id,  # Required field
             name=character_name,
-            role="supporting",  # Default role
+            entity_type=entity_type,
+            role="supporting" if entity_type == "character" else "object",
             physical_description="",
             personality="",
         )
@@ -761,6 +770,7 @@ async def create_project_character_placeholder(
             "id": str(new_character.id),
             "name": new_character.name,
             "role": new_character.role,
+            "entity_type": new_character.entity_type,
             "physical_description": new_character.physical_description,
             "personality": new_character.personality,
             "image_url": new_character.image_url,

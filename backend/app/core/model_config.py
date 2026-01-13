@@ -114,18 +114,86 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         # fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06 
+        primary="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
         fallback="imagen-4.0-ultra",  #  imagen-4.0-ultra (ModelsLab API) Per image generation will cost 0.072$
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         #  fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API
-       
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="qwen-image-2512",  # Qwen-Image-2512 (Direct API)
         fallback="gpt-image-1.5",  # GPT-Image-1.5 (Direct API)
         fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
         # fallback3="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
-        
+    ),
+}
+
+
+# Image-to-Image (Single Reference) Generation Strategy
+IMAGE_I2I_SINGLE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
+    ModelTier.FREE: ModelConfig(
+        primary="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
+        fallback="seededit-i2i",  # seededit (ModelsLab) $0.04
+        fallback2="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+    ),
+    ModelTier.BASIC: ModelConfig(
+        primary="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
+        fallback="seededit-i2i",  # seededit (ModelsLab) $0.04
+        fallback2="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+    ),
+    ModelTier.STANDARD: ModelConfig(
+        primary="seededit-i2i",  # seededit (ModelsLab) $0.04
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback2="seedream-4.0-i2i",
+    ),
+    ModelTier.PREMIUM: ModelConfig(
+        primary="seededit-i2i",  # seededit (ModelsLab) $0.04
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback2="seedream-4.5-i2i",
+    ),
+    ModelTier.PROFESSIONAL: ModelConfig(
+        primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback2="seededit-i2i",
+    ),
+    ModelTier.ENTERPRISE: ModelConfig(
+        primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback2="seededit-i2i",
+    ),
+}
+
+
+# Image-to-Image (Multi Reference) Generation Strategy
+IMAGE_I2I_MULTI_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
+    ModelTier.FREE: ModelConfig(
+        primary="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468 (Limit 2)
+        fallback2="seedream-4.5-i2i",
+    ),
+    ModelTier.BASIC: ModelConfig(
+        primary="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468 (Limit 2)
+        fallback2="seedream-4.5-i2i",
+    ),
+    ModelTier.STANDARD: ModelConfig(
+        primary="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
+        fallback2="seedream-4.5-i2i",
+    ),
+    ModelTier.PREMIUM: ModelConfig(
+        primary="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
+        fallback2="seedream-4.5-i2i",
+    ),
+    ModelTier.PROFESSIONAL: ModelConfig(
+        primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback2="seedream-4.0-i2i",
+    ),
+    ModelTier.ENTERPRISE: ModelConfig(
+        primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback2="seedream-4.0-i2i",
     ),
 }
 
@@ -135,34 +203,34 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 # ModelsLab aggregates top video models; Google's Veo accessed directly for enterprise-grade performance
 VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="seedance-v1-pro",  # Seedance-v1-Pro (ModelsLab)
-        fallback="veo-3-fast",  # Veo-3-Fast (Direct API)
-        fallback2="kling-2.5-turbo",  # Kling-2.5-Turbo (ModelsLab)
+        primary="seedance-1-5-pro",  # Seedance-v1.5-Pro (ModelsLab) $0.044/s
+        fallback="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p $0.05/s
+        fallback2="kling-2.5-turbo",
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="kling-2.5-turbo-1080p",  # Kling-2.5-Turbo-1080p (ModelsLab)
-        fallback="seedance-v1-pro",  # Seedance-v1-Pro (ModelsLab)
-        fallback2="veo-3-fast",  # Veo-3-Fast (Direct API)
+        primary="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 720p $0.10/s
+        fallback="seedance-1-5-pro",  # Seedance-v1.5-Pro (ModelsLab) $0.044/s
+        fallback2="wan2.6-t2v",
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="veo-3-fast-audio",  # Veo-3-Fast-Audio (Direct API)
-        fallback="kling-2.6-pro",  # Kling-2.6-Pro (ModelsLab)
-        fallback2="wan2.5-i2v-preview",  # Wan2.5-I2V-Preview (ModelsLab)
+        primary="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) $0.14/s
+        fallback="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 720p $0.10/s
+        fallback2="seedance-1-5-pro",
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="veo-3-audio",  # Veo-3-Audio (Direct API)
-        fallback="wan2.5-i2v-preview",  # Wan2.5-I2V-Preview (ModelsLab)
-        fallback2="veo-3-fast-audio",  # Veo-3-Fast-Audio (Direct API)
+        primary="omni-human",  # Omni-Human (ModelsLab) $0.168/s
+        fallback="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) $0.14/s
+        fallback2="wan2.5-i2v",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="veo-3.1-fast-audio",  # Veo-3.1-Fast-Audio (Direct API)
-        fallback="veo-3-audio",  # Veo-3-Audio (Direct API)
-        fallback2="wan2.5-i2v-preview",  # Wan2.5-I2V-Preview (ModelsLab)
+        primary="veo-3.1-fast",  # Veo-3.1-Fast (ModelsLab) $0.24/s
+        fallback="omni-human",  # Omni-Human (ModelsLab) $0.168/s
+        fallback2="omni-human-1.5",
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="veo-3.1-audio",  # Veo-3.1-Audio (Direct API)
-        fallback="veo-3.1-fast-audio",  # Veo-3.1-Fast-Audio (Direct API)
-        fallback2="wan2.5-i2v-preview",  # Wan2.5-I2V-Preview (ModelsLab)
+        primary="veo-3.1-fast",  # Veo-3.1-Fast (ModelsLab) Max Quality
+        fallback="omni-human",  # Omni-Human (ModelsLab) $0.168/s
+        fallback2="veo-3-fast",
     ),
 }
 
@@ -180,22 +248,22 @@ AUDIO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="eleven_multilingual_v2",
-        fallback="eleven_turbo_v2",
+        fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
         fallback2="eleven_english_v1",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="eleven_multilingual_v2",
-        fallback="eleven_turbo_v2",
+        fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
         fallback2="eleven_english_v1",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="eleven_multilingual_v2",
-        fallback="eleven_turbo_v2",
+        fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
         fallback2=None,
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="eleven_multilingual_v2",
-        fallback="eleven_turbo_v2",
+        fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
         fallback2=None,
     ),
 }
@@ -237,6 +305,10 @@ def validate_model_configs():
             logger.error(f"Missing script config for tier: {tier.value}")
         if not image_config:
             logger.error(f"Missing image config for tier: {tier.value}")
+        if not IMAGE_I2I_SINGLE_MODEL_CONFIG.get(tier):
+            logger.error(f"Missing i2i single image config for tier: {tier.value}")
+        if not IMAGE_I2I_MULTI_MODEL_CONFIG.get(tier):
+            logger.error(f"Missing i2i multi image config for tier: {tier.value}")
         if not video_config:
             logger.error(f"Missing video config for tier: {tier.value}")
         if not audio_config:

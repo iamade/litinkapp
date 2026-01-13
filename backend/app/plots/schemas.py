@@ -13,6 +13,11 @@ class PlotOverviewBase(BaseModel):
     original_prompt: Optional[str] = Field(
         None, max_length=2000, description="The original prompt provided by the user"
     )
+    creative_directive: Optional[str] = Field(
+        None,
+        max_length=3000,
+        description="Combined directive: prompt (prioritized) + logline, used for all AI generation",
+    )
     themes: Optional[List[str]] = Field(None, description="Key themes in the story")
     story_type: Optional[str] = Field(
         None, max_length=100, description="Type of story (e.g., adventure, mystery)"
@@ -58,6 +63,7 @@ class PlotOverviewCreate(PlotOverviewBase):
 class PlotOverviewUpdate(BaseModel):
     logline: Optional[str] = Field(None, max_length=1000)
     original_prompt: Optional[str] = Field(None, max_length=2000)
+    creative_directive: Optional[str] = Field(None, max_length=3000)
     themes: Optional[List[str]] = None
     story_type: Optional[str] = Field(None, max_length=100)
     script_story_type: Optional[str] = Field(None, max_length=100)
@@ -75,9 +81,27 @@ class PlotOverviewUpdate(BaseModel):
     version: Optional[int] = None
 
 
+class ImageRecord(BaseModel):
+    id: str
+    image_url: Optional[str]
+    status: str
+    created_at: datetime
+    model_used: Optional[str] = None
+    generation_method: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            uuid.UUID: lambda v: str(v),
+        }
+
+
 # Character Schemas
 class CharacterBase(BaseModel):
     name: str = Field(..., max_length=255, description="Character name")
+    entity_type: str = Field(
+        "character", description="Type of entity: 'character' or 'object'"
+    )
     role: Optional[str] = Field(
         None, max_length=100, description="Character's role in the story"
     )
@@ -125,6 +149,9 @@ class CharacterResponse(CharacterBase):
     user_id: Union[str, uuid.UUID]
     created_at: datetime
     updated_at: datetime
+    images: List[ImageRecord] = Field(
+        default=[], description="History of generated images"
+    )
 
     class Config:
         from_attributes = True
@@ -161,6 +188,7 @@ class CharacterCreate(CharacterBase):
 
 class CharacterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255)
+    entity_type: Optional[str] = None
     role: Optional[str] = Field(None, max_length=100)
     character_arc: Optional[str] = Field(None, max_length=1000)
     physical_description: Optional[str] = Field(None, max_length=1000)

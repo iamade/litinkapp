@@ -36,7 +36,7 @@ async def delete_image_generations(
         for record_id in ids:
             print(f"[DELETE] Processing deletion for record_id: {record_id}")
             success = await image_service.delete_image_record(
-                record_id, current_user["id"]
+                record_id, str(current_user.id)
             )
             if success:
                 deleted_count += 1
@@ -93,7 +93,7 @@ async def delete_all_scene_generations(
         image_service = StandaloneImageService(session)
 
         # Get all scene images for this script
-        user_images = await image_service.get_user_images(current_user["id"], "scene")
+        user_images = await image_service.get_user_images(str(current_user.id), "scene")
         print(f"[DELETE-ALL] Found {len(user_images)} total scene images for user")
 
         # Filter by script_id (check both root-level and metadata fields)
@@ -114,7 +114,7 @@ async def delete_all_scene_generations(
         deleted_count = 0
         for image_record in script_images:
             success = await image_service.delete_image_record(
-                image_record["id"], current_user["id"]
+                image_record["id"], str(current_user.id)
             )
             if success:
                 deleted_count += 1

@@ -430,7 +430,7 @@ async def generate_video_from_chapter(
         chapter, book = chapter_book
 
         # Check access permissions
-        if book.status != "published" and str(book.user_id) != current_user.id:
+        if book.status != "published" and str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -474,7 +474,7 @@ async def generate_tutorial_video(
         chapter, book = chapter_book
 
         # Check access permissions
-        if book.status != "published" and str(book.user_id) != current_user.id:
+        if book.status != "published" and str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -2027,6 +2027,83 @@ async def generate_sound_effects(
 
     except Exception as e:
         print(f"Error generating sound effects: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-audio-for-script")
+async def generate_audio_for_script(
+    request: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Generate all audio assets (dialogue, narration, music, sfx) for a script.
+    Creates a VideoGeneration container and triggers the audio task.
+    """
+    try:
+        chapter_id = request.get("chapter_id")
+        script_id = request.get("script_id")
+
+        if not chapter_id or not script_id:
+            raise HTTPException(
+                status_code=400, detail="chapter_id and script_id are required"
+            )
+
+        print(
+            f"🎵 Initiating audio generation for Script: {script_id} (Chapter: {chapter_id})"
+        )
+
+        # Verify ownership/access
+        # (Simplified for brevity, assumes standard checks)
+
+        # 1. Ensure Script exists and get data
+        stmt = select(Script).where(Script.id == uuid.UUID(script_id))
+        result = await session.exec(stmt)
+        script_data = result.first()
+
+        if not script_data:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # 2. Create VideoGeneration container
+        # We reuse VideoGeneration as the container for all assets
+        video_gen = VideoGeneration(
+            chapter_id=uuid.UUID(chapter_id),
+            user_id=current_user.id,
+            script_id=uuid.UUID(script_id),
+            script_data={
+                "script": script_data.script,
+                "characters": script_data.characters,
+                "scene_descriptions": script_data.scene_descriptions,
+                "style": script_data.script_style,
+            },
+            generation_status="generating_audio",
+            quality_tier="standard",  # Default, will be updated by task
+            task_meta={"pipeline_state": {"current_stage": "audio"}},
+        )
+        session.add(video_gen)
+        await session.commit()
+        await session.refresh(video_gen)
+
+        video_gen_id = str(video_gen.id)
+        print(f"✅ Created VideoGeneration container: {video_gen_id}")
+
+        # 3. Trigger Celery Task
+        from app.tasks.audio_tasks import generate_all_audio_for_video
+
+        task = generate_all_audio_for_video.delay(video_gen_id)
+
+        return {
+            "status": "processing",
+            "message": "Audio generation started",
+            "video_generation_id": video_gen_id,
+            "task_id": task.id,
+        }
+
+    except Exception as e:
+        print(f"❌ Error initiating audio generation: {e}")
+        import traceback
+
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

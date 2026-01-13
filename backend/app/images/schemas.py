@@ -5,15 +5,19 @@ from pydantic import BaseModel
 
 class SceneImageRequest(BaseModel):
     """Request model for generating scene images"""
+
     scene_description: str
     style: str = "cinematic"
     aspect_ratio: str = "16:9"
     custom_prompt: Optional[str] = None
     script_id: Optional[str] = None
+    character_ids: Optional[List[str]] = None
+    character_image_urls: Optional[List[str]] = None
 
 
 class CharacterImageRequest(BaseModel):
     """Request model for generating character images"""
+
     character_name: str
     character_description: str
     style: str = "realistic"
@@ -24,11 +28,13 @@ class CharacterImageRequest(BaseModel):
 
 class BatchImageRequest(BaseModel):
     """Request model for batch image generation"""
+
     images: List[Dict[str, Any]]
 
 
 class ImageGenerationResponse(BaseModel):
     """Response model for single image generation"""
+
     record_id: str
     image_url: str
     prompt_used: str
@@ -39,6 +45,7 @@ class ImageGenerationResponse(BaseModel):
 
 class ImageGenerationQueuedResponse(BaseModel):
     """Response model for queued image generation"""
+
     task_id: str
     status: str
     message: str
@@ -51,6 +58,7 @@ class ImageGenerationQueuedResponse(BaseModel):
 
 class BatchImageResponse(BaseModel):
     """Response model for batch image generation"""
+
     results: List[Dict[str, Any]]
     successful_count: int
     total_count: int
@@ -58,6 +66,7 @@ class BatchImageResponse(BaseModel):
 
 class ImageRecord(BaseModel):
     """Model for image generation record"""
+
     id: str
     user_id: str
     image_type: str
@@ -83,6 +92,7 @@ class ImageRecord(BaseModel):
 
 class ChapterImagesResponse(BaseModel):
     """Response model for listing chapter images"""
+
     chapter_id: str
     images: List[ImageRecord]
     total_count: int
@@ -90,6 +100,7 @@ class ChapterImagesResponse(BaseModel):
 
 class BatchStatusResponse(BaseModel):
     """Response model for batch generation status"""
+
     batch_id: str
     status: str
     completed_count: int
@@ -100,6 +111,7 @@ class BatchStatusResponse(BaseModel):
 
 class DeleteImageResponse(BaseModel):
     """Response model for image deletion"""
+
     success: bool
     message: str
     record_id: Optional[str] = None
@@ -107,6 +119,7 @@ class DeleteImageResponse(BaseModel):
 
 class ImageStatusResponse(BaseModel):
     """Response model for checking image generation status"""
+
     record_id: str
     status: str  # 'pending', 'processing', 'completed', 'failed'
     image_url: Optional[str] = None

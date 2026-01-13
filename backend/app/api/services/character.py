@@ -341,6 +341,18 @@ class CharacterService:
                 or f"Character portrait of {character.name}"
             )
 
+            # Adjust prompt based on entity type
+            if character.entity_type == "object":
+                character_description = (
+                    character.physical_description
+                    or f"A detailed image of {character.name}"
+                )
+                if not custom_prompt:
+                    # For objects, we want object-centric prompts
+                    custom_prompt = (
+                        f"Product shot, detailed, photorealistic, {style} style"
+                    )
+
             # Create initial record in image_generations table
             from datetime import datetime, timezone
             import uuid
@@ -505,7 +517,34 @@ class CharacterService:
             if not character:
                 return None
 
-            return CharacterResponse.model_validate(character)
+            # Fetch recent images for this character
+            from app.videos.models import ImageGeneration
+
+            # Ensure character_id is string for query if column is string
+            char_id_str = str(character_id)
+
+            stmt_images = (
+                select(ImageGeneration)
+                .where(ImageGeneration.character_id == char_id_str)
+                .order_by(ImageGeneration.created_at.desc())
+                .limit(50)
+            )
+            images_result = await self.session.exec(stmt_images)
+            images = images_result.all()
+
+            response = CharacterResponse.model_validate(character)
+            response.images = [
+                {
+                    "id": str(img.id),
+                    "image_url": img.image_url,
+                    "status": img.status,
+                    "created_at": img.created_at,
+                    "model_used": img.model_id if hasattr(img, "model_id") else None,
+                    "generation_method": "async",
+                }
+                for img in images
+            ]
+            return response
 
         except Exception as e:
             logger.error(
@@ -541,6 +580,7 @@ class CharacterService:
                 "image_metadata",
                 "generation_method",
                 "model_used",
+                "entity_type",
             ]:
                 if hasattr(updates, field) and getattr(updates, field) is not None:
                     update_data[field] = getattr(updates, field)
@@ -603,7 +643,47 @@ class CharacterService:
             result = await self.session.exec(stmt)
             characters = result.all()
 
-            return [CharacterResponse.model_validate(char) for char in characters]
+            characters = result.all()
+
+            # Collect all character IDs
+            char_ids = [str(char.id) for char in characters]
+
+            # Fetch images for all characters in one query (optimization)
+            images_map = {}
+            if char_ids:
+                stmt_images = (
+                    select(ImageGeneration)
+                    .where(ImageGeneration.character_id.in_(char_ids))
+                    .order_by(ImageGeneration.created_at.desc())
+                )
+                images_result = await self.session.exec(stmt_images)
+                all_images = images_result.all()
+
+                # Group by character_id
+                for img in all_images:
+                    c_id = img.character_id
+                    if c_id not in images_map:
+                        images_map[c_id] = []
+                    images_map[c_id].append(img)
+
+            results = []
+            for char in characters:
+                resp = CharacterResponse.model_validate(char)
+                char_images = images_map.get(str(char.id), [])
+                resp.images = [
+                    {
+                        "id": str(img.id),
+                        "image_url": img.image_url,
+                        "status": img.status,
+                        "created_at": img.created_at,
+                        "model_used": img.model_id,
+                        "generation_method": "async",
+                    }
+                    for img in char_images[:20]  # Limit to 20 recent
+                ]
+                results.append(resp)
+
+            return results
 
         except PermissionDeniedError:
             raise
@@ -670,6 +750,49 @@ class CharacterService:
         except Exception as e:
             logger.error(
                 f"[CharacterService] Error updating character image URL: {str(e)}"
+            )
+            return False
+
+    async def delete_character_image(
+        self, character_id: str, image_id: str, user_id: str
+    ) -> bool:
+        """
+        Delete a specific generated image for a character.
+        If the image is the current default image, clears the default image.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+
+            # Get the image to verify ownership and existence
+            stmt = select(ImageGeneration).where(
+                ImageGeneration.id == image_id,
+                ImageGeneration.character_id == str(character_id),
+            )
+            result = await self.session.exec(stmt)
+            image = result.first()
+
+            if not image:
+                raise CharacterServiceError("Image not found")
+
+            # Check if this is the current profile image
+            char_stmt = select(Character).where(Character.id == character_id)
+            char_result = await self.session.exec(char_stmt)
+            character = char_result.first()
+
+            if character and character.image_url == image.image_url:
+                # Clear the default image if we're deleting it
+                # Optionally, we could set it to the next available image
+                character.image_url = None
+                self.session.add(character)
+
+            # Delete the image record
+            await self.session.delete(image)
+            await self.session.commit()
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"[CharacterService] Error deleting character image {image_id}: {str(e)}"
             )
             return False
 
@@ -796,6 +919,7 @@ class CharacterService:
                 book_id=book_id,
                 user_id=uuid.UUID(user_id),
                 name=character_data.name,
+                entity_type=character_data.entity_type or "character",
                 role=character_data.role or "",
                 character_arc=character_data.character_arc or "",
                 physical_description=character_data.physical_description or "",

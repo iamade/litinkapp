@@ -27,9 +27,11 @@ class ModelsLabV7VideoService:
         # ✅ Available video models
         self.video_models = {
             "veo2": "veo2",  # Primary Veo 2 model
-            "veo2_pro": "veo2_pro",  # Enhanced Veo 2 model
-            "veo2_standard": "veo2",  # Standard Veo 2
-            "seedance-i2v": "seedance-i2v",  # Fallback model
+            "veo-3.1-fast": "veo-3.1-fast",
+            "omni-human": "omni-human",
+            "omni-human-1.5": "omni-human-1.5",
+            "wan2.5-i2v": "wan2.5-i2v",
+            "seedance-1-5-pro": "seedance-1-5-pro",
         }
 
         # ✅ Available lip sync models
@@ -43,18 +45,35 @@ class ModelsLabV7VideoService:
         self,
         image_url: str,
         prompt: str,
-        model_id: str = "veo2",
+        model_id: str = "veo-3.1-fast",
         negative_prompt: str = "",
         duration: float = 5.0,
         fps: int = 24,
         motion_strength: float = 0.8,
+        init_audio: Optional[str] = None,
+        resolution: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Generate video from image using ModelsLab V7 Veo 2 API with fallback to seedance-i2v"""
+        """Generate video from image using ModelsLab V7 API (Strict I2V)"""
 
         attempts = [
             {"model_id": model_id, "description": f"primary model {model_id}"},
-            {"model_id": "seedance-i2v", "description": "fallback model seedance-i2v"},
         ]
+
+        # Add a smart fallback based on the primary model
+        if "veo" in model_id or "omni" in model_id:
+            attempts.append(
+                {
+                    "model_id": "omni-human-1.5",
+                    "description": "fallback model omni-human-1.5",
+                }
+            )
+        elif "wan" in model_id:
+            attempts.append(
+                {
+                    "model_id": "seedance-1-5-pro",
+                    "description": "fallback model seedance",
+                }
+            )
 
         last_error = None
 
@@ -79,9 +98,19 @@ class ModelsLabV7VideoService:
                 if motion_strength != 0.8:
                     payload["motion_strength"] = motion_strength
 
-                if current_model_id == "seedance-i2v":
+                # Add new I2V parameters
+                if init_audio:
+                    payload["init_audio"] = init_audio
                     logger.info(
-                        f"[MODELSLAB V7 VIDEO] Veo2 unavailable, falling back to seedance-i2v model"
+                        f"[MODELSLAB V7 VIDEO] Including init_audio for audio-reactive/lip-sync"
+                    )
+
+                if resolution:
+                    payload["resolution"] = resolution
+
+                if current_model_id != model_id:
+                    logger.info(
+                        f"[MODELSLAB V7 VIDEO] Primary model unavailable, falling back to {current_model_id}"
                     )
                     logger.info(
                         f"[MODELSLAB V7 VIDEO] Retrying with same parameters: image={image_url}, prompt={prompt[:100]}..."
@@ -152,8 +181,8 @@ class ModelsLabV7VideoService:
                 )
                 last_error = e
 
-                # If this was the fallback attempt, break and raise the error
-                if current_model_id == "seedance-i2v":
+                # If this was the last attempt, break and raise the error
+                if attempt == attempts[-1]:
                     break
                 # Otherwise, continue to fallback
                 continue

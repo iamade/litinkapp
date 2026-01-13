@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Check, Plus, ChevronDown, User } from 'lucide-react';
+import { Check, User, Box, MapPin } from 'lucide-react';
 
 export interface PlotCharacter {
   id: string;
@@ -8,6 +8,7 @@ export interface PlotCharacter {
   physical_description?: string;
   personality?: string;
   image_url?: string;
+  entity_type?: 'character' | 'object' | 'location';
 }
 
 interface CharacterDropdownProps {
@@ -15,7 +16,7 @@ interface CharacterDropdownProps {
   plotCharacters: PlotCharacter[];
   linkedCharacterId?: string;  // If already linked to a plot character
   onSelect: (character: PlotCharacter) => void;
-  onCreateNew: (name: string) => void;
+  onCreateNew: (name: string, entityType: 'character' | 'object' | 'location') => void;
   onCancel: () => void;
   autoFocus?: boolean;
 }
@@ -30,7 +31,7 @@ const CharacterDropdown: React.FC<CharacterDropdownProps> = ({
   autoFocus = true
 }) => {
   const [searchText, setSearchText] = useState(value);
-  const [showDropdown, setShowDropdown] = useState(true);
+  // showDropdown state removed as it was unused (always true)
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -98,8 +99,7 @@ const CharacterDropdown: React.FC<CharacterDropdownProps> = ({
       </div>
 
       {/* Dropdown */}
-      {showDropdown && (
-        <div className="absolute top-full left-0 mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+      <div className="absolute top-full left-0 mt-1 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-64 overflow-y-auto">
           {/* Currently linked indicator */}
           {linkedCharacter && (
             <div className="px-3 py-2 bg-green-50 dark:bg-green-900/30 border-b border-gray-200 dark:border-gray-700">
@@ -130,7 +130,13 @@ const CharacterDropdown: React.FC<CharacterDropdownProps> = ({
                     />
                   ) : (
                     <div className="w-6 h-6 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center">
-                      <User className="w-3 h-3 text-gray-500" />
+                      {char.entity_type === 'location' ? (
+                        <MapPin className="w-3 h-3 text-gray-500" />
+                      ) : char.entity_type === 'object' ? (
+                        <Box className="w-3 h-3 text-gray-500" />
+                      ) : (
+                        <User className="w-3 h-3 text-gray-500" />
+                      )}
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
@@ -158,21 +164,37 @@ const CharacterDropdown: React.FC<CharacterDropdownProps> = ({
             </div>
           )}
 
-          {/* Create new option */}
+  
           {searchText.trim() && !exactMatch && (
-            <div className="border-t border-gray-200 dark:border-gray-700">
-              <button
-                onClick={() => onCreateNew(searchText.trim())}
-                className="w-full px-3 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-900/30 flex items-center gap-2 text-blue-600 dark:text-blue-400"
-              >
-                <Plus className="w-4 h-4" />
-                <span className="text-sm">Create "{searchText.trim()}" in Plot Overview</span>
-              </button>
+            <div className="p-2 border-t border-gray-100 dark:border-gray-700">
+               <div className="text-xs text-gray-500 mb-2 px-2">Create "{searchText.trim()}" as:</div>
+               <div className="flex flex-col gap-1">
+                 <button
+                    onClick={() => onCreateNew(searchText.trim(), 'character')}
+                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-md"
+                 >
+                    <User className="w-4 h-4" />
+                    <span>Character</span>
+                 </button>
+                 <button
+                    onClick={() => onCreateNew(searchText.trim(), 'object')}
+                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20 rounded-md"
+                 >
+                    <Box className="w-4 h-4" />
+                    <span>Object</span>
+                 </button>
+                  <button
+                    onClick={() => onCreateNew(searchText.trim(), 'location')}
+                    className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-md"
+                 >
+                    <MapPin className="w-4 h-4" />
+                    <span>Location</span>
+                 </button>
+               </div>
             </div>
           )}
         </div>
-      )}
-    </div>
+      </div>
   );
 };
 

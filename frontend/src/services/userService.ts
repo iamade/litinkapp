@@ -377,7 +377,8 @@ export const userService = {
   // Create a placeholder character in plot overview (for books)
   async createPlotCharacter(
     bookId: string,
-    characterName: string
+    characterName: string,
+    entityType: 'character' | 'object' | 'location' = 'character'
   ): Promise<{
     id: string;
     name: string;
@@ -385,10 +386,11 @@ export const userService = {
     physical_description?: string;
     personality?: string;
     image_url?: string;
+    entity_type?: string;
     message: string;
   }> {
     return apiClient.post(
-      `/plots/books/${bookId}/characters?character_name=${encodeURIComponent(characterName)}`,
+      `/plots/books/${bookId}/characters?character_name=${encodeURIComponent(characterName)}&entity_type=${entityType}`,
       {}
     );
   },
@@ -396,7 +398,8 @@ export const userService = {
   // Create a placeholder character in project plot overview (for Creator mode)
   async createProjectCharacter(
     projectId: string,
-    characterName: string
+    characterName: string,
+    entityType: 'character' | 'object' | 'location' = 'character'
   ): Promise<{
     id: string;
     name: string;
@@ -404,10 +407,11 @@ export const userService = {
     physical_description?: string;
     personality?: string;
     image_url?: string;
+    entity_type?: string;
     message: string;
   }> {
     return apiClient.post(
-      `/plots/projects/${projectId}/characters?character_name=${encodeURIComponent(characterName)}`,
+      `/plots/projects/${projectId}/characters?character_name=${encodeURIComponent(characterName)}&entity_type=${entityType}`,
       {}
     );
   },
@@ -717,6 +721,14 @@ export const userService = {
     error?: string;
   }> {
     return apiClient.get(`/characters/${characterId}/image-status`);
+  },
+
+  async setDefaultCharacterImage(characterId: string, imageUrl: string) {
+    return apiClient.put(`/characters/${characterId}/image/default`, { image_url: imageUrl });
+  },
+
+  async deleteCharacterHistoryImage(characterId: string, imageId: string) {
+    return apiClient.delete<{ success: boolean; message: string }>(`/characters/${characterId}/image/${imageId}`);
   },
 
   async generateCharacterDetailsWithAI(

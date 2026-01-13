@@ -10,7 +10,10 @@ from app.core.services.modelslab_v7_audio import ModelsLabV7AudioService
 from app.videos.models import VideoGeneration, AudioGeneration, Script
 from app.subscription.models import UserSubscription
 from sqlmodel import select
+from sqlmodel import select
 import uuid
+from app.core.model_config import get_model_config, ModelConfig
+from app.core.services.elevenlabs import ElevenLabsService
 
 
 @celery_app.task(bind=True)
@@ -83,10 +86,24 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                         f"[SCRIPT STYLE] No script_id found, using default: {script_style}"
                     )
 
-                # Update status
                 video_gen.generation_status = "generating_audio"
                 session.add(video_gen)
                 await session.commit()
+
+            # Get user subscription tier for model config
+            user_tier = "free"
+            async with get_session() as session:
+                sub_stmt = select(UserSubscription).where(
+                    UserSubscription.user_id == uuid.UUID(user_id)
+                )
+                sub_result = await session.exec(sub_stmt)
+                subscription = sub_result.first()
+                if subscription:
+                    user_tier = subscription.tier
+
+            # Get Audio Model Config
+            audio_config = get_model_config("audio", user_tier)
+            print(f"[AUDIO CONFIG] Tier: {user_tier}, Config: {audio_config}")
 
             # Parse script for audio components
             parser = ScriptParser()
@@ -113,10 +130,17 @@ def generate_all_audio_for_video(self, video_generation_id: str):
             audio_service = ModelsLabV7AudioService()
 
             # Generate audio based on script style
-            if script_style == "cinematic_movie":
-                # For cinematic: only background music and sound effects
+            if script_style == "cinematic_movie" or script_style == "cinematic":
+                # For cinematic: generate character dialogue + background music + sound effects
                 narrator_results = []
-                character_results = []
+                character_results = await generate_character_audio(
+                    audio_service,
+                    video_generation_id,
+                    audio_components["character_dialogue"],
+                    chapter_id,
+                    user_id,
+                    model_config=audio_config,
+                )
             else:
                 # For narration: generate narrator voice + background music + sound effects
                 narrator_results = await generate_narrator_audio(
@@ -125,6 +149,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                     audio_components["narrator_segments"],
                     chapter_id,
                     user_id,
+                    model_config=audio_config,
                 )
                 character_results = []
 
@@ -149,6 +174,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
             # Compile results
             total_audio_files = (
                 len(narrator_results)
+                + len(character_results)
                 + len(sound_effect_results)
                 + len(background_music_results)
             )
@@ -156,6 +182,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
             # Update video generation with audio file references
             audio_files_data = {
                 "narrator": narrator_results,
+                "character": character_results,
                 "sound_effects": sound_effect_results,
                 "background_music": background_music_results,
             }
@@ -268,6 +295,7 @@ async def generate_narrator_audio(
     narrator_segments: List[Dict[str, Any]],
     chapter_id: Optional[str],
     user_id: Optional[str],
+    model_config: Optional[ModelConfig] = None,
 ) -> List[Dict[str, Any]]:
     """Generate narrator voice audio"""
 
@@ -288,12 +316,54 @@ async def generate_narrator_audio(
             )
 
             # Generate audio
-            result = await audio_service.generate_tts_audio(
-                text=segment["text"],
-                voice_id=narrator_voice,
-                model_id="eleven_multilingual_v2",
-                speed=1.0,
-            )
+            result = {}
+            try:
+                result = await audio_service.generate_tts_audio(
+                    text=segment["text"],
+                    voice_id=narrator_voice,
+                    model_id="eleven_multilingual_v2",
+                    speed=1.0,
+                )
+            except Exception as e:
+                # Check for Fallback
+                fallback_success = False
+                if (
+                    model_config
+                    and model_config.fallback
+                    and model_config.fallback.startswith("elevenlabs/")
+                ):
+                    print(
+                        f"[NARRATOR AUDIO] ⚠️ Primary service failed: {e}. Attempting fallback to Direct ElevenLabs..."
+                    )
+                    try:
+                        eleven_service = ElevenLabsService()
+                        # Use voice mapping or default
+                        fallback_result = await eleven_service.generate_enhanced_speech(
+                            text=segment["text"],
+                            voice_id=narrator_voice,  # Re-use same ID as they are ElevenLabs IDs
+                            user_id=user_id,
+                        )
+
+                        if fallback_result and fallback_result.get("audio_url"):
+                            print(f"[NARRATOR AUDIO] ✅ Fallback successful!")
+                            result = {
+                                "status": "success",
+                                "audio_url": fallback_result.get("audio_url"),
+                                "audio_time": 0,  # Duration might need calculation or be missing
+                                "model_used": "direct_eleven_multilingual_v2",
+                                "service": "elevenlabs_direct",
+                            }
+                            fallback_success = True
+                        else:
+                            print(
+                                f"[NARRATOR AUDIO] ❌ Fallback failed: {fallback_result.get('error')}"
+                            )
+
+                    except Exception as fallback_e:
+                        print(f"[NARRATOR AUDIO] ❌ Fallback exception: {fallback_e}")
+
+                if not fallback_success:
+                    raise e  # Re-raise original error if fallback didn't work
 
             # Extract audio URL from response
             audio_url = None
@@ -394,8 +464,11 @@ async def generate_narrator_audio(
                     audio_metadata={
                         "chapter_id": chapter_id,
                         "line_number": segment.get("line_number", i + 1),
-                        "scene": segment.get("scene", 1),
-                        "service": "modelslab_v7",
+                        "scene": scene_id,
+                        "service": result.get("service", "modelslab_v7"),
+                        "model_used": result.get(
+                            "model_used", "eleven_multilingual_v2"
+                        ),
                     },
                 )
                 session.add(failed_record)
@@ -413,6 +486,7 @@ async def generate_character_audio(
     character_dialogues: List[Dict[str, Any]],
     chapter_id: Optional[str],
     user_id: Optional[str],
+    model_config: Optional[ModelConfig] = None,
 ) -> List[Dict[str, Any]]:
     """Generate character voice audio for cinematic scripts"""
 
@@ -446,12 +520,48 @@ async def generate_character_audio(
             voice_info = character_voice_mapping[character_name]
 
             # Generate audio
-            result = await audio_service.generate_tts_audio(
-                text=dialogue["text"],
-                voice_id=voice_info["voice_id"],
-                model_id="eleven_multilingual_v2",
-                speed=1.0,
-            )
+            result = {}
+            try:
+                result = await audio_service.generate_tts_audio(
+                    text=dialogue["text"],
+                    voice_id=voice_info["voice_id"],
+                    model_id="eleven_multilingual_v2",
+                    speed=1.0,
+                )
+            except Exception as e:
+                # Check for Fallback
+                fallback_success = False
+                if (
+                    model_config
+                    and model_config.fallback
+                    and model_config.fallback.startswith("elevenlabs/")
+                ):
+                    print(
+                        f"[CHARACTER AUDIO] ⚠️ Primary service failed: {e}. Attempting fallback to Direct ElevenLabs..."
+                    )
+                    try:
+                        eleven_service = ElevenLabsService()
+                        fallback_result = await eleven_service.generate_enhanced_speech(
+                            text=dialogue["text"],
+                            voice_id=voice_info["voice_id"],
+                            user_id=user_id,
+                        )
+
+                        if fallback_result and fallback_result.get("audio_url"):
+                            print(f"[CHARACTER AUDIO] ✅ Fallback successful!")
+                            result = {
+                                "status": "success",
+                                "audio_url": fallback_result.get("audio_url"),
+                                "audio_time": 0,
+                                "model_used": "direct_eleven_multilingual_v2",
+                                "service": "elevenlabs_direct",
+                            }
+                            fallback_success = True
+                    except Exception as fallback_e:
+                        print(f"[CHARACTER AUDIO] ❌ Fallback exception: {fallback_e}")
+
+                if not fallback_success:
+                    raise e
 
             audio_url = None
             duration = 0
@@ -506,7 +616,11 @@ async def generate_character_audio(
                         "voice_name": voice_info["voice_name"],
                         "line_number": dialogue.get("line_number", i + 1),
                         "scene": scene_id,
-                        "service": "modelslab_v7",
+                        "scene": scene_id,
+                        "service": result.get("service", "modelslab_v7"),
+                        "model_used": result.get(
+                            "model_used", "eleven_multilingual_v2"
+                        ),
                         "model_used": result.get(
                             "model_used", "eleven_multilingual_v2"
                         ),
@@ -656,7 +770,7 @@ async def generate_sound_effects_audio(
                         status="completed",
                         audio_metadata={
                             "chapter_id": chapter_id,
-                            "effect_type": "ambient",
+                            "effect_type": effect.get("type", "sound_effect"),
                             "service": "modelslab_v7",
                             "model_used": result.get(
                                 "model_used", "eleven_sound_effect"
@@ -697,7 +811,10 @@ async def generate_sound_effects_audio(
                     error_message=str(e),
                     sequence_order=i + 1,
                     status="failed",
-                    audio_metadata={"chapter_id": chapter_id, "service": "modelslab_v7"},
+                    audio_metadata={
+                        "chapter_id": chapter_id,
+                        "service": "modelslab_v7",
+                    },
                 )
                 session.add(failed_record)
                 await session.commit()
@@ -818,7 +935,10 @@ async def generate_background_music(
                     status="failed",
                     error_message=str(e),
                     sequence_order=i + 1,
-                    audio_metadata={"chapter_id": chapter_id, "service": "modelslab_v7"},
+                    audio_metadata={
+                        "chapter_id": chapter_id,
+                        "service": "modelslab_v7",
+                    },
                 )
                 session.add(failed_record)
                 await session.commit()

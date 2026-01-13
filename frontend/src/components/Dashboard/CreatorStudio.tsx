@@ -17,6 +17,7 @@ import {
 import { projectService, IntentAnalysisResult } from "../../services/projectService";
 import { toast } from "react-hot-toast";
 import ProjectFolder from "./ProjectFolder";
+import { checkFileAccessible } from "../../lib/fileValidation";
 
 interface UploadedBook {
   id: string;
@@ -54,9 +55,21 @@ export default function CreatorStudio() {
     fetchProjects();
   }, []);
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    
+    // Validate file accessibility (catches iCloud files not downloaded locally)
+    const validationResult = await checkFileAccessible(file);
+    if (!validationResult.accessible) {
+      toast.error(validationResult.error || "File is not accessible");
+      // Reset the file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+    
     setSelectedFile(file);
     // Reset uploaded book if file changes
     setUploadedBook(null);

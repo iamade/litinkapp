@@ -69,11 +69,36 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken }: UseAud
       
       // Normalize fields for consistent frontend filtering
       // Map backend snake_case fields to frontend camelCase expectations
-      const normalizedFiles = (files ?? []).map(f => ({
-        ...f,
-        url: f.url ?? f.audio_url, // Map audio_url to url for frontend compatibility
-        scriptId: f.script_id ?? f.scriptId ?? null
-      }));
+      const normalizedFiles = (files ?? []).map(f => {
+        // Map backend audio_type to frontend categories
+        let kind = f.type || 'narration';
+        
+        // Handle backend audio_type mapping
+        // @ts-expect-error - Backend field access
+        const audioType = f.audio_type || f.type;
+        // @ts-expect-error - Metadata access
+        const metadata = f.metadata || f.audio_metadata || {};
+
+        if (audioType === 'narrator') kind = 'narration';
+        else if (audioType === 'character') kind = 'dialogue';
+        else if (audioType === 'sound_effects' || audioType === 'sfx') kind = 'effects';
+        else if (audioType === 'background_music' || audioType === 'music') {
+          // Distinguish music vs ambiance
+          if (metadata.music_type === 'ambient' || metadata.music_type === 'ambiance' || 
+              metadata.effect_type === 'ambient' || metadata.effect_type === 'environmental') {
+            kind = 'ambiance';
+          } else {
+            kind = 'music';
+          }
+        }
+
+        return {
+          ...f,
+          url: f.url ?? f.audio_url,
+          scriptId: f.script_id ?? f.scriptId ?? null,
+          type: kind // Override type with normalized kind
+        };
+      });
       
       setState({ files: normalizedFiles, isLoading: false, error: null });
     } catch (e: unknown) {

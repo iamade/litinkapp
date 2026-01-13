@@ -321,6 +321,10 @@ class Script(SQLModel, table=True):
     character_ids: List[str] = Field(
         default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
     )
+    # Editable scene descriptions
+    scene_descriptions: List[str] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
     character_details: Optional[str] = Field(
         default=None
     )  # The code treats it as string sometimes? "character_details": character_details (string from _generate_character_details)

@@ -214,7 +214,11 @@ class ProjectService:
                 ),
                 source_mode="creator",  # Mark as Creator mode book (won't show in Explorer)
                 status="ready",
-                description=input_prompt or f"Uploaded from {file.filename}",
+                description=(
+                    input_prompt
+                    if input_prompt
+                    else f"Book uploaded from {file.filename}"
+                ),
                 original_file_storage_path=remote_path,
             )
             self.session.add(book)
@@ -236,7 +240,9 @@ class ProjectService:
                 book_id=book.id,  # Link project to book for RAG access
                 pipeline_steps=["plot", "chapters", "script"],
                 current_step="chapters",
-                input_prompt=input_prompt or f"Uploaded from {file.filename}",
+                input_prompt=(
+                    input_prompt if input_prompt else None
+                ),  # Don't default to filename
             )
             self.session.add(project)
             await self.session.commit()

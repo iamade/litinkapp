@@ -10,7 +10,11 @@ import {
   Edit2,
   Loader2,
   Plus,
-  Sparkles
+  Sparkles,
+  ChevronLeft,
+  ChevronRight,
+  Star,
+  AlertCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { userService } from '../../services/userService';
@@ -28,6 +32,13 @@ interface Character {
   lie?: string;
   ghost?: string;
   image_url?: string;
+  entity_type?: 'character' | 'object' | 'location';
+  images?: Array<{
+    id: string;
+    image_url: string;
+    created_at: string;
+    status: string;
+  }>;
 }
 
 interface CharacterCardProps {
@@ -41,6 +52,8 @@ interface CharacterCardProps {
   onGenerateImage: (characterId: string) => void;
   onRegenerateImage: (characterId: string) => void;
   onViewImage: (imageUrl: string) => void;
+  onDeleteImage?: (characterId: string, imageId: string) => Promise<void>;
+  onSetDefaultImage?: (characterId: string, imageUrl: string) => Promise<void>;
 }
 
 const CharacterCard: React.FC<CharacterCardProps> = ({
@@ -53,13 +66,78 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
   onDelete,
   onGenerateImage,
   onRegenerateImage,
-  onViewImage
+  onViewImage,
+  onDeleteImage,
+  onSetDefaultImage
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedCharacter, setEditedCharacter] = useState<Partial<Character>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingWithAI, setIsGeneratingWithAI] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [showDeleteImageModal, setShowDeleteImageModal] = useState(false);
+
+  const isObject = character.entity_type === 'object' || character.entity_type === 'location';
+  
+  // Carousel Logic
+  const validImages = React.useMemo(() => {
+    const images = character.images?.filter(img => img.status === 'completed' && img.image_url) || [];
+    // If no history but we have a main image, treat it as the only image
+    if (images.length === 0 && character.image_url) {
+        return [{ id: 'legacy', image_url: character.image_url, created_at: '', status: 'completed' }];
+    }
+    // Sort by created_at desc
+    return images.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [character.images, character.image_url]);
+
+  const currentImage = validImages[currentImageIndex] || validImages[0];
+  const hasMultipleImages = validImages.length > 1;
+
+  const handleNextImage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentImageIndex((prev) => (prev + 1) % validImages.length);
+  };
+
+  const handlePrevImage = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCurrentImageIndex((prev) => (prev - 1 + validImages.length) % validImages.length);
+  };
+
+  const handleSetDefaultImage = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!currentImage || currentImage.image_url === character.image_url) return;
+      
+      try {
+          if (onSetDefaultImage) {
+              await onSetDefaultImage(character.id, currentImage.image_url);
+          } else {
+              await onUpdate(character.id, { image_url: currentImage.image_url });
+          }
+          toast.success("Default image updated");
+      } catch (error) {
+          toast.error("Failed to update default image");
+      }
+  };
+
+  const handleDeleteCurrentImage = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!currentImage || !onDeleteImage) return;
+      setShowDeleteImageModal(true);
+  };
+
+  const confirmDeleteImage = async () => {
+      if (!currentImage || !onDeleteImage) return;
+
+      try {
+          await onDeleteImage(character.id, currentImage.id);
+          // Adjust index if needed
+          setCurrentImageIndex(prev => Math.max(0, prev - 1));
+          setShowDeleteImageModal(false);
+      } catch (error) {
+          // Error handled by parent usually
+      }
+  };
   
   // Archetype modal state
   const [showArchetypeModal, setShowArchetypeModal] = useState(false);
@@ -265,25 +343,76 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">This may take 20-30 seconds...</p>
             </div>
           </div>
-        ) : character.image_url ? (
+        ) : currentImage ? (
           <>
             <img
-              src={character.image_url}
+              src={currentImage.image_url}
               alt={character.name}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover transition-opacity duration-300"
             />
+            
+            {/* Carousel Controls */}
+            {hasMultipleImages && (
+                <>
+                    <button 
+                        onClick={handlePrevImage}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 p-1 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
+                    >
+                        <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button 
+                        onClick={handleNextImage}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
+                    >
+                        <ChevronRight className="w-5 h-5" />
+                    </button>
+                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex space-x-1.5">
+                        {validImages.map((_, idx) => (
+                            <div 
+                                key={idx}
+                                className={`w-1.5 h-1.5 rounded-full ${idx === currentImageIndex ? 'bg-white' : 'bg-white/50'}`}
+                            />
+                        ))}
+                    </div>
+                </>
+            )}
+
+            {/* Action Overlay */}
             <div className="absolute top-2 right-2 flex space-x-1">
               <button
-                onClick={() => onViewImage(character.image_url!)}
-                className="p-2 bg-black bg-opacity-50 text-white rounded-md hover:bg-opacity-70 transition-all"
+                onClick={() => onViewImage(currentImage.image_url)}
+                className="p-1.5 bg-black bg-opacity-50 text-white rounded-md hover:bg-opacity-70 transition-all"
                 title="View full size"
               >
                 <Eye className="w-4 h-4" />
               </button>
+              
+              {/* Set as Default (if not already) */}
+              {currentImage.image_url !== character.image_url && (
+                  <button
+                    onClick={handleSetDefaultImage}
+                    className="p-1.5 bg-black bg-opacity-50 text-yellow-400 rounded-md hover:bg-opacity-70 transition-all"
+                    title="Set as Default Image"
+                  >
+                    <Star className="w-4 h-4" />
+                  </button>
+              )}
+
+               {/* Delete Specific Image */}
+               {validImages.length > 0 && onDeleteImage && currentImage.id !== 'legacy' && (
+                  <button
+                    onClick={handleDeleteCurrentImage}
+                    className="p-1.5 bg-black bg-opacity-50 text-red-400 rounded-md hover:bg-opacity-70 transition-all"
+                    title="Delete this image"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+              )}
+
               <button
                 onClick={() => onRegenerateImage(character.id)}
-                className="p-2 bg-black bg-opacity-50 text-white rounded-md hover:bg-opacity-70 transition-all"
-                title="Regenerate image"
+                className="p-1.5 bg-black bg-opacity-50 text-white rounded-md hover:bg-opacity-70 transition-all"
+                title="Generate New Variation"
               >
                 <RefreshCw className="w-4 h-4" />
               </button>
@@ -345,27 +474,32 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
           )}
         </div>
 
-        {/* Role Field - Dropdown in edit mode */}
-        <div>
-          <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Role</label>
-          {isEditing ? (
-            <select
-              value={displayValue('role') as string}
-              onChange={(e) => handleInputChange('role', e.target.value)}
-              className="w-full text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={isGeneratingWithAI}
-            >
-              <option value="">Select role</option>
-              <option value="protagonist">Protagonist</option>
-              <option value="antagonist">Antagonist</option>
-              <option value="supporting">Supporting</option>
-              <option value="mentor">Mentor</option>
-              <option value="sidekick">Sidekick</option>
-            </select>
-          ) : (
-            <p className="text-sm text-gray-700 dark:text-gray-300 capitalize">{character.role || 'Not specified'}</p>
-          )}
-        </div>
+        {/* Role Field - Dropdown in edit mode - Hide for Objects if not needed, or keep optional */}
+        {/* Only show role for characters, or if it has a value for objects */}
+        {(!isObject || displayValue('role')) && (
+            <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Role</label>
+            {isEditing ? (
+                <select
+                value={displayValue('role') as string}
+                onChange={(e) => handleInputChange('role', e.target.value)}
+                className="w-full text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={isGeneratingWithAI}
+                >
+                <option value="">Select role</option>
+                <option value="protagonist">Protagonist</option>
+                <option value="antagonist">Antagonist</option>
+                <option value="supporting">Supporting</option>
+                <option value="mentor">Mentor</option>
+                <option value="sidekick">Sidekick</option>
+                {isObject && <option value="object">Object/Item</option>}
+                {isObject && <option value="location">Location</option>}
+                </select>
+            ) : (
+                <p className="text-sm text-gray-700 dark:text-gray-300 capitalize">{character.role || 'Not specified'}</p>
+            )}
+            </div>
+        )}
 
         {/* Physical Description */}
         <div>
@@ -400,27 +534,29 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
           )}
         </div>
 
-        {/* Personality */}
-        <div>
-          <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Personality</label>
-          {isEditing ? (
-            <textarea
-              value={displayValue('personality') as string}
-              onChange={(e) => handleInputChange('personality', e.target.value)}
-              className="w-full text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              rows={2}
-              placeholder="Describe personality traits..."
-              disabled={isGeneratingWithAI}
-            />
-          ) : (
-            <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2">
-              {character.personality || 'Not specified'}
-            </p>
-          )}
-        </div>
+        {/* Personality - Hide for Objects unless editing or present */}
+        {!isObject && (
+            <div>
+            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Personality</label>
+            {isEditing ? (
+                <textarea
+                value={displayValue('personality') as string}
+                onChange={(e) => handleInputChange('personality', e.target.value)}
+                className="w-full text-sm text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                rows={2}
+                placeholder="Describe personality traits..."
+                disabled={isGeneratingWithAI}
+                />
+            ) : (
+                <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2">
+                {character.personality || 'Not specified'}
+                </p>
+            )}
+            </div>
+        )}
 
-        {/* Character Arc - Only show in edit mode or if has value */}
-        {(isEditing || character.character_arc) && (
+        {/* Character Arc - Only show in for Characters */}
+        {!isObject && (isEditing || character.character_arc) && (
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Character Arc</label>
             {isEditing ? (
@@ -440,8 +576,8 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
           </div>
         )}
 
-        {/* Want / Need - Side by side */}
-        {(isEditing || character.want || character.need) && (
+        {/* Want / Need - Hide for Objects */}
+        {!isObject && (isEditing || character.want || character.need) && (
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Want</label>
@@ -476,8 +612,8 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
           </div>
         )}
 
-        {/* Lie / Ghost - Side by side */}
-        {(isEditing || character.lie || character.ghost) && (
+        {/* Lie / Ghost - Hide for Objects */}
+        {!isObject && (isEditing || character.lie || character.ghost) && (
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Lie They Believe</label>
@@ -512,8 +648,8 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
           </div>
         )}
 
-        {/* Archetypes */}
-        {(displayArchetypes && displayArchetypes.length > 0) || isEditing ? (
+        {/* Archetypes - Hide for Objects */}
+        { !isObject && ((displayArchetypes && displayArchetypes.length > 0) || isEditing) ? (
           <div>
             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Archetypes</label>
             <div className="flex flex-wrap gap-1">
@@ -645,6 +781,38 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-all"
               >
                 Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Delete Image Confirmation Modal */}
+      {showDeleteImageModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-white dark:bg-gray-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 dark:border-gray-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center flex-shrink-0">
+                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Delete Image?</h3>
+            </div>
+
+            <p className="text-gray-600 dark:text-gray-300 mb-6 text-sm">
+              Are you sure you want to delete this image? This action cannot be undone.
+            </p>
+
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowDeleteImageModal(false)}
+                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors text-sm font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteImage}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm text-sm font-medium"
+              >
+                Delete Image
               </button>
             </div>
           </div>

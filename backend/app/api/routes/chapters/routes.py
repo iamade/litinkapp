@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 import uuid
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, col, or_
@@ -26,6 +27,7 @@ from app.images.schemas import (
     ImageRecord,
     ImageStatusResponse,
 )
+from app.videos.schemas import SceneUpdateRequest
 from app.audio.schemas import (
     AudioGenerationRequest,
     AudioGenerationResponse,
@@ -65,7 +67,7 @@ async def verify_chapter_access(
             chapter, book = chapter_book
 
             # Check access permissions (published books or owned by user)
-            if book.status != "READY" and str(book.user_id) != user_id:
+            if book.status.upper() != "READY" and str(book.user_id) != str(user_id):
                 raise HTTPException(
                     status_code=403, detail="Not authorized to access this chapter"
                 )
@@ -199,7 +201,19 @@ async def list_chapter_images(
                 metadata.get("chapter_id") == chapter_id
                 or root_chapter_id == chapter_id
             ):
-                chapter_images.append(ImageRecord(**img))
+                # Convert UUIDs and datetimes to strings for Pydantic validation
+                img_data = dict(img)
+                for key, value in img_data.items():
+                    if isinstance(value, uuid.UUID):
+                        img_data[key] = str(value)
+                    elif isinstance(value, datetime):
+                        img_data[key] = value.isoformat()
+
+                # Ensure metadata is present
+                if "metadata" not in img_data or img_data["metadata"] is None:
+                    img_data["metadata"] = {}
+
+                chapter_images.append(ImageRecord(**img_data))
 
         return ChapterImagesResponse(
             chapter_id=chapter_id,
@@ -212,6 +226,68 @@ async def list_chapter_images(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error listing chapter images: {str(e)}"
+        )
+
+
+@router.put(
+    "/{chapter_id}/scripts/{script_id}/scenes/{scene_number}",
+)
+async def update_scene_description(
+    chapter_id: str,
+    script_id: str,
+    scene_number: int,
+    request: SceneUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Update description for a specific scene in the script"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Get the script
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Initialize scene_descriptions if needed (handling legacy scripts)
+        if not script.scene_descriptions:
+            # Try to populate from existing data or initialize empty list with sufficient size
+            # We can't easily parse here without AI, so we initiate a list based on known scenes count if possible
+            # Or just initialize as empty list and rely on index access filling
+            script.scene_descriptions = []
+
+        # Ensure list is long enough
+        # Note: scene_number is typically 1-based index in this app
+        idx = scene_number - 1
+
+        current_len = len(script.scene_descriptions)
+        if idx >= current_len:
+            # Extend list with empty strings or default values up to this index
+            extension = [""] * (idx - current_len + 1)
+            script.scene_descriptions.extend(extension)
+
+        # Update the description
+        script.scene_descriptions[idx] = request.scene_description
+
+        # We need to explicitly flag the field as modified for SQLAlchemy/SQLModel with JSON types sometimes
+        # Use simple reassignment to trigger change detection
+        script.scene_descriptions = list(script.scene_descriptions)
+
+        session.add(script)
+        await session.commit()
+        await session.refresh(script)
+
+        return {"success": True, "message": "Scene description updated"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error updating scene description: {str(e)}"
         )
 
 
@@ -247,7 +323,7 @@ async def generate_scene_image(
         # Get user tier for model selection
         subscription_manager = SubscriptionManager(session)
         usage_check = await subscription_manager.check_usage_limits(
-            uuid.UUID(current_user.id), "image"
+            current_user.id, "image"
         )
         user_tier = usage_check["tier"]
 
@@ -260,12 +336,23 @@ async def generate_scene_image(
             "image_type": "scene",
             "style": request.style,
             "aspect_ratio": request.aspect_ratio,
+            "character_ids": request.character_ids,
         }
 
         record = ImageGeneration(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             image_type="scene",
             scene_description=scene_description,
+            image_prompt=(
+                f"{scene_description}. {request.custom_prompt}"
+                if request.custom_prompt
+                else scene_description
+            ),
+            text_prompt=(
+                f"{scene_description}. {request.custom_prompt}"
+                if request.custom_prompt
+                else scene_description
+            ),
             scene_number=scene_number,
             chapter_id=uuid.UUID(chapter_id),
             script_id=uuid.UUID(request.script_id) if request.script_id else None,
@@ -295,14 +382,16 @@ async def generate_scene_image(
                 record_id=record_id,
                 scene_description=scene_description,
                 scene_number=scene_number,
-                user_id=current_user.id,
+                user_id=str(current_user.id),
                 chapter_id=chapter_id,
-                script_id=request.script_id,
+                script_id=str(request.script_id) if request.script_id else None,
                 style=request.style,
                 aspect_ratio=request.aspect_ratio,
                 custom_prompt=request.custom_prompt,
                 user_tier=user_tier,
                 retry_count=0,
+                character_ids=request.character_ids,
+                character_image_urls=request.character_image_urls,
             )
 
             print(
@@ -386,7 +475,7 @@ async def generate_character_image(
         }
 
         record = ImageGeneration(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             image_type="character",
             character_name=character_info["name"],
             scene_description=character_info["description"],
@@ -405,7 +494,7 @@ async def generate_character_image(
         task = generate_character_image_task.delay(
             character_name=character_info["name"],
             character_description=character_info["description"],
-            user_id=current_user.id,
+            user_id=str(current_user.id),
             chapter_id=chapter_id,
             style=request.style,
             aspect_ratio=request.aspect_ratio,
@@ -462,7 +551,7 @@ async def link_character_image(
         }
 
         record = ImageGeneration(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             image_type="character",
             character_name=character_name,
             image_url=image_url,
@@ -905,7 +994,7 @@ async def get_scene_image_status(
             )
 
         # Verify the record belongs to the current user
-        if str(image_record.user_id) != current_user.id:
+        if str(image_record.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this image generation"
             )
@@ -928,21 +1017,31 @@ async def get_scene_image_status(
             status = "pending"
 
         # Extract retry_count safely (ensure it's an int)
-        retry_count = image_record.retry_count or 0
+        # Check both meta and metadata attributes as they might vary
+        meta_dict = (
+            getattr(image_record, "meta", None)
+            or getattr(image_record, "metadata", {})
+            or {}
+        )
+        retry_count = meta_dict.get("retry_count", 0)
         retry_count = int(retry_count)
 
         return ImageStatusResponse(
             record_id=str(image_record.id),
             status=status,
             image_url=image_record.image_url,
-            prompt=image_record.prompt or image_record.image_prompt,
+            prompt=image_record.image_prompt or image_record.text_prompt,
             script_id=str(image_record.script_id) if image_record.script_id else None,
             scene_number=record_scene_number,
             retry_count=retry_count,
             error_message=image_record.error_message,
             generation_time_seconds=image_record.generation_time_seconds,
-            created_at=image_record.created_at,
-            updated_at=image_record.updated_at,
+            created_at=(
+                image_record.created_at.isoformat() if image_record.created_at else None
+            ),
+            updated_at=(
+                image_record.updated_at.isoformat() if image_record.updated_at else None
+            ),
         )
 
     except HTTPException:
@@ -973,7 +1072,7 @@ async def list_chapter_audio(
         )
 
         stmt = select(AudioGeneration).where(
-            AudioGeneration.user_id == uuid.UUID(current_user.id),
+            AudioGeneration.user_id == current_user.id,
             AudioGeneration.chapter_id == uuid.UUID(chapter_id),
         )
         result = await session.exec(stmt)
@@ -1121,7 +1220,7 @@ async def generate_chapter_audio(
         )
 
         audio_record = AudioGeneration(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             chapter_id=uuid.UUID(chapter_id),
             audio_type=audio_type,
             text_content=text_content,
@@ -1248,7 +1347,7 @@ async def export_chapter_audio_mix(
 
         # Get all audio files for this chapter
         stmt = select(AudioGeneration).where(
-            AudioGeneration.user_id == uuid.UUID(current_user.id),
+            AudioGeneration.user_id == current_user.id,
             AudioGeneration.chapter_id == uuid.UUID(chapter_id),
         )
         result = await session.exec(stmt)
@@ -1282,7 +1381,7 @@ async def export_chapter_audio_mix(
 
         # Create export record
         export_record = AudioExport(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             chapter_id=uuid.UUID(chapter_id),
             export_format=request.format,
             status="pending",

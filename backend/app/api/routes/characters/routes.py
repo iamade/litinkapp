@@ -386,6 +386,71 @@ async def get_character_image_status(
         )
 
 
+@router.put("/{character_id}/image/default")
+async def set_default_image(
+    character_id: str,
+    payload: dict,
+    session: AsyncSession = Depends(get_session),
+    current_user: dict = Depends(get_current_active_user),
+):
+    """
+    Set a specific image as the default/profile image for a character.
+
+    Payload should contain: {"image_url": "..."}
+    """
+    try:
+        image_url = payload.get("image_url")
+        if not image_url:
+            raise HTTPException(status_code=400, detail="image_url is required")
+
+        character_service = CharacterService(session)
+        success = await character_service.update_character_image_url(
+            character_id=character_id, image_url=image_url, user_id=current_user.id
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=500, detail="Failed to update default image"
+            )
+
+        return {"success": True, "message": "Default image updated"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to set default image: {str(e)}"
+        )
+
+
+@router.delete("/{character_id}/image/{image_id}")
+async def delete_character_image(
+    character_id: str,
+    image_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: dict = Depends(get_current_active_user),
+):
+    """
+    Delete a specific generated image from history.
+    If it is the current default, the default will be cleared.
+    """
+    try:
+        character_service = CharacterService(session)
+        success = await character_service.delete_character_image(
+            character_id=character_id, image_id=image_id, user_id=current_user.id
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete image")
+
+        return {"success": True, "message": "Image deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete image: {str(e)}")
+
+
 @router.get("/archetypes", response_model=List[CharacterArchetypeResponse])
 async def get_all_archetypes(
     session: AsyncSession = Depends(get_session),
