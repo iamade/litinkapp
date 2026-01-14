@@ -9,6 +9,7 @@ from app.core.services.pipeline import PipelineManager, PipelineStep
 from app.core.services.modelslab_v7_audio import ModelsLabV7AudioService
 from app.videos.models import VideoGeneration, AudioGeneration, Script
 from app.subscriptions.models import UserSubscription
+from app.plots.models import Character  # For character description lookup
 from sqlmodel import select
 import uuid
 from app.core.model_config import get_model_config, ModelConfig
@@ -313,37 +314,56 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                     f"[AUDIO FILTER] Filtering generation for scenes: {selected_scenes}"
                 )
 
+                # Helper function to check if a scene matches selected scenes
+                # Handles sub-scene matching: Scene 1 matches 1.1, 1.2, 1.3 etc.
+                def matches_selected_scene(scene_value, selected_scenes):
+                    if scene_value is None:
+                        return False
+                    scene_str = str(scene_value)
+                    for s in selected_scenes:
+                        s_str = str(s)
+                        # Exact match
+                        if scene_str == s_str:
+                            return True
+                        # Sub-scene match: scene 1.1 matches selected scene 1
+                        # Check if scene_str starts with "s_str." (e.g., "1.1" starts with "1.")
+                        if scene_str.startswith(f"{s_str}."):
+                            return True
+                        # Also check integer match for decimals (1.0 matches 1)
+                        try:
+                            scene_int = int(float(scene_value))
+                            if scene_int == int(float(s)):
+                                return True
+                        except (ValueError, TypeError):
+                            pass
+                    return False
+
                 # Filter narrator segments
                 audio_components["narrator_segments"] = [
                     seg
                     for seg in audio_components.get("narrator_segments", [])
-                    if str(seg.get("scene", "")) in [str(s) for s in selected_scenes]
-                    or seg.get("scene") in selected_scenes
+                    if matches_selected_scene(seg.get("scene"), selected_scenes)
                 ]
 
                 # Filter character dialogue
                 audio_components["character_dialogues"] = [
                     seg
                     for seg in audio_components.get("character_dialogues", [])
-                    if str(seg.get("scene", "")) in [str(s) for s in selected_scenes]
-                    or seg.get("scene") in selected_scenes
+                    if matches_selected_scene(seg.get("scene"), selected_scenes)
                 ]
 
                 # Filter sound effects
                 audio_components["sound_effects"] = [
                     seg
                     for seg in audio_components.get("sound_effects", [])
-                    if str(seg.get("scene", "")) in [str(s) for s in selected_scenes]
-                    or seg.get("scene") in selected_scenes
+                    if matches_selected_scene(seg.get("scene"), selected_scenes)
                 ]
 
-                # Filter background music (less strict? usually per scene matching)
-                # Music logic in parser likely assigns scene numbers
+                # Filter background music
                 audio_components["background_music"] = [
                     seg
                     for seg in audio_components.get("background_music", [])
-                    if str(seg.get("scene", "")) in [str(s) for s in selected_scenes]
-                    or seg.get("scene") in selected_scenes
+                    if matches_selected_scene(seg.get("scene"), selected_scenes)
                 ]
             # -----------------------------
 
@@ -725,9 +745,268 @@ async def generate_character_audio(
     print(f"[CHARACTER AUDIO] Generating character voices...")
     character_results = []
 
-    # Get available character voices
-    available_voices = list(audio_service.character_voices.items())
+    # Get available character voices - organized by gender
+    male_voices = [
+        (name, vid)
+        for name, vid in audio_service.character_voices.items()
+        if "male" in name.lower() and "female" not in name.lower()
+    ]
+    female_voices = [
+        (name, vid)
+        for name, vid in audio_service.character_voices.items()
+        if "female" in name.lower()
+    ]
+    all_voices = list(audio_service.character_voices.items())
     character_voice_mapping = {}
+
+    # Fetch character descriptions from database for enhanced gender detection
+    character_descriptions = {}  # name -> {role, physical_description, personality}
+    if user_id:
+        try:
+            async with session_scope() as session:
+                stmt = select(Character).where(Character.user_id == uuid.UUID(user_id))
+                result = await session.exec(stmt)
+                db_characters = result.all()
+
+                for char in db_characters:
+                    # Store with multiple name variations for matching
+                    name_key = char.name.upper().strip()
+                    character_descriptions[name_key] = {
+                        "role": char.role or "",
+                        "physical_description": char.physical_description or "",
+                        "personality": char.personality or "",
+                        "entity_type": char.entity_type or "character",
+                    }
+                    # Also store by last name only for better matching
+                    name_parts = name_key.split()
+                    if len(name_parts) > 1:
+                        character_descriptions[name_parts[-1]] = character_descriptions[
+                            name_key
+                        ]
+
+                print(
+                    f"[CHARACTER AUDIO] Loaded {len(db_characters)} character descriptions from DB"
+                )
+        except Exception as e:
+            print(
+                f"[CHARACTER AUDIO] Warning: Could not load character descriptions: {e}"
+            )
+
+    # Gender detection helper
+    def detect_character_gender(name: str) -> str:
+        """Detect gender from character name. Returns 'male', 'female', or 'unknown'."""
+        name_upper = name.upper().strip()
+
+        # Female indicators
+        female_prefixes = [
+            "MRS.",
+            "MRS ",
+            "MS.",
+            "MS ",
+            "MISS ",
+            "MISS.",
+            "LADY ",
+            "LADY.",
+            "QUEEN ",
+            "PRINCESS ",
+            "DUCHESS ",
+            "MADAM ",
+            "MADAME ",
+        ]
+        female_names = [
+            "SHE",
+            "HER",
+            "HERSELF",
+            "WOMAN",
+            "GIRL",
+            "MOTHER",
+            "MOM",
+            "MAMMA",
+            "SISTER",
+            "AUNT",
+            "GRANDMOTHER",
+            "GRANDMA",
+            "WIFE",
+            "DAUGHTER",
+            "NIECE",
+            "GODMOTHER",
+            "WITCH",
+            "SORCERESS",
+            "PRIESTESS",
+            "ACTRESS",
+            "WAITRESS",
+            "HOSTESS",
+            "STEWARDESS",
+            "EMPRESS",
+        ]
+
+        # Male indicators
+        male_prefixes = [
+            "MR.",
+            "MR ",
+            "SIR ",
+            "SIR.",
+            "LORD ",
+            "LORD.",
+            "KING ",
+            "PRINCE ",
+            "DUKE ",
+            "MASTER ",
+        ]
+        male_names = [
+            "HE",
+            "HIM",
+            "HIMSELF",
+            "MAN",
+            "BOY",
+            "FATHER",
+            "DAD",
+            "PAPA",
+            "BROTHER",
+            "UNCLE",
+            "GRANDFATHER",
+            "GRANDPA",
+            "HUSBAND",
+            "SON",
+            "NEPHEW",
+            "GODFATHER",
+            "WIZARD",
+            "SORCERER",
+            "PRIEST",
+            "ACTOR",
+            "WAITER",
+            "HOST",
+            "STEWARD",
+            "EMPEROR",
+        ]
+
+        # Check prefixes first (most reliable)
+        for prefix in female_prefixes:
+            if name_upper.startswith(prefix):
+                return "female"
+        for prefix in male_prefixes:
+            if name_upper.startswith(prefix):
+                return "male"
+
+        # Check if name contains gender-specific words
+        name_words = name_upper.replace(".", " ").split()
+        for word in name_words:
+            if word in female_names:
+                return "female"
+            if word in male_names:
+                return "male"
+
+        # Common female first names (when all else fails)
+        female_first_names = [
+            "LILY",
+            "PETUNIA",
+            "HERMIONE",
+            "MOLLY",
+            "MINERVA",
+            "MARY",
+            "ELIZABETH",
+            "SARAH",
+            "JANE",
+            "EMMA",
+            "ANNA",
+            "ROSE",
+            "ALICE",
+            "SUSAN",
+            "HELEN",
+            "MARGARET",
+            "NANCY",
+        ]
+        for first_name in female_first_names:
+            if first_name in name_upper:
+                return "female"
+
+        # Check character descriptions from database (enhanced detection)
+        # Look up by full name or last name
+        char_desc = None
+        if name_upper in character_descriptions:
+            char_desc = character_descriptions[name_upper]
+        else:
+            # Try last name only
+            name_parts = name_upper.split()
+            if name_parts:
+                last_name = name_parts[-1]
+                if last_name in character_descriptions:
+                    char_desc = character_descriptions[last_name]
+
+        if char_desc:
+            # Combine all description fields for analysis
+            full_desc = f"{char_desc.get('role', '')} {char_desc.get('physical_description', '')} {char_desc.get('personality', '')}".upper()
+
+            # Female indicators in descriptions
+            female_desc_words = [
+                "SHE",
+                "HER",
+                "HERSELF",
+                "WOMAN",
+                "FEMALE",
+                "LADY",
+                "GIRL",
+                "WITCH",
+                "SISTER",
+                "MOTHER",
+                "DAUGHTER",
+                "WIFE",
+                "AUNT",
+                "GRANDMOTHER",
+                "PRINCESS",
+                "QUEEN",
+                "DUCHESS",
+                "EMPRESS",
+                "PRIESTESS",
+                "SORCERESS",
+                "ACTRESS",
+                "WAITRESS",
+            ]
+
+            # Male indicators in descriptions
+            male_desc_words = [
+                "HE",
+                "HIS",
+                "HIM",
+                "HIMSELF",
+                "MAN",
+                "MALE",
+                "GUY",
+                "BOY",
+                "WIZARD",
+                "BROTHER",
+                "FATHER",
+                "SON",
+                "HUSBAND",
+                "UNCLE",
+                "GRANDFATHER",
+                "PRINCE",
+                "KING",
+                "DUKE",
+                "EMPEROR",
+                "PRIEST",
+                "SORCERER",
+                "ACTOR",
+                "WAITER",
+                "HALF-GIANT",
+                "GIANT",
+            ]
+
+            female_score = sum(1 for word in female_desc_words if word in full_desc)
+            male_score = sum(1 for word in male_desc_words if word in full_desc)
+
+            if female_score > male_score:
+                print(
+                    f"[CHARACTER AUDIO] Detected FEMALE from description: {name_upper} (score: {female_score} vs {male_score})"
+                )
+                return "female"
+            elif male_score > female_score:
+                print(
+                    f"[CHARACTER AUDIO] Detected MALE from description: {name_upper} (score: {male_score} vs {female_score})"
+                )
+                return "male"
+
+        return "unknown"
 
     for i, dialogue in enumerate(character_dialogues):
         try:
@@ -739,14 +1018,38 @@ async def generate_character_audio(
 
             # Assign voice to character if not already assigned
             if character_name not in character_voice_mapping:
-                voice_index = hash(character_name) % len(available_voices)
-                voice_name, voice_id = available_voices[voice_index]
+                # Detect gender and select appropriate voice
+                gender = detect_character_gender(character_name)
+
+                if gender == "female" and female_voices:
+                    # Select from female voices
+                    voice_index = hash(character_name) % len(female_voices)
+                    voice_name, voice_id = female_voices[voice_index]
+                    print(
+                        f"[CHARACTER AUDIO] Detected FEMALE: {character_name} -> {voice_name}"
+                    )
+                elif gender == "male" and male_voices:
+                    # Select from male voices
+                    voice_index = hash(character_name) % len(male_voices)
+                    voice_name, voice_id = male_voices[voice_index]
+                    print(
+                        f"[CHARACTER AUDIO] Detected MALE: {character_name} -> {voice_name}"
+                    )
+                else:
+                    # Unknown gender - use hash-based selection from all voices
+                    voice_index = hash(character_name) % len(all_voices)
+                    voice_name, voice_id = all_voices[voice_index]
+                    print(
+                        f"[CHARACTER AUDIO] Unknown gender: {character_name} -> {voice_name}"
+                    )
+
                 character_voice_mapping[character_name] = {
                     "voice_name": voice_name,
                     "voice_id": voice_id,
+                    "detected_gender": gender,
                 }
                 print(
-                    f"[CHARACTER AUDIO] Assigned voice '{voice_name}' to {character_name}"
+                    f"[CHARACTER AUDIO] Assigned voice '{voice_name}' ({gender}) to {character_name}"
                 )
 
             voice_info = character_voice_mapping[character_name]

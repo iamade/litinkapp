@@ -602,32 +602,65 @@ class ScriptParser:
             "sound_effects": [],
             "background_music": [],
         }
-
         lines = script.split("\n")
         current_scene = 0
+        current_sub_scene = 0  # Track sub-scenes (INT/EXT within same ACT+SCENE)
         current_character = None
+
+        # Regex pattern for ACT+SCENE markers (e.g., **ACT I - SCENE 1**, ACT I - SCENE 1, etc.)
+        act_scene_pattern = re.compile(
+            r"^\*?\*?\s*ACT\s+[IVX\d]+\s*[-–—]\s*SCENE\s+\d+", re.IGNORECASE
+        )
+
+        # Helper function to get current scene number (including sub-scene)
+        def get_scene_number():
+            if current_sub_scene == 0:
+                return current_scene
+            return float(f"{current_scene}.{current_sub_scene}")
 
         for i, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue
 
-            # Detect scene changes
-            if (
-                line.startswith("SCENE")
-                or line.startswith("INT.")
-                or line.startswith("EXT.")
-            ):
+            # Check for ACT+SCENE markers first (primary scene boundary)
+            if act_scene_pattern.match(line):
                 current_scene += 1
+                current_sub_scene = 0  # Reset sub-scene counter
                 current_character = None  # Reset character context on scene change
+                continue
+
+            # Check for INT./EXT. lines (sub-scene boundaries within an ACT+SCENE)
+            if line.startswith("INT.") or line.startswith("EXT."):
+                # Only increment sub-scene if we're already in a scene
+                if current_scene > 0:
+                    current_sub_scene += 1
+                else:
+                    # If no ACT+SCENE marker seen yet, treat INT/EXT as scene 1
+                    current_scene = 1
+                    current_sub_scene = 0
+
+                current_character = None  # Reset character context on location change
 
                 # Extract environmental sounds from scene description
                 scene_sounds = self._extract_scene_sounds(line)
                 if scene_sounds:
-                    # Add current_scene to each sound effect
+                    # Add current_scene (as decimal for sub-scene) to each sound effect
+                    scene_number = (
+                        current_scene
+                        if current_sub_scene == 0
+                        else float(f"{current_scene}.{current_sub_scene}")
+                    )
                     for sound in scene_sounds:
-                        sound["scene"] = current_scene
+                        sound["scene"] = scene_number
                     audio_components["sound_effects"].extend(scene_sounds)
+                continue
+
+            # Legacy: Handle standalone SCENE markers without ACT
+            if line.startswith("SCENE") and not act_scene_pattern.match(line):
+                current_scene += 1
+                current_sub_scene = 0
+                current_character = None
                 continue
 
             # Check if line is a character name (ALL CAPS at start of line, no colon)
@@ -640,13 +673,35 @@ class ScriptParser:
             ):
 
                 # Verify it's a known character (case-insensitive)
-                # Relaxed matching: check if line is part of full name or vice versa
-                if any(
-                    char.upper() == line.upper()
-                    or line.upper() in char.upper()
-                    or char.upper() in line.upper()
-                    for char in characters
-                ):
+                # Relaxed matching: check multiple ways to match character names
+                def matches_character(script_name: str, char_name: str) -> bool:
+                    script_upper = script_name.upper()
+                    char_upper = char_name.upper()
+
+                    # Exact match
+                    if script_upper == char_upper:
+                        return True
+
+                    # Direct substring match (either direction)
+                    if script_upper in char_upper or char_upper in script_upper:
+                        return True
+
+                    # Word-based matching: check if ALL words in script name appear in char name
+                    # This handles "MRS. DURSLEY" matching "Mrs. Petunia Dursley"
+                    script_words = script_upper.replace(".", "").split()
+                    char_words = char_upper.replace(".", "").split()
+                    if all(word in char_words for word in script_words):
+                        return True
+
+                    # Last name matching: check if last word matches
+                    # This handles "DURSLEY" matching any Dursley
+                    if script_words and char_words:
+                        if script_words[-1] == char_words[-1]:
+                            return True
+
+                    return False
+
+                if any(matches_character(line, char) for char in characters):
                     current_character = line
                     print(
                         f"[SCRIPT PARSER DEBUG] Detected character: {line} (line {i+1})"
@@ -661,7 +716,7 @@ class ScriptParser:
                     {
                         "character": character_name,
                         "text": dialogue,
-                        "scene": current_scene,
+                        "scene": get_scene_number(),
                         "line_number": i + 1,
                     }
                 )
@@ -679,7 +734,7 @@ class ScriptParser:
                     {
                         "character": current_character,
                         "text": dialogue,
-                        "scene": current_scene,
+                        "scene": get_scene_number(),
                         "line_number": i + 1,
                     }
                 )
@@ -693,7 +748,7 @@ class ScriptParser:
                     audio_components["sound_effects"].append(
                         {
                             "description": effect,
-                            "scene": current_scene,
+                            "scene": get_scene_number(),
                             "line_number": i + 1,
                         }
                     )
@@ -705,7 +760,7 @@ class ScriptParser:
                 audio_components["sound_effects"].append(
                     {
                         "description": effect,
-                        "scene": current_scene,
+                        "scene": get_scene_number(),
                         "line_number": i + 1,
                     }
                 )
@@ -716,7 +771,11 @@ class ScriptParser:
                     line.replace("MUSIC:", "").replace("BACKGROUND MUSIC:", "").strip()
                 )
                 audio_components["background_music"].append(
-                    {"description": music, "scene": current_scene, "line_number": i + 1}
+                    {
+                        "description": music,
+                        "scene": get_scene_number(),
+                        "line_number": i + 1,
+                    }
                 )
                 continue
 
@@ -780,27 +839,53 @@ class ScriptParser:
         # Split script into lines for processing
         lines = script.split("\n")
         current_scene = 0
+        current_sub_scene = 0  # Track sub-scenes (INT/EXT within same ACT+SCENE)
+
+        # Regex pattern for ACT+SCENE markers (e.g., **ACT I - SCENE 1**, ACT I - SCENE 1, etc.)
+        act_scene_pattern = re.compile(
+            r"^\*?\*?\s*ACT\s+[IVX\d]+\s*[-–—]\s*SCENE\s+\d+", re.IGNORECASE
+        )
+
+        # Helper function to get current scene number (including sub-scene)
+        def get_scene_number():
+            if current_sub_scene == 0:
+                return current_scene
+            return float(f"{current_scene}.{current_sub_scene}")
 
         for i, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue
 
-            # Detect scene changes
-            if (
-                line.startswith("SCENE")
-                or line.startswith("INT.")
-                or line.startswith("EXT.")
-            ):
+            # Check for ACT+SCENE markers first (primary scene boundary)
+            if act_scene_pattern.match(line):
                 current_scene += 1
+                current_sub_scene = 0  # Reset sub-scene counter
+                continue
+
+            # Check for INT./EXT. lines (sub-scene boundaries within an ACT+SCENE)
+            if line.startswith("INT.") or line.startswith("EXT."):
+                # Only increment sub-scene if we're already in a scene
+                if current_scene > 0:
+                    current_sub_scene += 1
+                else:
+                    # If no ACT+SCENE marker seen yet, treat INT/EXT as scene 1
+                    current_scene = 1
+                    current_sub_scene = 0
 
                 # Extract environmental sounds from scene description
                 scene_sounds = self._extract_scene_sounds(line)
                 if scene_sounds:
-                    # Add current_scene to each sound effect
+                    # Add current_scene (as decimal for sub-scene) to each sound effect
                     for sound in scene_sounds:
-                        sound["scene"] = current_scene
+                        sound["scene"] = get_scene_number()
                     audio_components["sound_effects"].extend(scene_sounds)
+                continue
+
+            # Legacy: Handle standalone SCENE markers without ACT
+            if line.startswith("SCENE") and not act_scene_pattern.match(line):
+                current_scene += 1
+                current_sub_scene = 0
                 continue
 
             # Detect character dialogue
@@ -811,7 +896,7 @@ class ScriptParser:
                     {
                         "character": character_name,
                         "text": dialogue,
-                        "scene": current_scene,
+                        "scene": get_scene_number(),
                         "line_number": i + 1,
                     }
                 )
@@ -820,7 +905,7 @@ class ScriptParser:
             # Detect narrator text (descriptive text that's not dialogue)
             if self._is_narrator_text(line, characters):
                 audio_components["narrator_segments"].append(
-                    {"text": line, "scene": current_scene, "line_number": i + 1}
+                    {"text": line, "scene": get_scene_number(), "line_number": i + 1}
                 )
                 continue
 
@@ -831,7 +916,7 @@ class ScriptParser:
                     audio_components["sound_effects"].append(
                         {
                             "description": effect,
-                            "scene": current_scene,
+                            "scene": get_scene_number(),
                             "line_number": i + 1,
                         }
                     )

@@ -229,3 +229,11 @@ export async function generateScriptAudio(chapterId: string | null, scriptId: st
     scene_numbers: sceneNumbers
   });
 }
+
+export async function deleteAudio(chapterId: string, audioId: string) {
+  return apiClient.delete<{ 
+    success: boolean; 
+    message: string;
+    audio_id: string;
+  }>(`/chapters/${chapterId}/audio/${audioId}`);
+}

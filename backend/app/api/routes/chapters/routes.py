@@ -1343,7 +1343,7 @@ async def delete_chapter_audio(
             raise HTTPException(status_code=404, detail="Audio file not found")
 
         # Verify the record belongs to the current user
-        if str(audio_record.user_id) != current_user.id:
+        if str(audio_record.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to delete this audio file"
             )
@@ -1367,9 +1367,9 @@ async def delete_chapter_audio(
         await session.commit()
 
         return DeleteAudioResponse(
-            status="success",
+            success=True,
             message="Audio file deleted successfully",
-            audio_id=audio_id,
+            record_id=audio_id,
         )
 
     except HTTPException:
