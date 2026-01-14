@@ -847,7 +847,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             }`}>
               {scenes.map((scene: any, idx: number) => {
                 const sceneNumber = scene.scene_number || idx + 1;
-                const images = getSceneImages(sceneNumber);
+                const images = sceneImages[`${selectedScriptId}_${sceneNumber}`] || sceneImages[sceneNumber] || [];
                 
                 return (
                   <SceneImageCard

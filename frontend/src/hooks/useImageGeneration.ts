@@ -33,7 +33,11 @@ interface ImageGenerationOptions {
   customPrompt?: string;
 }
 
-export const useImageGeneration = (chapterId: string | null, selectedScriptId: string | null) => {
+export const useImageGeneration = (
+  chapterId: string | null, 
+  selectedScriptId: string | null,
+  scenes?: string[] // Optional: providing scenes allows for recovery of missing scene numbers
+) => {
   const [sceneImages, setSceneImages] = useState<Record<string | number, SceneImage[]>>({});
   const [characterImages, setCharacterImages] = useState<Record<string, CharacterImage>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -56,26 +60,37 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
 
   const loadImages = useCallback(async () => {
 
-    if (!chapterId) {
+    // Allow loading if either chapterId or selectedScriptId is present
+    if (!chapterId && !selectedScriptId) {
       setSceneImages({});
       setCharacterImages({});
       setIsLoading(false);
       return;
     }
 
-    const requestKey = chapterId;
+    // Use scriptId as fallback request key if chapterId is missing
+    const requestKey = chapterId || selectedScriptId || 'unknown';
 
-    if (inflightRef.current === requestKey) {
-      return; // prevent duplicate fetch
-    }
+    // Remove strict inflight check to allow re-runs when 'scenes' updates for recovery
+    // if (inflightRef.current === requestKey) {
+    //   return; // prevent duplicate fetch
+    // }
 
     inflightRef.current = requestKey;
 
     setIsLoading(true);
     try {
-      const response = await userService.getChapterImages(chapterId);
-      if (!isMountedRef.current || inflightRef.current !== requestKey) {
-        return; // stale
+      let response;
+      if (chapterId) {
+        response = await userService.getChapterImages(chapterId);
+      } else if (selectedScriptId) {
+        response = await userService.getScriptImages(selectedScriptId);
+      } else {
+        return; // Should be caught by earlier guard, but safe fallback
+      }
+
+      if (!isMountedRef.current) {
+        return; 
       }
       const sceneImagesMap: Record<string | number, SceneImage[]> = {};
       const characterImagesMap: Record<string, CharacterImage> = {};
@@ -88,29 +103,46 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
           return dateB - dateA;
         });
 
-        sortedImages.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; scene_number?: number; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
+        sortedImages.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; scene_number?: number; scene_description?: string; image_prompt?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
           const metadata = img.metadata ?? {};
           const url = img.image_url ?? "";
           const imageType = img.image_type || metadata.image_type;
           const characterName = img.character_name || metadata.character_name;
           // Read scene_number from root level first, then fall back to metadata
-          const sceneNumber = img.scene_number ?? metadata.scene_number;
+          let sceneNumber = img.scene_number ?? metadata.scene_number;
 
           // Normalize script_id from either field
           const normalizedScriptId = img.script_id ?? img.scriptId;
+          
+          // Filter by script_id if provided
+          if (selectedScriptId && normalizedScriptId && normalizedScriptId !== selectedScriptId) {
+             return;
+          }
 
-          // Scene images: accept explicit scene or fallback when image_type missing but URL exists
-          if (
-            (imageType === "scene" || !imageType) &&
-            (typeof sceneNumber === "number" || url)
-          ) {
-            // Create a composite key using script_id and scene_number to avoid collisions
-            // when multiple scripts have images for the same scene number
-            const sceneKey =
-              typeof sceneNumber === "number" && normalizedScriptId
-                ? `${normalizedScriptId}_${sceneNumber}`
-                : img.id || url;
+          const prompt = img.image_prompt || metadata.image_prompt || "No prompt available";
 
+          // RECOVERY LOGIC: If sceneNumber is missing but we have scenes and a description
+          if ((sceneNumber === undefined || sceneNumber === null) && imageType === 'scene' && scenes && scenes.length > 0 && img.scene_description) {
+            // Try to match the image's scene_description to a scene text
+            const cleanDesc = img.scene_description.trim().substring(0, 50).toLowerCase();
+            const matchedIndex = scenes.findIndex(s => s.toLowerCase().includes(cleanDesc) || cleanDesc.includes(s.toLowerCase().substring(0, 50)));
+            
+            if (matchedIndex !== -1) {
+                sceneNumber = matchedIndex + 1; // 1-based index
+            }
+          }
+
+          if (imageType === 'scene' && (sceneNumber || sceneNumber === 0)) {
+            const sn = Number(sceneNumber);
+
+            // Use composite key to match state structure
+            const sceneKey = selectedScriptId && normalizedScriptId === selectedScriptId
+                ? `${selectedScriptId}_${sn}` 
+                : sn;
+
+            if (!sceneImagesMap[sceneKey]) {
+              sceneImagesMap[sceneKey] = [];
+            }
             // Map database status to UI status
             let uiStatus: 'pending' | 'generating' | 'completed' | 'failed' = 'pending';
             if (img.status === 'completed') {
@@ -123,37 +155,16 @@ export const useImageGeneration = (chapterId: string | null, selectedScriptId: s
               uiStatus = 'pending';
             }
 
-            const sceneImageObj: SceneImage = {
-              sceneNumber: sceneNumber ?? -1,
+            sceneImagesMap[sceneKey].push({
+              sceneNumber: sn,
               imageUrl: url,
-              prompt: metadata.image_prompt ?? "",
+              prompt: prompt,
               characters: [],
               generationStatus: uiStatus,
               generatedAt: img.created_at,
               id: img.id,
               script_id: normalizedScriptId,
-            };
-
-            if (!sceneImagesMap[sceneKey]) {
-                sceneImagesMap[sceneKey] = [];
-            }
-            sceneImagesMap[sceneKey].push(sceneImageObj);
-            return;
-          }
-
-          // Character images: use character_name from top level or metadata
-          if (imageType === "character" && characterName) {
-            // Map database status to UI status
-            let uiStatus: 'pending' | 'generating' | 'completed' | 'failed' = 'pending';
-            if (img.status === 'completed') {
-              uiStatus = 'completed';
-            } else if (img.status === 'failed') {
-              uiStatus = 'failed';
-            } else if (img.status === 'in_progress' || img.status === 'processing') {
-              uiStatus = 'generating';
-            } else {
-              uiStatus = 'pending';
-            }
+            });
 
             characterImagesMap[characterName] = {
               name: characterName,

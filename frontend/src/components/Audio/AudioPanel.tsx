@@ -18,14 +18,18 @@ import {
   Loader2,
   VolumeX,
   Volume1,
-  Mic
+  Mic,
+  Clapperboard
 } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAudioGeneration, type AudioFile } from '../../hooks/useAudioGeneration';
+import { useImageGeneration } from '../../hooks/useImageGeneration';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
 import AudioTimeline from './AudioTimeline';
 import { AudioGenerationModal } from './AudioGenerationModal';
+import SceneAudioCard from './SceneAudioCard';
+import SceneGalleryModal from './SceneGalleryModal';
 
 interface AudioPanelProps {
   // Props are now optional since we use context for script selection
@@ -33,8 +37,9 @@ interface AudioPanelProps {
   chapterTitle?: string;
   selectedScript?: {
     script_style?: string;
-    scene_descriptions?: unknown[];
+    scene_descriptions?: any[];
     characters?: string[];
+    script?: string;
   } | null;
   plotOverview?: unknown;
 }
@@ -52,14 +57,19 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     stableSelectedChapterId,
     selectedSegmentId,
     versionToken,
+    selectedSceneImages,
+    setSelectedSceneImage
   } = useScriptSelection();
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [activeTab, setActiveTab] = useState<'narration' | 'music' | 'effects' | 'ambiance' | 'timeline'>('narration');
+  const prevIsGeneratingRef = useRef(false);  // Track previous isGenerating value
+  const [activeTab, setActiveTab] = useState<'scenes' | 'narration' | 'music' | 'effects' | 'ambiance' | 'timeline'>('scenes');
   const [showSettings, setShowSettings] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration] = useState(0);
+  const [videoGenerationId, setVideoGenerationId] = useState<string | null>(null);
+  const [generatingScenesAudio, setGeneratingScenesAudio] = useState<Set<number>>(new Set());
   
   const [generationOptions, setGenerationOptions] = useState({
     voiceModel: selectedScript?.script_style === 'cinematic' ? 'elevenlabs_conversational' : 'elevenlabs_narrator',
@@ -76,18 +86,102 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
 
   const [showGenerationModal, setShowGenerationModal] = useState(false);
 
+  // Fallback parser if scene_descriptions is missing or incomplete
+  const parseScriptScenes = (scriptText: string): string[] => {
+    if (!scriptText) return [];
+    
+    // Split by common scene headers (e.g. **ACT I - SCENE 1**, INT., EXT.)
+    // This is a simplified parser to ensure we get *something* for the UI
+    const lines = scriptText.split('\n');
+    const extractedScenes: string[] = [];
+    let currentBuffer: string[] = [];
+    
+    // Regex to detect scene start
+    // Matches: **ACT I - SCENE 1**, SCENE 1, ACT 1 SCENE 1
+    const sceneStartRegex = /^(?:\*\*)?(?:ACT\s+[IVX\d]+\s*[-–]\s*)?SCENE\s+\d+(?:[-–].*)?(?:\*\*)?/i;
+    
+    lines.forEach((line) => {
+        const trimmed = line.trim();
+        const isSceneHeader = sceneStartRegex.test(trimmed);
+        
+        // If we hit a new explicit scene header, push previous buffer
+        if (isSceneHeader) {
+            if (currentBuffer.length > 0) {
+                // Join buffer and clean up
+                const sceneText = currentBuffer.join('\n').trim();
+                // Avoid empty scenes or just title scenes
+                if (sceneText.length > 20) extractedScenes.push(sceneText);
+            }
+            currentBuffer = [line]; // Start new buffer with header
+        } else {
+            currentBuffer.push(line);
+        }
+    });
+    
+    // Push last buffer
+    if (currentBuffer.length > 0) {
+        const sceneText = currentBuffer.join('\n').trim();
+        if (sceneText.length > 10) extractedScenes.push(sceneText);
+    }
+    
+    return extractedScenes;
+  };
+  
+  // Use scene_descriptions if valid/complete, otherwise fallback to parsing script
+  const scenes = React.useMemo(() => {
+    const fromMeta = selectedScript?.scene_descriptions || [];
+    // If metadata seems suspiciously short relative to script length, try parsing
+    if (selectedScript?.script && (fromMeta.length <= 1 && selectedScript.script.length > 500)) {
+        // Fallback to parsing script text if scene metadata is incomplete
+        const parsed = parseScriptScenes(selectedScript.script);
+        if (parsed.length > fromMeta.length) return parsed;
+    }
+    return fromMeta;
+  }, [selectedScript]);
+
   const {
     files,
-    isLoading,
+    isGenerating,
     loadAudio,
   } = useAudioGeneration({
     chapterId: stableSelectedChapterId,
     scriptId: selectedScriptId,
     versionToken,
+    videoGenerationId,
   });
+
+  const {
+    sceneImages,
+    loadImages,
+    generateSceneImage,
+    generatingScenes
+  } = useImageGeneration(stableSelectedChapterId, selectedScriptId, scenes);
+
+  // Load images when entering component or scenes update
+  useEffect(() => {
+    if (selectedScriptId) {
+       // We can load images securely using just the script ID now that the backend supports it/we have fallback
+      loadImages();
+    }
+  }, [stableSelectedChapterId, selectedScriptId, scenes, loadImages]);
 
   // Local selection state for audio file cards
   const [selectedAudioFiles, setSelectedAudioFiles] = useState<Set<string>>(new Set());
+
+  // Gallery Modal State
+  const [galleryState, setGalleryState] = useState<{
+    isOpen: boolean;
+    sceneIndex: number;
+    initialImageIndex: number;
+  }>({ isOpen: false, sceneIndex: -1, initialImageIndex: 0 });
+
+  const openGallery = (sceneIndex: number, imageIndex: number = 0) => {
+    setGalleryState({ isOpen: true, sceneIndex, initialImageIndex: imageIndex });
+  };
+
+  const closeGallery = () => {
+    setGalleryState(prev => ({ ...prev, isOpen: false }));
+  };
 
   // Helper function to compute seek start time
   const computeSeekStart = (): number => {
@@ -112,11 +206,23 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
       audioRef.current.currentTime = start;
     }
   }, [stableSelectedChapterId, selectedSegmentId]);
+  
+  // Clear audio generation state when generation completes (isGenerating transitions from true to false)
+  useEffect(() => {
+    // Only clear when isGenerating transitions from true → false (not when it's initially false)
+    const wasGenerating = prevIsGeneratingRef.current;
+    prevIsGeneratingRef.current = isGenerating;
+    
+    if (wasGenerating && !isGenerating) {
+      // Generation just completed - clear the state
+      setGeneratingScenesAudio(new Set());
+      setVideoGenerationId(null);
+    }
+  }, [isGenerating]);
 
-  const scenes = selectedScript?.scene_descriptions || [];
+
+
   const characters = selectedScript?.characters || [];
-
-  // Initialize character voices when script changes
   useEffect(() => {
     if (selectedScript && characters.length > 0) {
       // Initialize character voices with defaults if not already set
@@ -156,20 +262,31 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   // Backend returns chapter-level audio files, not script-specific
 
   // Filter audio files by selected script_id, accepting both script_id and scriptId fields
+  // Include files without script_id (legacy data or chapter-level audio)
   const filteredAudioFiles = (files ?? []).filter((file) => {
     const normalizedScriptId = file.script_id ?? file.scriptId;
-    return !selectedScriptId || normalizedScriptId === selectedScriptId;
+    // Keep file if:
+    // 1. No selectedScriptId filter is active, OR
+    // 2. File's script_id matches selectedScriptId, OR
+    // 3. File has no script_id (legacy data - include it anyway)
+    return !selectedScriptId || normalizedScriptId === selectedScriptId || !normalizedScriptId;
   });
+
+  // Filtering audio files by script_id
 
   // Disable controls during switching/prep
   const getTabInfo = (type: string) => {
     const tabFiles = filteredAudioFiles.filter((f: AudioFile) => f.type === type) || [];
-    const completedCount = tabFiles.filter((f: AudioFile) => f.status === 'completed').length;
-    const generatingCount = tabFiles.filter((f: AudioFile) => f.status === 'generating').length;
+    // Use generation_status (from API) or status field for status checks
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const completedCount = tabFiles.filter((f: AudioFile) => ((f as any).generation_status || f.status) === 'completed').length;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const generatingCount = tabFiles.filter((f: AudioFile) => ((f as any).generation_status || f.status) === 'generating').length;
     return { completedCount, generatingCount, totalCount: tabFiles.length };
   };
 
   const audioTabs = [
+    { id: 'scenes', label: 'Storyboard', icon: Clapperboard, completedCount: null, generatingCount: 0, totalCount: scenes.length },
     // Conditionally show Narration or Dialogue based on script type
     ...(selectedScript?.script_style === 'cinematic' || selectedScript?.script_style === 'cinematic_movie' 
         ? [{ id: 'dialogue', label: 'Dialogue', icon: Mic, ...getTabInfo('dialogue') }]
@@ -211,16 +328,42 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
 
 
   const handleConfirmGeneration = async () => {
-    if (!stableSelectedChapterId || !selectedScriptId) return;
+    
+    if (!selectedScriptId) {
+      console.error('[AudioPanel] Missing Script ID');
+      toast.error('Unable to generate: Missing Script ID');
+      return;
+    }
 
     try {
-      await import('../../lib/api').then(m => m.generateScriptAudio(stableSelectedChapterId, selectedScriptId));
+      // Extract selected scene numbers as integers
+      const selectedScenes = Object.keys(selectedSceneImages)
+        .map(Number)
+        .filter(n => !isNaN(n));
+      
+      const sceneNumbersToGenerate = selectedScenes.length > 0 ? selectedScenes : undefined;
+      
+      // Mark selected scenes (or all scenes if none selected) as generating
+      if (selectedScenes.length > 0) {
+        setGeneratingScenesAudio(new Set(selectedScenes));
+      } else {
+        // If no specific scenes selected, mark all scenes as generating
+        setGeneratingScenesAudio(new Set(scenes.map((_, i) => i + 1)));
+      }
+
+      const response = await import('../../lib/api').then(m => m.generateScriptAudio(stableSelectedChapterId, selectedScriptId, sceneNumbersToGenerate));
+      if (response && response.video_generation_id) {
+          setVideoGenerationId(response.video_generation_id);
+      }
+      setShowGenerationModal(false);
       toast.success('Audio generation started');
       // Reload will happen automatically via poll or manually
       loadAudio();
     } catch (error) {
       console.error('Failed to start generation:', error);
       toast.error('Failed to start audio generation');
+      // Clear generating state on error
+      setGeneratingScenesAudio(new Set());
     }
   };
 
@@ -236,8 +379,10 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   };
 
   const renderHeader = () => {
-    // Use isLoading from useAudioGeneration as the generation flag
-    const isGeneratingAudio = typeof isLoading !== 'undefined' ? isLoading : false;
+    // Use isGenerating from useAudioGeneration to track active generation polling
+    // isGenerating is properly managed by the hook and becomes false when polling completes
+    const isGeneratingAudio = isGenerating;
+    console.log('[AudioPanel renderHeader] isGenerating:', isGenerating, 'generatingScenesAudio:', [...generatingScenesAudio]);
     return (
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -507,6 +652,66 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         />
       );
     }
+    
+    if (activeTab === 'scenes') {
+        return (
+            <div className="space-y-6">
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900 rounded-lg p-4">
+                    <p className="text-sm text-blue-800 dark:text-blue-300">
+                        <strong>Storyboard Selection:</strong> Select your preferred image for each scene. 
+                        Only selected scene images will be used for final video generation.
+                    </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                    {scenes.map((scene: any, idx: number) => (
+                        <SceneAudioCard
+                            key={idx}
+                            sceneNumber={idx + 1}
+                            description={typeof scene === 'string' ? scene : (scene.visual_description || scene.description)}
+                            images={sceneImages[`${selectedScriptId}_${idx + 1}`] || sceneImages[idx + 1] || []}
+                            selectedSceneImage={selectedSceneImages[idx + 1]}
+                            selectedScriptId={selectedScriptId}
+                            onSelectImage={(url) => setSelectedSceneImage(idx + 1, url || null)}
+                            onGenerateImage={(sceneNum, prompt) => generateSceneImage(sceneNum, prompt, { 
+                                style: 'cinematic', 
+                                aspectRatio: '16:9',
+                                quality: 'standard',
+                                useCharacterReferences: true,
+                                includeBackground: true,
+                                lightingMood: 'natural'
+                            })}
+                            isGenerating={generatingScenes.has(idx + 1)}
+                            isGeneratingAudio={generatingScenesAudio.has(idx + 1)}
+                            onView={() => openGallery(idx)}
+                        />
+                    ))}
+                </div>
+                
+                {scenes.length === 0 && (
+                    <div className="text-center py-12 text-gray-500">
+                        <Clapperboard className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                        <p className="text-lg font-medium">No scenes found</p>
+                    </div>
+                )}
+
+                {galleryState.isOpen && galleryState.sceneIndex !== -1 && scenes[galleryState.sceneIndex] && (
+                    <SceneGalleryModal
+                        isOpen={galleryState.isOpen}
+                        onClose={closeGallery}
+                        sceneNumber={galleryState.sceneIndex + 1}
+                        description={typeof scenes[galleryState.sceneIndex] === 'string' 
+                            ? scenes[galleryState.sceneIndex] 
+                            : (scenes[galleryState.sceneIndex].visual_description || scenes[galleryState.sceneIndex].description)}
+                        images={sceneImages[`${selectedScriptId}_${galleryState.sceneIndex + 1}`] || sceneImages[galleryState.sceneIndex + 1] || []}
+                        selectedImageUrl={selectedSceneImages[galleryState.sceneIndex + 1]}
+                        initialIndex={galleryState.initialImageIndex}
+                        onSelectImage={(url) => setSelectedSceneImage(galleryState.sceneIndex + 1, url || null)}
+                    />
+                )}
+            </div>
+        );
+    }
 
     const audioType = activeTab;
     const tabFiles = filteredAudioFiles.filter((f: AudioFile) => f.type === audioType) || [];
@@ -583,7 +788,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         isOpen={showGenerationModal}
         onClose={() => setShowGenerationModal(false)}
         onConfirm={handleConfirmGeneration}
-        sceneCount={scenes.length}
+        sceneCount={Object.keys(selectedSceneImages).length > 0 ? Object.keys(selectedSceneImages).length : scenes.length}
       />
     </div>
   );

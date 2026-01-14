@@ -338,6 +338,12 @@ export const userService = {
     );
   },
 
+  async getScriptImages(scriptId: string): Promise<ChapterImagesResponse> {
+    return apiClient.get<ChapterImagesResponse>(
+      `/ai/script/${scriptId}/images`
+    );
+  },
+
   async generateSceneImage(
     chapterId: string,
     sceneNumber: number,
@@ -467,8 +473,9 @@ export const userService = {
   },
 
   // Audio generation methods
-  async getChapterAudio(chapterId: string) {
-    return apiClient.get<any>(`/chapters/${chapterId}/audio`);
+  async getChapterAudio(chapterId: string, scriptId?: string) {
+    const params = scriptId ? `?script_id=${scriptId}` : '';
+    return apiClient.get<any>(`/chapters/${chapterId}/audio${params}`);
   },
 
   async generateSceneDialogue(

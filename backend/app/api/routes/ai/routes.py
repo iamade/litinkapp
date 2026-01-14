@@ -7,7 +7,7 @@ from app.videos.schemas import VideoGenerationRequest, VideoGenerationResponse
 from app.api.services.character import CharacterService
 from app.api.services.plot import PlotService
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, update, delete, col, or_, text, func, SQLModel
+from sqlmodel import select, update, delete, col, or_, text, func, SQLModel, desc
 from sqlalchemy.orm import selectinload
 from app.videos.models import (
     Script,
@@ -836,10 +836,14 @@ async def get_video_generation_status(
         if not data:
             raise HTTPException(status_code=404, detail="Video generation not found")
 
-        status = data.generation_status
+        # Convert to dict for mutability and standard access
+        data_dict = data.model_dump()
 
-        task_metadata = data.task_metadata or {}
-        audio_task_id = task_metadata.get("audio_task_id") or data.get("audio_task_id")
+        status = data_dict.get("generation_status")
+        task_meta = data_dict.get("task_meta") or {}
+
+        # Check both the top-level field and task_meta
+        audio_task_id = data_dict.get("audio_task_id") or task_meta.get("audio_task_id")
 
         if audio_task_id and status in ["generating_audio", "pending"]:
             try:
@@ -852,12 +856,12 @@ async def get_video_generation_status(
                     status = "audio_completed"
                 elif task_result.state == "FAILURE":
                     status = "failed"
-                    data["error_message"] = str(task_result.result)
+                    data_dict["error_message"] = str(task_result.result)
                 elif task_result.state == "PENDING":
                     status = "generating_audio"
 
                 # Add task info to response
-                data["task_info"] = {
+                data_dict["task_info"] = {
                     "task_id": audio_task_id,
                     "task_state": task_result.state,
                     "task_result": (
@@ -871,16 +875,19 @@ async def get_video_generation_status(
         result = {
             "status": status,
             "generation_status": status,
-            "quality_tier": data["quality_tier"],
-            "video_url": data.get("video_url"),
-            "created_at": data["created_at"],
-            "script_id": data.get("script_id"),
-            "error_message": data.get("error_message"),
+            "quality_tier": data_dict.get("quality_tier"),
+            "video_url": data_dict.get("video_url"),
+            "created_at": data_dict.get("created_at"),
+            "script_id": data_dict.get("script_id"),
+            "error_message": data_dict.get("error_message"),
+            "task_info": data_dict.get("task_info"),
+            "task_meta": data_dict.get("task_meta"),
         }
 
         # Add audio information if available
-        if data.get("audio_files"):
-            audio_data = data["audio_files"]
+        # Add audio information if available
+        if data_dict.get("audio_files"):
+            audio_data = data_dict["audio_files"]
             result["audio_progress"] = {
                 "narrator_files": len(audio_data.get("narrator", [])),
                 "character_files": len(audio_data.get("characters", [])),
@@ -889,12 +896,13 @@ async def get_video_generation_status(
             }
 
         # Add task info if available
-        if "task_info" in data:
-            result["task_info"] = data["task_info"]
+        if "task_info" in data_dict:
+            result["task_info"] = data_dict["task_info"]
 
         # Add image information if available
-        if data.get("image_data"):
-            image_data = data["image_data"]
+        # Add image information if available
+        if data_dict.get("image_data"):
+            image_data = data_dict["image_data"]
             result["image_progress"] = image_data.get("statistics", {})
 
             # Include character images for frontend display
@@ -905,8 +913,8 @@ async def get_video_generation_status(
                 ]
 
         #  Add video information if available
-        if data.get("video_data"):
-            video_data = data["video_data"]
+        if data_dict.get("video_data"):
+            video_data = data_dict["video_data"]
             result["video_progress"] = video_data.get("statistics", {})
 
             # Include scene videos for frontend display
@@ -917,8 +925,8 @@ async def get_video_generation_status(
                 ]
 
         # Add merge information if available
-        if data.get("merge_data"):
-            merge_data = data["merge_data"]
+        if data_dict.get("merge_data"):
+            merge_data = data_dict["merge_data"]
             result["merge_progress"] = merge_data.get("merge_statistics", {})
 
             # Include final video information if completed
@@ -940,8 +948,8 @@ async def get_video_generation_status(
                 }
 
         # ✅ NEW: Add lip sync information if available
-        if data.get("lipsync_data"):
-            lipsync_data = data["lipsync_data"]
+        if data_dict.get("lipsync_data"):
+            lipsync_data = data_dict["lipsync_data"]
             result["lipsync_progress"] = lipsync_data.get("statistics", {})
 
             # Include lip sync details if completed
@@ -1702,6 +1710,46 @@ async def get_character_images(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/script/{script_id}/images")
+async def get_script_images(
+    script_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get all images (characters and scenes) associated with a specific script"""
+    try:
+        # Verify access
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script or script.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized or script not found"
+            )
+
+        # Get images linked to this script
+        # Note: Some older images might only have chapter_id, but newer ones have script_id
+        # We fetch images where script_id matches OR (chapter_id matches AND script_id is null - inferred context)
+        # For simplicity and correctness with new architecture, we prioritize script_id
+        stmt = (
+            select(ImageGeneration)
+            .where(
+                (ImageGeneration.script_id == script_id)
+                | (ImageGeneration.meta["script_id"].astext == script_id)
+            )
+            .order_by(desc(ImageGeneration.created_at))
+        )
+
+        result = await session.exec(stmt)
+        images = result.all()
+
+        return {"script_id": script_id, "images": images, "total_count": len(images)}
+    except Exception as e:
+        print(f"Error fetching script images: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/generate-video-avatar")
 async def generate_video_avatar(
     chapter_id: str,
@@ -2043,15 +2091,16 @@ async def generate_audio_for_script(
     try:
         chapter_id = request.get("chapter_id")
         script_id = request.get("script_id")
+        scene_numbers = request.get("scene_numbers")  # Optional list of integers
 
-        if not chapter_id or not script_id:
-            raise HTTPException(
-                status_code=400, detail="chapter_id and script_id are required"
-            )
+        if not script_id:
+            raise HTTPException(status_code=400, detail="script_id is required")
 
         print(
-            f"🎵 Initiating audio generation for Script: {script_id} (Chapter: {chapter_id})"
+            f"🎵 Initiating audio generation for Script: {script_id} (Chapter: {chapter_id or 'Auto-detect'})"
         )
+        if scene_numbers:
+            print(f"🎵 Filtering for scenes: {scene_numbers}")
 
         # Verify ownership/access
         # (Simplified for brevity, assumes standard checks)
@@ -2064,10 +2113,15 @@ async def generate_audio_for_script(
         if not script_data:
             raise HTTPException(status_code=404, detail="Script not found")
 
+        # If chapter_id was not provided, use the one from the script
+        final_chapter_id = (
+            uuid.UUID(chapter_id) if chapter_id else script_data.chapter_id
+        )
+
         # 2. Create VideoGeneration container
         # We reuse VideoGeneration as the container for all assets
         video_gen = VideoGeneration(
-            chapter_id=uuid.UUID(chapter_id),
+            chapter_id=final_chapter_id,
             user_id=current_user.id,
             script_id=uuid.UUID(script_id),
             script_data={
@@ -2078,7 +2132,10 @@ async def generate_audio_for_script(
             },
             generation_status="generating_audio",
             quality_tier="standard",  # Default, will be updated by task
-            task_meta={"pipeline_state": {"current_stage": "audio"}},
+            task_meta={
+                "pipeline_state": {"current_stage": "audio"},
+                "selected_scene_numbers": scene_numbers,  # Store for task to use
+            },
         )
         session.add(video_gen)
         await session.commit()

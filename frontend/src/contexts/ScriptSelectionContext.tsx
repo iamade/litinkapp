@@ -24,6 +24,7 @@ export type ScriptSelectionState = {
   versionToken: number;
   isSwitching: boolean;
   lastValidChapterId: string | null; // Ensure type matches
+  selectedSceneImages: Record<number, string>; // sceneNumber -> imageUrl
 };
 
 type Listener = (evt: ScriptSelectionEvent, payload: EventPayload) => void;
@@ -35,6 +36,7 @@ type ContextValue = ScriptSelectionState & {
   publish: (evt: ScriptSelectionEvent, extra?: Partial<EventPayload>) => void;
   subscribe: (listener: Listener) => () => void;
   stableSelectedChapterId: string | null; // Ensure type matches
+  setSelectedSceneImage: (sceneNumber: number, imageUrl: string | null) => void;
 };
 
 const ScriptSelectionContext = createContext<ContextValue | undefined>(undefined);
@@ -49,6 +51,7 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
     versionToken: 0,
     isSwitching: false,
     lastValidChapterId: null, // Ensure type matches
+    selectedSceneImages: {},
   });
 
   const emit = useCallback((evt: ScriptSelectionEvent, payload: EventPayload) => {
@@ -73,6 +76,7 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
         versionToken: nextVersion,
         isSwitching: true,
         lastValidChapterId: prev.lastValidChapterId, // Preserve last valid chapter
+        selectedSceneImages: {}, // Reset selections on script change
       };
       // emit after commit via microtask to ensure consumers see latest state
       queueMicrotask(() => {
@@ -138,6 +142,21 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
     });
   }, [emit]);
 
+  const setSelectedSceneImage = useCallback((sceneNumber: number, imageUrl: string | null) => {
+    setState(prev => {
+        const newImages = { ...prev.selectedSceneImages };
+        if (imageUrl) {
+            newImages[sceneNumber] = imageUrl;
+        } else {
+            delete newImages[sceneNumber];
+        }
+        return {
+            ...prev,
+            selectedSceneImages: newImages
+        };
+    });
+  }, []);
+
   const publish = useCallback((evt: ScriptSelectionEvent, extra?: Partial<EventPayload>) => {
     const now = Date.now();
     const payload: EventPayload = {
@@ -167,7 +186,8 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
     publish,
     subscribe,
     stableSelectedChapterId, // Ensure type matches
-  }), [state, selectScript, selectChapter, selectSegment, publish, subscribe]);
+    setSelectedSceneImage,
+  }), [state, selectScript, selectChapter, selectSegment, publish, subscribe, stableSelectedChapterId, setSelectedSceneImage]);
 
   return <ScriptSelectionContext.Provider value={value}>{children}</ScriptSelectionContext.Provider>;
 };

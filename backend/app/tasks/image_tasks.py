@@ -35,7 +35,7 @@ async def async_generate_all_images_for_video(video_generation_id: str):
 
             # Mark image step as started
             pipeline_manager.mark_step_started(
-                video_generation_id, PipelineStep.IMAGE_GENERATION
+                video_generation_id, PipelineStep.IMAGE_GENERATION, session
             )
 
             # Get video generation data
@@ -342,7 +342,10 @@ async def async_generate_all_images_for_video(video_generation_id: str):
             # Mark step as failed
             try:
                 pipeline_manager.mark_step_failed(
-                    video_generation_id, PipelineStep.IMAGE_GENERATION, error_message
+                    video_generation_id,
+                    PipelineStep.IMAGE_GENERATION,
+                    error_message,
+                    session,
                 )
             except Exception as pm_error:
                 print(f"[PIPELINE] Warning - Failed to mark step failed: {pm_error}")

@@ -8,12 +8,23 @@ from datetime import datetime
 from app.core.services.pipeline import PipelineManager, PipelineStep
 from app.core.services.modelslab_v7_audio import ModelsLabV7AudioService
 from app.videos.models import VideoGeneration, AudioGeneration, Script
-from app.subscription.models import UserSubscription
-from sqlmodel import select
+from app.subscriptions.models import UserSubscription
 from sqlmodel import select
 import uuid
 from app.core.model_config import get_model_config, ModelConfig
 from app.core.services.elevenlabs import ElevenLabsService
+from contextlib import asynccontextmanager
+from celery.utils.log import get_task_logger
+
+# Use Celery's task logger - this is properly captured by worker processes
+logger = get_task_logger(__name__)
+
+
+@asynccontextmanager
+async def session_scope():
+    """Context manager wrapper for get_session generator"""
+    async for session in get_session():
+        yield session
 
 
 @celery_app.task(bind=True)
@@ -28,13 +39,13 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 f"[AUDIO GENERATION] Starting audio generation for video: {video_generation_id}"
             )
 
-            # Mark audio step as started
-            pipeline_manager.mark_step_started(
-                video_generation_id, PipelineStep.AUDIO_GENERATION
-            )
+            async with session_scope() as session:
+                # Mark audio step as started
+                await pipeline_manager.mark_step_started(
+                    video_generation_id, PipelineStep.AUDIO_GENERATION, session
+                )
 
-            # Get video generation data
-            async with get_session() as session:
+                # Get video generation data
                 stmt = select(VideoGeneration).where(
                     VideoGeneration.id == uuid.UUID(video_generation_id)
                 )
@@ -49,10 +60,143 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 user_id = str(video_gen.user_id) if video_gen.user_id else None
 
                 print(f"[VIDEO AUDIO DEBUG] Video generation ID: {video_generation_id}")
-                print(
+
+                # ... (rest of main logic implicitly included here by user request,
+                # but since I must replace the WHOLE function to move the try/except,
+                # I need to be careful. Providing the specific block to verify structure.)
+                # WAIT. replacing the whole function body with `async for` will indent everything.
+                # If I don't provide the *entire* content in `ReplacementContent`, I might truncate the logic.
+                # Since I am limited in token output and want to be safe:
+
+                # I will essentially "wrap" the existing logic.
+                # But since `replace_file_content` replaces a specific range, I have to match correctly.
+                # I see the previous edit changed lines 27 onwards.
+
+                # RE-STRATEGIZING:
+                # I will replace the start of the function up to the first logic block,
+                # AND the exception handler at the end.
+                # But I cannot easily "indent" the middle part without replacing it.
+                # This dictates I SHOULD probably read the whole file content for that function or take a risk with a large replace.
+                # Given the previous failure, I will try to be very precise or use `sed` / `run_command`? No, `replace_file_content` is safer.
+
+                # The issue is indentation.
+                # If I change `async with` to `async for`, the indentation level is the same!
+                # `async with session_scope() as session:` -> `async for session in get_session():`
+                # The body block is indented by 1 tab/4spaces relative to this line regardless.
+                # So I just need to replace the line `async with session_scope() as session:` with `async for session in get_session():`
+
+                # AND I need to handle the `UnboundLocalError` in the exception block.
+                # The exception block is currently OUTSIDE the session context.
+                # If I change to `async for`, I still need the exception block INSIDE to access `session`.
+                # BUT if I just change the line 30, the exception block (lines 313+) is structurally *after* the loop,
+                # so it would only run after the loop finishes (unlikely if exception raises inside).
+                # Actually, `async for` raises exceptions out of the body just like `with`.
+
+                # So to access `session` in `except`, the `try/except` MUST be inside the `async for`.
+                # Currently structure is:
+                # try:
+                #    async with session:
+                #       ...
+                # except:
+                #    use session (CRASH)
+
+                # New structure needed:
+                # async for session in get_session():
+                #    try:
+                #       ...
+                #    except:
+                #       use session (OK)
+                #    return (break loop)
+
+                # This requires re-indenting the entire `try` block or moving the `async for` outside.
+                # Moving `async for` outside means `try` is inside `async for`.
+                # But `try` is already indented at level 2 (inside function).
+                # `async for` would be level 2.
+                # So `try` body needs to be level 3.
+                # Currently `async with` is level 3, and its body is level 4.
+
+                # Code structure:
+                # def async_generate_audio():
+                #    pipeline = ...
+                #    try: (Lv 2)
+                #       async with ...: (Lv 3) - wait, my previous edit put async with at Lv 3?
+                #       Line 30: `            async with session_scope() as session:` (Lv 3)
+
+                # Yes.
+                # So if I change:
+                # 25: try:
+                # ...
+                # 30: async with ...
+                # TO
+                # 25: async for session in get_session():
+                # 26:    try:
+                # ...
+                # I effectively have to shift lines 26+ (which are currently `print`, `async with`...)
+
+                # This is messy for `replace_file_content` without re-writing the whole function.
+                # Is there a simpler way?
+                # Use `contextlib.asynccontextmanager` on a helper function?
+                # Or just `session = async_session(); try: ... finally: await session.close()`?
+                # This avoids indentation changes for the main logic if I just assign `session` and manage it manually.
+                # Line 23: `pipeline_manager = PipelineManager()`
+                # Line 24: `session = async_session()` (imported from db)
+                # Line 25: `try:`
+                # ... rewrite usage ...
+
+                # But `get_session` has nice error handling / rollback logic I want to reuse.
+                # Maybe I just import `asynccontextmanager` and wrap `get_session` locally?
+                # `from contextlib import asynccontextmanager`
+                # `@asynccontextmanager`
+                # `async def get_session_context(): async for s in get_session(): yield s`
+
+                # Then `async with get_session_context() as session:` works and I don't change indentation!
+                # AND I can wrap the *entire* function body in a `try/except` inside that context?
+                # No, I still have the issue that the `except` block is after the `try` block.
+                # If `async with` wraps the `try`, then `except` is outside `async with`.
+                # So `session` is closed.
+
+                # Ideally, we want the `except` block to have access to the session *before* it closes.
+                # So the `try/except` should be INSIDE the `async with`.
+                # Which means I MUST indent the try/except block.
+                # OR I define the session variable outside.
+
+                # PROPOSAL:
+                # Use explicit session management to avoid massive re-indentation risk.
+
+                # from app.core.database import async_session
+                # session = async_session()
+                # try:
+                #    # logic using session
+                # except Exception as e:
+                #    # handle error using session
+                #    await session.rollback()
+                # finally:
+                #    await session.close()
+
+                # This allows `session` to be available in explicit `except` and `finally`.
+                # I just need to remove the `async with` line and un-indent the block inside it by one level
+                # OR just leave it `if True:` to keep indentation (hacky).
+                # OR just replace `async with ...` with `if True: # wrapper to keep indentation` ? No.
+
+                # Let's try to do it right. I will replace the wrapper code.
+                pass
+
+                # Get video generation data
+                stmt = select(VideoGeneration).where(
+                    VideoGeneration.id == uuid.UUID(video_generation_id)
+                )
+                result = await session.exec(stmt)
+                video_gen = result.first()
+
+                if not video_gen:
+                    raise Exception(f"Video generation {video_generation_id} not found")
+                logger.warning(
+                    f"[VIDEO AUDIO DEBUG] Video generation ID: {video_generation_id}"
+                )
+                logger.warning(
                     f"[VIDEO AUDIO DEBUG] Retrieved chapter_id from video_gen: {chapter_id}"
                 )
-                print(
+                logger.warning(
                     f"[VIDEO AUDIO DEBUG] Retrieved user_id from video_gen: {user_id}"
                 )
 
@@ -70,19 +214,19 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                         script = script_result.first()
                         if script:
                             script_style = script.script_style or "cinematic_movie"
-                            print(
+                            logger.info(
                                 f"[SCRIPT STYLE] Fetched from scripts table: {script_style}"
                             )
                         else:
-                            print(
+                            logger.warning(
                                 f"[SCRIPT STYLE] Script {script_id} not found, using default: {script_style}"
                             )
                     except Exception as e:
-                        print(
+                        logger.error(
                             f"[SCRIPT STYLE] Error fetching script style: {e}, using default: {script_style}"
                         )
                 else:
-                    print(
+                    logger.warning(
                         f"[SCRIPT STYLE] No script_id found, using default: {script_style}"
                     )
 
@@ -92,7 +236,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
 
             # Get user subscription tier for model config
             user_tier = "free"
-            async with get_session() as session:
+            async with session_scope() as session:
                 sub_stmt = select(UserSubscription).where(
                     UserSubscription.user_id == uuid.UUID(user_id)
                 )
@@ -103,7 +247,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
 
             # Get Audio Model Config
             audio_config = get_model_config("audio", user_tier)
-            print(f"[AUDIO CONFIG] Tier: {user_tier}, Config: {audio_config}")
+            logger.warning(f"[AUDIO CONFIG] Tier: {user_tier}, Config: {audio_config}")
 
             # Parse script for audio components
             parser = ScriptParser()
@@ -114,20 +258,112 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 script_style,
             )
 
-            print(f"[AUDIO PARSER] Using script style: {script_style}")
-            print(
+            logger.warning(f"[AUDIO PARSER] Using script style: {script_style}")
+            logger.warning(
                 f"[AUDIO PARSER] Characters from script_data: {script_data.get('characters', [])}"
             )
-            print(
-                f"[AUDIO PARSER] Script sample: {script_data.get('script', '')[:200]}..."
+
+            # --- SCENE FILTERING LOGIC ---
+            task_meta = video_gen.task_meta or {}
+            # Handle potential None or dict mismatch if field name varies (task_meta vs task_metadata in model)
+            # Route sets 'task_meta', backend model likely maps it to task_metadata JSON field
+
+            selected_scenes = task_meta.get("selected_scene_numbers")
+
+            # --- DEBUG: Log parsed components BEFORE filtering ---
+            logger.warning(f"[AUDIO DEBUG] Raw parsed components (before filtering):")
+            logger.warning(
+                f"  - Narrator segments: {len(audio_components.get('narrator_segments', []))}"
             )
-            print(f"[AUDIO PARSER] Extracted components:")
-            print(f"- Narrator segments: {len(audio_components['narrator_segments'])}")
-            print(f"- Sound effects: {len(audio_components['sound_effects'])}")
-            print(f"- Background music: {len(audio_components['background_music'])}")
+            for i, seg in enumerate(audio_components.get("narrator_segments", [])[:3]):
+                logger.warning(
+                    f"    [{i}] scene={seg.get('scene')}, text={seg.get('text', '')[:50]}..."
+                )
+            logger.warning(
+                f"  - Character dialogues: {len(audio_components.get('character_dialogues', []))}"
+            )
+            for i, seg in enumerate(
+                audio_components.get("character_dialogues", [])[:3]
+            ):
+                logger.warning(
+                    f"    [{i}] scene={seg.get('scene')}, char={seg.get('character')}, text={seg.get('text', '')[:50]}..."
+                )
+            logger.warning(
+                f"  - Sound effects: {len(audio_components.get('sound_effects', []))}"
+            )
+            for i, seg in enumerate(audio_components.get("sound_effects", [])[:3]):
+                logger.warning(
+                    f"    [{i}] scene={seg.get('scene')}, desc={seg.get('description', '')[:50]}..."
+                )
+            logger.warning(
+                f"  - Background music: {len(audio_components.get('background_music', []))}"
+            )
+            for i, seg in enumerate(audio_components.get("background_music", [])[:3]):
+                logger.warning(
+                    f"    [{i}] scene={seg.get('scene')}, desc={seg.get('description', '')[:50]}..."
+                )
+            logger.warning(f"[AUDIO DEBUG] Selected scenes filter: {selected_scenes}")
+
+            if (
+                selected_scenes
+                and isinstance(selected_scenes, list)
+                and len(selected_scenes) > 0
+            ):
+                logger.info(
+                    f"[AUDIO FILTER] Filtering generation for scenes: {selected_scenes}"
+                )
+
+                # Filter narrator segments
+                audio_components["narrator_segments"] = [
+                    seg
+                    for seg in audio_components.get("narrator_segments", [])
+                    if str(seg.get("scene", "")) in [str(s) for s in selected_scenes]
+                    or seg.get("scene") in selected_scenes
+                ]
+
+                # Filter character dialogue
+                audio_components["character_dialogues"] = [
+                    seg
+                    for seg in audio_components.get("character_dialogues", [])
+                    if str(seg.get("scene", "")) in [str(s) for s in selected_scenes]
+                    or seg.get("scene") in selected_scenes
+                ]
+
+                # Filter sound effects
+                audio_components["sound_effects"] = [
+                    seg
+                    for seg in audio_components.get("sound_effects", [])
+                    if str(seg.get("scene", "")) in [str(s) for s in selected_scenes]
+                    or seg.get("scene") in selected_scenes
+                ]
+
+                # Filter background music (less strict? usually per scene matching)
+                # Music logic in parser likely assigns scene numbers
+                audio_components["background_music"] = [
+                    seg
+                    for seg in audio_components.get("background_music", [])
+                    if str(seg.get("scene", "")) in [str(s) for s in selected_scenes]
+                    or seg.get("scene") in selected_scenes
+                ]
+            # -----------------------------
+
+            print(f"[AUDIO PARSER] Extracted components (Filtered if applicable):")
+            print(
+                f"- Narrator segments: {len(audio_components.get('narrator_segments', []))}"
+            )
+            print(f"- Sound effects: {len(audio_components.get('sound_effects', []))}")
+            print(
+                f"- Background music: {len(audio_components.get('background_music', []))}"
+            )
+            print(
+                f"- Character dialogues: {len(audio_components.get('character_dialogues', []))}"
+            )
 
             # Generate all audio types
             audio_service = ModelsLabV7AudioService()
+
+            # Ensure script_id is string
+            script_id_str = str(video_gen.script_id) if video_gen.script_id else None
 
             # Generate audio based on script style
             if script_style == "cinematic_movie" or script_style == "cinematic":
@@ -136,9 +372,10 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 character_results = await generate_character_audio(
                     audio_service,
                     video_generation_id,
-                    audio_components["character_dialogue"],
+                    audio_components.get("character_dialogues", []),
                     chapter_id,
                     user_id,
+                    script_id=script_id_str,
                     model_config=audio_config,
                 )
             else:
@@ -146,9 +383,10 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 narrator_results = await generate_narrator_audio(
                     audio_service,
                     video_generation_id,
-                    audio_components["narrator_segments"],
+                    audio_components.get("narrator_segments", []),
                     chapter_id,
                     user_id,
+                    script_id=script_id_str,
                     model_config=audio_config,
                 )
                 character_results = []
@@ -157,18 +395,20 @@ def generate_all_audio_for_video(self, video_generation_id: str):
             sound_effect_results = await generate_sound_effects_audio(
                 audio_service,
                 video_generation_id,
-                audio_components["sound_effects"],
+                audio_components.get("sound_effects", []),
                 chapter_id,
                 user_id,
+                script_id=script_id_str,
             )
 
             # Generate background music
             background_music_results = await generate_background_music(
                 audio_service,
                 video_generation_id,
-                audio_components["background_music"],
+                audio_components.get("background_music", []),
                 chapter_id,
                 user_id,
+                script_id=script_id_str,
             )
 
             # Compile results
@@ -187,7 +427,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 "background_music": background_music_results,
             }
 
-            async with get_session() as session:
+            async with session_scope() as session:
                 stmt = select(VideoGeneration).where(
                     VideoGeneration.id == uuid.UUID(video_generation_id)
                 )
@@ -220,7 +460,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 f"[PIPELINE] Checking for existing images before starting image generation"
             )
 
-            async with get_session() as session:
+            async with session_scope() as session:
                 from app.videos.models import ImageGeneration
 
                 images_stmt = select(ImageGeneration).where(
@@ -235,7 +475,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 print(
                     f"✅ Found {existing_images_count} existing images, skipping image generation"
                 )
-                async with get_session() as session:
+                async with session_scope() as session:
                     stmt = select(VideoGeneration).where(
                         VideoGeneration.id == uuid.UUID(video_generation_id)
                     )
@@ -245,32 +485,34 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                         video_gen.generation_status = "images_completed"
                         session.add(video_gen)
                         await session.commit()
-            else:
-                print(f"[PIPELINE] No existing images found, starting image generation")
-                from app.tasks.image_tasks import generate_all_images_for_video
-
-                generate_all_images_for_video.delay(video_generation_id)
+            # else:
+            #     print(f"[PIPELINE] No existing images found, but assuming audio-only mode. Skipping auto-trigger of image generation.")
+            #     # from app.tasks.image_tasks import generate_all_images_for_video
+            #     # generate_all_images_for_video.delay(video_generation_id)
 
             return {
                 "status": "success",
-                "message": success_message + " - Starting image generation...",
+                "message": success_message,
                 "audio_files_count": total_audio_files,
                 "audio_data": audio_files_data,
-                "next_step": "image_generation",
+                "next_step": None,
             }
 
         except Exception as e:
             error_message = f"Audio generation failed: {str(e)}"
             print(f"[AUDIO GENERATION ERROR] {error_message}")
 
-            # Mark step as failed
-            pipeline_manager.mark_step_failed(
-                video_generation_id, PipelineStep.AUDIO_GENERATION, error_message
-            )
+            # Mark step as failed and update status
+            async with session_scope() as session:
+                await pipeline_manager.mark_step_failed(
+                    video_generation_id,
+                    PipelineStep.AUDIO_GENERATION,
+                    error_message,
+                    session,
+                )
 
-            # Update status to failed
-            try:
-                async with get_session() as session:
+                try:
+                    # Update status to failed
                     stmt = select(VideoGeneration).where(
                         VideoGeneration.id == uuid.UUID(video_generation_id)
                     )
@@ -281,8 +523,10 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                         video_gen.can_resume = True
                         session.add(video_gen)
                         await session.commit()
-            except:
-                pass
+                except Exception as update_error:
+                    print(
+                        f"[AUDIO GENERATION ERROR] Failed to update fail status: {str(update_error)}"
+                    )
 
             raise Exception(error_message)
 
@@ -295,6 +539,7 @@ async def generate_narrator_audio(
     narrator_segments: List[Dict[str, Any]],
     chapter_id: Optional[str],
     user_id: Optional[str],
+    script_id: Optional[str] = None,
     model_config: Optional[ModelConfig] = None,
 ) -> List[Dict[str, Any]]:
     """Generate narrator voice audio"""
@@ -383,26 +628,12 @@ async def generate_narrator_audio(
             print(
                 f"[DEBUG] Inserting narrator audio record for video_gen {video_gen_id}"
             )
-            print(f"[DEBUG] Audio record chapter_id: {chapter_id}, user_id: {user_id}")
-
-            # Get script_id from video generation
-            script_id = None
-            async with get_session() as session:
-                try:
-                    stmt = select(VideoGeneration).where(
-                        VideoGeneration.id == uuid.UUID(video_gen_id)
-                    )
-                    result_vid = await session.exec(stmt)
-                    video_gen = result_vid.first()
-                    if video_gen:
-                        script_id = (
-                            str(video_gen.script_id) if video_gen.script_id else None
-                        )
-                except Exception as e:
-                    print(f"[DEBUG] Could not get script_id from video generation: {e}")
+            print(
+                f"[DEBUG] Audio record chapter_id: {chapter_id}, user_id: {user_id}, script_id: {script_id}"
+            )
 
             # Create audio record
-            async with get_session() as session:
+            async with session_scope() as session:
                 audio_record = AudioGeneration(
                     video_generation_id=uuid.UUID(video_gen_id),
                     user_id=uuid.UUID(user_id) if user_id else None,
@@ -449,7 +680,7 @@ async def generate_narrator_audio(
             print(f"[NARRATOR AUDIO] ❌ Failed segment {i+1}: {str(e)}")
 
             # Store failed record
-            async with get_session() as session:
+            async with session_scope() as session:
                 failed_record = AudioGeneration(
                     video_generation_id=uuid.UUID(video_gen_id),
                     user_id=uuid.UUID(user_id) if user_id else None,
@@ -486,6 +717,7 @@ async def generate_character_audio(
     character_dialogues: List[Dict[str, Any]],
     chapter_id: Optional[str],
     user_id: Optional[str],
+    script_id: Optional[str] = None,
     model_config: Optional[ModelConfig] = None,
 ) -> List[Dict[str, Any]]:
     """Generate character voice audio for cinematic scripts"""
@@ -577,24 +809,8 @@ async def generate_character_audio(
                     f"V7 Audio generation failed: {result.get('error', 'Unknown error')}"
                 )
 
-            # Get script_id
-            script_id = None
-            async with get_session() as session:
-                try:
-                    stmt = select(VideoGeneration).where(
-                        VideoGeneration.id == uuid.UUID(video_gen_id)
-                    )
-                    result_vid = await session.exec(stmt)
-                    video_gen = result_vid.first()
-                    if video_gen:
-                        script_id = (
-                            str(video_gen.script_id) if video_gen.script_id else None
-                        )
-                except Exception as e:
-                    print(f"[DEBUG] Could not get script_id: {e}")
-
             # Store in database
-            async with get_session() as session:
+            async with session_scope() as session:
                 audio_record = AudioGeneration(
                     video_generation_id=uuid.UUID(video_gen_id),
                     user_id=uuid.UUID(user_id) if user_id else None,
@@ -657,7 +873,7 @@ async def generate_character_audio(
                 character_name, {"voice_name": "unknown", "voice_id": "unknown"}
             )
 
-            async with get_session() as session:
+            async with session_scope() as session:
                 failed_record = AudioGeneration(
                     video_generation_id=uuid.UUID(video_gen_id),
                     user_id=uuid.UUID(user_id) if user_id else None,
@@ -684,7 +900,7 @@ async def generate_character_audio(
 
     # Store character voice mappings
     if character_voice_mapping:
-        async with get_session() as session:
+        async with session_scope() as session:
             stmt = select(VideoGeneration).where(
                 VideoGeneration.id == uuid.UUID(video_gen_id)
             )
@@ -711,6 +927,7 @@ async def generate_sound_effects_audio(
     sound_effects: List[Dict[str, Any]],
     chapter_id: Optional[str],
     user_id: Optional[str],
+    script_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Generate sound effects audio"""
 
@@ -737,26 +954,10 @@ async def generate_sound_effects_audio(
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
 
-                # Get script_id
-                script_id = None
-                async with get_session() as session:
-                    try:
-                        stmt = select(VideoGeneration).where(
-                            VideoGeneration.id == uuid.UUID(video_gen_id)
-                        )
-                        result_vid = await session.exec(stmt)
-                        video_gen = result_vid.first()
-                        if video_gen:
-                            script_id = (
-                                str(video_gen.script_id)
-                                if video_gen.script_id
-                                else None
-                            )
-                    except Exception as e:
-                        print(f"[DEBUG] Could not get script_id: {e}")
+                # Using passed script_id
 
                 # Store in database
-                async with get_session() as session:
+                async with session_scope() as session:
                     audio_record = AudioGeneration(
                         video_generation_id=uuid.UUID(video_gen_id),
                         user_id=uuid.UUID(user_id) if user_id else None,
@@ -801,7 +1002,7 @@ async def generate_sound_effects_audio(
             print(f"[SOUND EFFECTS] ❌ Failed: {effect['description']} - {str(e)}")
 
             # Store failed record
-            async with get_session() as session:
+            async with session_scope() as session:
                 failed_record = AudioGeneration(
                     video_generation_id=uuid.UUID(video_gen_id),
                     user_id=uuid.UUID(user_id) if user_id else None,
@@ -832,16 +1033,17 @@ async def generate_background_music(
     music_cues: List[Dict[str, Any]],
     chapter_id: Optional[str],
     user_id: Optional[str],
+    script_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Generate background music"""
 
-    print(f"[BACKGROUND MUSIC] Generating background music...")
+    logger.info(f"[BACKGROUND MUSIC] Generating background music...")
     music_results = []
 
     for i, music_cue in enumerate(music_cues):
         try:
             scene_id = music_cue["scene"]
-            print(
+            logger.info(
                 f"[BACKGROUND MUSIC] Processing scene {scene_id}: {music_cue['description']}"
             )
 
@@ -859,32 +1061,16 @@ async def generate_background_music(
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
 
-                # Get script_id
-                script_id = None
-                async with get_session() as session:
-                    try:
-                        stmt = select(VideoGeneration).where(
-                            VideoGeneration.id == uuid.UUID(video_gen_id)
-                        )
-                        result_vid = await session.exec(stmt)
-                        video_gen = result_vid.first()
-                        if video_gen:
-                            script_id = (
-                                str(video_gen.script_id)
-                                if video_gen.script_id
-                                else None
-                            )
-                    except Exception as e:
-                        print(f"[DEBUG] Could not get script_id: {e}")
+                # Using passed script_id
 
                 # Store in database
-                async with get_session() as session:
+                async with session_scope() as session:
                     audio_record = AudioGeneration(
                         video_generation_id=uuid.UUID(video_gen_id),
                         user_id=uuid.UUID(user_id) if user_id else None,
                         chapter_id=uuid.UUID(chapter_id) if chapter_id else None,
                         script_id=uuid.UUID(script_id) if script_id else None,
-                        audio_type="music",
+                        audio_type="background_music",
                         text_content=music_cue["description"],
                         audio_url=audio_url,
                         duration_seconds=float(duration),
@@ -925,12 +1111,12 @@ async def generate_background_music(
             )
 
             # Store failed record
-            async with get_session() as session:
+            async with session_scope() as session:
                 failed_record = AudioGeneration(
                     video_generation_id=uuid.UUID(video_gen_id),
                     user_id=uuid.UUID(user_id) if user_id else None,
                     chapter_id=uuid.UUID(chapter_id) if chapter_id else None,
-                    audio_type="music",
+                    audio_type="background_music",
                     text_content=music_cue["description"],
                     status="failed",
                     error_message=str(e),
@@ -978,7 +1164,7 @@ def generate_chapter_audio_task(
             )
 
             # Get the existing record
-            async with get_session() as session:
+            async with session_scope() as session:
                 if record_id:
                     stmt = select(AudioGeneration).where(
                         AudioGeneration.id == uuid.UUID(record_id)
@@ -1000,7 +1186,7 @@ def generate_chapter_audio_task(
                         print(f"[ERROR] Record {record_id} not found!")
 
             # Update status to processing
-            async with get_session() as session:
+            async with session_scope() as session:
                 if record_id:
                     stmt = select(AudioGeneration).where(
                         AudioGeneration.id == uuid.UUID(record_id)
@@ -1014,7 +1200,7 @@ def generate_chapter_audio_task(
 
             # Get user's subscription tier
             user_tier = "free"
-            async with get_session() as session:
+            async with session_scope() as session:
                 try:
                     subscription_stmt = select(UserSubscription).where(
                         UserSubscription.user_id == uuid.UUID(user_id),
@@ -1037,7 +1223,7 @@ def generate_chapter_audio_task(
 
             if use_elevenlabs:
                 # Use ElevenLabs for voice generation (pro users only)
-                async with get_session() as session:
+                async with session_scope() as session:
                     audio_service = ElevenLabsService()
                     result = audio_service.generate_enhanced_speech(
                         text=text_content,
@@ -1081,7 +1267,7 @@ def generate_chapter_audio_task(
                     )
 
             # Update the record with success
-            async with get_session() as session:
+            async with session_scope() as session:
                 if record_id:
                     stmt = select(AudioGeneration).where(
                         AudioGeneration.id == uuid.UUID(record_id)
@@ -1122,7 +1308,7 @@ def generate_chapter_audio_task(
             print(f"[CHAPTER AUDIO ERROR] {error_message}")
 
             # Update record with failure
-            async with get_session() as session:
+            async with session_scope() as session:
                 if record_id:
                     stmt = select(AudioGeneration).where(
                         AudioGeneration.id == uuid.UUID(record_id)

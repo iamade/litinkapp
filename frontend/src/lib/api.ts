@@ -218,13 +218,14 @@ export const apiClient = {
   },
 };
 
-export async function generateScriptAudio(chapterId: string, scriptId: string) {
+export async function generateScriptAudio(chapterId: string | null, scriptId: string, sceneNumbers?: number[]) {
   return apiClient.post<{ 
     status: string; 
     video_generation_id: string; 
     task_id: string 
   }>("/ai/generate-audio-for-script", {
     chapter_id: chapterId,
-    script_id: scriptId
+    script_id: scriptId,
+    scene_numbers: sceneNumbers
   });
 }

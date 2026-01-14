@@ -1058,23 +1058,53 @@ async def get_scene_image_status(
 @router.get("/{chapter_id}/audio", response_model=ChapterAudioResponse)
 async def list_chapter_audio(
     chapter_id: str,
+    script_id: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
 ):
-    """List all audio files associated with a chapter"""
+    """List all audio files associated with a chapter or script.
+
+    Tries to verify chapter access first. If chapter doesn't exist but script_id is provided,
+    falls back to querying by script_id only.
+    """
     try:
-        # Verify chapter access
-        chapter_data = await verify_chapter_access(chapter_id, current_user.id, session)
+        chapter_exists = True
+        try:
+            # Verify chapter access
+            chapter_data = await verify_chapter_access(
+                chapter_id, current_user.id, session
+            )
+        except HTTPException as e:
+            if e.status_code == 404 and script_id:
+                # Chapter not found, but we have a script_id - allow fallback
+                print(
+                    f"[DEBUG] Chapter {chapter_id} not found, falling back to script_id query"
+                )
+                chapter_exists = False
+            else:
+                raise
 
-        # Get user's audio files for this chapter
+        # Build query based on available identifiers
         print(
-            f"[DEBUG] Querying audio_generations for user_id: {current_user.id}, chapter_id: {chapter_id}"
+            f"[DEBUG] Querying audio_generations for user_id: {current_user.id}, chapter_id: {chapter_id}, script_id: {script_id}"
         )
 
-        stmt = select(AudioGeneration).where(
-            AudioGeneration.user_id == current_user.id,
-            AudioGeneration.chapter_id == uuid.UUID(chapter_id),
-        )
+        if chapter_exists:
+            # Query by chapter_id (preferred)
+            stmt = select(AudioGeneration).where(
+                AudioGeneration.user_id == current_user.id,
+                AudioGeneration.chapter_id == uuid.UUID(chapter_id),
+            )
+        elif script_id:
+            # Fallback: query by script_id only
+            stmt = select(AudioGeneration).where(
+                AudioGeneration.user_id == current_user.id,
+                AudioGeneration.script_id == uuid.UUID(script_id),
+            )
+        else:
+            # No valid identifier
+            raise HTTPException(status_code=404, detail="Chapter not found")
+
         result = await session.exec(stmt)
         chapter_audio_records = result.all()
 
@@ -1089,14 +1119,31 @@ async def list_chapter_audio(
             record_dict["video_generation_id"] = (
                 str(r.video_generation_id) if r.video_generation_id else None
             )
-            # Handle metadata rename
-            if hasattr(r, "audio_metadata"):
+
+            # Map 'status' field to 'generation_status' expected by schema
+            record_dict["generation_status"] = r.status or "pending"
+
+            # Convert datetime fields to ISO strings
+            if hasattr(r, "created_at") and r.created_at:
+                record_dict["created_at"] = r.created_at.isoformat()
+            else:
+                record_dict["created_at"] = None
+
+            if hasattr(r, "updated_at") and r.updated_at:
+                record_dict["updated_at"] = r.updated_at.isoformat()
+            else:
+                record_dict["updated_at"] = None
+
+            # Handle metadata rename and ensure it's a dict
+            if hasattr(r, "audio_metadata") and r.audio_metadata:
                 record_dict["metadata"] = r.audio_metadata
+            else:
+                record_dict["metadata"] = {}
 
             chapter_audio.append(AudioRecord(**record_dict))
 
         print(
-            f"[DEBUG] Retrieved {len(chapter_audio)} audio records for chapter {chapter_id}"
+            f"[DEBUG] Retrieved {len(chapter_audio)} audio records for chapter {chapter_id} / script {script_id}"
         )
         return ChapterAudioResponse(
             chapter_id=chapter_id,
