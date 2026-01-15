@@ -98,6 +98,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         sceneNumber: number;
         description: string;
         isRegenerate?: boolean;
+        parentSceneImageUrl?: string;  // For suggested shots - reference parent scene image
+        isSuggestedShot?: boolean;     // Flag to indicate this is a suggested shot
     } | null>(null);
 
   // Filter excluded characters (Set for .has() method)
@@ -811,15 +813,20 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   };
 
   // Handle opening the generation modal
+  // parentSceneImageUrl: URL of the parent scene's generated image (for suggested shots consistency)
   const handleGenerateSceneImage = (
     sceneNumber: number, 
     isRef = false,
-    currentDescription = ""
+    currentDescription = "",
+    parentSceneImageUrl?: string,
+    isSuggestedShot = false
   ) => {
     setSelectedSceneForGeneration({
       sceneNumber,
       description: currentDescription,
-      isRegenerate: isRef
+      isRegenerate: isRef,
+      parentSceneImageUrl,
+      isSuggestedShot
     });
     setShowSceneGenerationModal(true);
   };
@@ -980,10 +987,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     )}
                     onDelete={(imageId) => deleteImage('scene', sceneNumber, imageId)}
                     onView={(url) => setSelectedImage(url)}
-                    onGenerateMoment={(shotDescription) => handleGenerateSceneImage(
+                    onGenerateMoment={(shotDescription, parentSceneImageUrl) => handleGenerateSceneImage(
                       sceneNumber,
                       false,
-                      shotDescription
+                      shotDescription,
+                      parentSceneImageUrl,  // Pass parent scene image for I2I consistency
+                      true                   // Mark as suggested shot
                     )}
                   />
                 );
@@ -1339,16 +1348,24 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     .filter(img => img.imageUrl && img.generationStatus === 'completed')
                     .map(img => img.imageUrl);
                 
-                // 3. Combine and deduplicate all character image URLs
-                const allCharacterImageUrls = [...new Set([...selectedCharUrls, ...generatedCharUrls])];
+                // 3. Start with parent scene image URL if this is a suggested shot
+                // This goes first for maximum visual consistency with the main scene
+                const referenceImages: string[] = [];
+                if (selectedSceneForGeneration.parentSceneImageUrl) {
+                    referenceImages.push(selectedSceneForGeneration.parentSceneImageUrl);
+                }
                 
-                // Pass character IDs and URLs to enable I2I generation
+                // 4. Add character images (deduplicated)
+                const characterUrls = [...new Set([...selectedCharUrls, ...generatedCharUrls])];
+                referenceImages.push(...characterUrls);
+                
+                // Pass character IDs and combined reference URLs to enable I2I generation
                 generateSceneImage(
                     selectedSceneForGeneration.sceneNumber, 
                     desc, 
                     generationOptions,
                     charIds.length > 0 ? charIds : undefined,
-                    allCharacterImageUrls.length > 0 ? allCharacterImageUrls : undefined
+                    referenceImages.length > 0 ? referenceImages : undefined
                 );
             }
             setShowSceneGenerationModal(false);
@@ -1363,6 +1380,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             generationStatus: 'completed'
         }))}
         isGenerating={generatingScenes.has(selectedSceneForGeneration?.sceneNumber || -1)}
+        parentSceneImageUrl={selectedSceneForGeneration?.parentSceneImageUrl}
+        isSuggestedShot={selectedSceneForGeneration?.isSuggestedShot}
       />
     </div>
   );
@@ -1471,7 +1490,7 @@ interface SceneImageCardProps {
   onRegenerate: () => void;
   onDelete: (imageId: string) => void;
   onView: (imageUrl: string) => void;
-  onGenerateMoment?: (shotDescription: string) => void;
+  onGenerateMoment?: (shotDescription: string, parentSceneImageUrl?: string) => void;
 }
 
 const SceneImageCard: React.FC<SceneImageCardProps> = ({
@@ -1620,7 +1639,11 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
               {(expandedShots ? dialogueMoments : dialogueMoments.slice(0, 3)).map((moment, idx) => (
                 <button
                   key={idx}
-                  onClick={() => onGenerateMoment?.(moment.shot_description)}
+                  onClick={() => {
+                    // Find the best completed parent scene image for consistency
+                    const parentImage = sceneImages.find(img => img.generationStatus === 'completed' && img.imageUrl);
+                    onGenerateMoment?.(moment.shot_description, parentImage?.imageUrl);
+                  }}
                   className="w-full flex items-center justify-between px-2 py-1.5 text-left text-xs bg-gray-50 hover:bg-blue-50 border border-dashed border-gray-300 hover:border-blue-400 rounded transition-colors group"
                 >
                   <span className="truncate text-gray-600 group-hover:text-blue-600">

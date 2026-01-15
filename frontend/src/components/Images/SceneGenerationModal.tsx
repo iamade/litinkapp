@@ -12,6 +12,8 @@ interface SceneGenerationModalProps {
   availableCharacters: CharacterImage[];
   onGenerate: (description: string, characterIds: string[]) => void;
   isGenerating: boolean;
+  parentSceneImageUrl?: string;  // For suggested shots - shows reference for consistency
+  isSuggestedShot?: boolean;     // Flag to show "suggested shot" context in UI
 }
 
 const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
@@ -22,7 +24,9 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
   chapterTitle,
   availableCharacters,
   onGenerate,
-  isGenerating
+  isGenerating,
+  parentSceneImageUrl,
+  isSuggestedShot = false
 }) => {
   const [description, setDescription] = useState(initialDescription);
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<Set<string>>(new Set());
@@ -67,6 +71,11 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
           <div>
             <h2 className="text-xl font-semibold text-white">Generate Scene {sceneNumber}</h2>
             {chapterTitle && <p className="text-sm text-gray-400 mt-1">{chapterTitle}</p>}
+            {isSuggestedShot && (
+              <span className="mt-1 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-900/50 text-blue-300">
+                Suggested Shot
+              </span>
+            )}
           </div>
           <button 
             onClick={onClose}
@@ -77,6 +86,28 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Parent Scene Reference (for suggested shots) */}
+          {parentSceneImageUrl && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-300">
+                Reference Scene
+                <span className="ml-2 text-xs text-gray-500 font-normal">
+                  (Your shot will match this scene's style and characters)
+                </span>
+              </label>
+              <div className="relative rounded-lg overflow-hidden border border-gray-700 w-48 h-28">
+                <img 
+                  src={parentSceneImageUrl} 
+                  alt="Parent scene reference" 
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+                  <span className="text-xs text-gray-300">Main Scene</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Detailed Scene Description */}
           <div className="space-y-3">
             <label className="text-sm font-medium text-gray-300">
