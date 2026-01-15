@@ -197,6 +197,11 @@ export const useImageGeneration = (
     }
   }, [chapterId, selectedScriptId]);
 
+  // Auto-load images when chapterId or selectedScriptId changes
+  useEffect(() => {
+    loadImages();
+  }, [chapterId, selectedScriptId, loadImages]);
+
   const generateSceneImage = async (
     sceneNumber: number,
     sceneDescription: string,

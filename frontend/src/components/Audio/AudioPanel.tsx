@@ -98,8 +98,8 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     let currentBuffer: string[] = [];
     
     // Regex to detect scene start
-    // Matches: **ACT I - SCENE 1**, SCENE 1, ACT 1 SCENE 1
-    const sceneStartRegex = /^(?:\*\*)?(?:ACT\s+[IVX\d]+\s*[-–]\s*)?SCENE\s+\d+(?:[-–].*)?(?:\*\*)?/i;
+    // Matches: **ACT I - SCENE 1**, SCENE 1, ACT 1 SCENE 1, SCENE 1.1, SCENE 1.2
+    const sceneStartRegex = /^(?:\*\*)?(?:ACT\s+[IVX\d]+\s*[-–]\s*)?SCENE\s+\d+(?:\.\d+)?(?:[-–].*)?(?:\*\*)?/i;
     
     lines.forEach((line) => {
         const trimmed = line.trim();

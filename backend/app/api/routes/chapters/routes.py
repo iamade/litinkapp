@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, col, or_
+from sqlmodel import select, col, or_, SQLModel
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_session
@@ -167,7 +167,54 @@ def get_character_info_from_chapter(
                     "description": f"Character {character_name} appearing in the chapter",
                 }
 
+                # Fallback with basic info
+                return {
+                    "name": character_name,
+                    "description": f"Character {character_name} appearing in the chapter",
+                }
+
     return None
+
+
+class SceneReorderRequest(SQLModel):
+    scene_order: List[int]
+
+
+@router.patch("/{chapter_id}/scripts/{script_id}/reorder-scenes", response_model=Script)
+async def reorder_scenes(
+    chapter_id: str,
+    script_id: str,
+    request: SceneReorderRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Update the order of scenes in the storyboard"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Get the script
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Update scene order
+        script.scene_order = request.scene_order
+        session.add(script)
+        await session.commit()
+        await session.refresh(script)
+
+        return script
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error reordering scenes: {str(e)}"
+        )
 
 
 @router.get("/{chapter_id}/images", response_model=ChapterImagesResponse)
@@ -254,34 +301,37 @@ async def update_scene_description(
             raise HTTPException(status_code=404, detail="Script not found")
 
         # Initialize scene_descriptions if needed (handling legacy scripts)
+        # Now using dict with string keys to support sub-scenes (1.1, 1.2, etc.)
         if not script.scene_descriptions:
-            # Try to populate from existing data or initialize empty list with sufficient size
-            # We can't easily parse here without AI, so we initiate a list based on known scenes count if possible
-            # Or just initialize as empty list and rely on index access filling
-            script.scene_descriptions = []
+            script.scene_descriptions = {}
+        elif isinstance(script.scene_descriptions, list):
+            # Convert legacy list format to dict format
+            legacy_list = script.scene_descriptions
+            script.scene_descriptions = {
+                str(i + 1): desc for i, desc in enumerate(legacy_list) if desc
+            }
 
-        # Ensure list is long enough
-        # Note: scene_number is typically 1-based index in this app
-        idx = scene_number - 1
+        # Use scene_number as string key to support decimals (1.1, 1.2, etc.)
+        scene_key = str(scene_number)
+        # Normalize the key - convert "1.0" to "1" for whole numbers
+        if scene_key.endswith(".0"):
+            scene_key = scene_key[:-2]
 
-        current_len = len(script.scene_descriptions)
-        if idx >= current_len:
-            # Extend list with empty strings or default values up to this index
-            extension = [""] * (idx - current_len + 1)
-            script.scene_descriptions.extend(extension)
+        # Store as dict with scene key
+        if isinstance(script.scene_descriptions, dict):
+            script.scene_descriptions[scene_key] = request.scene_description
+        else:
+            # Fallback for unexpected type - convert to dict
+            script.scene_descriptions = {scene_key: request.scene_description}
 
-        # Update the description
-        script.scene_descriptions[idx] = request.scene_description
-
-        # We need to explicitly flag the field as modified for SQLAlchemy/SQLModel with JSON types sometimes
-        # Use simple reassignment to trigger change detection
-        script.scene_descriptions = list(script.scene_descriptions)
+        # Trigger SQLAlchemy change detection for JSON field
+        script.scene_descriptions = dict(script.scene_descriptions)
 
         session.add(script)
         await session.commit()
         await session.refresh(script)
 
-        return {"success": True, "message": "Scene description updated"}
+        return {"success": True, "message": f"Scene {scene_key} description updated"}
 
     except HTTPException:
         raise
@@ -934,14 +984,12 @@ async def get_scene_image_status(
         # Verify chapter access
         await verify_chapter_access(chapter_id, current_user.id, session)
 
-        # Query for the scene image record
-        # Primary filter: chapter_id and scene_number (root-level)
-        # Secondary filter: fallback to metadata->>'scene_number' if root-level is NULL
+        # Query for the scene image record by chapter_id and scene_number
         print(
             f"[DEBUG] [get_scene_image_status] Querying for chapter_id={chapter_id}, scene_number={scene_number}"
         )
 
-        # Try root-level scene_number first
+        # Direct query - scene_number column is now FLOAT in database
         stmt = (
             select(ImageGeneration)
             .where(
@@ -954,35 +1002,6 @@ async def get_scene_image_status(
 
         result = await session.exec(stmt)
         image_record = result.first()
-
-        # If no results, try metadata-based scene_number as fallback
-        if not image_record:
-            print(
-                f"[DEBUG] [get_scene_image_status] No root-level scene_number match, trying metadata fallback"
-            )
-            # Fetch all records for this chapter with NULL scene_number and filter in Python
-            stmt = (
-                select(ImageGeneration)
-                .where(
-                    ImageGeneration.chapter_id == uuid.UUID(chapter_id),
-                    ImageGeneration.scene_number == None,
-                )
-                .order_by(col(ImageGeneration.created_at).desc())
-            )
-
-            result = await session.exec(stmt)
-            all_chapter_images = result.all()
-
-            # Filter by metadata scene_number in Python
-            for record in all_chapter_images:
-                metadata = record.metadata or {}
-                metadata_scene_number = metadata.get("scene_number")
-                if metadata_scene_number == scene_number:
-                    image_record = record
-                    print(
-                        f"[DEBUG] [get_scene_image_status] Found match via metadata scene_number"
-                    )
-                    break
 
         if not image_record:
             print(

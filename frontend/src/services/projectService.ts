@@ -79,6 +79,17 @@ export const projectService = {
     );
   },
 
+  reorderScenes: async (
+    chapterId: string,
+    scriptId: string,
+    sceneOrder: number[]
+  ) => {
+    return await apiClient.patch(
+      `/chapters/${chapterId}/scripts/${scriptId}/reorder-scenes`,
+      { scene_order: sceneOrder }
+    );
+  },
+
   analyzeIntent: async (prompt: string, fileName?: string) => {
     return await apiClient.post<IntentAnalysisResult>("/projects/analyze-intent", {
       prompt,

@@ -257,7 +257,7 @@ class ImageGeneration(SQLModel, table=True):
     chapter_id: Optional[uuid.UUID] = Field(
         default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
     )
-    scene_number: Optional[int] = Field(default=None)
+    scene_number: Optional[float] = Field(default=None)
     progress: int = Field(default=0)
 
     meta: Dict[str, Any] = Field(
@@ -323,6 +323,10 @@ class Script(SQLModel, table=True):
     )
     # Editable scene descriptions
     scene_descriptions: List[str] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    # Scene order for storyboard
+    scene_order: List[int] = Field(
         default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
     )
     character_details: Optional[str] = Field(

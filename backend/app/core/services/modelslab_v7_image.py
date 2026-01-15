@@ -371,34 +371,41 @@ class ModelsLabV7ImageService:
     async def generate_character_image(
         self,
         character_name: str,
-        character_description: str,
+        character_description: str,  # Now accepts pre-built prompt OR raw description
         style: str = "realistic",
         aspect_ratio: str = "3:4",  # Portrait for characters
         user_tier: Optional[str] = None,
+        prompt_already_built: bool = True,  # Flag to indicate if prompt is pre-built
     ) -> Dict[str, Any]:
-        """Generate character image using V7 API with automatic fallback"""
+        """
+        Generate character image using V7 API with automatic fallback.
 
+        When prompt_already_built=True (default), character_description is used directly as the prompt.
+        This allows StandaloneImageService to handle all prompt engineering centrally.
+
+        When prompt_already_built=False, basic style modifiers are added (for backward compatibility).
+        """
         try:
-            # Enhanced character prompts for better quality
-            style_modifiers = {
-                "realistic": "photorealistic portrait, detailed facial features, professional lighting, high quality, 8k resolution",
-                "cinematic": "cinematic character portrait, dramatic lighting, film noir style, movie quality",
-                "animated": "animated character design, cartoon style, expressive features, vibrant colors",
-                "fantasy": "fantasy character art, magical aura, ethereal lighting, detailed fantasy design",
-            }
-
-            style_prompt = style_modifiers.get(style, style_modifiers["realistic"])
-
-            # Comprehensive character prompt
-            full_prompt = f"""Character portrait of {character_name}: {character_description}.
-            {style_prompt}.
-            Clear background, centered composition, detailed character design,
-            expressive eyes, well-defined features, professional character art"""
+            if prompt_already_built:
+                # Use the description directly as prompt - all engineering done by caller
+                full_prompt = self._sanitize_prompt(character_description)
+            else:
+                # Backward compatibility: add basic style modifiers only
+                style_modifiers = {
+                    "realistic": "photorealistic portrait, detailed facial features, professional lighting, high quality",
+                    "cinematic": "cinematic character portrait, dramatic lighting, movie quality",
+                    "animated": "animated character design, cartoon style, vibrant colors",
+                    "fantasy": "fantasy character art, magical aura, ethereal lighting",
+                }
+                style_prompt = style_modifiers.get(style, style_modifiers["realistic"])
+                sanitized_desc = self._sanitize_prompt(character_description)
+                full_prompt = f"Character portrait of {character_name}: {sanitized_desc}. {style_prompt}."
 
             logger.info(
                 f"[CHARACTER IMAGE] Generating {style} portrait for: {character_name}"
             )
             logger.info(f"[CHARACTER IMAGE] User tier: {user_tier}")
+            logger.info(f"[CHARACTER IMAGE] Prompt: {full_prompt[:100]}...")
 
             result = await self.generate_image(
                 prompt=full_prompt,
@@ -406,7 +413,7 @@ class ModelsLabV7ImageService:
                 model_id=None,
                 user_tier=user_tier,
                 wait_for_completion=True,
-                max_wait_time=1200,  # Increased to 20 minutes
+                max_wait_time=1200,
             )
 
             # Add character metadata
@@ -546,35 +553,41 @@ class ModelsLabV7ImageService:
 
     async def generate_scene_image(
         self,
-        scene_description: str,
+        scene_description: str,  # Now accepts a pre-built prompt OR raw description
         style: str = "cinematic",
         aspect_ratio: str = "16:9",
         user_tier: Optional[str] = None,
         character_image_urls: Optional[List[str]] = None,
+        prompt_already_built: bool = True,  # Flag to indicate if prompt is pre-built
     ) -> Dict[str, Any]:
-        """Generate scene image using V7 API with automatic fallback"""
+        """
+        Generate scene image using V7 API with automatic fallback.
 
+        When prompt_already_built=True (default), scene_description is used directly as the prompt.
+        This allows StandaloneImageService to handle all prompt engineering centrally.
+
+        When prompt_already_built=False, basic style modifiers are added (for backward compatibility).
+        """
         try:
-            # Enhanced scene prompts
-            style_modifiers = {
-                "realistic": "photorealistic environment, detailed landscape, natural lighting, high resolution",
-                "cinematic": "cinematic scene, dramatic lighting, movie-quality composition, epic vista",
-                "animated": "animated scene background, cartoon environment, vibrant world design",
-                "fantasy": "fantasy environment, magical atmosphere, otherworldly landscape, mystical setting",
-            }
-
-            style_prompt = style_modifiers.get(style, style_modifiers["cinematic"])
-
-            # Sanitize prompt to avoid safety filter triggers
-            sanitized_description = self._sanitize_prompt(scene_description)
-
-            full_prompt = f"""Scene: {sanitized_description}.
-            {style_prompt}.
-            Wide establishing shot, detailed environment, atmospheric perspective,
-            rich visual storytelling, immersive background, professional scene composition"""
+            if prompt_already_built:
+                # Use the prompt directly - all engineering done by caller (StandaloneImageService)
+                full_prompt = scene_description
+                sanitized_description = self._sanitize_prompt(full_prompt)
+                full_prompt = sanitized_description
+            else:
+                # Backward compatibility: add basic style modifiers only
+                style_modifiers = {
+                    "realistic": "photorealistic environment, natural lighting, high resolution",
+                    "cinematic": "cinematic scene, dramatic lighting, film still",
+                    "animated": "animated scene background, vibrant world design",
+                    "fantasy": "fantasy environment, magical atmosphere",
+                }
+                style_prompt = style_modifiers.get(style, style_modifiers["cinematic"])
+                sanitized_description = self._sanitize_prompt(scene_description)
+                full_prompt = f"Scene: {sanitized_description}. {style_prompt}."
 
             logger.info(
-                f"[SCENE IMAGE] Generating {style} scene: {scene_description[:50]}..."
+                f"[SCENE IMAGE] Generating {style} scene: {full_prompt[:80]}..."
             )
             logger.info(f"[SCENE IMAGE] User tier: {user_tier}")
 
@@ -606,7 +619,6 @@ class ModelsLabV7ImageService:
                 result["scene_description"] = scene_description
                 result["scene_style"] = style
                 result["image_type"] = "scene"
-                result["sanitized_prompt"] = sanitized_description
 
             return result
 

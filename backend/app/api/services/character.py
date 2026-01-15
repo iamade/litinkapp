@@ -407,6 +407,7 @@ class CharacterService:
                     custom_prompt=custom_prompt,
                     record_id=record_id,
                     user_tier=user_tier,
+                    entity_type=character.entity_type or "character",
                 )
                 logger.info(
                     f"[CharacterService] Task dispatched successfully! Task ID: {task.id}"
@@ -1048,8 +1049,41 @@ class CharacterService:
         self, character: CharacterResponse, custom_prompt: Optional[str] = None
     ) -> str:
         """
-        Build optimized prompt for character image generation.
+        Build optimized prompt for character/object/location image generation.
         """
+        entity_type = getattr(character, "entity_type", "character") or "character"
+
+        # Handle objects and locations differently - explicitly exclude humans
+        if entity_type in ("object", "location"):
+            if entity_type == "location":
+                base_prompt = f"Professional photograph of {character.name}"
+                if character.physical_description:
+                    base_prompt += f", {character.physical_description}"
+                # Add location-specific style
+                base_prompt += ". Cinematic landscape photography, establishing shot, wide angle, dramatic lighting"
+                # Explicitly exclude humans
+                base_prompt += ", no people, no humans, uninhabited, empty of people"
+            else:  # object
+                base_prompt = f"Professional product photograph of {character.name}"
+                if character.physical_description:
+                    base_prompt += f", {character.physical_description}"
+                # Add object/product-specific style
+                base_prompt += ". Studio product photography, isolated object, clean background, detailed textures"
+                # Explicitly exclude humans
+                base_prompt += (
+                    ", no people, no humans, no hands, object only, inanimate"
+                )
+
+            if custom_prompt:
+                base_prompt += f", {custom_prompt}"
+
+            # Add quality modifiers
+            base_prompt += (
+                ". Photorealistic, high quality, 8k resolution, professional lighting"
+            )
+            return base_prompt
+
+        # Original character portrait logic
         base_prompt = f"Professional character portrait of {character.name}"
 
         if character.physical_description:

@@ -699,6 +699,7 @@ def generate_character_image_task(
     custom_prompt: Optional[str] = None,
     record_id: Optional[str] = None,
     user_tier: str = "free",
+    entity_type: str = "character",
 ):
     """
     Unified asynchronous Celery task for generating character images.
@@ -732,6 +733,7 @@ def generate_character_image_task(
             custom_prompt,
             record_id,
             user_tier,
+            entity_type,
         )
     )
 
@@ -748,6 +750,7 @@ async def async_generate_character_image_task(
     custom_prompt: Optional[str] = None,
     record_id: Optional[str] = None,
     user_tier: str = "free",
+    entity_type: str = "character",
 ):
     """Async implementation of character image generation task"""
     async with async_session() as session:
@@ -795,6 +798,7 @@ async def async_generate_character_image_task(
                 aspect_ratio=aspect_ratio,
                 custom_prompt=custom_prompt,
                 user_tier=user_tier,
+                entity_type=entity_type,
             )
 
             # Check for error in result (fallback manager returns dict on error)

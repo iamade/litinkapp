@@ -220,7 +220,12 @@ class OpenRouterService:
 - Divide the story into ACT I, ACT II, and ACT III
 - Create 5-10 distinct SCENES per act (15-30 total scenes depending on content length)
 - Each scene must have proper heading: INT./EXT. LOCATION - TIME
-- Label each scene clearly (e.g., "ACT I - SCENE 1:", "ACT II - SCENE 5:")
+- Label each scene clearly with INTEGER numbers (e.g., "ACT I - SCENE 1", "ACT I - SCENE 2", "ACT II - SCENE 1")
+
+**SCENE NUMBERING RULES:**
+- Use INTEGER scene numbers only: SCENE 1, SCENE 2, SCENE 3, etc.
+- Scene numbers reset to 1 for each new ACT (ACT II - SCENE 1, not ACT II - SCENE 11)
+- NEVER use decimal scene numbers (NO 1.1, 1.2, etc.)
 
 **CRITICAL DIALOGUE FORMATTING:**
 Show conversations between characters in proper screenplay format:
@@ -232,22 +237,18 @@ What the character says directly.
 ANOTHER CHARACTER
 Their direct response.
 
-**EXAMPLE:**
+**EXAMPLE FORMAT:**
 **ACT I - SCENE 1**
-INT. DURSLEY HOUSE - DAY
-A lonely boy sits on the curb.
+INT. LIVING ROOM - DAY
+The PROTAGONIST enters, looking troubled.
 
-DUDLEY
-(mocking)
-Look at the freak! No one wants you here.
+PROTAGONIST
+(hesitant)
+I need to tell you something important.
 
-HARRY
-(quietly, looking down)
-I just want to be left alone.
-
-AUNT PETUNIA
-(shouting from doorway)
-Get inside this instant! And stop bothering Dudley.
+CHARACTER A
+(turning to face them)
+What is it? You look worried.
 
 **FORMATTING RULES:**
 - Character names in UPPERCASE before their dialogue
@@ -256,6 +257,7 @@ Get inside this instant! And stop bothering Dudley.
 - NO phrases like "The narrator says" or "Voice-over explains"
 - Action descriptions in present tense between dialogue
 - Parentheticals for actor directions only
+- Each location change should be a NEW SCENE with an incremented integer number
 
 **STORY COVERAGE:**
 - Complete character arcs and development

@@ -174,6 +174,7 @@ class StandaloneImageService:
         script_id: Optional[str] = None,
         chapter_id: Optional[str] = None,  # Added for metadata tracking
         user_tier: Optional[str] = None,
+        entity_type: str = "character",  # 'character', 'object', or 'location'
     ) -> Dict[str, Any]:
         """
         Generate a standalone character image and store in database.
@@ -218,7 +219,7 @@ class StandaloneImageService:
 
             # Build enhanced prompt
             prompt = self._build_character_prompt(
-                character_name, character_description, style, custom_prompt
+                character_name, character_description, style, custom_prompt, entity_type
             )
 
             # Generate image using ModelsLab service with tier-based model selection
@@ -543,19 +544,52 @@ class StandaloneImageService:
     ) -> str:
         """
         Build enhanced prompt for scene image generation.
+        Strips dialogue and adds negative prompts to prevent text in images.
         """
+        import re
+
+        # Strip quoted dialogue to prevent text appearing in images
+        # Remove patterns like: "dialogue text" or 'dialogue text'
+        cleaned_description = re.sub(r'["\']([^"\']*)["\']', "", scene_description)
+
+        # Remove character speaking patterns like "CHARACTER_NAME speaking" or "CHARACTER_NAME:"
+        # and convert to action description
+        cleaned_description = re.sub(
+            r"(\w+)\s*:\s*speaking", r"\1 talking", cleaned_description
+        )
+        cleaned_description = re.sub(
+            r"(\w+)\s+speaking\b", r"\1 in conversation", cleaned_description
+        )
+
+        # Remove any remaining colons that might indicate dialogue
+        cleaned_description = re.sub(r"\s+:\s+", " ", cleaned_description)
+
+        # Clean up extra whitespace
+        cleaned_description = " ".join(cleaned_description.split())
+
+        # If description is too minimal, add context
+        if len(cleaned_description.strip()) < 15:
+            cleaned_description = (
+                f"Cinematic scene showing {cleaned_description.strip()}, indoor setting"
+            )
+
         style_modifiers = {
             "realistic": "photorealistic environment, detailed landscape, natural lighting, high resolution",
-            "cinematic": "cinematic scene, dramatic lighting, movie-quality composition, epic vista",
+            "cinematic": "cinematic scene, dramatic lighting, movie-quality composition, film still",
             "animated": "animated scene background, cartoon environment, vibrant world design",
             "fantasy": "fantasy environment, magical atmosphere, otherworldly landscape, mystical setting",
         }
 
-        base_prompt = f"Scene: {scene_description}. {style_modifiers.get(style, style_modifiers['cinematic'])}. "
+        base_prompt = f"Scene: {cleaned_description}. {style_modifiers.get(style, style_modifiers['cinematic'])}. "
         base_prompt += "Wide establishing shot, detailed environment, atmospheric perspective, immersive background, professional scene composition"
 
+        # Add negative prompt to prevent text in images
+        base_prompt += ". NO TEXT, no words, no letters, no writing, no captions, no subtitles, no dialogue text, no speech bubbles"
+
         if custom_prompt:
-            base_prompt += f". {custom_prompt}"
+            # Also strip any dialogue from custom prompt
+            clean_custom = re.sub(r'["\']([^"\']*)["\']', "", custom_prompt)
+            base_prompt += f". {clean_custom}"
 
         return base_prompt
 
@@ -565,10 +599,38 @@ class StandaloneImageService:
         character_description: str,
         style: str,
         custom_prompt: Optional[str] = None,
+        entity_type: str = "character",
     ) -> str:
         """
-        Build enhanced prompt for character image generation.
+        Build enhanced prompt for character/object/location image generation.
         """
+        # Handle objects and locations differently - explicitly exclude humans
+        if entity_type in ("object", "location"):
+            if entity_type == "location":
+                base_prompt = f"Professional photograph of {character_name}"
+                if character_description:
+                    base_prompt += f": {character_description}"
+                base_prompt += ". Cinematic landscape photography, establishing shot, wide angle, dramatic lighting"
+                # Explicitly exclude humans
+                base_prompt += ", no people, no humans, uninhabited, empty of people, no figures, no persons"
+            else:  # object
+                base_prompt = f"Professional product photograph of {character_name}"
+                if character_description:
+                    base_prompt += f": {character_description}"
+                base_prompt += ". Studio product photography, isolated object, clean background, detailed textures"
+                # Explicitly exclude humans
+                base_prompt += ", no people, no humans, no hands, object only, inanimate, without any human presence"
+
+            if custom_prompt:
+                base_prompt += f". {custom_prompt}"
+
+            # Add quality modifiers
+            base_prompt += (
+                ". Photorealistic, high quality, 8k resolution, professional lighting"
+            )
+            return base_prompt
+
+        # Original character portrait logic
         style_modifiers = {
             "realistic": "photorealistic portrait, detailed facial features, professional lighting, high quality, 8k resolution",
             "cinematic": "cinematic character portrait, dramatic lighting, film noir style, movie quality",

@@ -329,7 +329,7 @@ async def enhance_with_plot_context(
                 plot_context_parts.append(char_info)
 
         # Conflict and stakes
-        if plot_overview.conflict_type or plot_overview.stakes:
+        if plot_overview and (plot_overview.conflict_type or plot_overview.stakes):
             plot_context_parts.append("\nSTORY ELEMENTS:")
             if plot_overview.conflict_type:
                 plot_context_parts.append(
@@ -344,13 +344,18 @@ async def enhance_with_plot_context(
 
         return {
             "enhanced_content": enhanced_content,
-            "plot_info": {
-                "plot_id": plot_overview.id,
-                "logline": plot_overview.logline,
-                "genre": plot_overview.genre,
-                "tone": plot_overview.tone,
-                "character_count": len(characters) if characters else 0,
-            },
+            "plot_info": (
+                {
+                    "plot_id": plot_overview.id if plot_overview else None,
+                    "logline": custom_logline
+                    or (plot_overview.logline if plot_overview else None),
+                    "genre": plot_overview.genre if plot_overview else None,
+                    "tone": plot_overview.tone if plot_overview else None,
+                    "character_count": len(characters) if characters else 0,
+                }
+                if plot_overview or custom_logline
+                else None
+            ),
         }
 
     except Exception as e:
@@ -3015,6 +3020,7 @@ async def generate_script_and_scenes(
 
         # ✅ First, try to parse scenes directly from the script
         scene_descriptions = []
+        sub_scenes_metadata = []  # Track sub-scene breakdown for frontend
 
         # Parse scenes directly from script by looking for scene headers
         script_lines = script.split("\n")
@@ -3026,9 +3032,9 @@ async def generate_script_and_scenes(
             line_stripped = line.strip()
 
             # Check if this is an ACT-SCENE header (primary scene marker)
-            # Check if this is an ACT-SCENE header (primary scene marker) - supports both screenplay and narration styles
+            # Supports sub-scenes like SCENE 1.1, SCENE 1.2, etc.
             act_scene_match = re.match(
-                r"^(?:(?:\*?\*?ACT\s+[IVX0-9]+\s*-?\s*SCENE\s+\d+\*?\*?)|(?:###\s*.*\[.*\]))",
+                r"^(?:(?:\*?\*?ACT\s+[IVX0-9]+\s*-?\s*SCENE\s+(\d+(?:\.\d+)?)\*?\*?)|(?:###\s*.*\[.*\]))",
                 line_stripped,
                 re.IGNORECASE,
             )
@@ -3045,15 +3051,30 @@ async def generate_script_and_scenes(
                 if current_scene and len(current_scene) > 20:
                     scene_descriptions.append(current_scene[:400])
 
-                # Start new scene
-                scene_number += 1
+                # Extract scene number (could be 1, 1.1, 1.2 etc from the capture group)
+                captured_num = (
+                    act_scene_match.group(1)
+                    if act_scene_match.lastindex and act_scene_match.group(1)
+                    else None
+                )
+                if captured_num and "." in captured_num:
+                    # Sub-scene detected (e.g., 1.2)
+                    scene_number = float(captured_num)
+                else:
+                    scene_number += 1
+
                 current_scene = line_stripped
                 pending_location = None  # Reset pending location
 
                 # Look ahead for location header on next line
+                location_text = None
                 if i + 1 < len(script_lines):
                     next_line = script_lines[i + 1].strip()
-                    if re.match(r"^(?:INT\.|EXT\.)", next_line, re.IGNORECASE):
+                    location_match_ahead = re.match(
+                        r"^(?:INT\.|EXT\.)\s+(.+)", next_line, re.IGNORECASE
+                    )
+                    if location_match_ahead:
+                        location_text = next_line
                         current_scene += " " + next_line
                         # Add context from lines after location
                         context_lines = []
@@ -3069,6 +3090,18 @@ async def generate_script_and_scenes(
                                 break
                         if context_lines:
                             current_scene += " " + " ".join(context_lines)
+
+                        # Add to sub_scenes_metadata for frontend
+                        sub_scenes_metadata.append(
+                            {
+                                "number": scene_number,
+                                "location": location_text,
+                                "description": (
+                                    " ".join(context_lines) if context_lines else ""
+                                ),
+                                "is_sub_scene": "." in str(scene_number),
+                            }
+                        )
                     else:
                         # No location header, just add context
                         context_lines = []
@@ -3133,6 +3166,89 @@ Script to analyze:
         # Allow more scenes (up to 30 for complete story coverage)
         scene_descriptions = scene_descriptions[:30]
         print(f"[DEBUG] Final scene count: {len(scene_descriptions)}")
+
+        # ✅ Extract dialogue moments for suggested shots in image carousel
+        dialogue_moments = []
+        current_dialogue_scene = 0
+        current_dialogue_character = None
+
+        for i, line in enumerate(script_lines):
+            line_stripped = line.strip()
+            if not line_stripped:
+                continue
+
+            # Track scene changes for dialogue moments
+            scene_match = re.match(
+                r"^(?:\*?\*?ACT\s+[IVX0-9]+\s*-?\s*SCENE\s+(\d+(?:\.\d+)?)\*?\*?)",
+                line_stripped,
+                re.IGNORECASE,
+            )
+            if scene_match:
+                captured = scene_match.group(1)
+                current_dialogue_scene = (
+                    float(captured) if captured else current_dialogue_scene + 1
+                )
+                current_dialogue_character = None
+                continue
+
+            # Detect character names (ALL CAPS, typically 1-3 words)
+            if (
+                line_stripped.isupper()
+                and len(line_stripped) <= 30
+                and not line_stripped.startswith(
+                    ("INT.", "EXT.", "SCENE", "ACT", "FADE", "CUT")
+                )
+            ):
+                current_dialogue_character = (
+                    line_stripped.replace("(CONT'D)", "").replace("(V.O.)", "").strip()
+                )
+                continue
+
+            # Capture action/parenthetical descriptions as shot suggestions
+            if (
+                current_dialogue_character
+                and line_stripped.startswith("(")
+                and line_stripped.endswith(")")
+            ):
+                action = line_stripped[1:-1].strip()  # Remove parentheses
+                if action and len(action) > 3:
+                    dialogue_moments.append(
+                        {
+                            "scene_number": current_dialogue_scene,
+                            "character": current_dialogue_character,
+                            "action": action,
+                            "shot_description": f"{current_dialogue_character} {action}",
+                            "moment_type": "action",
+                        }
+                    )
+
+            # Also capture the first line of dialogue as a "speaking" shot
+            elif current_dialogue_character and not line_stripped.startswith(
+                ("(", "*", "INT.", "EXT.")
+            ):
+                if len(line_stripped) > 10:  # Meaningful dialogue
+                    dialogue_moments.append(
+                        {
+                            "scene_number": current_dialogue_scene,
+                            "character": current_dialogue_character,
+                            "action": "speaking",
+                            "dialogue_preview": line_stripped[:50]
+                            + ("..." if len(line_stripped) > 50 else ""),
+                            "shot_description": f"{current_dialogue_character} speaking",
+                            "moment_type": "dialogue",
+                        }
+                    )
+                current_dialogue_character = None  # Reset after capturing dialogue
+
+        # Group dialogue moments by scene for easier frontend use
+        dialogue_moments_by_scene = {}
+        for moment in dialogue_moments:
+            scene_key = moment["scene_number"]
+            if scene_key not in dialogue_moments_by_scene:
+                dialogue_moments_by_scene[scene_key] = []
+            dialogue_moments_by_scene[scene_key].append(moment)
+
+        print(f"[DEBUG] Extracted {len(dialogue_moments)} dialogue moments from script")
 
         # ✅ Generate character analysis using OpenRouter
         character_analysis_result = await openrouter_service.analyze_content(
@@ -3208,6 +3324,8 @@ Script to analyze:
         script_data = {
             "script": script,
             "scene_descriptions": scene_descriptions,
+            "sub_scenes_metadata": sub_scenes_metadata,  # Sub-scene breakdown for images
+            "dialogue_moments": dialogue_moments_by_scene,  # Suggested shots per scene
             "characters": characters,
             "character_details": character_details,
             "script_style": script_style,
@@ -3216,6 +3334,8 @@ Script to analyze:
             "created_at": datetime.now().isoformat(),
             "metadata": {
                 "total_scenes": len(scene_descriptions),
+                "has_sub_scenes": any("." in str(s) for s in scene_descriptions if s),
+                "total_dialogue_moments": len(dialogue_moments),
                 "estimated_duration": len(script) * 0.01,  # Rough estimate
                 "has_characters": len(characters) > 0,
                 "script_length": len(script),

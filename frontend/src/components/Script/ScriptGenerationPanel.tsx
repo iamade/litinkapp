@@ -434,7 +434,16 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
   const renderScriptsList = () => (
     <div className="space-y-4">
-      <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Generated Scripts</h4>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Generated Scripts</h4>
+          {generatedScripts.length > 0 && (
+            <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-full">
+              {generatedScripts.length}
+            </span>
+          )}
+        </div>
+      </div>
       
       {isLoading ? (
         <div className="flex items-center justify-center py-8">
@@ -448,18 +457,27 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           <p className="text-sm">Generate your first script using the form above</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4">
-          {generatedScripts.map((script) => (
-            <ScriptCard
-              key={script.id}
-              script={script}
-              isSelected={selectedScriptId === script.id}
-              isSwitching={isSwitching}
-              onSelect={() => onChooseScript(script.id)}
-              onUpdate={(updates) => onUpdateScript(script.id, updates)}
-              onDelete={() => setScriptToDelete(script.id)}
-            />
-          ))}
+        <div className="space-y-4">
+          {/* Horizontal Script Cards */}
+          <div className="flex gap-4 overflow-x-auto pb-3 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
+            {generatedScripts.map((script) => {
+              const isSelected = selectedScriptId === script.id;
+              
+              return (
+                <ScriptCard
+                  key={script.id}
+                  script={script}
+                  isSelected={isSelected}
+                  isSwitching={isGeneratingScript || isSwitching}
+                  onSelect={() => onChooseScript(script.id)}
+                  onDelete={() => setScriptToDelete(script.id)}
+                  onUpdate={(updates) => onUpdateScript(script.id, updates)}
+                  className="flex-shrink-0 min-w-[280px] max-w-[320px]"
+                  showPreview={false}
+                />
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -1102,14 +1120,25 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 // Script Card Component
 interface ScriptCardProps {
   script: ChapterScript;
-  isSelected: boolean;
-  isSwitching: boolean;
-  onSelect: () => void;
+  isSelected?: boolean;
+  isSwitching?: boolean;
+  onSelect?: () => void;
   onUpdate: (updates: Partial<ChapterScript>) => void;
   onDelete: () => void;
+  className?: string;
+  showPreview?: boolean;
 }
 
-const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching, onSelect, onDelete, onUpdate }) => {
+const ScriptCard: React.FC<ScriptCardProps> = ({ 
+  script, 
+  isSelected, 
+  isSwitching, 
+  onSelect, 
+  onDelete, 
+  onUpdate,
+  className = '',
+  showPreview = true
+}) => {
   const [showActions, setShowActions] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState(script.script_name || "");
@@ -1142,9 +1171,9 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
 
   return (
     <div
-      className={`border rounded-lg p-4 transition-all hover:shadow-md ${
-        isSelected ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-      } ${isSwitching ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+      className={`relative border rounded-lg p-4 transition-all hover:shadow-md ${
+        isSelected ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+      } ${isSwitching ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${className}`}
       onClick={!isSwitching ? onSelect : undefined}
       onMouseEnter={() => !isSwitching && setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
@@ -1218,7 +1247,9 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
         </div>
       </div>
 
-      {script.script && script.script.trim() ? (
+
+
+      {showPreview && (script.script && script.script.trim() ? (
         <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded text-sm">
           <p className="text-gray-700 dark:text-gray-300 line-clamp-3">
             {script.script.substring(0, 200)}...
@@ -1228,7 +1259,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
         <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded text-sm text-center text-gray-500 dark:text-gray-400">
           <p className="text-xs">No preview available</p>
         </div>
-      )}
+      ))}
 
       <div className="mt-3 flex items-center justify-between">
         <span className={`text-xs px-2 py-1 rounded-full font-medium ${
@@ -1242,7 +1273,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (!isSwitching) onSelect();
+            if (!isSwitching) onSelect?.();
           }}
           className={`text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm font-medium ${
             isSwitching ? 'cursor-not-allowed opacity-50' : ''

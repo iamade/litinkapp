@@ -1017,11 +1017,13 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       {/* Characters Section */}
       <div className="space-y-4">
         {/* Characters Header */}
-        <button
-          onClick={() => setIsCharactersExpanded(!isCharactersExpanded)}
+        <div
           className="flex items-center justify-between w-full group"
         >
-          <div className="flex items-center space-x-3">
+          <div 
+            onClick={() => setIsCharactersExpanded(!isCharactersExpanded)}
+            className="flex items-center space-x-3 cursor-pointer"
+          >
              <div className="flex items-center gap-2">
                 {isCharactersExpanded ? <ChevronDown className="w-5 h-5 text-gray-500" /> : <ChevronRight className="w-5 h-5 text-gray-500" />}
                 <Users className="w-6 h-6 text-gray-700 dark:text-gray-300" />
@@ -1036,10 +1038,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
             </div>
           </div>
           
-          <div 
-            className="flex items-center space-x-2"
-            onClick={(e) => e.stopPropagation()} 
-          >
+          <div className="flex items-center space-x-2">
             {selectedCharacters.size > 0 && (
               <>
                 <button
@@ -1131,7 +1130,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
               )}
             </button>
           </div>
-        </button>
+        </div>
 
         {isCharactersExpanded && (
           <>
