@@ -205,6 +205,7 @@ class Settings(BaseSettings):
     MODELSLAB_API_KEY: str = os.getenv("MODELSLAB_API_KEY", "")
     
     MODELSLAB_BASE_URL: str = "https://modelslab.com/api/v7"  # Updated to v7
+    MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
 
     # Gemini
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")

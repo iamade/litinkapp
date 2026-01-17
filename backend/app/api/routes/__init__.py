@@ -37,6 +37,10 @@ api_router.include_router(merge_router, prefix="/merge", tags=["merge"])
 api_router.include_router(
     image_generations_router, prefix="/image-generations", tags=["image-generations"]
 )
+from .image_generations.upscale import router as upscale_router
+
+api_router.include_router(upscale_router, prefix="/images", tags=["images"])
+
 api_router.include_router(admin_router, tags=["admin"])
 api_router.include_router(home_router, tags=["home"])
 from .projects import router as projects_router

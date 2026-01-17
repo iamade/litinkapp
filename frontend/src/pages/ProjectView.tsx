@@ -36,6 +36,7 @@ import { useScriptGeneration } from '../hooks/useScriptGeneration';
 import { useImageGeneration } from '../hooks/useImageGeneration';
 import { useAudioGeneration } from '../hooks/useAudioGeneration';
 import { useScriptSelection } from '../contexts/ScriptSelectionContext';
+import { useAuth } from '../contexts/AuthContext';
 
 // Types
 interface ChapterArtifact {
@@ -119,7 +120,7 @@ const ChapterContentModal: React.FC<ChapterContentModalProps> = ({ chapter, onCl
 const ProjectView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  // user removed from useAuth
+  const { user } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [artifacts, setArtifacts] = useState<any[]>([]);
@@ -455,6 +456,7 @@ const ProjectView: React.FC = () => {
             selectedScript={selectedScript}
             plotOverview={plotOverview}
             onRefreshPlotOverview={refreshPlotOverview}
+            userTier={user?.subscription_tier || 'free'}
           />
         );
 

@@ -214,7 +214,7 @@ class OpenRouterService:
         Prepare messages for different script types
         """
         system_prompts = {
-            "cinematic": """You are a professional screenwriter. Convert the provided content into a cinematic screenplay with proper THREE-ACT STRUCTURE:
+            "cinematic": """You are a professional screenwriter for visual production. Convert the provided content into a cinematic screenplay with proper THREE-ACT STRUCTURE:
 
 **STRUCTURE REQUIREMENTS:**
 - Divide the story into ACT I, ACT II, and ACT III
@@ -237,14 +237,30 @@ What the character says directly.
 ANOTHER CHARACTER
 Their direct response.
 
+**CAMERA DIRECTIONS FOR IMAGE GENERATION:**
+Include camera directions in parentheses for key visual moments to guide image generation:
+- Use (CLOSE-UP) for emotional dialogue or important character reactions
+- Use (WIDE SHOT) for establishing scenes or group interactions
+- Use (MEDIUM SHOT) for standard dialogue between characters
+- Use (OVER-THE-SHOULDER) for conversations showing perspective
+- Use (TWO SHOT) when two characters interact intimately
+- Use (POV) for character perspective shots
+- Use (TRACKING) for following movement
+
+Place camera directions before action descriptions, e.g.:
+(CLOSE-UP) Sarah's eyes widen as she reads the letter.
+(WIDE SHOT) The entire family gathers around the dinner table.
+
 **EXAMPLE FORMAT:**
 **ACT I - SCENE 1**
 INT. LIVING ROOM - DAY
-The PROTAGONIST enters, looking troubled.
+(WIDE SHOT) The PROTAGONIST enters, looking troubled.
 
 PROTAGONIST
 (hesitant)
 I need to tell you something important.
+
+(CLOSE-UP) CHARACTER A turns, concern visible on their face.
 
 CHARACTER A
 (turning to face them)

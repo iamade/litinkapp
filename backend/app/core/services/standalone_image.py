@@ -53,6 +53,7 @@ class StandaloneImageService:
         chapter_id: Optional[str] = None,  # Added for scene metadata tracking
         scene_number: Optional[int] = None,  # Added for scene metadata tracking
         character_ids: Optional[List[str]] = None,  # Added for character references
+        is_suggested_shot: bool = False,  # For suggested shot special handling
     ) -> Dict[str, Any]:
         """
         Generate a standalone scene image and store in database.
@@ -67,6 +68,7 @@ class StandaloneImageService:
             chapter_id: Optional chapter ID for metadata tracking
             scene_number: Optional scene number for ordering
             character_ids: Optional list of character image IDs to use as style references
+            is_suggested_shot: If True, uses special prompts to maintain same background
 
         Returns:
             Dict containing image data and database record info
@@ -74,6 +76,7 @@ class StandaloneImageService:
         try:
             logger.info(
                 f"[StandaloneImageService] Generating scene image for user {user_id}"
+                f"{' (suggested shot)' if is_suggested_shot else ''}"
             )
 
             # Get user tier for model selection
@@ -94,8 +97,13 @@ class StandaloneImageService:
                 scene_number=scene_number,  # Pass scene_number for root-level field
             )
 
-            # Build enhanced prompt
-            prompt = self._build_scene_prompt(scene_description, style, custom_prompt)
+            # Build enhanced prompt - use special handling for suggested shots
+            prompt = self._build_scene_prompt(
+                scene_description,
+                style,
+                custom_prompt,
+                is_suggested_shot=is_suggested_shot,
+            )
 
             # Resolve character IDs to URLs if provided
             character_image_urls = []
@@ -540,11 +548,21 @@ class StandaloneImageService:
             return False
 
     def _build_scene_prompt(
-        self, scene_description: str, style: str, custom_prompt: Optional[str] = None
+        self,
+        scene_description: str,
+        style: str,
+        custom_prompt: Optional[str] = None,
+        is_suggested_shot: bool = False,
     ) -> str:
         """
         Build enhanced prompt for scene image generation.
         Strips dialogue and adds negative prompts to prevent text in images.
+
+        Args:
+            scene_description: Description of the scene
+            style: Visual style (cinematic, realistic, etc.)
+            custom_prompt: Optional additional prompt text
+            is_suggested_shot: If True, emphasizes keeping same background with only pose changes
         """
         import re
 
@@ -573,6 +591,55 @@ class StandaloneImageService:
                 f"Cinematic scene showing {cleaned_description.strip()}, indoor setting"
             )
 
+        # Special handling for suggested shots - emphasize same background, different pose
+        if is_suggested_shot:
+            # Extract location/setting from description if available (e.g., "INT. DURSLEY'S HOUSE - MORNING")
+            location_match = re.search(
+                r"(INT\.|EXT\.)[^\n,]+", cleaned_description, re.IGNORECASE
+            )
+            location_context = location_match.group(0).strip() if location_match else ""
+
+            # Extract time of day if present
+            time_match = re.search(
+                r"(MORNING|AFTERNOON|EVENING|NIGHT|DAY|DAWN|DUSK|SUNSET|SUNRISE)",
+                cleaned_description,
+                re.IGNORECASE,
+            )
+            time_context = time_match.group(0).lower() if time_match else ""
+
+            # Build a focused suggested shot prompt
+            base_prompt = f"Cinematic film still, {cleaned_description}"
+
+            # Add location context if available
+            if location_context:
+                base_prompt += f". Setting: {location_context}"
+            if time_context:
+                base_prompt += f" during {time_context}"
+
+            # Strong I2I preservation instructions
+            base_prompt += (
+                ". CRITICAL: Preserve EXACT same background, environment, lighting, and color palette from reference image"
+                ". Keep same room/location, same furniture placement, same wall colors, same atmospheric lighting"
+                ". Only adjust: character pose, facial expression, camera framing/angle"
+                ". Match the visual style, color grading, and mood of the reference exactly"
+                ". Professional cinematography, natural acting, expressive but subtle performance"
+                ". Photorealistic, consistent lighting direction, matching shadows"
+            )
+
+            # Stronger negative prompt for I2I
+            base_prompt += (
+                ". ABSOLUTELY NO: text, words, captions, labels, watermarks, logos, speech bubbles"
+                ". NO color shifts, NO environment changes, NO different room, NO new furniture"
+                ". NO exaggerated expressions, NO screaming, NO dramatic poses unless specified"
+            )
+
+            if custom_prompt:
+                clean_custom = re.sub(r'["\']([^"\']*)["\']', "", custom_prompt)
+                base_prompt += f". Additional context: {clean_custom}"
+
+            return base_prompt
+
+        # Standard scene prompt
         style_modifiers = {
             "realistic": "photorealistic environment, detailed landscape, natural lighting, high resolution",
             "cinematic": "cinematic scene, dramatic lighting, movie-quality composition, film still",

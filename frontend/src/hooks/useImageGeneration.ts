@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { userService } from '../services/userService';
 import { toast } from 'react-hot-toast';
 
-interface SceneImage {
+export interface SceneImage {
   sceneNumber: number;
   imageUrl: string;
   prompt: string;
@@ -38,7 +38,7 @@ export const useImageGeneration = (
   selectedScriptId: string | null,
   scenes?: string[] // Optional: providing scenes allows for recovery of missing scene numbers
 ) => {
-  const [sceneImages, setSceneImages] = useState<Record<string | number, SceneImage[]>>({});
+  const [sceneImages, setSceneImages] = useState<Record<number, SceneImage[]>>({});
   const [characterImages, setCharacterImages] = useState<Record<string, CharacterImage>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [generatingScenes, setGeneratingScenes] = useState<Set<number>>(new Set());
@@ -92,7 +92,7 @@ export const useImageGeneration = (
       if (!isMountedRef.current) {
         return; 
       }
-      const sceneImagesMap: Record<string | number, SceneImage[]> = {};
+      const sceneImagesMap: Record<number, SceneImage[]> = {};
       const characterImagesMap: Record<string, CharacterImage> = {};
 
       if (response.images && Array.isArray(response.images)) {
@@ -136,9 +136,8 @@ export const useImageGeneration = (
             const sn = Number(sceneNumber);
 
             // Use composite key to match state structure
-            const sceneKey = selectedScriptId && normalizedScriptId === selectedScriptId
-                ? `${selectedScriptId}_${sn}` 
-                : sn;
+            // Use simple numeric key since we filter by scriptId already
+            const sceneKey = sn;
 
             if (!sceneImagesMap[sceneKey]) {
               sceneImagesMap[sceneKey] = [];
@@ -166,15 +165,17 @@ export const useImageGeneration = (
               script_id: normalizedScriptId,
             });
 
-            characterImagesMap[characterName] = {
-              name: characterName,
-              imageUrl: url,
-              prompt: metadata.image_prompt ?? "",
-              generationStatus: uiStatus,
-              generatedAt: img.created_at,
-              id: img.id,
-              script_id: normalizedScriptId,
-            };
+            if (characterName) {
+              characterImagesMap[characterName] = {
+                name: characterName,
+                imageUrl: url,
+                prompt: metadata.image_prompt ?? "",
+                generationStatus: uiStatus,
+                generatedAt: img.created_at,
+                id: img.id,
+                script_id: normalizedScriptId,
+              };
+            }
             return;
           }
           // Optionally ignore other types without logging noise
@@ -207,7 +208,8 @@ export const useImageGeneration = (
     sceneDescription: string,
     options: ImageGenerationOptions,
     characterIds?: string[],
-    characterImageUrls?: string[]
+    characterImageUrls?: string[],
+    isSuggestedShot: boolean = false
   ) => {
     setGeneratingScenes((prev) => new Set(prev).add(sceneNumber));
 
@@ -227,7 +229,7 @@ export const useImageGeneration = (
 
       setSceneImages((prev) => ({ 
         ...prev, 
-        [sceneKey]: [tempImage, ...(prev[sceneKey] || [])]
+        [Number(sceneKey)]: [tempImage, ...(prev[Number(sceneKey)] || [])]
       }));
 
       const request = {
@@ -239,7 +241,8 @@ export const useImageGeneration = (
           : (options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined),
         script_id: selectedScriptId ?? undefined,
         character_ids: characterIds,
-        character_image_urls: characterImageUrls
+        character_image_urls: characterImageUrls,
+        is_suggested_shot: isSuggestedShot  // Pass suggested shot flag to backend
       };
 
       const result = await userService.generateSceneImage(chapterId!, sceneNumber, request);
@@ -249,10 +252,10 @@ export const useImageGeneration = (
         startPollingSceneImage(sceneNumber, result.record_id);
       } else {
         setSceneImages((prev) => {
-            const currentImages = prev[sceneKey] || [];
+            const currentImages = prev[Number(sceneKey)] || [];
             // Replace the temp generated image with the real one, or just prepend if not found?
             // Actually simpler to just map:
-            const updatedImages = currentImages.map(img => 
+            const updatedImages = currentImages.map((img: SceneImage) => 
                 img.generationStatus === 'generating' && img.prompt === sceneDescription 
                     ? {
                         ...tempImage,
@@ -281,9 +284,9 @@ export const useImageGeneration = (
           // Mark the specific temp image as failed?
           // Since we might have multiple generating, we need to be careful.
           // For now, let's mark the most recent 'generating' one as failed.
-          const sceneKey = selectedScriptId ? `${selectedScriptId}_${sceneNumber}` : sceneNumber;
+          const sceneKey = Number(sceneNumber);
           const currentImages = prev[sceneKey] || [];
-          const updatedImages = currentImages.map(img => 
+          const updatedImages = currentImages.map((img: SceneImage) => 
              img.generationStatus === 'generating' && img.prompt === sceneDescription
              ? { ...img, generationStatus: 'failed' as const }
              : img
@@ -379,8 +382,8 @@ export const useImageGeneration = (
   ) => {
     if (type === 'scene' && typeof identifier === 'number') {
       // Try composite key first, then number
-      const sceneKey = selectedScriptId ? `${selectedScriptId}_${identifier}` : identifier;
-      const images = sceneImages[sceneKey] || sceneImages[identifier];
+      const sceneKey = typeof identifier === 'number' ? identifier : Number(identifier);
+      const images = sceneImages[sceneKey];
       // Use the most recent image for prompt
       const existingImage = Array.isArray(images) && images.length > 0 ? images[0] : null;
       
@@ -401,8 +404,8 @@ export const useImageGeneration = (
 
       if (type === 'scene' && typeof identifier === 'number') {
         // Look up image ID
-        const sceneKey = selectedScriptId ? `${selectedScriptId}_${identifier}` : identifier;
-        const images = sceneImages[sceneKey] || sceneImages[identifier];
+        const sceneKey = Number(identifier);
+        const images = sceneImages[sceneKey];
         
         if (!targetId && Array.isArray(images) && images.length > 0) {
             targetId = images[0].id;
@@ -413,10 +416,10 @@ export const useImageGeneration = (
           
           setSceneImages(prev => {
             const updated = { ...prev };
-            // Remove specific image from array
-            const key = selectedScriptId ? `${selectedScriptId}_${identifier}` : identifier;
+             // Remove specific image from array
+            const key = Number(identifier);
             if (updated[key]) {
-                 updated[key] = updated[key].filter(img => img.id !== targetId);
+                 updated[key] = updated[key].filter((img: SceneImage) => img.id !== targetId);
                  if (updated[key].length === 0) {
                      delete updated[key];
                  }
@@ -496,7 +499,7 @@ export const useImageGeneration = (
         if (status.status === 'completed' && status.image_url) {
           // Update scene image with completed data
           setSceneImages((prev) => {
-            const sceneKey = status.script_id ? `${status.script_id}_${sceneNumber}` : sceneNumber;
+            const sceneKey = Number(sceneNumber);
             const currentImages = prev[sceneKey] || [];
             
             const existingIndex = currentImages.findIndex(img => img.id === recordId);
@@ -564,7 +567,7 @@ export const useImageGeneration = (
         } else if (status.status === 'failed') {
           // Update as failed
           setSceneImages((prev) => {
-             const sceneKey = status.script_id ? `${status.script_id}_${sceneNumber}` : sceneNumber;
+             const sceneKey = Number(sceneNumber);
              const currentImages = prev[sceneKey] || [];
              const updatedImages = currentImages.map(img => 
                 // Best effort match
@@ -643,11 +646,12 @@ export const useImageGeneration = (
       setSceneImages(prev => {
         const updated = { ...prev };
         Object.keys(updated).forEach(key => {
-          const images = updated[key];
+          const numKey = Number(key);
+          const images = updated[numKey];
           if (Array.isArray(images)) {
-             updated[key] = images.filter(img => img.id && !ids.includes(img.id));
-             if (updated[key].length === 0) {
-                 delete updated[key];
+             updated[numKey] = images.filter((img: SceneImage) => img.id && !ids.includes(img.id));
+             if (updated[numKey].length === 0) {
+                 delete updated[numKey];
              }
           }
         });
@@ -680,13 +684,14 @@ export const useImageGeneration = (
       setSceneImages(prev => {
         const updated = { ...prev };
         Object.keys(updated).forEach(key => {
-          const images = updated[key];
+          const numKey = Number(key);
+          const images = updated[numKey];
            if (Array.isArray(images) && images.length > 0) {
                // Check if ANY image in the group belongs to this script
                // Typically all images in a key group belong to same script/scene combo
                const normalizedScriptId = images[0].script_id ?? (images[0] as any).scriptId;
                if (normalizedScriptId === scriptId) {
-                  delete updated[key];
+                  delete updated[numKey];
                }
            }
         });
@@ -830,6 +835,7 @@ export const useImageGeneration = (
     deleteAllSceneGenerations,
     generateAllSceneImages,
     generateAllCharacterImages,
-    setCharacterImage
+    setCharacterImage,
+    setSceneImages
   };
 };

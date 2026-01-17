@@ -987,6 +987,7 @@ def generate_scene_image_task(
     retry_count: int = 0,
     character_ids: Optional[List[str]] = None,
     character_image_urls: Optional[List[str]] = None,
+    is_suggested_shot: bool = False,  # For suggested shot special handling
 ) -> None:
     """
     Asynchronous Celery task for generating scene images with retry mechanism.
@@ -1005,6 +1006,7 @@ def generate_scene_image_task(
         retry_count: Current retry count for exponential backoff
         character_ids: Optional list of character image IDs to use as style references
         character_image_urls: Optional list of direct character image URLs
+        is_suggested_shot: If True, maintains same background with only pose changes
     """
     return asyncio.run(
         async_generate_scene_image_task(
@@ -1021,6 +1023,7 @@ def generate_scene_image_task(
             retry_count=retry_count,
             character_ids=character_ids,
             character_image_urls=character_image_urls,
+            is_suggested_shot=is_suggested_shot,
             task_instance=self,
         )
     )
@@ -1040,6 +1043,7 @@ async def async_generate_scene_image_task(
     retry_count: int = 0,
     character_ids: Optional[List[str]] = None,
     character_image_urls: Optional[List[str]] = None,
+    is_suggested_shot: bool = False,
     task_instance: Any = None,
 ):
     """Async implementation of scene image generation task"""
@@ -1110,7 +1114,21 @@ async def async_generate_scene_image_task(
             # ✅ FIX: Combine scene_description with custom_prompt instead of replacing it
             # custom_prompt should enhance the description (e.g., "Lighting mood: natural")
             # NOT replace the actual scene content from the book
-            if custom_prompt:
+            if is_suggested_shot:
+                # Suggested shots should maintain same background, only change pose/expression
+                final_description = f"Cinematic film still, {scene_description}"
+                final_description += ". MAINTAIN EXACT SAME BACKGROUND AND ENVIRONMENT"
+                final_description += (
+                    ". Only change character pose, expression, and camera angle"
+                )
+                final_description += ". Professional cinematography, natural acting"
+                final_description += ". ABSOLUTELY NO TEXT, no words, no captions, no labels, no speech bubbles, no watermarks"
+                if custom_prompt:
+                    final_description += f". {custom_prompt}"
+                logger.info(
+                    f"[SceneImageTask] Generating SUGGESTED SHOT with preserved background"
+                )
+            elif custom_prompt:
                 final_description = f"{scene_description}. {custom_prompt}"
             else:
                 final_description = scene_description
@@ -1166,6 +1184,7 @@ async def async_generate_scene_image_task(
                 aspect_ratio=aspect_ratio or "16:9",
                 user_tier=user_tier,
                 character_image_urls=final_character_urls,
+                is_suggested_shot=is_suggested_shot,  # Pass flag for low-strength I2I
             )
 
             # Extract result data

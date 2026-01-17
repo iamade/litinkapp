@@ -48,7 +48,7 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         cost_per_1k_output=0.00028,
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="qwen/qwen3-coder",  # Qwen-Thinking (Replacing Grok-Thinking)
+        primary="google/gemini-2.5-pro",  # # Gemini-2.5-pro
         fallback="openai/gpt-4.5-preview",  # GPT-4.5-preview
         fallback2="anthropic/claude-opus-4",  # Claude-Opus-4.1
         max_tokens=8000,
@@ -269,6 +269,43 @@ AUDIO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 }
 
 
+# Image Upscaling Strategy (ModelsLab V6 API)
+# Tier-based model selection for super resolution
+# Higher tiers get higher quality upscaling with fallback options
+UPSCALE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
+    ModelTier.FREE: ModelConfig(
+        primary="RealESRGAN_x2plus",  # 2x upscaling - basic
+        fallback="realesr-general-x4v3",  # 4x general fallback
+        fallback2=None,
+    ),
+    ModelTier.BASIC: ModelConfig(
+        primary="realesr-general-x4v3",  # 4x general upscaling
+        fallback="RealESRGAN_x4plus",  # 4x fallback
+        fallback2="RealESRGAN_x2plus",  # 2x fallback
+    ),
+    ModelTier.STANDARD: ModelConfig(
+        primary="RealESRGAN_x4plus",  # 4x high quality
+        fallback="realesr-general-x4v3",  # 4x general fallback
+        fallback2="RealESRGAN_x2plus",  # 2x fallback
+    ),
+    ModelTier.PREMIUM: ModelConfig(
+        primary="RealESRGAN_x4plus",  # 4x high quality
+        fallback="ultra_resolution",  # 4K+ fallback
+        fallback2="realesr-general-x4v3",  # 4x general fallback
+    ),
+    ModelTier.PROFESSIONAL: ModelConfig(
+        primary="ultra_resolution",  # 4K+ upscaling - best quality
+        fallback="RealESRGAN_x4plus",  # 4x fallback
+        fallback2="realesr-general-x4v3",  # 4x general fallback
+    ),
+    ModelTier.ENTERPRISE: ModelConfig(
+        primary="ultra_resolution",  # 4K+ upscaling - best quality
+        fallback="RealESRGAN_x4plus",  # 4x fallback
+        fallback2="realesr-general-x4v3",  # 4x general fallback
+    ),
+}
+
+
 def get_model_config(service_type: str, tier: str) -> Optional[ModelConfig]:
     try:
         model_tier = ModelTier(tier.lower())
@@ -278,6 +315,7 @@ def get_model_config(service_type: str, tier: str) -> Optional[ModelConfig]:
             "image": IMAGE_MODEL_CONFIG,
             "video": VIDEO_MODEL_CONFIG,
             "audio": AUDIO_MODEL_CONFIG,
+            "upscale": UPSCALE_MODEL_CONFIG,
         }
 
         config = config_map.get(service_type.lower())

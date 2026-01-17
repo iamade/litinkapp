@@ -46,7 +46,7 @@ from sqlmodel import select
 from app.books.models import Chapter, Book
 from app.core.auth import get_current_active_user
 from app.core.services.pipeline import PipelineManager, PipelineStep
-from app.core.services.deepseek_script import DeepSeekScriptService
+# from app.core.services.deepseek_script import DeepSeekScriptService
 from app.core.services.openrouter import OpenRouterService, ModelTier
 from app.api.services.subscription import SubscriptionManager
 
@@ -1501,55 +1501,55 @@ async def get_script_details(
 
 
 # --- Script Evaluation Endpoint ---
-@router.post("/evaluate-script/{script_id}")
-async def evaluate_script(
-    script_id: str,
-    session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_active_user),
-):
-    """
-    Evaluate a script using DeepSeekScriptService (LLM) for coherence, storytelling, character consistency, video suitability.
-    Returns scores and feedback.
-    """
-    try:
-        # Fetch script and chapter context
-        stmt = select(Script).where(
-            Script.id == script_id, Script.user_id == current_user.id
-        )
-        result = await session.exec(stmt)
-        script_record = result.first()
-        if not script_record:
-            raise HTTPException(status_code=404, detail="Script not found")
-        script = script_record.script
-        chapter_id = script_record.chapter_id
-        plot_context = None
-        if chapter_id:
-            stmt = select(Chapter).where(Chapter.id == chapter_id)
-            result = await session.exec(stmt)
-            chapter = result.first()
-            plot_context = chapter.content if chapter else None
+# @router.post("/evaluate-script/{script_id}")
+# async def evaluate_script(
+#     script_id: str,
+#     session: AsyncSession = Depends(get_session),
+#     current_user: User = Depends(get_current_active_user),
+# ):
+#     """
+#     Evaluate a script using DeepSeekScriptService (LLM) for coherence, storytelling, character consistency, video suitability.
+#     Returns scores and feedback.
+#     """
+#     try:
+#         # Fetch script and chapter context
+#         stmt = select(Script).where(
+#             Script.id == script_id, Script.user_id == current_user.id
+#         )
+#         result = await session.exec(stmt)
+#         script_record = result.first()
+#         if not script_record:
+#             raise HTTPException(status_code=404, detail="Script not found")
+#         script = script_record.script
+#         chapter_id = script_record.chapter_id
+#         plot_context = None
+#         if chapter_id:
+#             stmt = select(Chapter).where(Chapter.id == chapter_id)
+#             result = await session.exec(stmt)
+#             chapter = result.first()
+#             plot_context = chapter.content if chapter else None
 
-        # Evaluate using DeepSeekScriptService
-        from app.core.services.deepseek_script import DeepSeekScriptService
+#         # Evaluate using DeepSeekScriptService
+#         from app.core.services.deepseek_script import DeepSeekScriptService
 
-        deepseek = DeepSeekScriptService()
-        result = await deepseek.evaluate_script(script, plot_context=plot_context)
+#         deepseek = DeepSeekScriptService()
+#         result = await deepseek.evaluate_script(script, plot_context=plot_context)
 
-        # Optionally update script status and store evaluation
-        if result.get("status") == "success" and result.get("scores"):
-            stmt = select(Script).where(Script.id == script_id)
-            exec_result = await session.exec(stmt)
-            script_record = exec_result.first()
-            if script_record:
-                script_record.evaluation = result["scores"]
-                script_record.status = "evaluated"
-                session.add(script_record)
-                await session.commit()
+#         # Optionally update script status and store evaluation
+#         if result.get("status") == "success" and result.get("scores"):
+#             stmt = select(Script).where(Script.id == script_id)
+#             exec_result = await session.exec(stmt)
+#             script_record = exec_result.first()
+#             if script_record:
+#                 script_record.evaluation = result["scores"]
+#                 script_record.status = "evaluated"
+#                 session.add(script_record)
+#                 await session.commit()
 
-        return result
-    except Exception as e:
-        print(f"Error evaluating script: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+#         return result
+#     except Exception as e:
+#         print(f"Error evaluating script: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- Script Status Management Endpoints ---

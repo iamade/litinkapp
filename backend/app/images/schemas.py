@@ -13,6 +13,7 @@ class SceneImageRequest(BaseModel):
     script_id: Optional[str] = None
     character_ids: Optional[List[str]] = None
     character_image_urls: Optional[List[str]] = None
+    is_suggested_shot: bool = False  # For suggested shot special handling
 
 
 class CharacterImageRequest(BaseModel):
@@ -132,3 +133,24 @@ class ImageStatusResponse(BaseModel):
     generation_time_seconds: Optional[float] = None
     created_at: str
     updated_at: Optional[str] = None
+
+
+class ImageUpscaleRequest(BaseModel):
+    """Request model for image upscaling"""
+
+    image_url: str
+    model_id: str = "realesr-general-x4v3"  # Default: 4x general upscaling
+    scale: int = 4  # 2, 3, or 4
+    face_enhance: bool = False
+
+
+class ImageUpscaleResponse(BaseModel):
+    """Response model for image upscaling"""
+
+    status: str
+    upscaled_url: Optional[str] = None
+    original_url: str
+    model_used: str
+    scale: int
+    generation_time: Optional[float] = None
+    message: str

@@ -1,7 +1,17 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, Search } from 'lucide-react';
+import { X, Search, Sparkles, Box, MapPin } from 'lucide-react';
 import { CharacterImage } from './types';
+
+// Tier-based character reference limits
+const TIER_CHARACTER_LIMITS: Record<string, number> = {
+  free: 4,
+  basic: 5,
+  standard: 6,
+  premium: 8,
+  professional: 10,
+  enterprise: 99, // Effectively unlimited
+};
 
 interface SceneGenerationModalProps {
   isOpen: boolean;
@@ -14,6 +24,7 @@ interface SceneGenerationModalProps {
   isGenerating: boolean;
   parentSceneImageUrl?: string;  // For suggested shots - shows reference for consistency
   isSuggestedShot?: boolean;     // Flag to show "suggested shot" context in UI
+  userTier?: string;             // User subscription tier for character limits
 }
 
 const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
@@ -26,11 +37,16 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
   onGenerate,
   isGenerating,
   parentSceneImageUrl,
-  isSuggestedShot = false
+  isSuggestedShot = false,
+  userTier = 'free'
 }) => {
   const [description, setDescription] = useState(initialDescription);
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<Set<string>>(new Set());
   const [searchTerm, setSearchTerm] = useState('');
+  const [showUpgradeHint, setShowUpgradeHint] = useState(false);
+
+  // Get character limit for user's tier
+  const characterLimit = TIER_CHARACTER_LIMITS[userTier.toLowerCase()] || TIER_CHARACTER_LIMITS.free;
 
   // Reset state when modal opens
   useEffect(() => {
@@ -38,6 +54,7 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
       setDescription(initialDescription);
       setSelectedCharacterIds(new Set());
       setSearchTerm('');
+      setShowUpgradeHint(false);
     }
   }, [isOpen, initialDescription]);
 
@@ -48,13 +65,15 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
     const newSelected = new Set(selectedCharacterIds);
     if (newSelected.has(characterId)) {
       newSelected.delete(characterId);
+      setShowUpgradeHint(false);
     } else {
-      if (newSelected.size >= 3) {
-        // Optional: limit number of characters if needed, but 3 is reasonable for i2i
-        // For now preventing more than 3 to avoid clutter/poor results
+      if (newSelected.size >= characterLimit) {
+        // Show upgrade hint instead of silently blocking
+        setShowUpgradeHint(true);
         return; 
       }
       newSelected.add(characterId);
+      setShowUpgradeHint(false);
     }
     setSelectedCharacterIds(newSelected);
   };
@@ -130,13 +149,27 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
               <label className="text-sm font-medium text-gray-300">
                 Reference Characters
                 <span className="ml-2 text-xs text-gray-500 font-normal">
-                  (Select up to 3)
+                  (Select up to {characterLimit})
                 </span>
               </label>
               <span className="text-xs text-indigo-400 font-medium">
-                {selectedCharacterIds.size} selected
+                {selectedCharacterIds.size}/{characterLimit} selected
               </span>
             </div>
+
+            {/* Upgrade Notification */}
+            {showUpgradeHint && (
+              <div className="flex items-center gap-2 p-3 bg-gradient-to-r from-indigo-900/40 to-purple-900/40 border border-indigo-700/50 rounded-lg">
+                <Sparkles className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                <p className="text-xs text-indigo-200">
+                  You've reached your limit of {characterLimit} characters.{' '}
+                  <a href="/pricing" className="text-indigo-400 hover:text-indigo-300 underline font-medium">
+                    Upgrade your subscription
+                  </a>
+                  {' '}for more character references.
+                </p>
+              </div>
+            )}
 
             {/* Search */}
             <div className="relative">
@@ -157,37 +190,61 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
                   <span className="text-gray-400 text-sm font-medium mb-1">No generated characters available</span>
                   <p className="text-gray-500 text-xs">Generate character images in the "Characters" tab first to use them as references here.</p>
                 </div>
-              ) : filteredCharacters.map((char) => (
-                <button
-                  key={char.id}
-                  onClick={() => toggleCharacterSelection(char.id)}
-                  className={`
-                    group relative aspect-square rounded-lg overflow-hidden border-2 transition-all
-                    ${selectedCharacterIds.has(char.id || '') 
-                      ? 'border-indigo-500 ring-2 ring-indigo-500/20' 
-                      : 'border-transparent hover:border-gray-600'}
-                  `}
-                >
-                  <img 
-                    src={char.imageUrl || ''} 
-                    alt={char.name || 'Character'} 
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-100" />
-                  <span className="absolute bottom-1.5 left-2 right-2 text-xs font-medium text-white truncate text-left">
-                    {char.name || 'Unknown'}
-                  </span>
-                  
-                  {/* Selection Indicator */}
-                  {selectedCharacterIds.has(char.id || '') && (
-                    <div className="absolute top-2 right-2 w-5 h-5 bg-indigo-500 rounded-full flex items-center justify-center shadow-sm">
-                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </div>
-                  )}
-                </button>
-              ))}
+              ) : filteredCharacters.map((char) => {
+                const entityType = (char as any).entity_type || 'character';
+                const isObject = entityType === 'object';
+                const isLocation = entityType === 'location';
+                const borderColorSelected = isObject 
+                  ? 'border-purple-500 ring-2 ring-purple-500/20' 
+                  : isLocation 
+                    ? 'border-amber-500 ring-2 ring-amber-500/20'
+                    : 'border-indigo-500 ring-2 ring-indigo-500/20';
+                const indicatorColor = isObject 
+                  ? 'bg-purple-500' 
+                  : isLocation 
+                    ? 'bg-amber-500' 
+                    : 'bg-indigo-500';
+
+                return (
+                  <button
+                    key={`${char.id}-${entityType}`}
+                    onClick={() => toggleCharacterSelection(char.id)}
+                    className={`
+                      group relative aspect-square rounded-lg overflow-hidden border-2 transition-all
+                      ${selectedCharacterIds.has(char.id || '') 
+                        ? borderColorSelected 
+                        : 'border-transparent hover:border-gray-600'}
+                    `}
+                  >
+                    <img 
+                      src={char.imageUrl || ''} 
+                      alt={char.name || 'Character'} 
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-100" />
+                    
+                    {/* Entity Type Icon */}
+                    {(isObject || isLocation) && (
+                      <div className={`absolute top-2 left-2 p-1 rounded ${isObject ? 'bg-purple-600' : 'bg-amber-600'}`}>
+                        {isObject ? <Box className="w-3 h-3 text-white" /> : <MapPin className="w-3 h-3 text-white" />}
+                      </div>
+                    )}
+                    
+                    <span className="absolute bottom-1.5 left-2 right-2 text-xs font-medium text-white truncate text-left">
+                      {char.name || 'Unknown'}
+                    </span>
+                    
+                    {/* Selection Indicator */}
+                    {selectedCharacterIds.has(char.id || '') && (
+                      <div className={`absolute top-2 right-2 w-5 h-5 ${indicatorColor} rounded-full flex items-center justify-center shadow-sm`}>
+                        <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>

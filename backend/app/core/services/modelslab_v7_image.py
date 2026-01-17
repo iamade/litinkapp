@@ -252,7 +252,7 @@ class ModelsLabV7ImageService:
                     self.image_endpoint,
                     json=payload,
                     headers=self.headers,
-                    timeout=aiohttp.ClientTimeout(total=60),
+                    timeout=aiohttp.ClientTimeout(total=180),
                 ) as response:
 
                     if response.status != 200:
@@ -466,8 +466,21 @@ class ModelsLabV7ImageService:
         user_tier: Optional[str] = None,
         wait_for_completion: bool = True,
         max_wait_time: int = 1200,
+        strength: float = 0.7,  # Controls how much to modify input image (0.0-1.0)
     ) -> Dict[str, Any]:
-        """Generate image using Image-to-Image models"""
+        """Generate image using Image-to-Image models
+
+        Args:
+            prompt: Text prompt for generation
+            init_images: Reference images
+            aspect_ratio: Output aspect ratio
+            model_id: Specific model to use
+            user_tier: User tier for model selection
+            wait_for_completion: Wait for async generation
+            max_wait_time: Max wait time in seconds
+            strength: How much to modify input (0.0 = identical, 1.0 = completely different)
+                      Use lower values (0.2-0.4) for suggested shots to preserve background
+        """
 
         # Determine model if not provided
         if not model_id and user_tier:
@@ -481,6 +494,7 @@ class ModelsLabV7ImageService:
                 "model_id": model_id,
                 "key": self.api_key,
                 "aspect_ratio": aspect_ratio,
+                "strength": str(strength),  # Add strength to payload
             }
 
             # Handle model-specific payloads
@@ -524,7 +538,7 @@ class ModelsLabV7ImageService:
                     self.image_to_image_endpoint,
                     json=payload,
                     headers=self.headers,
-                    timeout=aiohttp.ClientTimeout(total=60),
+                    timeout=aiohttp.ClientTimeout(total=180),
                 ) as response:
 
                     if response.status != 200:
@@ -559,6 +573,7 @@ class ModelsLabV7ImageService:
         user_tier: Optional[str] = None,
         character_image_urls: Optional[List[str]] = None,
         prompt_already_built: bool = True,  # Flag to indicate if prompt is pre-built
+        is_suggested_shot: bool = False,  # For suggested shots, use lower strength
     ) -> Dict[str, Any]:
         """
         Generate scene image using V7 API with automatic fallback.
@@ -567,6 +582,9 @@ class ModelsLabV7ImageService:
         This allows StandaloneImageService to handle all prompt engineering centrally.
 
         When prompt_already_built=False, basic style modifiers are added (for backward compatibility).
+
+        Args:
+            is_suggested_shot: If True, uses lower I2I strength (0.30) to preserve parent scene background
         """
         try:
             if prompt_already_built:
@@ -590,18 +608,27 @@ class ModelsLabV7ImageService:
                 f"[SCENE IMAGE] Generating {style} scene: {full_prompt[:80]}..."
             )
             logger.info(f"[SCENE IMAGE] User tier: {user_tier}")
+            if is_suggested_shot:
+                logger.info(
+                    f"[SCENE IMAGE] SUGGESTED SHOT mode - using low strength for background preservation"
+                )
 
             # Use Image-to-Image if character images are provided
             if character_image_urls and len(character_image_urls) > 0:
                 logger.info(
                     f"[SCENE IMAGE] Using {len(character_image_urls)} character reference images"
                 )
+                # Use lower strength for suggested shots to preserve parent scene background
+                i2i_strength = 0.30 if is_suggested_shot else 0.7
+                logger.info(f"[SCENE IMAGE] I2I strength: {i2i_strength}")
+
                 result = await self.generate_image_to_image(
                     prompt=full_prompt,
                     init_images=character_image_urls,
                     aspect_ratio=aspect_ratio,
                     user_tier=user_tier,
                     wait_for_completion=True,
+                    strength=i2i_strength,  # Pass strength based on suggested shot
                 )
             else:
                 # Standard Text-to-Image

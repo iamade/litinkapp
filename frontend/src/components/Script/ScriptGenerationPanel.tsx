@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User } from 'lucide-react';
+import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User, Activity } from 'lucide-react';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
 
@@ -183,7 +183,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       }));
     }
   }, [plotOverview?.script_story_type, plotOverview?.story_type]);
-  const [activeView, setActiveView] = useState<'overview' | 'acts' | 'scenes' | 'dialogue'>('overview');
+  const [activeView, setActiveView] = useState<'overview' | 'acts' | 'scenes' | 'dialogue' | 'performance'>('overview');
   const [showFullScript, setShowFullScript] = useState(false);
   const [isAddingCharacter, setIsAddingCharacter] = useState(false);
   const [newCharacterName, setNewCharacterName] = useState('');
@@ -520,7 +520,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
           {/* Script Navigation */}
           <div className="flex space-x-4">
-            {['overview', 'acts', 'scenes', 'dialogue'].map((view) => (
+            {['overview', 'acts', 'scenes', 'dialogue', 'performance'].map((view) => (
               <button
                 key={view}
                 onClick={() => setActiveView(view as typeof activeView)}
@@ -530,7 +530,14 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
                 }`}
               >
-                {view.charAt(0).toUpperCase() + view.slice(1)}
+                {view === 'performance' ? (
+                  <div className="flex items-center space-x-1">
+                    <Activity className="w-3 h-3" />
+                    <span>Map</span>
+                  </div>
+                ) : (
+                  view.charAt(0).toUpperCase() + view.slice(1)
+                )}
               </button>
             ))}
           </div>
@@ -541,7 +548,9 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           {activeView === 'overview' && renderScriptOverview(selectedScript)}
           {activeView === 'acts' && renderActsBreakdown(selectedScript)}
           {activeView === 'scenes' && renderScenesDetail(selectedScript)}
+          {activeView === 'scenes' && renderScenesDetail(selectedScript)}
           {activeView === 'dialogue' && renderDialogueView(selectedScript)}
+          {activeView === 'performance' && renderPerformanceMap(selectedScript)}
         </div>
       </div>
     );
@@ -1052,6 +1061,161 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       </div>
     </div>
   );
+
+  const renderPerformanceMap = (script: ChapterScript) => {
+    // 1. Parsing logic (duplicated for isolation)
+    const scriptText = script.script || '';
+    // Match basic scene headers
+    const scenePattern = /(\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+(\d+(?:\.\d+)?)\*?\*?)/gi;
+    const matches = [...scriptText.matchAll(scenePattern)];
+    
+    // Fallback if no text but we have scene definitions
+    let displayScenes: { number: number; label: string; energy: number; description: string }[] = [];
+    
+    // Heuristic for Energy
+    const calculateEnergy = (text: string) => {
+        let score = 5; // Neutral baseline
+        const high = ['shout', 'scream', 'yell', 'attack', 'run', 'fight', 'explosion', 'urgent', 'anger', 'furious', 'fast', 'quick', 'loud', 'argue', 'chase'];
+        const low = ['whisper', 'cry', 'sob', 'sad', 'slow', 'quiet', 'calm', 'wait', 'pause', 'silence', 'sleep', 'dream', 'solitary'];
+        
+        const lower = text.toLowerCase();
+        high.forEach(w => { if (lower.includes(w)) score += 1; });
+        low.forEach(w => { if (lower.includes(w)) score -= 1; });
+        return Math.max(1, Math.min(10, score));
+    };
+
+    if (matches.length > 0) {
+        displayScenes = matches.map((match, idx) => {
+            const startIdx = match.index!;
+            const endIdx = idx < matches.length - 1 ? matches[idx + 1].index! : scriptText.length;
+            const content = scriptText.substring(startIdx, endIdx);
+            const energy = calculateEnergy(content);
+            return {
+                number: idx + 1,
+                label: `Scene ${idx + 1}`,
+                energy,
+                description: content.substring(0, 100) + '...'
+            };
+        });
+    } else if (script.scenes && script.scenes.length > 0) {
+        displayScenes = script.scenes.map((s, idx) => ({
+            number: s.scene_number || idx + 1,
+            label: `Scene ${s.scene_number || idx + 1}`,
+            energy: calculateEnergy(s.visual_description + ' ' + s.action + ' ' + s.dialogue),
+            description: s.visual_description.substring(0, 100) + '...'
+        }));
+    } else if (script.scene_descriptions && script.scene_descriptions.length > 0) {
+        displayScenes = script.scene_descriptions.map((s: any, idx) => ({
+            number: s.scene_number || idx + 1,
+            label: `Scene ${s.scene_number || idx + 1}`,
+            energy: calculateEnergy(typeof s === 'string' ? s : s.visual_description || ''),
+            description: (typeof s === 'string' ? s : s.visual_description || '').substring(0, 100) + '...'
+        }));
+    }
+
+    if (displayScenes.length === 0) {
+        return (
+            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
+                <Activity className="mx-auto h-12 w-12 mb-4 opacity-50" />
+                <p>No scene data available for analysis</p>
+            </div>
+        );
+    }
+
+    // SVG Chart
+
+    const points = displayScenes.map((s, i) => {
+        const x = (i / (displayScenes.length - 1 || 1)) * 100;
+        const y = 100 - (s.energy * 10); // Map 0-10 to 100-0%
+        return `${x},${y}`;
+    }).join(' ');
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <div>
+                   <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Emotional Performance Map</h4>
+                   <p className="text-sm text-gray-600 dark:text-gray-400">Visualizing narrative energy across {displayScenes.length} scenes</p>
+                </div>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
+                <div className="h-[250px] w-full relative">
+                    {/* Y-Axis Labels */}
+                    <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-xs text-gray-400">
+                        <span>High</span>
+                        <span>Neutral</span>
+                        <span>Low</span>
+                    </div>
+
+                    {/* Chart Area */}
+                    <div className="absolute left-12 right-0 top-4 bottom-8 border-l border-b border-gray-200 dark:border-gray-700">
+                         {/* SVG Line */}
+                         <svg className="w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100">
+                            {/* Grid lines */}
+                            <line x1="0" y1="50" x2="100" y2="50" stroke="currentColor" strokeOpacity="0.1" strokeDasharray="4" />
+                            
+                            {/* Path */}
+                            <polyline 
+                                points={points} 
+                                fill="none" 
+                                stroke="#8b5cf6" 
+                                strokeWidth="3" // Increased visibility
+                                vectorEffect="non-scaling-stroke"
+                            />
+                            
+                            {/* Points */}
+                            {displayScenes.map((s, i) => (
+                                <circle
+                                    key={i}
+                                    cx={(i / (displayScenes.length - 1 || 1)) * 100}
+                                    cy={100 - (s.energy * 10)}
+                                    r="1.5"
+                                    fill="white"
+                                    stroke="#8b5cf6"
+                                    strokeWidth="0.5" // Adjust relative to viewbox
+                                    vectorEffect="non-scaling-stroke" // Keep uniform size
+                                    className="hover:r-2 transition-all cursor-pointer"
+                                >
+                                    <title>{s.label}: Energy {s.energy}/10</title>
+                                </circle>
+                            ))}
+                         </svg>
+                    </div>
+
+                     {/* X-Axis Labels */}
+                    <div className="absolute left-12 right-0 bottom-0 flex justify-between text-xs text-gray-400 pt-2">
+                        <span>Start</span>
+                        <span>End</span>
+                    </div>
+                </div>
+            </div>
+
+            {/* Key Moments */}
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {displayScenes.filter(s => s.energy >= 7 || s.energy <= 3).map((scene, idx) => (
+                    <div key={idx} className={`p-4 rounded-lg border ${
+                        scene.energy >= 7 
+                        ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800' 
+                        : 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800'
+                    }`}>
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="font-semibold text-gray-900 dark:text-white">{scene.label}</span>
+                            <span className={`text-xs px-2 py-1 rounded-full ${
+                                scene.energy >= 7 ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
+                            }`}>
+                                {scene.energy >= 7 ? 'High Energy' : 'Introspective'}
+                            </span>
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
+                            {scene.description}
+                        </p>
+                    </div>
+                ))}
+             </div>
+        </div>
+    );
+  };
 
   return (
     <div className="space-y-6">

@@ -17,7 +17,12 @@ import {
   FileText,
   UserPlus,
   Check,
-  X 
+  X,
+  Box,
+  MapPin,
+  ChevronDown,
+  ChevronRight,
+  ZoomIn
 } from 'lucide-react';
 import { userService } from '../../services/userService';
 import { Tables } from '../../types/supabase';
@@ -42,9 +47,32 @@ import {
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { upscaleImage } from '../../lib/api/upscale';
 
 import { projectService } from '../../services/projectService';
 import SceneGenerationModal from './SceneGenerationModal';
+import { StoryboardSceneRow } from './StoryboardSceneRow';
+
+const SortableStoryboardRow = ({ id, ...props }: any) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <StoryboardSceneRow {...props} dragHandleListeners={listeners} />
+    </div>
+  );
+};
 
 // Define ChapterScript interface locally if not available globally
 interface SceneDescription {
@@ -71,19 +99,64 @@ interface ImagesPanelProps {
   selectedScript: unknown;
   plotOverview: { characters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string; image_url?: string }> } | null;
   onRefreshPlotOverview?: () => void | Promise<void>;
+  userTier?: string; // User subscription tier for character reference limits
 }
+
+// Robust script scene parsing helper (copied from AudioPanel)
+const parseScriptScenes = (scriptText: string): string[] => {
+    if (!scriptText) return [];
+    
+    // Split by common scene headers (e.g. **ACT I - SCENE 1**, INT., EXT.)
+    // This is a simplified parser to ensure we get *something* for the UI
+    const lines = scriptText.split('\n');
+    const extractedScenes: string[] = [];
+    let currentBuffer: string[] = [];
+    
+    // Regex to detect scene start
+    // Matches: **ACT I - SCENE 1**, SCENE 1, ACT 1 SCENE 1, SCENE 1.1, SCENE 1.2
+    const sceneStartRegex = /^(?:\*\*)?(?:ACT\s+[IVX\d]+\s*[-–]\s*)?SCENE\s+\d+(?:\.\d+)?(?:[-–].*)?(?:\*\*)?/i;
+    
+    lines.forEach((line) => {
+        const trimmed = line.trim();
+        const isSceneHeader = sceneStartRegex.test(trimmed);
+        
+        // If we hit a new explicit scene header, push previous buffer
+        if (isSceneHeader) {
+            if (currentBuffer.length > 0) {
+                // Join buffer and clean up
+                const sceneText = currentBuffer.join('\n').trim();
+                // Avoid empty scenes or just title scenes
+                if (sceneText.length > 20) extractedScenes.push(sceneText);
+            }
+            currentBuffer = [line]; // Start new buffer with header
+        } else {
+            currentBuffer.push(line);
+        }
+    });
+    
+    // Push last buffer
+    if (currentBuffer.length > 0) {
+        const sceneText = currentBuffer.join('\n').trim();
+        if (sceneText.length > 10) extractedScenes.push(sceneText);
+    }
+    
+    return extractedScenes;
+};
 
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
   chapterId,
   chapterTitle,
   selectedScript,
   plotOverview,
-  onRefreshPlotOverview
+  onRefreshPlotOverview,
+  userTier = 'free'
 }) => {
   const {
     selectedScriptId,
     versionToken,
-    isSwitching
+    isSwitching,
+    selectedSceneImages,
+    setSelectedSceneImage
   } = useScriptSelection();
 
   // State for image generation
@@ -115,86 +188,22 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const [deleteAction, setDeleteAction] = useState<'selected' | 'all' | null>(null);
   const [selectedSceneIds, setSelectedSceneIds] = useState<Set<string>>(new Set());
   
-  // Generation options
+  // Key scene tracking: map of scene_number -> image_id (for suggested shots reference)
+  const [keySceneIds, setKeySceneIds] = useState<Record<number, string>>({});
+  
+  // Objects & Locations section state
+  const [isObjectsExpanded, setIsObjectsExpanded] = useState(true);
+
+  const [upscalingImages, setUpscalingImages] = useState<Set<string>>(new Set());
+  
   const [generationOptions, setGenerationOptions] = useState({
-    style: 'cinematic' as 'realistic' | 'cartoon' | 'cinematic' | 'fantasy' | 'sketch',
-    quality: 'hd' as 'standard' | 'hd',
-    aspectRatio: '16:9' as '16:9' | '4:3' | '1:1' | '9:16',
+    style: 'cinematic',
+    quality: 'standard',
+    aspectRatio: '16:9',
     useCharacterReferences: true,
-    includeBackground: true,
-    lightingMood: 'natural',
-    customPrompt: ''
-  });
+    lightingMood: 'cinematic'
+  } as ImageGenerationOptions);
 
-  const {
-    sceneImages,
-    characterImages,
-    isLoading,
-    generatingScenes,
-    generatingCharacters,
-    loadImages,
-    generateSceneImage,
-    generateCharacterImage,
-    regenerateImage,
-    deleteImage,
-    deleteGenerations,
-    deleteAllSceneGenerations,
-    generateAllSceneImages,
-    generateAllCharacterImages,
-    setCharacterImage
-  } = useImageGeneration(chapterId, selectedScriptId);
-
-  // Storyboard scene order state (must be at top-level for hooks rules)
-  const [sceneOrder, setSceneOrder] = useState<number[]>([]);
-  
-  // DnD sensors (must be at top-level)
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
-
-  // Initialize scene order when script changes
-  useEffect(() => {
-    if (selectedScript && typeof selectedScript === 'object' && 'scenes' in selectedScript) {
-      const scriptData = selectedScript as ChapterScript;
-      const scriptScenes = scriptData.scenes || [];
-      const order = scriptData.scene_order || scriptScenes.map(s => s.scene_number).sort((a, b) => a - b);
-      setSceneOrder(order);
-    }
-  }, [selectedScript]);
-
-
-  useEffect(() => {
-    if (!chapterId) {
-      return;
-    }
-    // loadImages(); // Removed as useImageGeneration now handles initial load
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapterId, versionToken]);
-
-  // Empty state when no script or chapter is selected
-  if (!selectedScriptId || !chapterId) {
-    return (
-      <div className="flex items-center justify-center h-64 text-gray-500">
-        <div className="text-center">
-          <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
-          <p className="text-lg font-medium">Select a script to view images</p>
-          <p className="text-sm">Choose a script from the sidebar to generate and view scene images</p>
-          {!chapterId && (
-            <p className="text-xs text-orange-500 mt-2">Chapter ID not available</p>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Disable actions during switching
-  const isDisabled = isSwitching;
-
-
-  
   // Get scenes from selected script by parsing script text (like ScriptGenerationPanel does)
   const scenes = React.useMemo(() => {
     if (!selectedScript) {
@@ -237,10 +246,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         const content = contentLines.join(' ').substring(0, 300);
 
         parsedScenes.push({
-          // Use captured scene number (supports sub-scenes like 1.1, 1.2)
-          scene_number: match[2] ? parseInt(match[2]) : idx + 1,
-          visual_description: content || location || `Scene ${match[2] || idx + 1}`,
-          description: content || location || `Scene ${match[2] || idx + 1}`,
+          // IMPORTANT: Use global index (idx+1) for scene_number to ensure uniqueness across acts
+          // The match[2] captures per-Act scene number (e.g., "1" for both ACT I SCENE 1 and ACT II SCENE 1)
+          // which causes image matching issues since images are stored by scene_number
+          scene_number: idx + 1,
+          visual_description: content || location || `Scene ${idx + 1}`,
+          description: content || location || `Scene ${idx + 1}`,
           header: match[0].replace(/\*/g, '').trim(),
           location: location
         });
@@ -291,6 +302,152 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     return [];
   }, [selectedScript]);
 
+
+  const {
+    sceneImages,
+    characterImages,
+
+    generatingScenes,
+    generatingCharacters,
+    loadImages,
+    generateSceneImage,
+    generateCharacterImage,
+    regenerateImage,
+    deleteImage,
+    deleteGenerations,
+    deleteAllSceneGenerations,
+    generateAllSceneImages,
+    generateAllCharacterImages,
+    setCharacterImage,
+    setSceneImages
+  } = useImageGeneration(chapterId, selectedScriptId);
+
+  const handleUpscaleImage = async (_sceneNumber: number, imageUrl: string) => {
+    if (upscalingImages.has(imageUrl)) return;
+    
+    // Add to upscaling set
+    setUpscalingImages(prev => new Set(prev).add(imageUrl));
+    const toastId = toast.loading('Upscaling image...');
+    
+    try {
+       // We use 'free' tier as default for now, or could get from user profile if available
+       const result = await upscaleImage(imageUrl, 'free');
+       
+       if (result.upscaled_url) {
+          // Update local state immediately
+          setSceneImages((prev: Record<number | string, SceneImage[]>) => {
+             // We need to handle both key formats (sceneNumber vs scriptId_sceneNumber)
+             // Best effort: update all occurrences
+             const newState = { ...prev };
+             
+             Object.keys(newState).forEach(key => {
+                 const images = newState[key];
+                 if (Array.isArray(images)) {
+                     const updatedImages = images.map(img => {
+                         if (img.imageUrl === imageUrl) {
+                             return {
+                                 ...img,
+                                 imageUrl: result.upscaled_url
+                             };
+                         }
+                         return img;
+                     });
+                     newState[key] = updatedImages;
+                 }
+             });
+             
+             return newState;
+          });
+          
+          toast.success('Image upscaled successfully!', { id: toastId });
+       }
+    } catch (error) {
+       console.error(error);
+       toast.error('Failed to upscale image', { id: toastId });
+    } finally {
+       setUpscalingImages(prev => {
+          const next = new Set(prev);
+          next.delete(imageUrl);
+          return next;
+       });
+    }
+  };
+
+  // Storyboard scene order state (must be at top-level for hooks rules)
+  const [sceneOrder, setSceneOrder] = useState<number[]>([]);
+  
+  // DnD sensors (must be at top-level)
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Initialize scene order when script changes
+  useEffect(() => {
+    if (selectedScript && typeof selectedScript === 'object' && 'scenes' in selectedScript) {
+      const scriptData = selectedScript as ChapterScript;
+      const scriptScenes = scriptData.scenes || [];
+      const availableSceneNumbers = new Set(scriptScenes.map(s => s.scene_number));
+      
+      let order = scriptData.scene_order || [];
+      
+      // Smart Sync: Ensure all current scenes are present and deleted ones are removed
+      if (order.length === 0) {
+        order = scriptScenes.map(s => s.scene_number).sort((a, b) => a - b);
+      } else {
+        // Remove scenes that no longer exist
+        order = order.filter(n => availableSceneNumbers.has(n));
+        
+        // Add new scenes that aren't in the order yet
+        const presentInOrder = new Set(order);
+        const newScenes = scriptScenes
+            .map(s => s.scene_number)
+            .filter(n => !presentInOrder.has(n))
+            .sort((a,b) => a-b);
+            
+        if (newScenes.length > 0) {
+            order = [...order, ...newScenes];
+        }
+      }
+      
+      setSceneOrder(order);
+    }
+  }, [selectedScript]);
+
+
+  useEffect(() => {
+    if (!chapterId) {
+      return;
+    }
+    // loadImages(); // Removed as useImageGeneration now handles initial load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chapterId, versionToken]);
+
+  // Empty state when no script or chapter is selected
+  if (!selectedScriptId || !chapterId) {
+    return (
+      <div className="flex items-center justify-center h-64 text-gray-500">
+        <div className="text-center">
+          <Camera className="mx-auto h-12 w-12 mb-4 opacity-50" />
+          <p className="text-lg font-medium">Select a script to view images</p>
+          <p className="text-sm">Choose a script from the sidebar to generate and view scene images</p>
+          {!chapterId && (
+            <p className="text-xs text-orange-500 mt-2">Chapter ID not available</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Disable actions during switching
+  const isDisabled = isSwitching;
+
+
+  
+
+
   // Get dialogue moments (suggested shots) from selected script
   // Extract from API response or parse from script text
   const dialogueMoments = React.useMemo(() => {
@@ -305,6 +462,66 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       return script.dialogue_moments;
     }
     
+    // Cinematic shot types for variety in suggested shots (fallback)
+    const SHOT_TYPES = [
+      'close-up of',
+      'medium shot of',
+      'wide shot showing',
+      'over-the-shoulder shot of',
+      'two-shot featuring',
+      'medium close-up of',
+      'profile view of',
+      'low angle shot of',
+      'high angle shot of'
+    ];
+    
+    // Action descriptors for pose/expression variety
+    const ACTIONS_FOR_DIALOGUE = [
+      'speaking with emotion',
+      'reacting expressively',
+      'leaning forward intently',
+      'gesturing while talking',
+      'with thoughtful expression',
+      'looking directly ahead',
+      'turning slightly'
+    ];
+    
+    // Camera direction patterns from script (e.g., "(CLOSE-UP)" "(WIDE SHOT)")
+    const CAMERA_DIRECTION_PATTERNS: Record<string, string> = {
+      'CLOSE-UP': 'close-up of',
+      'CLOSE UP': 'close-up of',
+      'CLOSEUP': 'close-up of',
+      'WIDE SHOT': 'wide shot showing',
+      'WIDE': 'wide shot showing',
+      'MEDIUM SHOT': 'medium shot of',
+      'MEDIUM': 'medium shot of',
+      'OVER-THE-SHOULDER': 'over-the-shoulder shot of',
+      'OTS': 'over-the-shoulder shot of',
+      'TWO SHOT': 'two-shot featuring',
+      'TWO-SHOT': 'two-shot featuring',
+      'POV': 'point-of-view showing',
+      'TRACKING': 'tracking shot following',
+      'HIGH ANGLE': 'high angle shot of',
+      'LOW ANGLE': 'low angle shot of',
+      'AERIAL': 'aerial view of',
+      'PROFILE': 'profile view of'
+    };
+    
+    // Function to extract camera direction from line
+    const extractCameraDirection = (line: string): string | null => {
+      // Match (CAMERA_DIRECTION) pattern at start of line
+      const match = line.match(/^\s*\(([A-Z\-\s]+)\)/i);
+      if (match) {
+        const directionText = match[1].toUpperCase().trim();
+        for (const [pattern, shotType] of Object.entries(CAMERA_DIRECTION_PATTERNS)) {
+          if (directionText.includes(pattern)) {
+            return shotType;
+          }
+        }
+      }
+      return null;
+    };
+    
     // Otherwise, extract from script text on-the-fly
     const scriptText = script.script || '';
     if (!scriptText) return {};
@@ -315,10 +532,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     
     let currentSceneKey = '';
     let currentCharacter: string | null = null;
+    let momentIndex = 0; // Track index to rotate through shot types
+    let lastDetectedCameraDirection: string | null = null; // Track camera direction from action lines
     
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+      
+      // Check for camera direction in this line
+      const detectedDirection = extractCameraDirection(trimmed);
+      if (detectedDirection) {
+        lastDetectedCameraDirection = detectedDirection;
+      }
       
       // Detect scene headers (ACT I - SCENE 1) - capture full header for unique key
       const sceneMatch = trimmed.match(/^(\*?\*?ACT\s+[IVX0-9]+\s*-?\s*SCENE\s+\d+(?:\.\d+)?)\*?\*?/i);
@@ -326,6 +551,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         // Use the full header as key (normalized to uppercase without asterisks)
         currentSceneKey = sceneMatch[1].replace(/\*/g, '').trim().toUpperCase();
         currentCharacter = null;
+        lastDetectedCameraDirection = null; // Reset for new scene
         continue;
       }
       
@@ -344,29 +570,40 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         continue;
       }
       
-      // Capture action cues (parentheticals)
+      // Capture action cues (parentheticals) - use the actual action from script
       if (currentCharacter && currentSceneKey && trimmed.startsWith('(') && trimmed.endsWith(')')) {
         const action = trimmed.slice(1, -1).trim();
         if (action && action.length > 3) {
           if (!moments[currentSceneKey]) moments[currentSceneKey] = [];
+          // Use detected camera direction or fall back to rotation
+          const shotType = lastDetectedCameraDirection || SHOT_TYPES[momentIndex % SHOT_TYPES.length];
           moments[currentSceneKey].push({
             character: currentCharacter,
             action: action,
-            shot_description: `${currentCharacter} ${action}`,
-            moment_type: 'action'
+            shot_description: `${shotType} ${currentCharacter} ${action}, same background and environment`,
+            moment_type: 'action',
+            has_camera_direction: !!lastDetectedCameraDirection
           });
+          momentIndex++;
+          lastDetectedCameraDirection = null; // Reset after use
         }
       }
-      // Capture first line of dialogue
+      // Capture first line of dialogue - add variety with shot types
       else if (currentCharacter && currentSceneKey && !trimmed.startsWith('(') && !trimmed.startsWith('*') && trimmed.length > 10) {
         if (!moments[currentSceneKey]) moments[currentSceneKey] = [];
+        // Use detected camera direction or fall back to rotation
+        const shotType = lastDetectedCameraDirection || SHOT_TYPES[momentIndex % SHOT_TYPES.length];
+        const actionDesc = ACTIONS_FOR_DIALOGUE[momentIndex % ACTIONS_FOR_DIALOGUE.length];
         moments[currentSceneKey].push({
           character: currentCharacter,
-          action: 'speaking',
+          action: actionDesc,
           dialogue_preview: trimmed.slice(0, 50) + (trimmed.length > 50 ? '...' : ''),
-          shot_description: `${currentCharacter} speaking`,
-          moment_type: 'dialogue'
+          shot_description: `${shotType} ${currentCharacter} ${actionDesc}, same background and environment`,
+          moment_type: 'dialogue',
+          has_camera_direction: !!lastDetectedCameraDirection
         });
+        momentIndex++;
+        lastDetectedCameraDirection = null; // Reset after use
         currentCharacter = null; // Reset after capturing
       }
     }
@@ -509,9 +746,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     return baseCharacters;
   }, [selectedScriptId, selectedScript, plotOverview, excludedCharacters, characterRenames]);
 
- 
-
-
+  // Get objects and locations from plot overview
+  const objectsAndLocations = React.useMemo(() => {
+    if (!plotOverview?.characters) return [];
+    
+    return plotOverview.characters
+      .filter((item: any) => item.entity_type === 'object' || item.entity_type === 'location')
+      .map((item: any) => ({
+        ...item,
+        originalName: item.name,
+        displayName: item.name
+      }));
+  }, [plotOverview]);
 
 
 
@@ -950,7 +1196,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             }`}>
               {scenes.map((scene: any, idx: number) => {
                 const sceneNumber = scene.scene_number || idx + 1;
-                const images = sceneImages[`${selectedScriptId}_${sceneNumber}`] || sceneImages[sceneNumber] || [];
+                const images = sceneImages[Number(sceneNumber)] || [];
                 // Use header (e.g. "ACT I - SCENE 1") as key, normalized to uppercase
                 const headerKey = (scene.header || '').replace(/\*/g, '').trim().toUpperCase();
                 const sceneMoments = dialogueMoments[headerKey] || [];
@@ -962,6 +1208,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     sceneImages={images}
                     isGenerating={generatingScenes.has(sceneNumber)}
                     selectedIds={selectedSceneIds}
+                    keySceneId={keySceneIds[sceneNumber]}
                     dialogueMoments={sceneMoments}
                     onSelect={(selected, imageId) => {
                       if (!imageId) return;
@@ -987,6 +1234,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     )}
                     onDelete={(imageId) => deleteImage('scene', sceneNumber, imageId)}
                     onView={(url) => setSelectedImage(url)}
+                    onSetKeyScene={(imageId) => {
+                      setKeySceneIds(prev => ({
+                        ...prev,
+                        [sceneNumber]: imageId
+                      }));
+                    }}
                     onGenerateMoment={(shotDescription, parentSceneImageUrl) => handleGenerateSceneImage(
                       sceneNumber,
                       false,
@@ -1163,6 +1416,89 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             </div>
           </>
         )}
+
+        {/* Objects & Locations Section */}
+        {objectsAndLocations.length > 0 && (
+          <div className="space-y-4 pt-6 mt-6 border-t border-gray-200 dark:border-gray-700">
+            <button
+              onClick={() => setIsObjectsExpanded(!isObjectsExpanded)}
+              className="flex items-center justify-between w-full group"
+            >
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+                  <Box className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                </div>
+                <div className="text-left">
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white group-hover:text-purple-600 transition-colors">
+                    Objects & Locations
+                  </h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {objectsAndLocations.length} item{objectsAndLocations.length !== 1 ? 's' : ''} from Plot Overview
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center space-x-2 text-sm text-gray-500">
+                {isObjectsExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+              </div>
+            </button>
+
+            {isObjectsExpanded && (
+              <div className={`${
+                viewMode === 'grid'
+                  ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6'
+                  : 'space-y-4'
+              }`}>
+                {objectsAndLocations.map((item: any) => {
+                  const itemKey = item.originalName || item.name;
+                  const displayName = item.displayName || item.name;
+                  const itemImage = characterImages?.[itemKey];
+                  const plotImageUrl = item.image_url || null;
+                  const isFallbackImage = !itemImage && !!plotImageUrl;
+
+                  let finalImage = itemImage;
+                  if (isFallbackImage) {
+                    finalImage = {
+                      name: itemKey,
+                      imageUrl: plotImageUrl!,
+                      prompt: '',
+                      generationStatus: 'completed',
+                      id: undefined
+                    } as CharacterImage;
+                  }
+
+                  return (
+                    <CharacterImageCard
+                      key={itemKey}
+                      characterName={displayName}
+                      characterImage={finalImage}
+                      characterDetails={item}
+                      isGenerating={generatingCharacters.has(itemKey)}
+                      viewMode={viewMode}
+                      fromPlotOverview={!!plotImageUrl && !itemImage}
+                      plotCharacters={plotOverview?.characters || []}
+                      onGenerate={() => {
+                        const description = item.physical_description 
+                          || `Detailed image of ${displayName}, ${item.entity_type === 'location' ? 'scenic environment' : 'object design'}`;
+                        generateCharacterImage(itemKey, description, generationOptions);
+                      }}
+                      onRegenerate={() => {
+                        if (finalImage?.id && !isFallbackImage) {
+                          regenerateImage('character', itemKey, generationOptions);
+                        } else {
+                          const description = item.physical_description 
+                            || `Detailed image of ${displayName}, ${item.entity_type === 'location' ? 'scenic environment' : 'object design'}`;
+                          generateCharacterImage(itemKey, description, generationOptions);
+                        }
+                      }}
+                      onDelete={() => deleteImage('character', itemKey)}
+                      onView={() => setSelectedImage(finalImage?.imageUrl || null)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -1181,7 +1517,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
     const script = selectedScript as ChapterScript;
     // sensors is now at top-level
-
 
     const handleDragEnd = (event: DragEndEvent) => {
       const { active, over } = event;
@@ -1202,31 +1537,42 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       }
     };
     
-    // Prepare items for SortableContext - just scene numbers
-    // Filter scenes to ensure we only show existing ones 
-    // (sceneOrder might contain deleted scenes potentially if logic isn't tight, safe to filter)
-    const validScenes = sceneOrder.filter(sn => script.scenes?.some(s => s.scene_number === sn));
-    // Also check if any new scenes were added that aren't in order yet, append them
-    const existingSceneNumbers = new Set(validScenes);
-    const missingScenes = script.scenes?.filter(s => !existingSceneNumbers.has(s.scene_number)).map(s => s.scene_number) || [];
-    // Deduplicate to prevent duplicate React keys
-    const finalSceneOrder = [...new Set([...validScenes, ...missingScenes])];
+    // Prepare items for SortableContext using robust scenes list
+    // We want to show ALL scenes found in the robust list
+    const validScenes = sceneOrder.length > 0 
+        ? sceneOrder.filter(sn => sn <= scenes.length) // Filter out clearly invalid numbers
+        : scenes.map((_, i) => i + 1); // Default to 1..N if no order saved
+
+    // Merge any missing scenes
+    const allSceneNumbers = new Set(validScenes);
+    scenes.forEach((_, i) => {
+        if(!allSceneNumbers.has(i+1)) validScenes.push(i+1);
+    });
+    
+    const finalSceneOrder = validScenes; // Use the robust list
 
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-           <div>
-             <h3 className="text-lg font-medium text-gray-900 dark:text-white">Storyboard</h3>
-             <p className="text-sm text-gray-500">Drag and drop scenes to rearrange the narrative flow.</p>
-           </div>
-           <button
-            onClick={() => projectService.reorderScenes(chapterId, script.id, finalSceneOrder.sort((a,b) => a-b)).then(() => setSceneOrder(finalSceneOrder.sort((a,b) => a-b))).then(() => toast.success('Reset to numerical order'))}
-            className="flex items-center px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-           >
-             <RefreshCw className="w-4 h-4 mr-2" />
-             Reset Order
-           </button>
-        </div>
+      <div className="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-xl min-h-[600px]">
+         <div className="mb-6 flex items-center justify-between">
+            <div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 flex items-center">
+                   <List className="w-5 h-5 mr-2" />
+                   Storyboard Sequence
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                   Arrange your scenes and select the best shots for the final video/audio production.
+                </p>
+            </div>
+            
+            <button
+                onClick={() => toast.success('Storyboard sync confirmed!')}
+                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-sm transition-colors"
+                title="Confirm selection for Audio/Video"
+            >
+                <Check className="w-4 h-4" />
+                <span>Confirm Selection</span>
+            </button>
+         </div>
 
         <DndContext 
           sensors={sensors}
@@ -1237,33 +1583,50 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             items={finalSceneOrder}
             strategy={rectSortingStrategy}
           >
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="space-y-6">
               {finalSceneOrder.map((sceneNum) => {
-                 const scene = script.scenes?.find(s => s.scene_number === sceneNum);
-                 const description = script.scene_descriptions?.find(sd => sd.scene_number === sceneNum); // Assuming scene_descriptions structure matches
-                 
-                 // Fallback if scene_descriptions is just strings string[], simpler logic needed if so
-                 // Based on types.ts earlier view: scene_descriptions: SceneDescription[]
-                 
-                 const images = sceneImages?.[sceneNum] || [];
-                 
-                 return (
-                   <SortableSceneCard
-                     key={sceneNum}
-                     id={sceneNum}
-                     sceneNumber={sceneNum}
-                     images={images}
-                     description={description?.visual_description || `Scene ${sceneNum}`}
-                     onViewImage={(url) => setSelectedImage(url)}
-                   />
-                 );
+                // Get description reliably
+                const sceneIdx = sceneNum - 1;
+                const sceneData = scenes[sceneIdx];
+                const description = typeof sceneData === 'string' 
+                    ? sceneData 
+                    : (sceneData?.visual_description || sceneData?.description || `Scene ${sceneNum}`);
+
+                const images = sceneImages[Number(sceneNum)] || [];
+
+                return (
+                  <SortableStoryboardRow
+                    key={sceneNum}
+                    id={sceneNum}
+                    sceneNumber={sceneNum}
+                    description={description}
+                    images={images}
+                    selectedImageUrl={selectedSceneImages[sceneNum]}
+                    onSelect={(url: string | null) => setSelectedSceneImage(sceneNum, url)}
+                    onView={(url: string) => setSelectedImage(url)}
+                    onDelete={(imgId: string) => deleteImage('scene', sceneNum, imgId)}
+                    onReorder={(newImages: SceneImage[]) => {
+                        setSceneImages(prev => ({
+                            ...prev,
+                            [sceneNum]: newImages
+                        }));
+                    }}
+                  />
+                );
               })}
             </div>
           </SortableContext>
         </DndContext>
+        
+        {finalSceneOrder.length === 0 && (
+             <div className="text-center py-12 text-gray-500">
+                <p>No scenes found. Please check your script parsing.</p>
+             </div>
+        )}
       </div>
     );
   };
+
 
   return (
     <div className="space-y-6">
@@ -1359,118 +1722,51 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 const characterUrls = [...new Set([...selectedCharUrls, ...generatedCharUrls])];
                 referenceImages.push(...characterUrls);
                 
-                // Pass character IDs and combined reference URLs to enable I2I generation
+                // Pass character IDs, combined reference URLs, and suggested shot flag
                 generateSceneImage(
                     selectedSceneForGeneration.sceneNumber, 
                     desc, 
                     generationOptions,
                     charIds.length > 0 ? charIds : undefined,
-                    referenceImages.length > 0 ? referenceImages : undefined
+                    referenceImages.length > 0 ? referenceImages : undefined,
+                    selectedSceneForGeneration.isSuggestedShot  // Pass suggested shot flag
                 );
             }
             setShowSceneGenerationModal(false);
         }}
         sceneNumber={selectedSceneForGeneration?.sceneNumber || 0}
         initialDescription={selectedSceneForGeneration?.description || ''}
-        availableCharacters={characters.map(c => ({
-            name: c.name,
-            imageUrl: c.image_url || c.imageUrl || '',
-            id: c.id || c.name,
-            prompt: '',
-            generationStatus: 'completed'
-        }))}
+        availableCharacters={[
+            // Characters
+            ...characters.map(c => ({
+                name: c.name,
+                imageUrl: c.image_url || c.imageUrl || '',
+                id: c.id || c.name,
+                prompt: '',
+                generationStatus: 'completed' as const,
+                entity_type: c.entity_type || 'character'
+            })),
+            // Objects & Locations
+            ...objectsAndLocations.map((item: any) => ({
+                name: item.name,
+                imageUrl: item.image_url || '',
+                id: item.id || item.name,
+                prompt: '',
+                generationStatus: 'completed' as const,
+                entity_type: item.entity_type || 'object'
+            }))
+        ]}
         isGenerating={generatingScenes.has(selectedSceneForGeneration?.sceneNumber || -1)}
         parentSceneImageUrl={selectedSceneForGeneration?.parentSceneImageUrl}
         isSuggestedShot={selectedSceneForGeneration?.isSuggestedShot}
+        userTier={userTier}
       />
     </div>
   );
 };
 
 // Sortable Scene Card Component
-function SortableSceneCard({ 
-  id, 
-  sceneNumber, 
-  images, 
-  description,
-  onViewImage 
-}: { 
-  id: number; 
-  sceneNumber: number; 
-  images: SceneImage[]; 
-  description?: string;
-  onViewImage: (url: string) => void;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging
-  } = useSortable({ id });
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 100 : 'auto',
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  const coverImage = images && images.length > 0 ? images[0].imageUrl : null;
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      className={`bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-move group`}
-    >
-      <div className="relative aspect-video bg-gray-100 dark:bg-gray-900">
-        {coverImage ? (
-           <div className="relative w-full h-full group">
-            <img 
-              src={coverImage} 
-              alt={`Scene ${sceneNumber}`} 
-              className="w-full h-full object-cover"
-            />
-             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onViewImage(coverImage);
-                  }}
-                  className="p-2 bg-black/50 rounded-full text-white hover:bg-black/70 backdrop-blur-sm"
-                >
-                  <Eye className="w-5 h-5" />
-                </button>
-             </div>
-           </div>
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
-            <Camera className="w-8 h-8 mb-2 opacity-50" />
-            <span className="text-xs">No image</span>
-          </div>
-        )}
-        
-        <div className="absolute top-2 left-2 px-2 py-1 bg-black/60 backdrop-blur-sm rounded text-white text-xs font-bold">
-          Scene {sceneNumber}
-        </div>
-      </div>
-      
-      <div className="p-3">
-        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-2 min-h-[2.5em]">
-          {description || "No description"}
-        </p>
-        <div className="flex items-center justify-between text-xs text-gray-400">
-           <span>{images?.length || 0} images</span>
-           <Grid3X3 className="w-3 h-3 text-gray-300" />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // Scene Image Card Component
 interface SceneImageCardProps {
@@ -1478,6 +1774,7 @@ interface SceneImageCardProps {
   sceneImages?: SceneImage[];
   isGenerating: boolean;
   selectedIds?: Set<string>;
+  keySceneId?: string; // ID of the key scene image for this scene
   dialogueMoments?: Array<{
     character: string;
     action: string;
@@ -1491,6 +1788,7 @@ interface SceneImageCardProps {
   onDelete: (imageId: string) => void;
   onView: (imageUrl: string) => void;
   onGenerateMoment?: (shotDescription: string, parentSceneImageUrl?: string) => void;
+  onSetKeyScene?: (imageId: string) => void; // Callback to set key scene
 }
 
 const SceneImageCard: React.FC<SceneImageCardProps> = ({
@@ -1498,6 +1796,7 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
   sceneImages = [],
   isGenerating,
   selectedIds,
+  keySceneId,
   dialogueMoments = [],
   onSelect,
   onGenerate,
@@ -1505,6 +1804,7 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
   onDelete,
   onView,
   onGenerateMoment,
+  onSetKeyScene,
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [expandedShots, setExpandedShots] = useState(false);
@@ -1594,7 +1894,26 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
           </div>
         )}
 
-        <div className="absolute top-2 right-2">
+        <div className="absolute top-2 right-2 flex items-center gap-1">
+          {/* Key Scene Star Button */}
+          {currentImage?.id && currentImage.generationStatus === 'completed' && currentImage.imageUrl && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onSetKeyScene?.(currentImage.id!);
+              }}
+              title={currentImage.id === keySceneId ? 'Key scene (reference for suggested shots)' : 'Set as key scene'}
+              className={`p-1.5 rounded-full transition-all ${
+                currentImage.id === keySceneId
+                  ? 'bg-yellow-400 text-yellow-900 shadow-md'
+                  : 'bg-black/30 hover:bg-black/50 text-white/70 hover:text-yellow-400'
+              }`}
+            >
+              <svg className="w-4 h-4" fill={currentImage.id === keySceneId ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              </svg>
+            </button>
+          )}
           <ImageActions
             hasImage={!!currentImage?.imageUrl}
             isGenerating={isGenerating || displayStatus === 'generating'}
@@ -1632,27 +1951,49 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
         )}
 
         {/* Dialogue Moment Placeholders - Suggested Shots */}
-        {dialogueMoments.length > 0 && (
+        {dialogueMoments.length > 0 && (() => {
+          // Check if there's at least one completed key scene image
+          const hasCompletedKeyScene = sceneImages.some(img => img.generationStatus === 'completed' && img.imageUrl);
+          
+          return (
           <div className="mt-3 pt-3 border-t border-gray-200">
-            <p className="text-xs text-gray-500 mb-2">Suggested shots:</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-gray-500">Suggested shots:</p>
+              {!hasCompletedKeyScene && (
+                <span className="text-xs text-amber-600 flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                  Generate key scene first
+                </span>
+              )}
+            </div>
             <div className="space-y-1">
               {(expandedShots ? dialogueMoments : dialogueMoments.slice(0, 3)).map((moment, idx) => (
                 <button
                   key={idx}
                   onClick={() => {
-                    // Find the best completed parent scene image for consistency
-                    const parentImage = sceneImages.find(img => img.generationStatus === 'completed' && img.imageUrl);
+                    if (!hasCompletedKeyScene) return;
+                    // Prefer key scene image (marked with star), fallback to first completed
+                    const keySceneImage = sceneImages.find(img => img.id === keySceneId && img.generationStatus === 'completed' && img.imageUrl);
+                    const parentImage = keySceneImage || sceneImages.find(img => img.generationStatus === 'completed' && img.imageUrl);
                     onGenerateMoment?.(moment.shot_description, parentImage?.imageUrl);
                   }}
-                  className="w-full flex items-center justify-between px-2 py-1.5 text-left text-xs bg-gray-50 hover:bg-blue-50 border border-dashed border-gray-300 hover:border-blue-400 rounded transition-colors group"
+                  disabled={!hasCompletedKeyScene}
+                  title={!hasCompletedKeyScene ? 'Generate a key scene image first to enable suggested shots' : undefined}
+                  className={`w-full flex items-center justify-between px-2 py-1.5 text-left text-xs border border-dashed rounded transition-colors group ${
+                    hasCompletedKeyScene 
+                      ? 'bg-gray-50 hover:bg-blue-50 border-gray-300 hover:border-blue-400 cursor-pointer' 
+                      : 'bg-gray-100 border-gray-200 cursor-not-allowed opacity-60'
+                  }`}
                 >
-                  <span className="truncate text-gray-600 group-hover:text-blue-600">
+                  <span className={`truncate ${hasCompletedKeyScene ? 'text-gray-600 group-hover:text-blue-600' : 'text-gray-400'}`}>
                     {moment.character}: {moment.action}
                     {moment.dialogue_preview && (
                       <span className="text-gray-400 ml-1">"{moment.dialogue_preview}"</span>
                     )}
                   </span>
-                  <Plus className="w-3 h-3 text-gray-400 group-hover:text-blue-500 flex-shrink-0 ml-2" />
+                  <Plus className={`w-3 h-3 flex-shrink-0 ml-2 ${hasCompletedKeyScene ? 'text-gray-400 group-hover:text-blue-500' : 'text-gray-300'}`} />
                 </button>
               ))}
               {dialogueMoments.length > 3 && (
@@ -1665,7 +2006,8 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
               )}
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

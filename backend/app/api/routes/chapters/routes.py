@@ -442,6 +442,7 @@ async def generate_scene_image(
                 retry_count=0,
                 character_ids=request.character_ids,
                 character_image_urls=request.character_image_urls,
+                is_suggested_shot=request.is_suggested_shot,
             )
 
             print(
@@ -1585,3 +1586,82 @@ async def get_audio_generation_status(
         raise HTTPException(
             status_code=500, detail=f"Error getting audio generation status: {str(e)}"
         )
+
+
+@router.post("/{chapter_id}/images/upscale")
+async def upscale_image(
+    chapter_id: str,
+    request: Dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Upscale an image using ModelsLab V6 super resolution API.
+
+    Model selection is tier-based with automatic fallback:
+    - FREE: 2x upscaling (RealESRGAN_x2plus)
+    - BASIC/STANDARD: 4x upscaling (realesr-general-x4v3, RealESRGAN_x4plus)
+    - PREMIUM+: 4K+ upscaling (ultra_resolution)
+
+    Optional override: Pass 'model_id' to use a specific model (e.g., anime upscaling).
+    """
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Extract request parameters
+        image_url = request.get("image_url")
+        if not image_url:
+            raise HTTPException(status_code=400, detail="image_url is required")
+
+        face_enhance = request.get("face_enhance", False)
+
+        # Get user's subscription tier
+        user_tier = (
+            current_user.subscription_tier
+            if hasattr(current_user, "subscription_tier")
+            else "free"
+        )
+
+        # Import and use upscale service
+        from app.core.services.modelslab_upscale import ModelsLabUpscaleService
+
+        upscale_service = ModelsLabUpscaleService()
+
+        # Check if user wants to override with a specific model (e.g., anime)
+        override_model = request.get("model_id")
+        if override_model:
+            # Use specific model with manual scale
+            scale = request.get("scale", 4)
+            result = await upscale_service.upscale_image(
+                image_url=image_url,
+                model_id=override_model,
+                scale=scale,
+                face_enhance=face_enhance,
+            )
+            result["model_used"] = override_model
+            result["tier"] = user_tier
+            result["scale"] = scale
+        else:
+            # Use tier-based model with automatic fallback
+            result = await upscale_service.upscale_with_tier(
+                image_url=image_url,
+                user_tier=user_tier,
+                face_enhance=face_enhance,
+            )
+
+        return {
+            "status": result.get("status", "success"),
+            "upscaled_url": result.get("upscaled_url"),
+            "original_url": image_url,
+            "model_used": result.get("model_used"),
+            "tier": result.get("tier", user_tier),
+            "scale": result.get("scale"),
+            "generation_time": result.get("generation_time"),
+            "message": f"Image upscaled successfully with {result.get('model_used')} at {result.get('scale')}x",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error upscaling image: {str(e)}")

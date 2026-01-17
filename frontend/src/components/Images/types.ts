@@ -17,6 +17,8 @@ export interface CharacterImage {
   generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
   generatedAt?: string;
   id?: string;
+  script_id?: string;
+  entity_type?: 'character' | 'object' | 'location';
 }
 
 export interface ImageGenerationOptions {
