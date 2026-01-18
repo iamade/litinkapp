@@ -31,6 +31,7 @@ import { AudioGenerationModal } from './AudioGenerationModal';
 import SceneAudioCard from './SceneAudioCard';
 import SceneGalleryModal from './SceneGalleryModal';
 import { deleteAudio } from '../../lib/api';
+import { projectService } from '../../services/projectService';
 
 interface AudioPanelProps {
   // Props are now optional since we use context for script selection
@@ -59,7 +60,11 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     selectedSegmentId,
     versionToken,
     selectedSceneImages,
-    setSelectedSceneImage
+    setSelectedSceneImage,
+    // NEW: Storyboard configuration
+    keySceneImages,
+    deselectedImages,
+    loadStoryboardConfig,
   } = useScriptSelection();
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -199,6 +204,20 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stableSelectedChapterId, selectedScriptId, versionToken]);
 
+  // NEW: Load storyboard configuration when script changes
+  useEffect(() => {
+    if (stableSelectedChapterId && selectedScriptId) {
+      projectService.getStoryboardConfig(stableSelectedChapterId, selectedScriptId)
+        .then((config) => {
+          loadStoryboardConfig(config);
+        })
+        .catch((error) => {
+          console.log('[AudioPanel] No storyboard config found or error loading:', error);
+          // This is expected for new scripts, just use empty config
+        });
+    }
+  }, [stableSelectedChapterId, selectedScriptId, loadStoryboardConfig]);
+
   // Seek on chapter/segment change without reloading audio
   useEffect(() => {
     if (!stableSelectedChapterId) return; // guard to avoid running before context is ready
@@ -329,7 +348,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
 
 
   const handleConfirmGeneration = async () => {
-    
+
     if (!selectedScriptId) {
       console.error('[AudioPanel] Missing Script ID');
       toast.error('Unable to generate: Missing Script ID');
@@ -341,14 +360,33 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
       const selectedScenes = Object.keys(selectedSceneImages)
         .map(Number)
         .filter(n => !isNaN(n));
-      
-      const sceneNumbersToGenerate = selectedScenes.length > 0 ? selectedScenes : undefined;
-      
-      // Mark selected scenes (or all scenes if none selected) as generating
+
+      // Filter out scenes where all images are excluded (deselectedImages from storyboard config)
+      // For each scene, check if it has any non-excluded images
+      const scenesWithIncludedImages = scenes
+        .map((_, idx) => idx + 1)
+        .filter(sceneNum => {
+          // Get images for this scene
+          const sceneImgs = sceneImages[sceneNum] || [];
+          // Check if at least one image is not excluded
+          return sceneImgs.some(img => img.id && !deselectedImages.has(img.id));
+        });
+
+      // If user has selected specific scenes, filter to only those
+      // Otherwise use all scenes with included images
+      let sceneNumbersToGenerate: number[] | undefined;
       if (selectedScenes.length > 0) {
-        setGeneratingScenesAudio(new Set(selectedScenes));
+        // Intersect user-selected scenes with scenes that have included images
+        sceneNumbersToGenerate = selectedScenes.filter(sn => scenesWithIncludedImages.includes(sn));
       } else {
-        // If no specific scenes selected, mark all scenes as generating
+        sceneNumbersToGenerate = scenesWithIncludedImages.length > 0 ? scenesWithIncludedImages : undefined;
+      }
+
+      // Mark scenes for generating
+      if (sceneNumbersToGenerate && sceneNumbersToGenerate.length > 0) {
+        setGeneratingScenesAudio(new Set(sceneNumbersToGenerate));
+      } else {
+        // If no specific scenes, mark all scenes
         setGeneratingScenesAudio(new Set(scenes.map((_, i) => i + 1)));
       }
 

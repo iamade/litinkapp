@@ -180,6 +180,20 @@ class SceneReorderRequest(SQLModel):
     scene_order: List[int]
 
 
+class StoryboardConfigRequest(SQLModel):
+    """Request model for saving storyboard configuration"""
+    key_scene_images: Dict[str, str] = {}  # scene_number (str) -> image_id
+    deselected_images: List[str] = []       # image IDs that are excluded (opt-OUT)
+    image_order: Dict[str, List[str]] = {}  # scene_number (str) -> ordered list of image_ids
+
+
+class StoryboardConfigResponse(SQLModel):
+    """Response model for storyboard configuration"""
+    key_scene_images: Dict[str, str] = {}
+    deselected_images: List[str] = []
+    image_order: Dict[str, List[str]] = {}
+
+
 @router.patch("/{chapter_id}/scripts/{script_id}/reorder-scenes", response_model=Script)
 async def reorder_scenes(
     chapter_id: str,
@@ -214,6 +228,91 @@ async def reorder_scenes(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error reordering scenes: {str(e)}"
+        )
+
+
+@router.get("/{chapter_id}/scripts/{script_id}/storyboard-config", response_model=StoryboardConfigResponse)
+async def get_storyboard_config(
+    chapter_id: str,
+    script_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get storyboard configuration for a script"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Get the script
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Return storyboard config (default to empty if not set)
+        config = script.storyboard_config or {}
+        return StoryboardConfigResponse(
+            key_scene_images=config.get("key_scene_images", {}),
+            deselected_images=config.get("deselected_images", []),
+            image_order=config.get("image_order", {}),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error getting storyboard config: {str(e)}"
+        )
+
+
+@router.patch("/{chapter_id}/scripts/{script_id}/storyboard-config", response_model=StoryboardConfigResponse)
+async def update_storyboard_config(
+    chapter_id: str,
+    script_id: str,
+    request: StoryboardConfigRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Save storyboard configuration including key scenes, selections, and image order"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Get the script
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Update storyboard config
+        script.storyboard_config = {
+            "key_scene_images": request.key_scene_images,
+            "deselected_images": request.deselected_images,
+            "image_order": request.image_order,
+        }
+
+        # Force SQLAlchemy to detect the change
+        script.storyboard_config = dict(script.storyboard_config)
+
+        session.add(script)
+        await session.commit()
+        await session.refresh(script)
+
+        return StoryboardConfigResponse(
+            key_scene_images=script.storyboard_config.get("key_scene_images", {}),
+            deselected_images=script.storyboard_config.get("deselected_images", []),
+            image_order=script.storyboard_config.get("image_order", {}),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error updating storyboard config: {str(e)}"
         )
 
 

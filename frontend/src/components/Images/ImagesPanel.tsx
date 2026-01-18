@@ -13,16 +13,13 @@ import {
   Eye,
   Plus,
   Wand2,
-  Edit2,
   FileText,
-  UserPlus,
   Check,
   X,
   Box,
-  MapPin,
   ChevronDown,
   ChevronRight,
-  ZoomIn
+  Unlink2
 } from 'lucide-react';
 import { userService } from '../../services/userService';
 import { Tables } from '../../types/supabase';
@@ -156,7 +153,17 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     versionToken,
     isSwitching,
     selectedSceneImages,
-    setSelectedSceneImage
+    setSelectedSceneImage,
+    // NEW: Storyboard configuration
+    keySceneImages,
+    deselectedImages,
+    storyboardDirty,
+    setKeySceneImage,
+    toggleDeselectedImage,
+    setImageOrder,
+    loadStoryboardConfig,
+    getStoryboardConfig,
+    markStoryboardClean,
   } = useScriptSelection();
 
   // State for image generation
@@ -424,6 +431,20 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     // loadImages(); // Removed as useImageGeneration now handles initial load
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterId, versionToken]);
+
+  // NEW: Load storyboard configuration when script changes
+  useEffect(() => {
+    if (chapterId && selectedScriptId) {
+      projectService.getStoryboardConfig(chapterId, selectedScriptId)
+        .then((config) => {
+          loadStoryboardConfig(config);
+        })
+        .catch((error) => {
+          console.log('No storyboard config found or error loading:', error);
+          // This is expected for new scripts, just use empty config
+        });
+    }
+  }, [chapterId, selectedScriptId, loadStoryboardConfig]);
 
   // Empty state when no script or chapter is selected
   if (!selectedScriptId || !chapterId) {
@@ -1276,17 +1297,10 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           <div>
             <h4 className="text-lg font-semibold text-gray-900">Character Images for Current Script</h4>
             <p className="text-xs text-gray-500 mt-1">
-              Scene-specific character images. Global character images are managed in Plot Overview.
+              Character images are managed in Plot Overview. Link or generate variants for specific scenes below.
             </p>
           </div>
-          <button
-            onClick={handleGenerateAllCharacters}
-            disabled={!characters.length || generatingCharacters.size > 0}
-            className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400"
-          >
-            <Wand2 className="w-4 h-4" />
-            <span>Generate All Characters</span>
-          </button>
+          {/* Generate All Characters button removed - use Plot Overview for base character images */}
         </div>
 
         {!characters.length ? (
@@ -1410,6 +1424,17 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     }}
                     onDelete={() => deleteImage('character', characterKey)}
                     onView={() => setSelectedImage(characterImage?.imageUrl || null)}
+                    onUnlink={characterImage?.imageUrl ? async () => {
+                      // Clear the local character image mapping by setting an empty CharacterImage
+                      // This removes the visual link without deleting from database
+                      setCharacterImage(characterKey, {
+                        name: characterKey,
+                        imageUrl: '',
+                        prompt: '',
+                        generationStatus: 'pending' as const  // Reset to pending so it shows as 'no image'
+                      });
+                      toast.success(`Unlinked image from ${displayName}`);
+                    } : undefined}
                   />
                 );
               })}
@@ -1492,6 +1517,15 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       }}
                       onDelete={() => deleteImage('character', itemKey)}
                       onView={() => setSelectedImage(finalImage?.imageUrl || null)}
+                      onUnlink={finalImage?.imageUrl ? async () => {
+                        setCharacterImage(itemKey, {
+                          name: itemKey,
+                          imageUrl: '',
+                          prompt: '',
+                          generationStatus: 'pending' as const
+                        });
+                        toast.success(`Unlinked image from ${displayName}`);
+                      } : undefined}
                     />
                   );
                 })}
@@ -1565,12 +1599,27 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             </div>
             
             <button
-                onClick={() => toast.success('Storyboard sync confirmed!')}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-sm transition-colors"
-                title="Confirm selection for Audio/Video"
+                onClick={async () => {
+                  try {
+                    const config = getStoryboardConfig();
+                    await projectService.saveStoryboardConfig(chapterId, script.id, config);
+                    markStoryboardClean();
+                    toast.success('Storyboard saved successfully!');
+                  } catch (error) {
+                    console.error('Failed to save storyboard config:', error);
+                    toast.error('Failed to save storyboard');
+                  }
+                }}
+                disabled={!storyboardDirty}
+                className={`flex items-center space-x-2 px-4 py-2 rounded-lg shadow-sm transition-colors ${
+                  storyboardDirty
+                    ? 'bg-green-600 text-white hover:bg-green-700'
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
+                title={storyboardDirty ? 'Save changes to storyboard' : 'No changes to save'}
             >
                 <Check className="w-4 h-4" />
-                <span>Confirm Selection</span>
+                <span>{storyboardDirty ? 'Save Changes' : 'Saved'}</span>
             </button>
          </div>
 
@@ -1606,11 +1655,19 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     onView={(url: string) => setSelectedImage(url)}
                     onDelete={(imgId: string) => deleteImage('scene', sceneNum, imgId)}
                     onReorder={(newImages: SceneImage[]) => {
+                        // Update local state for immediate feedback
                         setSceneImages(prev => ({
                             ...prev,
                             [sceneNum]: newImages
                         }));
+                        // Update image order in context for persistence
+                        setImageOrder(sceneNum, newImages.map(img => img.id).filter((id): id is string => !!id));
                     }}
+                    // NEW: Storyboard configuration props
+                    keySceneImageId={keySceneImages[sceneNum]}
+                    deselectedImages={deselectedImages}
+                    onSetKeyScene={(imageId: string) => setKeySceneImage(sceneNum, imageId)}
+                    onToggleDeselected={(imageId: string) => toggleDeselectedImage(imageId)}
                   />
                 );
               })}
@@ -2026,6 +2083,7 @@ interface CharacterImageCardProps {
   onRegenerate: () => void;
   onDelete: () => void;
   onView: () => void;
+  onUnlink?: () => void; // New: Remove incorrect image mapping without deleting the character
 }
 
 const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
@@ -2039,7 +2097,8 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
   onGenerate,
   onRegenerate,
   onDelete,
-  onView
+  onView,
+  onUnlink
 }) => {
   const [selectedPlotCharacter, setSelectedPlotCharacter] = useState<string>('');
   const [showSelector, setShowSelector] = useState(false);
@@ -2095,6 +2154,8 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
               onDelete={fromPlotOverview ? undefined : onDelete}
               onView={onView}
               selectedPlotCharHasImage={!!selectedPlotCharDetails?.image_url}
+              onUnlink={onUnlink}
+              hideGenerateButtons
             />
           </div>
         </div>
@@ -2131,6 +2192,8 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
             onView={onView}
             compact
             selectedPlotCharHasImage={!!selectedPlotCharDetails?.image_url}
+            onUnlink={onUnlink}
+            hideGenerateButtons
           />
         </div>
       </div>
@@ -2291,6 +2354,8 @@ interface ImageActionsProps {
   onView: () => void;
   compact?: boolean;
   selectedPlotCharHasImage?: boolean;
+  onUnlink?: () => void; // Unlink incorrect image mapping
+  hideGenerateButtons?: boolean; // Hide generate/regenerate for character cards (users should generate in Plot Overview)
 }
 
 const ImageActions: React.FC<ImageActionsProps> = ({
@@ -2301,7 +2366,9 @@ const ImageActions: React.FC<ImageActionsProps> = ({
   onDelete,
   onView,
   compact = false,
-  selectedPlotCharHasImage = false
+  selectedPlotCharHasImage = false,
+  onUnlink,
+  hideGenerateButtons = false
 }) => {
   if (compact) {
     return (
@@ -2315,16 +2382,31 @@ const ImageActions: React.FC<ImageActionsProps> = ({
             >
               <Eye className="w-4 h-4" />
             </button>
-            <button
-              onClick={onRegenerate}
-              disabled={isGenerating}
-              className="p-1 bg-black bg-opacity-50 text-white rounded hover:bg-opacity-70 disabled:opacity-50"
-              title="Regenerate"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+            {!hideGenerateButtons && (
+              <button
+                onClick={onRegenerate}
+                disabled={isGenerating}
+                className="p-1 bg-black bg-opacity-50 text-white rounded hover:bg-opacity-70 disabled:opacity-50"
+                title="Regenerate"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            )}
+            {onUnlink && (
+              <button
+                onClick={onUnlink}
+                className="p-1 bg-black bg-opacity-50 text-orange-400 rounded hover:bg-opacity-70"
+                title="Unlink image (remove incorrect mapping)"
+              >
+                <Unlink2 className="w-4 h-4" />
+              </button>
+            )}
           </>
+        ) : hideGenerateButtons ? (
+          // For character cards without images - no generate button
+          <span className="text-xs text-gray-400 px-2 py-1">No image</span>
         ) : (
+          // For scene cards without images - show generate button
           <button
             onClick={onGenerate}
             disabled={isGenerating}
@@ -2353,15 +2435,17 @@ const ImageActions: React.FC<ImageActionsProps> = ({
           >
             <Eye className="w-4 h-4" />
           </button>
-          <button
-            onClick={onRegenerate}
-            disabled={isGenerating}
-            className="p-2 text-gray-600 hover:bg-gray-50 rounded disabled:opacity-50"
-            title="Regenerate"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
-          {onDelete && (
+          {!hideGenerateButtons && (
+            <button
+              onClick={onRegenerate}
+              disabled={isGenerating}
+              className="p-2 text-gray-600 hover:bg-gray-50 rounded disabled:opacity-50"
+              title="Regenerate"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          )}
+          {!hideGenerateButtons && onDelete && (
             <button
               onClick={onDelete}
               className="p-2 text-red-600 hover:bg-red-50 rounded"
@@ -2370,8 +2454,21 @@ const ImageActions: React.FC<ImageActionsProps> = ({
               <Trash2 className="w-4 h-4" />
             </button>
           )}
+          {onUnlink && (
+            <button
+              onClick={onUnlink}
+              className="p-2 text-orange-600 hover:bg-orange-50 rounded"
+              title="Unlink image (remove incorrect mapping)"
+            >
+              <Unlink2 className="w-4 h-4" />
+            </button>
+          )}
         </>
+      ) : hideGenerateButtons ? (
+        // For character cards - no generate button
+        <span className="text-sm text-gray-400 italic">Generate in Plot Overview</span>
       ) : (
+        // For scene cards - show generate button
         <button
           onClick={onGenerate}
           disabled={isGenerating}

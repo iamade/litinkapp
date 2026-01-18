@@ -23,6 +23,12 @@ export interface IntentAnalysisResult {
   detected_pipeline: string[];
 }
 
+export interface StoryboardConfig {
+  key_scene_images: Record<string, string>;  // scene_number (str) -> image_id
+  deselected_images: string[];               // image IDs that are excluded (opt-OUT)
+  image_order: Record<string, string[]>;     // scene_number (str) -> ordered list of image_ids
+}
+
 export const projectService = {
   createProject: async (data: any) => {
     return await apiClient.post<Project>("/projects/", data);
@@ -87,6 +93,26 @@ export const projectService = {
     return await apiClient.patch(
       `/chapters/${chapterId}/scripts/${scriptId}/reorder-scenes`,
       { scene_order: sceneOrder }
+    );
+  },
+
+  getStoryboardConfig: async (
+    chapterId: string,
+    scriptId: string
+  ): Promise<StoryboardConfig> => {
+    return await apiClient.get<StoryboardConfig>(
+      `/chapters/${chapterId}/scripts/${scriptId}/storyboard-config`
+    );
+  },
+
+  saveStoryboardConfig: async (
+    chapterId: string,
+    scriptId: string,
+    config: StoryboardConfig
+  ): Promise<StoryboardConfig> => {
+    return await apiClient.patch<StoryboardConfig>(
+      `/chapters/${chapterId}/scripts/${scriptId}/storyboard-config`,
+      config
     );
   },
 

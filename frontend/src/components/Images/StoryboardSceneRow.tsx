@@ -1,6 +1,6 @@
 import React from 'react';
 import { SceneImage } from '../../hooks/useImageGeneration';
-import { Check, Maximize2, Trash2, Film, Camera, GripVertical } from 'lucide-react';
+import { Check, Maximize2, Trash2, Film, Camera, GripVertical, Star, X } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -29,20 +29,33 @@ interface StoryboardSceneRowProps {
   onView: (url: string) => void;
   dragHandleListeners?: any; // Listeners for the parent sortable (Scene drag)
   onReorder?: (newImages: SceneImage[]) => void; // Callback when images are reordered
+  // NEW: Storyboard configuration props
+  keySceneImageId?: string;                       // ID of the key scene image for this scene
+  deselectedImages?: Set<string>;                 // Set of excluded image IDs (opt-OUT)
+  onSetKeyScene?: (imageId: string) => void;      // Callback to set key scene image
+  onToggleDeselected?: (imageId: string) => void; // Callback to toggle image exclusion
 }
 
-const SortableImageCard = ({ 
-    image, 
-    isSelected, 
-    onSelect, 
-    onView, 
-    onDelete 
-}: { 
+const SortableImageCard = ({
+    image,
+    isSelected,
+    onSelect,
+    onView,
+    onDelete,
+    isKeyScene,
+    isExcluded,
+    onSetKeyScene,
+    onToggleDeselected,
+}: {
     image: SceneImage;
     isSelected: boolean;
     onSelect: () => void;
     onView: () => void;
     onDelete: () => void;
+    isKeyScene?: boolean;
+    isExcluded?: boolean;
+    onSetKeyScene?: () => void;
+    onToggleDeselected?: () => void;
 }) => {
     const {
         attributes,
@@ -60,63 +73,130 @@ const SortableImageCard = ({
         zIndex: isDragging ? 10 : 1
     };
 
+    // Determine card styling based on exclusion state
+    const cardBorderClass = isExcluded
+        ? 'border-gray-300 opacity-50'  // Excluded: grayed out
+        : isKeyScene
+        ? 'border-yellow-500 shadow-lg ring-2 ring-yellow-500/20'  // Key scene: yellow border
+        : isSelected
+        ? 'border-purple-600 shadow-lg ring-2 ring-purple-600/20 translate-y-[-2px]'  // Selected: purple
+        : 'border-transparent shadow hover:border-gray-300 hover:shadow-md';  // Default
+
     return (
-        <div 
+        <div
             ref={setNodeRef}
             style={style}
             {...attributes}
             {...listeners}
-            className={`relative group flex-shrink-0 w-72 bg-white dark:bg-gray-800 rounded-lg border-2 transition-all duration-200 cursor-grab active:cursor-grabbing ${
-                isSelected 
-                ? 'border-purple-600 shadow-lg ring-2 ring-purple-600/20 translate-y-[-2px]' 
-                : 'border-transparent shadow hover:border-gray-300 hover:shadow-md'
-            }`}
+            className={`relative group flex-shrink-0 w-72 bg-white dark:bg-gray-800 rounded-lg border-2 transition-all duration-200 cursor-grab active:cursor-grabbing ${cardBorderClass}`}
             onClick={onSelect}
         >
             {/* Image Container */}
             <div className="aspect-video bg-gray-200 relative rounded-t-lg overflow-hidden pointer-events-none">
                  {/* pointer-events-none on content prevents dragging issues, but we re-enable for buttons */}
-                 <img 
-                    src={image.imageUrl} 
-                    alt={image.prompt} 
-                    className="w-full h-full object-cover"
+                 <img
+                    src={image.imageUrl}
+                    alt={image.prompt}
+                    className={`w-full h-full object-cover ${isExcluded ? 'grayscale' : ''}`}
                  />
-                 
+
+                 {/* Checkbox for include/exclude (top-left) */}
+                 {onToggleDeselected && image.id && (
+                     <div className="absolute top-2 left-2 pointer-events-auto z-10">
+                         <button
+                             onPointerDown={(e) => e.stopPropagation()}
+                             onClick={(e) => { e.stopPropagation(); onToggleDeselected(); }}
+                             className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${
+                                 isExcluded
+                                     ? 'bg-gray-200 border-gray-400 text-gray-500'
+                                     : 'bg-green-500 border-green-600 text-white'
+                             }`}
+                             title={isExcluded ? 'Include this image' : 'Exclude this image'}
+                         >
+                             {isExcluded ? <X className="w-4 h-4" /> : <Check className="w-4 h-4" />}
+                         </button>
+                     </div>
+                 )}
+
+                 {/* Star button for key scene (top-right, next to actions) */}
+                 {onSetKeyScene && image.id && !isExcluded && (
+                     <div className="absolute top-2 right-20 pointer-events-auto z-10">
+                         <button
+                             onPointerDown={(e) => e.stopPropagation()}
+                             onClick={(e) => { e.stopPropagation(); onSetKeyScene(); }}
+                             className={`p-1.5 rounded-full transition-all ${
+                                 isKeyScene
+                                     ? 'bg-yellow-400 text-yellow-900 shadow-md'
+                                     : 'bg-black/50 text-white/70 hover:bg-yellow-400 hover:text-yellow-900'
+                             }`}
+                             title={isKeyScene ? 'Key scene (reference for suggested shots)' : 'Set as key scene'}
+                         >
+                             <Star className={`w-4 h-4 ${isKeyScene ? 'fill-current' : ''}`} />
+                         </button>
+                     </div>
+                 )}
+
                  {/* Overlay Actions - Enable pointer events specifically */}
                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-start justify-end p-2 opacity-0 group-hover:opacity-100 pointer-events-auto">
-                     <button 
+                     <button
                          onPointerDown={(e) => e.stopPropagation()} // Prevent drag start
-                         onClick={(e) => { e.stopPropagation(); onView(); }} 
+                         onClick={(e) => { e.stopPropagation(); onView(); }}
                          className="p-1.5 bg-black/60 text-white rounded-full hover:bg-black/80 mr-1"
                          title="View Fullscreen"
                      >
                          <Maximize2 className="w-4 h-4"/>
                      </button>
-                     <button 
+                     <button
                          onPointerDown={(e) => e.stopPropagation()} // Prevent drag start
-                         onClick={(e) => { e.stopPropagation(); onDelete(); }} 
+                         onClick={(e) => { e.stopPropagation(); onDelete(); }}
                          className="p-1.5 bg-red-600/80 text-white rounded-full hover:bg-red-700"
                          title="Delete Image"
                      >
                          <Trash2 className="w-4 h-4"/>
                      </button>
                  </div>
-                 
-                 {/* Active Indicator Overlay */}
-                 {isSelected && (
+
+                 {/* Key Scene Label (bottom-left) */}
+                 {isKeyScene && !isExcluded && (
+                     <div className="absolute bottom-2 left-2 pointer-events-none">
+                         <span className="px-2 py-0.5 bg-yellow-400 text-yellow-900 text-xs font-bold rounded shadow-sm flex items-center">
+                             <Star className="w-3 h-3 mr-1 fill-current" /> Key Scene
+                         </span>
+                     </div>
+                 )}
+
+                 {/* Excluded Label (bottom-left) */}
+                 {isExcluded && (
+                     <div className="absolute bottom-2 left-2 pointer-events-none">
+                         <span className="px-2 py-0.5 bg-gray-500 text-white text-xs font-bold rounded shadow-sm flex items-center">
+                             <X className="w-3 h-3 mr-1" /> Excluded
+                         </span>
+                     </div>
+                 )}
+
+                 {/* Active Indicator Overlay (when selected but not key scene) */}
+                 {isSelected && !isKeyScene && !isExcluded && (
                      <div className="absolute inset-0 ring-inset ring-4 ring-purple-600/30 pointer-events-none rounded-t-lg">
-                         <div className="absolute top-2 left-2 bg-purple-600 text-white p-1 rounded shadow-sm">
+                         <div className="absolute top-2 left-10 bg-purple-600 text-white p-1 rounded shadow-sm">
                              <Check className="w-4 h-4" />
                          </div>
                      </div>
                  )}
             </div>
-            
+
             {/* Footer Info */}
             <div className="p-3 border-t border-gray-100 dark:border-gray-700 pointer-events-none">
                 <div className="flex items-center justify-between mb-1">
-                    <span className={`text-xs font-bold uppercase tracking-wider ${isSelected ? 'text-purple-600' : 'text-gray-500'}`}>
-                        {isSelected ? 'Active Selection' : 'Option'}
+                    <span className={`text-xs font-bold uppercase tracking-wider ${
+                        isExcluded
+                            ? 'text-gray-400'
+                            : isKeyScene
+                            ? 'text-yellow-600'
+                            : isSelected
+                            ? 'text-purple-600'
+                            : 'text-gray-500'
+                    }`}>
+                        {isExcluded ? 'Excluded' : isKeyScene ? 'Key Scene' : isSelected ? 'Active Selection' : 'Option'}
                     </span>
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2" title={image.prompt}>
@@ -135,8 +215,13 @@ export const StoryboardSceneRow: React.FC<StoryboardSceneRowProps> = ({
   onSelect,
   onDelete,
   onView,
-  dragHandleListeners, 
-  onReorder
+  dragHandleListeners,
+  onReorder,
+  // NEW: Storyboard configuration props
+  keySceneImageId,
+  deselectedImages,
+  onSetKeyScene,
+  onToggleDeselected,
 }) => {
   // Use images prop directly (assume it's the source of truth for order)
   const sensors = useSensors(
@@ -219,6 +304,11 @@ export const StoryboardSceneRow: React.FC<StoryboardSceneRowProps> = ({
                                 onSelect={() => onSelect(img.imageUrl === selectedImageUrl ? null : img.imageUrl)}
                                 onView={() => onView(img.imageUrl)}
                                 onDelete={() => img.id && onDelete(img.id)}
+                                // NEW: Storyboard configuration props
+                                isKeyScene={img.id === keySceneImageId}
+                                isExcluded={img.id ? deselectedImages?.has(img.id) : false}
+                                onSetKeyScene={img.id && onSetKeyScene ? () => onSetKeyScene(img.id!) : undefined}
+                                onToggleDeselected={img.id && onToggleDeselected ? () => onToggleDeselected(img.id!) : undefined}
                             />
                         ))}
                     </div>

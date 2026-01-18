@@ -1,17 +1,20 @@
 import React from 'react';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Check, 
-  Play, 
-  Pause, 
-  RefreshCw, 
+import {
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  Play,
+  Pause,
+  RefreshCw,
   Image as ImageIcon,
   Loader2,
-  Music
+  Music,
+  Star,
+  X
 } from 'lucide-react';
 import { SceneImage } from '../Images/types';
 import { toast } from 'react-hot-toast';
+import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 
 interface SceneAudioCardProps {
   sceneNumber: number;
@@ -44,13 +47,20 @@ const SceneAudioCard: React.FC<SceneAudioCardProps> = ({
   console.log(`[SceneAudioCard] Scene ${sceneNumber} isGeneratingAudio:`, isGeneratingAudio);
   const [currentImageIndex, setCurrentImageIndex] = React.useState(0);
 
+  // Get storyboard configuration from context
+  const { keySceneImages, deselectedImages } = useScriptSelection();
+
   // Filter for valid images only
-  const validImages = React.useMemo(() => 
-    images.filter(img => img.generationStatus === 'completed' && img.imageUrl), 
+  const validImages = React.useMemo(() =>
+    images.filter(img => img.generationStatus === 'completed' && img.imageUrl),
     [images]
   );
 
   const currentImage = validImages[currentImageIndex];
+
+  // Check if current image is key scene or excluded
+  const isKeyScene = currentImage?.id === keySceneImages[sceneNumber];
+  const isExcluded = currentImage?.id ? deselectedImages.has(currentImage.id) : false;
 
   const handlePrev = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -78,10 +88,17 @@ const SceneAudioCard: React.FC<SceneAudioCardProps> = ({
 
   const isSelected = currentImage?.imageUrl === selectedSceneImage;
 
+  // Determine card styling based on state
+  const cardBorderClass = isExcluded
+    ? 'border-gray-300 opacity-60'  // Excluded: grayed out
+    : isKeyScene
+    ? 'border-yellow-500 ring-2 ring-yellow-500/20'  // Key scene: yellow
+    : isSelected
+    ? 'border-purple-500 ring-2 ring-purple-500/20'  // Selected: purple
+    : 'border-gray-200 dark:border-gray-700';  // Default
+
   return (
-    <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border transition-all duration-200 ${
-      isSelected ? 'border-purple-500 ring-2 ring-purple-500/20' : 'border-gray-200 dark:border-gray-700'
-    }`}>
+    <div className={`bg-white dark:bg-gray-800 rounded-xl shadow-sm border transition-all duration-200 ${cardBorderClass}`}>
       {/* Header */}
       <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50/50 dark:bg-gray-800/50 rounded-t-xl">
         <h4 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
@@ -90,18 +107,35 @@ const SceneAudioCard: React.FC<SceneAudioCardProps> = ({
           </span>
           <span className="text-sm">Scene {sceneNumber}</span>
         </h4>
-        {isSelected && (
-           <span className="flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full">
-             <Check className="w-3 h-3" />
-             Selected
-           </span>
-        )}
-        {(isGenerating || isGeneratingAudio) && (
-           <span className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded-full animate-pulse">
-             <Loader2 className="w-3 h-3 animate-spin" />
-             {isGeneratingAudio ? 'Generating Audio...' : 'Generating...'}
-           </span>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Key Scene Badge */}
+          {isKeyScene && !isExcluded && (
+            <span className="flex items-center gap-1 text-xs font-medium text-yellow-700 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-1 rounded-full">
+              <Star className="w-3 h-3 fill-current" />
+              Key Scene
+            </span>
+          )}
+          {/* Excluded Badge */}
+          {isExcluded && (
+            <span className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full">
+              <X className="w-3 h-3" />
+              Excluded
+            </span>
+          )}
+          {/* Selected Badge */}
+          {isSelected && !isKeyScene && !isExcluded && (
+            <span className="flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-1 rounded-full">
+              <Check className="w-3 h-3" />
+              Selected
+            </span>
+          )}
+          {(isGenerating || isGeneratingAudio) && (
+            <span className="flex items-center gap-1 text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded-full animate-pulse">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              {isGeneratingAudio ? 'Generating Audio...' : 'Generating...'}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="p-4 flex flex-col gap-4">
@@ -182,7 +216,13 @@ const SceneAudioCard: React.FC<SceneAudioCardProps> = ({
         {/* Footer info */}
         <div className="flex justify-between items-center text-xs text-gray-500 pt-2 border-t border-gray-100 dark:border-gray-800">
              <span>{validImages.length} versions available</span>
-             {isSelected && <span className="text-purple-600 font-medium">Ready for Audio</span>}
+             {isExcluded ? (
+               <span className="text-gray-400 font-medium">Excluded from Audio</span>
+             ) : isKeyScene ? (
+               <span className="text-yellow-600 font-medium">Key Scene for Audio</span>
+             ) : isSelected ? (
+               <span className="text-purple-600 font-medium">Ready for Audio</span>
+             ) : null}
         </div>
       </div>
     </div>
