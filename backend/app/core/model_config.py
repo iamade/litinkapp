@@ -93,24 +93,24 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
         primary="seedream-t2i",  # Seedream (ModelsLab V7) Per image generation will cost $0.033
         fallback="seedream-4",  # Seedream-4 (ModelsLab V7) Per image generation will cost $0.033
-        fallback2="imagen-4",  # imagen-4 (ModelsLab API) Per image generation will cost 0.044$
+        fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
     ),
     ModelTier.BASIC: ModelConfig(
         primary="seedream-4",  # Seedream-4 (ModelsLab V7) Per image generation will cost $0.033
         fallback="imagen-4",  # imagen-4 (ModelsLab API) Per image generation will cost 0.044$
-        fallback2="nano-banana-t2i",  # nano-banana-t2i (ModelsLab V7) working Your request will cost $0.046
+        fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         # fallback2="qwen-image-2512",  # Qwen-Image-2512 (Direct API)
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="imagen-4",  # imagen-4 (ModelsLab API) Per image generation will cost 0.044$
         fallback="nano-banana-t2i",  # nano-banana-t2i (ModelsLab V7) working Your request will cost $0.046
-        fallback2="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
+        fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         # fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="nano-banana-t2i",  # nano-banana-t2i (ModelsLab V7) working Your request will cost $0.046
         fallback="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
-        fallback2="imagen-4.0-ultra",  #  imagen-4.0-ultra (ModelsLab API) Per image generation will cost 0.072
+        fallback2="nano-banana-pro",  #  nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         # fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
@@ -120,7 +120,7 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         #  fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="qwen-image-2512",  # Qwen-Image-2512 (Direct API)
+        primary="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         fallback="gpt-image-1.5",  # GPT-Image-1.5 (Direct API)
         fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
         # fallback3="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
@@ -136,19 +136,21 @@ IMAGE_I2I_SINGLE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="nano-banana",  # Nano Banana (ModelsLab) $0.0468
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
-        fallback="seededit-i2i",  # seededit (ModelsLab) $0.04
-        fallback2="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        primary="seededit-i2i",  # seededit (ModelsLab) $0.04
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback2="seedream-4.5-i2i"
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="seededit-i2i",  # seededit (ModelsLab) $0.04
-        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
-        fallback2="seedream-4.0-i2i",
+        primary="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback="seedream-4.0-i2i",
+        fallback2="seedream-4.5-i2i"# seedream-4.5 (ModelsLab) $0.06
     ),
+
     ModelTier.PREMIUM: ModelConfig(
-        primary="seededit-i2i",  # seededit (ModelsLab) $0.04
-        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        primary="nano-banana",  # Nano Banana (ModelsLab) $0.0468
         fallback2="seedream-4.5-i2i",
+        fallback="seededit-i2i",  # seededit (ModelsLab) $0.04
+        
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06

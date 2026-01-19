@@ -296,3 +296,4 @@ Stripe payment processing is fully integrated. Ensure you have:
 - `STRIPE_WEBHOOK_SECRET` for webhook handling
 
 ### make makemigrations name="add_character_ids_to_scripts"
+stripe listen --forward-to http://localhost:8000/api/v1/subscriptions/webhook

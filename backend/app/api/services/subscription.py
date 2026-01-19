@@ -28,6 +28,10 @@ class SubscriptionManager:
         SubscriptionTier.FREE: {
             "videos_per_month": 2,
             "images_per_month": 50,  # For testing character images
+            "audio_per_month": 10,  # Audio/voiceover generations
+            "scripts_per_month": 5,  # Script generations
+            "plots_per_month": 3,  # Plot overview generations
+            "ai_assists_per_month": 20,  # AI chat/assist requests
             "books_upload_limit": 3,
             "video_books_limit": 1,
             "chapters_per_book": 2,
@@ -45,6 +49,11 @@ class SubscriptionManager:
         },
         SubscriptionTier.BASIC: {
             "videos_per_month": 8,
+            "images_per_month": 200,  # Character and scene images
+            "audio_per_month": 50,  # Audio/voiceover generations
+            "scripts_per_month": 25,  # Script generations
+            "plots_per_month": 15,  # Plot overview generations
+            "ai_assists_per_month": 100,  # AI chat/assist requests
             "books_upload_limit": 10,
             "video_books_limit": 3,
             "chapters_per_book": "unlimited",
@@ -62,6 +71,11 @@ class SubscriptionManager:
         },
         SubscriptionTier.PRO: {
             "videos_per_month": 20,
+            "images_per_month": 500,  # Character and scene images
+            "audio_per_month": 150,  # Audio/voiceover generations
+            "scripts_per_month": 75,  # Script generations
+            "plots_per_month": 50,  # Plot overview generations
+            "ai_assists_per_month": 300,  # AI chat/assist requests
             "books_upload_limit": 25,
             "video_books_limit": 10,
             "chapters_per_book": "unlimited",
@@ -79,6 +93,11 @@ class SubscriptionManager:
         },
         SubscriptionTier.PREMIUM: {
             "videos_per_month": 60,
+            "images_per_month": 2000,  # Character and scene images
+            "audio_per_month": 500,  # Audio/voiceover generations
+            "scripts_per_month": 200,  # Script generations
+            "plots_per_month": 150,  # Plot overview generations
+            "ai_assists_per_month": 1000,  # AI chat/assist requests
             "books_upload_limit": 100,
             "video_books_limit": 50,
             "chapters_per_book": "unlimited",
@@ -96,6 +115,11 @@ class SubscriptionManager:
         },
         SubscriptionTier.PROFESSIONAL: {
             "videos_per_month": 150,
+            "images_per_month": 5000,  # Character and scene images
+            "audio_per_month": 2000,  # Audio/voiceover generations
+            "scripts_per_month": 500,  # Script generations
+            "plots_per_month": 400,  # Plot overview generations
+            "ai_assists_per_month": 5000,  # AI chat/assist requests
             "books_upload_limit": "unlimited",
             "video_books_limit": "unlimited",
             "chapters_per_book": "unlimited",
@@ -113,6 +137,11 @@ class SubscriptionManager:
         },
         SubscriptionTier.ENTERPRISE: {
             "videos_per_month": "unlimited",
+            "images_per_month": "unlimited",  # Character and scene images
+            "audio_per_month": "unlimited",  # Audio/voiceover generations
+            "scripts_per_month": "unlimited",  # Script generations
+            "plots_per_month": "unlimited",  # Plot overview generations
+            "ai_assists_per_month": "unlimited",  # AI chat/assist requests
             "books_upload_limit": "unlimited",
             "video_books_limit": "unlimited",
             "chapters_per_book": "unlimited",

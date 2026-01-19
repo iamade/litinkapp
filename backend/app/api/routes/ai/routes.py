@@ -46,6 +46,7 @@ from sqlmodel import select
 from app.books.models import Chapter, Book
 from app.core.auth import get_current_active_user
 from app.core.services.pipeline import PipelineManager, PipelineStep
+
 # from app.core.services.deepseek_script import DeepSeekScriptService
 from app.core.services.openrouter import OpenRouterService, ModelTier
 from app.api.services.subscription import SubscriptionManager
@@ -2910,15 +2911,19 @@ async def generate_script_and_scenes(
                     status_code=403, detail="Not authorized to access this chapter"
                 )
 
-        # ✅ NEW: Check subscription tier and limits
+        # ✅ Check subscription tier and SCRIPT limits (not video)
         subscription_manager = SubscriptionManager(session)
         user_tier = await subscription_manager.get_user_tier(current_user.id)
-        tier_check = await subscription_manager.can_user_generate_video(current_user.id)
 
-        if not tier_check["can_generate"]:
+        # Check script generation limits
+        usage_check = await subscription_manager.check_usage_limits(
+            current_user.id, "script"
+        )
+
+        if not usage_check["can_generate"]:
             raise HTTPException(
                 status_code=402,
-                detail=f"Monthly limit reached. You have used {tier_check['videos_used']} out of {tier_check['videos_limit']} videos. Please upgrade your subscription.",
+                detail=f"Script generation limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
             )
 
         # Map subscription tier to model tier
@@ -3455,6 +3460,18 @@ async def generate_script_and_scenes_with_gpt(
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
+
+        # ✅ Check script generation limits
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(
+            current_user.id, "script"
+        )
+        if not usage_check["can_generate"]:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Script generation limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
+            )
+
         # Generate script using RAGService
         rag_service = RAGService(session)
         chapter_context = await rag_service.get_chapter_with_context(
@@ -3542,6 +3559,16 @@ async def generate_script_and_scenes_with_gpt(
             await session.commit()
             await session.refresh(new_script)
             script_id = str(new_script.id)
+
+        # ✅ Record usage for billing/limits
+        await subscription_manager.record_usage(
+            user_id=current_user.id,
+            resource_type="script",
+            metadata={
+                "script_style": script_style,
+                "chapter_id": chapter_id,
+            },
+        )
 
         return {
             "chapter_id": chapter_id,
@@ -4630,3 +4657,172 @@ async def retry_video_retrieval(
 
         print(f"🔍 Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ============================================================================
+# SCENE PROMPT ENHANCEMENT ENDPOINT
+# ============================================================================
+
+from app.ai.schemas import EnhanceScenePromptRequest, EnhanceScenePromptResponse
+
+
+@router.post("/enhance-scene-prompt", response_model=EnhanceScenePromptResponse)
+async def enhance_scene_prompt(
+    request: EnhanceScenePromptRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Enhance a scene description to be more suitable for image generation.
+
+    This endpoint uses AI to:
+    1. Expand brief descriptions into detailed visual prompts
+    2. Add cinematographic framing instructions
+    3. Suggest appropriate shot types
+    4. Include style-appropriate details
+
+    Usage limits apply based on user subscription tier.
+    """
+    try:
+        user_id = current_user.id
+
+        # Check usage limits
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(user_id, "ai_assist")
+
+        if not usage_check.get("can_generate", True):
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "AI assist limit reached for your subscription tier",
+                    "tier": usage_check.get("tier", "free"),
+                    "limit": usage_check.get("limits", {}).get("ai_assists_per_month", 0),
+                    "used": usage_check.get("current_usage", {}).get("ai_assist", 0),
+                }
+            )
+
+        # Detect shot type from description
+        detected_shot = None
+        shot_patterns = {
+            "close-up": r"\b(extreme\s+)?close[-\s]?up\b",
+            "medium shot": r"\bmedium\s+(close[-\s]?up|shot)\b",
+            "wide shot": r"\b(wide|full|establishing)\s+shot\b",
+            "over-the-shoulder": r"\bover[-\s]?the[-\s]?shoulder\b",
+            "two-shot": r"\btwo[-\s]?shot\b",
+            "POV": r"\bPOV\b|point[-\s]?of[-\s]?view",
+        }
+
+        for shot_name, pattern in shot_patterns.items():
+            if re.search(pattern, request.scene_description, re.IGNORECASE):
+                detected_shot = shot_name
+                break
+
+        # Build the enhancement prompt
+        system_prompt = """You are a cinematography and visual storytelling expert. Your task is to enhance scene descriptions for AI image generation.
+
+Guidelines:
+1. PRESERVE the original intent and content of the description
+2. ADD visual details: lighting, colors, atmosphere, composition
+3. SPECIFY camera framing clearly (close-up = camera position, NOT enlarged subject)
+4. INCLUDE character actions and expressions where relevant
+5. AVOID dialogue or text that might appear in the image
+6. Use CINEMATIC language appropriate for film stills
+7. Keep the enhanced description under 200 words
+8. DO NOT include any formatting, just the enhanced description text
+
+IMPORTANT for close-ups and framing:
+- "Close-up" means the camera is positioned closer, showing head and shoulders
+- Characters should ALWAYS be at natural human proportions
+- Never describe enlarged or oversized body parts
+- Frame descriptions should be about camera position, not subject size"""
+
+        user_prompt = f"""Enhance this scene description for AI image generation:
+
+Original: {request.scene_description}
+
+{f"Scene context: {request.scene_context}" if request.scene_context else ""}
+{f"Characters present: {', '.join(request.characters_in_scene)}" if request.characters_in_scene else ""}
+{f"Requested shot type: {request.shot_type}" if request.shot_type else ""}
+Style: {request.style}
+
+Provide ONLY the enhanced description, no explanations or formatting."""
+
+        # Use OpenRouter for the enhancement - use analyze_content with custom analysis
+        openrouter = OpenRouterService()
+
+        # Combine system prompt and user prompt for analyze_content
+        combined_prompt = f"""{system_prompt}
+
+---
+
+{user_prompt}"""
+
+        # Map user's subscription tier to ModelTier enum
+        user_tier_str = usage_check.get("tier", "free").lower()
+        model_tier_mapping = {
+            "free": ModelTier.FREE,
+            "basic": ModelTier.BASIC,
+            "standard": ModelTier.STANDARD,
+            "premium": ModelTier.PREMIUM,
+            "professional": ModelTier.PROFESSIONAL,
+            "enterprise": ModelTier.ENTERPRISE,
+        }
+        user_model_tier = model_tier_mapping.get(user_tier_str, ModelTier.FREE)
+
+        # Use user's subscription tier for model selection
+        # FREE -> DeepSeek, BASIC -> Qwen, STANDARD -> Gemini 2.5 Pro, etc.
+        result = await openrouter.analyze_content(
+            content=combined_prompt,
+            user_tier=user_model_tier,
+            analysis_type="enhancement"  # Custom type for scene enhancement
+        )
+
+        # Extract enhanced text from result
+        enhanced_text = result.get("analysis", result.get("summary", request.scene_description))
+
+        # Clean up the response
+        if isinstance(enhanced_text, str):
+            enhanced_text = enhanced_text.strip()
+            # Remove any markdown formatting if present
+            enhanced_text = re.sub(r"^[*#]+\s*", "", enhanced_text)
+            enhanced_text = re.sub(r"\s*[*#]+$", "", enhanced_text)
+            # Remove any leading labels like "Enhanced description:" or similar
+            enhanced_text = re.sub(r"^(Enhanced description|Result|Output):\s*", "", enhanced_text, flags=re.IGNORECASE)
+        else:
+            enhanced_text = request.scene_description  # Fallback to original
+
+        # Suggest shot types based on the scene
+        suggested_shots = []
+        if "character" in request.scene_description.lower() or request.characters_in_scene:
+            suggested_shots = ["close-up", "medium shot", "over-the-shoulder"]
+        elif "environment" in request.scene_description.lower() or "room" in request.scene_description.lower():
+            suggested_shots = ["wide shot", "establishing shot"]
+        else:
+            suggested_shots = ["wide shot", "medium shot", "close-up"]
+
+        # Track usage
+        await subscription_manager.record_usage(
+            user_id,
+            "ai_assist",
+            cost_usd=0.001,  # Small cost for tracking
+            metadata={"scene_number": None, "enhanced": True}
+        )
+
+        return EnhanceScenePromptResponse(
+            original_description=request.scene_description,
+            enhanced_description=enhanced_text,
+            detected_shot_type=detected_shot,
+            suggested_shot_types=suggested_shots,
+            enhancement_notes="Enhanced for better image generation. Shot type instructions added for proper framing."
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error enhancing scene prompt: {e}")
+        import traceback
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to enhance scene prompt: {str(e)}"
+        )

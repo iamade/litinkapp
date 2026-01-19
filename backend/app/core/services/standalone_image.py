@@ -556,7 +556,7 @@ class StandaloneImageService:
     ) -> str:
         """
         Build enhanced prompt for scene image generation.
-        Strips dialogue and adds negative prompts to prevent text in images.
+        Strips dialogue, detects shot types, and adds negative prompts to prevent text in images.
 
         Args:
             scene_description: Description of the scene
@@ -565,6 +565,67 @@ class StandaloneImageService:
             is_suggested_shot: If True, emphasizes keeping same background with only pose changes
         """
         import re
+
+        # Shot type mappings - translate cinematographic terms to image generation instructions
+        # These ensure the model understands framing without distorting proportions
+        shot_type_mappings = {
+            # Close-ups - camera framing, NOT enlarging the subject
+            r'\b(extreme\s+)?close[-\s]?up\b': {
+                'framing': 'camera positioned close to subject, head and shoulders visible',
+                'instruction': 'IMPORTANT: Subject should be at NATURAL human proportions, camera is simply positioned closer. Do NOT enlarge or distort the head/face size. Frame shows face and upper chest area.',
+                'negative': 'NO oversized heads, NO distorted proportions, NO giant faces'
+            },
+            r'\bECU\b': {
+                'framing': 'extreme close-up, face fills most of frame',
+                'instruction': 'Subject at natural proportions, camera very close showing facial details. Do NOT distort or enlarge features.',
+                'negative': 'NO distorted features, NO unnatural proportions'
+            },
+            # Medium shots
+            r'\bmedium\s+(close[-\s]?up|shot)\b': {
+                'framing': 'medium shot, waist-up framing',
+                'instruction': 'Subject shown from waist up, natural proportions, comfortable conversational distance',
+                'negative': 'NO cropped limbs at awkward points'
+            },
+            r'\bMCU\b': {
+                'framing': 'medium close-up, chest and head visible',
+                'instruction': 'Subject from chest up, natural proportions',
+                'negative': ''
+            },
+            r'\bMS\b': {
+                'framing': 'medium shot, waist-up',
+                'instruction': 'Subject from waist up, natural proportions',
+                'negative': ''
+            },
+            # Wide/Full shots
+            r'\b(wide|full|establishing)\s+shot\b': {
+                'framing': 'wide establishing shot, full scene visible',
+                'instruction': 'Show full environment with characters in context, full bodies visible if characters present',
+                'negative': ''
+            },
+            r'\bWS\b': {
+                'framing': 'wide shot, full scene',
+                'instruction': 'Full environment visible, characters shown in full body',
+                'negative': ''
+            },
+            # Two-shot
+            r'\btwo[-\s]?shot\b': {
+                'framing': 'two-shot, two characters in frame',
+                'instruction': 'Frame two characters together, both visible from similar distance, balanced composition',
+                'negative': 'NO single character focus'
+            },
+            # Over-the-shoulder
+            r'\bover[-\s]?the[-\s]?shoulder\b|OTS\b': {
+                'framing': 'over-the-shoulder shot',
+                'instruction': 'Camera positioned behind one character looking at another, foreground character partially visible from behind',
+                'negative': ''
+            },
+            # POV
+            r'\bPOV\b|point[-\s]?of[-\s]?view': {
+                'framing': 'POV shot, first-person perspective',
+                'instruction': 'Camera shows what the character sees, subjective viewpoint',
+                'negative': 'NO visible camera operator'
+            },
+        }
 
         # Strip quoted dialogue to prevent text appearing in images
         # Remove patterns like: "dialogue text" or 'dialogue text'
@@ -584,6 +645,24 @@ class StandaloneImageService:
 
         # Clean up extra whitespace
         cleaned_description = " ".join(cleaned_description.split())
+
+        # Detect shot type and extract framing instructions
+        detected_shot_type = None
+        shot_framing = ""
+        shot_instruction = ""
+        shot_negative = ""
+
+        for pattern, mapping in shot_type_mappings.items():
+            if re.search(pattern, cleaned_description, re.IGNORECASE):
+                detected_shot_type = pattern
+                shot_framing = mapping['framing']
+                shot_instruction = mapping['instruction']
+                shot_negative = mapping['negative']
+                # Remove the shot type from description to avoid confusion
+                cleaned_description = re.sub(pattern, '', cleaned_description, flags=re.IGNORECASE)
+                cleaned_description = " ".join(cleaned_description.split())
+                logger.debug(f"[_build_scene_prompt] Detected shot type: {shot_framing}")
+                break
 
         # If description is too minimal, add context
         if len(cleaned_description.strip()) < 15:
@@ -610,6 +689,11 @@ class StandaloneImageService:
             # Build a focused suggested shot prompt
             base_prompt = f"Cinematic film still, {cleaned_description}"
 
+            # Add shot type framing if detected
+            if shot_framing:
+                base_prompt += f". Camera framing: {shot_framing}"
+                base_prompt += f". {shot_instruction}"
+
             # Add location context if available
             if location_context:
                 base_prompt += f". Setting: {location_context}"
@@ -627,11 +711,15 @@ class StandaloneImageService:
             )
 
             # Stronger negative prompt for I2I
-            base_prompt += (
+            negative_prompt = (
                 ". ABSOLUTELY NO: text, words, captions, labels, watermarks, logos, speech bubbles"
                 ". NO color shifts, NO environment changes, NO different room, NO new furniture"
                 ". NO exaggerated expressions, NO screaming, NO dramatic poses unless specified"
             )
+            # Add shot-type specific negatives
+            if shot_negative:
+                negative_prompt += f". {shot_negative}"
+            base_prompt += negative_prompt
 
             if custom_prompt:
                 clean_custom = re.sub(r'["\']([^"\']*)["\']', "", custom_prompt)
@@ -647,11 +735,22 @@ class StandaloneImageService:
             "fantasy": "fantasy environment, magical atmosphere, otherworldly landscape, mystical setting",
         }
 
-        base_prompt = f"Scene: {cleaned_description}. {style_modifiers.get(style, style_modifiers['cinematic'])}. "
-        base_prompt += "Wide establishing shot, detailed environment, atmospheric perspective, immersive background, professional scene composition"
+        # Build base prompt with shot type if detected
+        if shot_framing:
+            base_prompt = f"Cinematic film still, {shot_framing}. {cleaned_description}. "
+            base_prompt += f"{shot_instruction}. "
+            base_prompt += f"{style_modifiers.get(style, style_modifiers['cinematic'])}. "
+            base_prompt += "Professional scene composition, natural human proportions"
+        else:
+            base_prompt = f"Scene: {cleaned_description}. {style_modifiers.get(style, style_modifiers['cinematic'])}. "
+            base_prompt += "Wide establishing shot, detailed environment, atmospheric perspective, immersive background, professional scene composition"
 
         # Add negative prompt to prevent text in images
-        base_prompt += ". NO TEXT, no words, no letters, no writing, no captions, no subtitles, no dialogue text, no speech bubbles"
+        negative_prompt = ". NO TEXT, no words, no letters, no writing, no captions, no subtitles, no dialogue text, no speech bubbles"
+        # Add shot-type specific negatives
+        if shot_negative:
+            negative_prompt += f". {shot_negative}"
+        base_prompt += negative_prompt
 
         if custom_prompt:
             # Also strip any dialogue from custom prompt

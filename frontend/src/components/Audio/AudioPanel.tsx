@@ -64,6 +64,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     // NEW: Storyboard configuration
     keySceneImages,
     deselectedImages,
+    imageOrderByScene,
     loadStoryboardConfig,
   } = useScriptSelection();
 
@@ -703,28 +704,56 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                    {scenes.map((scene: any, idx: number) => (
-                        <SceneAudioCard
-                            key={idx}
-                            sceneNumber={idx + 1}
-                            description={typeof scene === 'string' ? scene : (scene.visual_description || scene.description)}
-                            images={sceneImages[`${selectedScriptId}_${idx + 1}`] || sceneImages[idx + 1] || []}
-                            selectedSceneImage={selectedSceneImages[idx + 1]}
-                            selectedScriptId={selectedScriptId}
-                            onSelectImage={(url) => setSelectedSceneImage(idx + 1, url || null)}
-                            onGenerateImage={(sceneNum, prompt) => generateSceneImage(sceneNum, prompt, { 
-                                style: 'cinematic', 
-                                aspectRatio: '16:9',
-                                quality: 'standard',
-                                useCharacterReferences: true,
-                                includeBackground: true,
-                                lightingMood: 'natural'
-                            })}
-                            isGenerating={generatingScenes.has(idx + 1)}
-                            isGeneratingAudio={generatingScenesAudio.has(idx + 1)}
-                            onView={() => openGallery(idx)}
-                        />
-                    ))}
+                    {scenes.map((scene: any, idx: number) => {
+                        const sceneNum = idx + 1;
+                        const rawImages = sceneImages[`${selectedScriptId}_${sceneNum}`] || sceneImages[sceneNum] || [];
+
+                        // Filter out excluded images - only show images not in deselectedImages
+                        const includedImages = rawImages.filter((img: any) =>
+                            !img.id || !deselectedImages.has(img.id)
+                        );
+
+                        // Sort images according to stored order
+                        const storedOrder = imageOrderByScene[sceneNum];
+                        const sortedImages = storedOrder && storedOrder.length > 0
+                            ? [...includedImages].sort((a: any, b: any) => {
+                                const aIndex = a.id ? storedOrder.indexOf(a.id) : -1;
+                                const bIndex = b.id ? storedOrder.indexOf(b.id) : -1;
+                                if (aIndex === -1 && bIndex === -1) return 0;
+                                if (aIndex === -1) return 1;
+                                if (bIndex === -1) return -1;
+                                return aIndex - bIndex;
+                            })
+                            : includedImages;
+
+                        // Skip scenes where all images are excluded
+                        if (sortedImages.length === 0 && rawImages.length > 0) {
+                            return null;
+                        }
+
+                        return (
+                            <SceneAudioCard
+                                key={idx}
+                                sceneNumber={sceneNum}
+                                description={typeof scene === 'string' ? scene : (scene.visual_description || scene.description)}
+                                images={sortedImages}
+                                selectedSceneImage={selectedSceneImages[sceneNum]}
+                                selectedScriptId={selectedScriptId}
+                                onSelectImage={(url) => setSelectedSceneImage(sceneNum, url || null)}
+                                onGenerateImage={(sceneNumber, prompt) => generateSceneImage(sceneNumber, prompt, {
+                                    style: 'cinematic',
+                                    aspectRatio: '16:9',
+                                    quality: 'standard',
+                                    useCharacterReferences: true,
+                                    includeBackground: true,
+                                    lightingMood: 'natural'
+                                })}
+                                isGenerating={generatingScenes.has(sceneNum)}
+                                isGeneratingAudio={generatingScenesAudio.has(sceneNum)}
+                                onView={() => openGallery(idx)}
+                            />
+                        );
+                    })}
                 </div>
                 
                 {scenes.length === 0 && (

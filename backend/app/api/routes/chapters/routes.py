@@ -182,13 +182,17 @@ class SceneReorderRequest(SQLModel):
 
 class StoryboardConfigRequest(SQLModel):
     """Request model for saving storyboard configuration"""
+
     key_scene_images: Dict[str, str] = {}  # scene_number (str) -> image_id
-    deselected_images: List[str] = []       # image IDs that are excluded (opt-OUT)
-    image_order: Dict[str, List[str]] = {}  # scene_number (str) -> ordered list of image_ids
+    deselected_images: List[str] = []  # image IDs that are excluded (opt-OUT)
+    image_order: Dict[str, List[str]] = (
+        {}
+    )  # scene_number (str) -> ordered list of image_ids
 
 
 class StoryboardConfigResponse(SQLModel):
     """Response model for storyboard configuration"""
+
     key_scene_images: Dict[str, str] = {}
     deselected_images: List[str] = []
     image_order: Dict[str, List[str]] = {}
@@ -231,7 +235,10 @@ async def reorder_scenes(
         )
 
 
-@router.get("/{chapter_id}/scripts/{script_id}/storyboard-config", response_model=StoryboardConfigResponse)
+@router.get(
+    "/{chapter_id}/scripts/{script_id}/storyboard-config",
+    response_model=StoryboardConfigResponse,
+)
 async def get_storyboard_config(
     chapter_id: str,
     script_id: str,
@@ -267,7 +274,10 @@ async def get_storyboard_config(
         )
 
 
-@router.patch("/{chapter_id}/scripts/{script_id}/storyboard-config", response_model=StoryboardConfigResponse)
+@router.patch(
+    "/{chapter_id}/scripts/{script_id}/storyboard-config",
+    response_model=StoryboardConfigResponse,
+)
 async def update_storyboard_config(
     chapter_id: str,
     script_id: str,
@@ -469,11 +479,19 @@ async def generate_scene_image(
         if request.scene_description:
             scene_description = request.scene_description
 
-        # Get user tier for model selection
+        # Get user tier for model selection and check limits
         subscription_manager = SubscriptionManager(session)
         usage_check = await subscription_manager.check_usage_limits(
             current_user.id, "image"
         )
+
+        # Enforce image generation limits
+        if not usage_check["can_generate"]:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Image generation limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
+            )
+
         user_tier = usage_check["tier"]
 
         # Create pending record in database

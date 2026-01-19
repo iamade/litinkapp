@@ -60,3 +60,21 @@ class ScriptRetrievalResponse(BaseModel):
     service_used: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class EnhanceScenePromptRequest(BaseModel):
+    """Request to enhance a scene description for image generation"""
+    scene_description: str
+    scene_context: Optional[str] = None  # Additional context from the script
+    characters_in_scene: Optional[List[str]] = None  # Character names present
+    shot_type: Optional[str] = None  # e.g., "close-up", "wide shot"
+    style: str = "cinematic"
+
+
+class EnhanceScenePromptResponse(BaseModel):
+    """Response with enhanced scene description"""
+    original_description: str
+    enhanced_description: str
+    detected_shot_type: Optional[str] = None
+    suggested_shot_types: List[str] = []
+    enhancement_notes: Optional[str] = None

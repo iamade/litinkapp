@@ -148,6 +148,16 @@ async def generate_plot_overview(
             existing_characters=existing_characters,
         )
 
+        # ✅ Record usage for billing/limits
+        await subscription_manager.record_usage(
+            user_id=current_user.id,
+            resource_type="plot",
+            metadata={
+                "book_id": str(book_id),
+                "is_refinement": bool(request.refinement_prompt),
+            },
+        )
+
         return result
 
     except HTTPException:
@@ -552,6 +562,16 @@ async def generate_project_plot_overview(
             refinement_prompt=request.refinement_prompt,
             existing_plot=existing_plot,
             book_id=project.book_id,  # Use linked book for character extraction
+        )
+
+        # ✅ Record usage for billing/limits
+        await subscription_manager.record_usage(
+            user_id=current_user.id,
+            resource_type="plot",
+            metadata={
+                "project_id": str(project_id),
+                "is_refinement": bool(request.refinement_prompt),
+            },
         )
 
         return result

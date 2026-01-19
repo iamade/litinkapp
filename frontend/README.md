@@ -1,5 +1,6 @@
 
  stripe listen --forward-to http://localhost:8000/api/v1/subscriptions/webhook
+ https://docs.stripe.com/testing?testing-method=card-numbers#visa
  
 postgres implementation section 5 vidoe 17 2:50
 

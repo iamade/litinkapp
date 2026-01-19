@@ -158,6 +158,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     keySceneImages,
     deselectedImages,
     storyboardDirty,
+    imageOrderByScene,
     setKeySceneImage,
     toggleDeselectedImage,
     setImageOrder,
@@ -1641,7 +1642,21 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     ? sceneData 
                     : (sceneData?.visual_description || sceneData?.description || `Scene ${sceneNum}`);
 
-                const images = sceneImages[Number(sceneNum)] || [];
+                const rawImages = sceneImages[Number(sceneNum)] || [];
+
+                // Sort images according to stored order from imageOrderByScene
+                const storedOrder = imageOrderByScene[sceneNum];
+                const images = storedOrder && storedOrder.length > 0
+                  ? [...rawImages].sort((a, b) => {
+                      const aIndex = a.id ? storedOrder.indexOf(a.id) : -1;
+                      const bIndex = b.id ? storedOrder.indexOf(b.id) : -1;
+                      // Images not in stored order go to the end
+                      if (aIndex === -1 && bIndex === -1) return 0;
+                      if (aIndex === -1) return 1;
+                      if (bIndex === -1) return -1;
+                      return aIndex - bIndex;
+                    })
+                  : rawImages;
 
                 return (
                   <SortableStoryboardRow

@@ -801,6 +801,29 @@ export const userService = {
     });
   },
 
+  // AI Assist - Enhance scene prompt for image generation
+  enhanceScenePrompt: async (request: {
+    scene_description: string;
+    scene_context?: string;
+    characters_in_scene?: string[];
+    shot_type?: string;
+    style?: string;
+  }): Promise<{
+    original_description: string;
+    enhanced_description: string;
+    detected_shot_type: string | null;
+    suggested_shot_types: string[];
+    enhancement_notes: string | null;
+  }> => {
+    return apiClient.post("/ai/enhance-scene-prompt", {
+      scene_description: request.scene_description,
+      scene_context: request.scene_context,
+      characters_in_scene: request.characters_in_scene,
+      shot_type: request.shot_type,
+      style: request.style || "cinematic",
+    });
+  },
+
 };
 
 export async function deleteBook(bookId: string) {

@@ -1172,7 +1172,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
           filteredCharacters.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {filteredCharacters
-                .filter((character: Character) => character.entity_type !== 'object')
+                .filter((character: Character) => character.entity_type !== 'object' && character.entity_type !== 'location')
                 .map((character: Character) => (
                 <CharacterCard
                   key={character.id}

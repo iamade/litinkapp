@@ -9,11 +9,16 @@ interface TierFeatures {
   custom_voices?: boolean;
   api_access?: boolean;
   team_collaboration?: boolean;
-  books_upload_limit?: number;
+  books_upload_limit?: number | string;
   video_books_limit?: number;
   chapters_per_book?: number | string;
   model_selection?: boolean;
   voice_cloning?: boolean;
+  images_per_month?: number | string;  // Character and scene image generation limit
+  audio_per_month?: number | string;   // Audio/voiceover generation limit
+  scripts_per_month?: number | string; // Script generation limit
+  plots_per_month?: number | string;   // Plot overview generation limit
+  ai_assists_per_month?: number | string; // AI assist/chat limit
 }
 
 interface SubscriptionTierCardProps {
@@ -180,6 +185,79 @@ export default function SubscriptionTierCard({
             </div>
           )}
         </div>
+
+        {/* Image Generation Limits */}
+        {tier.features && (tier.features as TierFeatures).images_per_month && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold text-gray-900 dark:text-gray-200 uppercase tracking-wide opacity-70">Image Generation</h4>
+            <div className="flex items-center gap-3">
+              <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+              <span className="text-sm text-gray-700 dark:text-gray-300">
+                {(tier.features as TierFeatures).images_per_month === 'unlimited'
+                  ? 'Unlimited images per month'
+                  : `${(tier.features as TierFeatures).images_per_month} images per month`}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 ml-8">
+              Includes character & scene images
+            </p>
+          </div>
+        )}
+
+        {/* Audio Generation Limits */}
+        {tier.features && (tier.features as TierFeatures).audio_per_month && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold text-gray-900 dark:text-gray-200 uppercase tracking-wide opacity-70">Audio Generation</h4>
+            <div className="flex items-center gap-3">
+              <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+              <span className="text-sm text-gray-700 dark:text-gray-300">
+                {(tier.features as TierFeatures).audio_per_month === 'unlimited'
+                  ? 'Unlimited audio generations per month'
+                  : `${(tier.features as TierFeatures).audio_per_month} audio generations per month`}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 ml-8">
+              Includes voiceovers & narration
+            </p>
+          </div>
+        )}
+
+        {/* AI Text Generation Limits */}
+        {tier.features && ((tier.features as TierFeatures).scripts_per_month || (tier.features as TierFeatures).plots_per_month || (tier.features as TierFeatures).ai_assists_per_month) && (
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold text-gray-900 dark:text-gray-200 uppercase tracking-wide opacity-70">AI Text Generation</h4>
+            {(tier.features as TierFeatures).scripts_per_month && (
+              <div className="flex items-center gap-3">
+                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {(tier.features as TierFeatures).scripts_per_month === 'unlimited'
+                    ? 'Unlimited script generations'
+                    : `${(tier.features as TierFeatures).scripts_per_month} script generations/month`}
+                </span>
+              </div>
+            )}
+            {(tier.features as TierFeatures).plots_per_month && (
+              <div className="flex items-center gap-3">
+                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {(tier.features as TierFeatures).plots_per_month === 'unlimited'
+                    ? 'Unlimited plot generations'
+                    : `${(tier.features as TierFeatures).plots_per_month} plot generations/month`}
+                </span>
+              </div>
+            )}
+            {(tier.features as TierFeatures).ai_assists_per_month && (
+              <div className="flex items-center gap-3">
+                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {(tier.features as TierFeatures).ai_assists_per_month === 'unlimited'
+                    ? 'Unlimited AI assist requests'
+                    : `${(tier.features as TierFeatures).ai_assists_per_month} AI assist requests/month`}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Book & Content Limits */}
         {tier.features && (
