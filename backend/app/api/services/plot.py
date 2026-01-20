@@ -1785,6 +1785,10 @@ Return the enhanced script.
         Retrieve existing plot overview for a book.
         """
         try:
+            logger.info(
+                f"[PlotService.get_plot_overview] Looking for plot with book_id={book_id}, user_id={user_id}"
+            )
+
             # Get plot overview
             statement = (
                 select(PlotOverview)
@@ -1797,7 +1801,28 @@ Return the enhanced script.
             plot_data = result.first()
 
             if not plot_data:
+                # Debug: Check if plot exists with different user_id
+                debug_statement = (
+                    select(PlotOverview)
+                    .where(PlotOverview.book_id == book_id)
+                    .limit(1)
+                )
+                debug_result = await self.session.exec(debug_statement)
+                debug_plot = debug_result.first()
+                if debug_plot:
+                    logger.warning(
+                        f"[PlotService.get_plot_overview] Plot exists but user_id mismatch! "
+                        f"Requested user_id={user_id}, Plot user_id={debug_plot.user_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"[PlotService.get_plot_overview] No plot found with book_id={book_id}"
+                    )
                 return None
+
+            logger.info(
+                f"[PlotService.get_plot_overview] Found plot: id={plot_data.id}, version={plot_data.version}"
+            )
 
             # Get associated characters (ordered by creation time for consistent display)
             statement = (

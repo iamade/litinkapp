@@ -39,6 +39,9 @@ interface Character {
     created_at: string;
     status: string;
   }>;
+  accent?: string;
+  voice_characteristics?: string;
+  voice_gender?: string;
 }
 
 interface CharacterCardProps {
@@ -170,7 +173,10 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
         need: character.need || '',
         lie: character.lie || '',
         ghost: character.ghost || '',
-        archetypes: character.archetypes || []
+        archetypes: character.archetypes || [],
+        accent: character.accent || 'neutral',
+        voice_characteristics: character.voice_characteristics || '',
+        voice_gender: character.voice_gender || 'auto'
       });
       setIsEditing(true);
     }
@@ -500,6 +506,79 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
             )}
             </div>
         )}
+
+        {/* Voice and Accent Settings - Single Row */}
+        {!isObject && (
+          <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">Voice & Accent</label>
+             
+             <div className="grid grid-cols-2 gap-2 mb-2">
+                <div>
+                   <label className="block text-[10px] text-gray-400 uppercase tracking-wider mb-1">Accent</label>
+                   {isEditing ? (
+                      <select
+                        value={displayValue('accent') as string || 'neutral'}
+                        onChange={(e) => handleInputChange('accent', e.target.value)}
+                        className="w-full text-xs text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        disabled={isGeneratingWithAI}
+                      >
+                        <option value="neutral">Neutral</option>
+                        <option value="nigerian">Nigerian</option>
+                        <option value="british">British</option>
+                        <option value="american">American</option>
+                        <option value="indian">Indian</option>
+                        <option value="australian">Australian</option>
+                        <option value="jamaican">Jamaican</option>
+                        <option value="french">French</option>
+                        <option value="german">German</option>
+                      </select>
+                   ) : (
+                      <span className="text-xs font-medium px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-md text-gray-700 dark:text-gray-300 capitalize">
+                         {character.accent || 'Neutral'}
+                      </span>
+                   )}
+                </div>
+
+                <div>
+                   <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Voice Gender</label>
+                    {isEditing ? (
+                      <select
+                        value={displayValue('voice_gender') as string || 'auto'}
+                        onChange={(e) => handleInputChange('voice_gender', e.target.value)}
+                        className="w-full text-xs text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        disabled={isGeneratingWithAI}
+                      >
+                        <option value="auto">Auto (Detect)</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                      </select>
+                   ) : (
+                      <span className="text-xs font-medium px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded-md text-gray-700 dark:text-gray-300 capitalize">
+                         {character.voice_gender || 'Auto'}
+                      </span>
+                   )}
+                </div>
+             </div>
+
+             {/* Voice Characteristics */}
+             {isEditing ? (
+                <textarea
+                  value={displayValue('voice_characteristics') as string || ''}
+                  onChange={(e) => handleInputChange('voice_characteristics', e.target.value)}
+                  className="w-full text-xs text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 border dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-400 resize-none"
+                  rows={2}
+                  placeholder="Voice traits (e.g., deep, raspy, warm, cheerful)..."
+                  disabled={isGeneratingWithAI}
+                />
+             ) : character.voice_characteristics && (
+                <p className="text-xs text-gray-600 dark:text-gray-400 italic">
+                   "{character.voice_characteristics}"
+                </p>
+             )}
+          </div>
+        )}
+
+
 
         {/* Physical Description */}
         <div>

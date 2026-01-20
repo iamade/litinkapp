@@ -361,6 +361,7 @@ What is it? You look worried.
             "character_generation",
             "archetype_analysis",
             "character_details",
+            "enhancement",
         ]:
             system_prompt = self._get_special_system_prompt(analysis_type)
             user_message = content
@@ -482,6 +483,17 @@ What is it? You look worried.
             "characters": """You are an expert character developer and psychologist specializing in creating deep, multidimensional characters with clear motivations, arcs, and personality traits. You understand Jungian archetypes and narrative character functions.""",
             "archetype_analysis": """You are a Jungian psychology expert specializing in archetypal analysis of characters in literature. You can identify and explain how characters embody classic archetypes and their narrative functions.""",
             "character_details": """You are an expert character development analyst. Analyze the provided book content and generate comprehensive character details in valid JSON format. Always respond with properly formatted JSON containing all requested fields.""",
+            "enhancement": """You are a cinematography and visual storytelling expert specializing in creating detailed scene descriptions for AI image generation.
+
+Your task is to enhance scene descriptions with:
+- Visual style and atmosphere (cinematic, dramatic, ethereal, etc.)
+- Lighting details (warm ambient glow, dramatic shadows, natural daylight, etc.)
+- Camera composition suggestions (wide establishing shot, intimate close-up, etc.)
+- Character expressions and body language when relevant
+- Environmental and atmospheric details
+- Quality notes for AI generation (high detail, photorealistic, etc.)
+
+Return ONLY the enhanced description text. Do not include explanations, formatting, or metadata.""",
         }
 
         return prompts.get(analysis_type, "You are a content analyst.")

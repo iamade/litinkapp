@@ -1,25 +1,31 @@
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
+
 class AIRequest(BaseModel):
     prompt: str
     context: str | None = None
 
+
 class AIResponse(BaseModel):
     text: str
+
 
 class QuizGenerationRequest(BaseModel):
     book_id: int
     num_questions: int = 5
     difficulty: str = "medium"
 
+
 class AnalyzeChapterSafetyRequest(BaseModel):
-    chapter_id: str 
-    
+    chapter_id: str
+
+
 class ScriptGenerationRequest(BaseModel):
     chapter_id: str
     script_style: str = "cinematic_movie"
     service_provider: Optional[str] = "deepseek"
+
 
 class CharacterDetail(BaseModel):
     name: str
@@ -27,11 +33,13 @@ class CharacterDetail(BaseModel):
     personality: str
     role: str
 
+
 class ScriptMetadata(BaseModel):
     genre: Optional[str] = None
     tone: Optional[str] = None
     target_audience: Optional[str] = None
     estimated_duration: Optional[str] = None
+
 
 class ScriptResponse(BaseModel):
     chapter_id: str
@@ -44,6 +52,7 @@ class ScriptResponse(BaseModel):
     script_style: str
     metadata: ScriptMetadata
     service_used: str
+
 
 class ScriptRetrievalResponse(BaseModel):
     id: str
@@ -64,6 +73,7 @@ class ScriptRetrievalResponse(BaseModel):
 
 class EnhanceScenePromptRequest(BaseModel):
     """Request to enhance a scene description for image generation"""
+
     scene_description: str
     scene_context: Optional[str] = None  # Additional context from the script
     characters_in_scene: Optional[List[str]] = None  # Character names present
@@ -73,8 +83,37 @@ class EnhanceScenePromptRequest(BaseModel):
 
 class EnhanceScenePromptResponse(BaseModel):
     """Response with enhanced scene description"""
+
     original_description: str
     enhanced_description: str
     detected_shot_type: Optional[str] = None
     suggested_shot_types: List[str] = []
     enhancement_notes: Optional[str] = None
+
+
+class EmotionalMapEntry(BaseModel):
+    """Detailed emotional mapping for a single line of dialogue"""
+
+    line_id: str
+    character: str
+    dialogue: str
+    emotional_state: str  # e.g. "Angry", "Hesitant", "Joyful"
+    emotional_intensity: int  # 1-10 scale
+    subtext: str  # The hidden meaning or internal thought
+    vocal_direction: (
+        str  # Instructions for the voice actor/TTS (e.g. "Whispered", "Fast paced")
+    )
+    facial_expression: (
+        str  # Visual cue for video generation (e.g. "Furrowed brow", "Wide smile")
+    )
+    body_language: Optional[str] = None  # e.g. "Clenching fists", "Looking away"
+
+
+class EmotionalMapRequest(BaseModel):
+    script_content: str
+    characters: List[str]
+    script_id: Optional[str] = None
+
+
+class EmotionalMapResponse(BaseModel):
+    entries: List[EmotionalMapEntry]

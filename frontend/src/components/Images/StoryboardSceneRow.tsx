@@ -88,7 +88,7 @@ const SortableImageCard = ({
             style={style}
             {...attributes}
             {...listeners}
-            className={`relative group flex-shrink-0 w-72 bg-white dark:bg-gray-800 rounded-lg border-2 transition-all duration-200 cursor-grab active:cursor-grabbing ${cardBorderClass}`}
+            className={`relative group w-full bg-white dark:bg-gray-800 rounded-lg border-2 transition-all duration-200 cursor-grab active:cursor-grabbing ${cardBorderClass}`}
             onClick={onSelect}
         >
             {/* Image Container */}
@@ -249,7 +249,7 @@ export const StoryboardSceneRow: React.FC<StoryboardSceneRowProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 mb-6 shadow-sm hover:shadow-md transition-shadow relative">
+    <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-5 mb-6 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
       <div className="flex justify-between items-start mb-4 border-b border-gray-100 dark:border-gray-700 pb-3">
          <div className="flex items-start">
             {/* Drag Handle for Scene */}
@@ -295,7 +295,7 @@ export const StoryboardSceneRow: React.FC<StoryboardSceneRowProps> = ({
                     items={images.map(img => img.imageUrl)} 
                     strategy={horizontalListSortingStrategy}
                 >
-                    <div className="flex space-x-5 overflow-x-auto pb-4 pt-2 scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                         {images.map((img) => (
                             <SortableImageCard
                                 key={img.imageUrl} // Ensure URL is unique, usually is

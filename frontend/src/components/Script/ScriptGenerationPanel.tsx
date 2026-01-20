@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User, Activity } from 'lucide-react';
+import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User, Activity, Mic, Play, Smile } from 'lucide-react';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
+import { apiClient } from '../../lib/api';
 
 interface SceneDescription {
   scene_number: number;
@@ -30,7 +31,8 @@ interface ChapterScript {
   scenes: Scene[];
   created_at: string;
   status: 'draft' | 'ready' | 'approved';
-  scriptStoryType?: string; // Added property for story type
+  scriptStoryType?: string;
+  emotional_map?: any[];
 }
 
 interface Act {
@@ -115,6 +117,32 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   } = useScriptSelection();
 
   const [scriptToDelete, setScriptToDelete] = useState<string | null>(null);
+  const [isGeneratingMap, setIsGeneratingMap] = useState<Record<string, boolean>>({});
+
+  const generateEmotionalMap = async (scriptId: string, currentScript: ChapterScript) => {
+    setIsGeneratingMap(prev => ({...prev, [scriptId]: true}));
+    try {
+        // Construct payload
+        const payload = {
+            script_content: currentScript.script,
+            characters: currentScript.characters || [],
+            script_id: scriptId
+        };
+
+        // Call API using apiClient which includes authentication
+        const response = await apiClient.post<{ entries: any[] }>('/ai/generate-emotional-map', payload);
+
+        if (response && response.entries) {
+            // Update script with new map
+            onUpdateScript(scriptId, { emotional_map: response.entries });
+        }
+    } catch (error) {
+        console.error("Failed to generate emotional map:", error);
+        // You might want to show a toast here
+    } finally {
+        setIsGeneratingMap(prev => ({...prev, [scriptId]: false}));
+    }
+  };
   
   // Character editing state
   const [editingCharacterIdx, setEditingCharacterIdx] = useState<number | null>(null);
@@ -1063,156 +1091,113 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   );
 
   const renderPerformanceMap = (script: ChapterScript) => {
-    // 1. Parsing logic (duplicated for isolation)
-    const scriptText = script.script || '';
-    // Match basic scene headers
-    const scenePattern = /(\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+(\d+(?:\.\d+)?)\*?\*?)/gi;
-    const matches = [...scriptText.matchAll(scenePattern)];
-    
-    // Fallback if no text but we have scene definitions
-    let displayScenes: { number: number; label: string; energy: number; description: string }[] = [];
-    
-    // Heuristic for Energy
-    const calculateEnergy = (text: string) => {
-        let score = 5; // Neutral baseline
-        const high = ['shout', 'scream', 'yell', 'attack', 'run', 'fight', 'explosion', 'urgent', 'anger', 'furious', 'fast', 'quick', 'loud', 'argue', 'chase'];
-        const low = ['whisper', 'cry', 'sob', 'sad', 'slow', 'quiet', 'calm', 'wait', 'pause', 'silence', 'sleep', 'dream', 'solitary'];
-        
-        const lower = text.toLowerCase();
-        high.forEach(w => { if (lower.includes(w)) score += 1; });
-        low.forEach(w => { if (lower.includes(w)) score -= 1; });
-        return Math.max(1, Math.min(10, score));
-    };
-
-    if (matches.length > 0) {
-        displayScenes = matches.map((match, idx) => {
-            const startIdx = match.index!;
-            const endIdx = idx < matches.length - 1 ? matches[idx + 1].index! : scriptText.length;
-            const content = scriptText.substring(startIdx, endIdx);
-            const energy = calculateEnergy(content);
-            return {
-                number: idx + 1,
-                label: `Scene ${idx + 1}`,
-                energy,
-                description: content.substring(0, 100) + '...'
-            };
-        });
-    } else if (script.scenes && script.scenes.length > 0) {
-        displayScenes = script.scenes.map((s, idx) => ({
-            number: s.scene_number || idx + 1,
-            label: `Scene ${s.scene_number || idx + 1}`,
-            energy: calculateEnergy(s.visual_description + ' ' + s.action + ' ' + s.dialogue),
-            description: s.visual_description.substring(0, 100) + '...'
-        }));
-    } else if (script.scene_descriptions && script.scene_descriptions.length > 0) {
-        displayScenes = script.scene_descriptions.map((s: any, idx) => ({
-            number: s.scene_number || idx + 1,
-            label: `Scene ${s.scene_number || idx + 1}`,
-            energy: calculateEnergy(typeof s === 'string' ? s : s.visual_description || ''),
-            description: (typeof s === 'string' ? s : s.visual_description || '').substring(0, 100) + '...'
-        }));
-    }
-
-    if (displayScenes.length === 0) {
-        return (
-            <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-                <Activity className="mx-auto h-12 w-12 mb-4 opacity-50" />
-                <p>No scene data available for analysis</p>
-            </div>
-        );
-    }
-
-    // SVG Chart
-
-    const points = displayScenes.map((s, i) => {
-        const x = (i / (displayScenes.length - 1 || 1)) * 100;
-        const y = 100 - (s.energy * 10); // Map 0-10 to 100-0%
-        return `${x},${y}`;
-    }).join(' ');
+    const hasMap = script.emotional_map && script.emotional_map.length > 0;
+    const isGenerating = isGeneratingMap[script.id];
 
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                   <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Emotional Performance Map</h4>
-                   <p className="text-sm text-gray-600 dark:text-gray-400">Visualizing narrative energy across {displayScenes.length} scenes</p>
+                   <h4 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                      <Activity className="w-5 h-5 text-purple-500" />
+                      Cinematic Emotional Map
+                   </h4>
+                   <p className="text-sm text-gray-600 dark:text-gray-400">
+                     {hasMap 
+                       ? `AI-generated acting notes for ${script.emotional_map?.length} dialogue lines.` 
+                       : "Generate detailed emotional cues, vocal direction, and subtext for each line."}
+                   </p>
                 </div>
+                {!hasMap && (
+                    <button
+                        onClick={() => generateEmotionalMap(script.id, script)}
+                        disabled={isGenerating}
+                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                    >
+                        {isGenerating ? (
+                            <>
+                                <span className="animate-spin">⏳</span> Analyzing...
+                            </>
+                        ) : (
+                            <>
+                                <Smile className="w-4 h-4" /> Generate Emotional Map
+                            </>
+                        )}
+                    </button>
+                )}
             </div>
 
-            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
-                <div className="h-[250px] w-full relative">
-                    {/* Y-Axis Labels */}
-                    <div className="absolute left-0 top-0 bottom-8 w-12 flex flex-col justify-between text-xs text-gray-400">
-                        <span>High</span>
-                        <span>Neutral</span>
-                        <span>Low</span>
-                    </div>
-
-                    {/* Chart Area */}
-                    <div className="absolute left-12 right-0 top-4 bottom-8 border-l border-b border-gray-200 dark:border-gray-700">
-                         {/* SVG Line */}
-                         <svg className="w-full h-full overflow-visible" preserveAspectRatio="none" viewBox="0 0 100 100">
-                            {/* Grid lines */}
-                            <line x1="0" y1="50" x2="100" y2="50" stroke="currentColor" strokeOpacity="0.1" strokeDasharray="4" />
-                            
-                            {/* Path */}
-                            <polyline 
-                                points={points} 
-                                fill="none" 
-                                stroke="#8b5cf6" 
-                                strokeWidth="3" // Increased visibility
-                                vectorEffect="non-scaling-stroke"
-                            />
-                            
-                            {/* Points */}
-                            {displayScenes.map((s, i) => (
-                                <circle
-                                    key={i}
-                                    cx={(i / (displayScenes.length - 1 || 1)) * 100}
-                                    cy={100 - (s.energy * 10)}
-                                    r="1.5"
-                                    fill="white"
-                                    stroke="#8b5cf6"
-                                    strokeWidth="0.5" // Adjust relative to viewbox
-                                    vectorEffect="non-scaling-stroke" // Keep uniform size
-                                    className="hover:r-2 transition-all cursor-pointer"
-                                >
-                                    <title>{s.label}: Energy {s.energy}/10</title>
-                                </circle>
-                            ))}
-                         </svg>
-                    </div>
-
-                     {/* X-Axis Labels */}
-                    <div className="absolute left-12 right-0 bottom-0 flex justify-between text-xs text-gray-400 pt-2">
-                        <span>Start</span>
-                        <span>End</span>
+            {hasMap ? (
+                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                    <div className="max-h-[600px] overflow-y-auto">
+                        <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400 sticky top-0 z-10">
+                                <tr>
+                                    <th className="px-6 py-3 w-[15%]">Character</th>
+                                    <th className="px-6 py-3 w-[20%]">Emotion</th>
+                                    <th className="px-6 py-3 w-[25%]">Vocal Direction</th>
+                                    <th className="px-6 py-3 w-[40%]">Subtext & Context</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                {script.emotional_map!.map((entry, idx) => (
+                                    <tr key={idx} className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                        <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
+                                            {entry.character}
+                                            <div className="text-xs text-gray-400 font-normal mt-1 truncate max-w-[150px]" title={entry.dialogue}>
+                                                "{entry.dialogue}"
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4">
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                                                entry.emotional_intensity === 'high' ? 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800' :
+                                                entry.emotional_intensity === 'low' ? 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800' :
+                                                'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800'
+                                            }`}>
+                                                {entry.emotional_state}
+                                                <span className="ml-1 opacity-70">({entry.emotional_intensity})</span>
+                                            </span>
+                                            {entry.facial_expression && (
+                                                <div className="text-xs text-gray-500 mt-1">
+                                                    Face: {entry.facial_expression}
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
+                                            {entry.vocal_direction}
+                                            {entry.body_language && (
+                                                <div className="text-xs text-gray-500 mt-1 italic">
+                                                    Body: {entry.body_language}
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="px-6 py-4 text-gray-600 dark:text-gray-400 italic">
+                                            "{entry.subtext}"
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
-            </div>
-
-            {/* Key Moments */}
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {displayScenes.filter(s => s.energy >= 7 || s.energy <= 3).map((scene, idx) => (
-                    <div key={idx} className={`p-4 rounded-lg border ${
-                        scene.energy >= 7 
-                        ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800' 
-                        : 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800'
-                    }`}>
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="font-semibold text-gray-900 dark:text-white">{scene.label}</span>
-                            <span className={`text-xs px-2 py-1 rounded-full ${
-                                scene.energy >= 7 ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'
-                            }`}>
-                                {scene.energy >= 7 ? 'High Energy' : 'Introspective'}
-                            </span>
-                        </div>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2">
-                            {scene.description}
-                        </p>
-                    </div>
-                ))}
-             </div>
+            ) : (
+                <div className="text-center py-12 bg-gray-50 dark:bg-gray-900 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
+                    <Activity className="mx-auto h-12 w-12 mb-4 text-gray-400" />
+                    <h5 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Ready to Direct</h5>
+                    <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-6">
+                        Generate an emotional map to add depth to your characters. This data will guide the text-to-speech engine for more realistic performances.
+                    </p>
+                    <button
+                        onClick={() => generateEmotionalMap(script.id, script)}
+                        disabled={isGenerating}
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm"
+                    >
+                         {isGenerating ? <span className="animate-spin">⏳</span> : <Smile className="w-5 h-5" />}
+                         Generate Emotional Map
+                    </button>
+                    {/* Keep preview of old heuristic chart if needed or just remove it. Removing for cleaner UI unless requested. */}
+                </div>
+            )}
         </div>
     );
   };

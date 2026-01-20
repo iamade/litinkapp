@@ -196,9 +196,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const [deleteAction, setDeleteAction] = useState<'selected' | 'all' | null>(null);
   const [selectedSceneIds, setSelectedSceneIds] = useState<Set<string>>(new Set());
   
-  // Key scene tracking: map of scene_number -> image_id (for suggested shots reference)
-  const [keySceneIds, setKeySceneIds] = useState<Record<number, string>>({});
-  
   // Objects & Locations section state
   const [isObjectsExpanded, setIsObjectsExpanded] = useState(true);
 
@@ -446,6 +443,23 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         });
     }
   }, [chapterId, selectedScriptId, loadStoryboardConfig]);
+
+  // Auto-save storyboard config with debounce when dirty
+  useEffect(() => {
+    if (!storyboardDirty || !chapterId || !selectedScriptId) return;
+    
+    const timeoutId = setTimeout(async () => {
+      try {
+        const config = getStoryboardConfig();
+        await projectService.saveStoryboardConfig(chapterId, selectedScriptId, config);
+        markStoryboardClean();
+      } catch (error) {
+        console.error('Auto-save storyboard config failed:', error);
+      }
+    }, 1500);
+
+    return () => clearTimeout(timeoutId);
+  }, [storyboardDirty, chapterId, selectedScriptId, getStoryboardConfig, markStoryboardClean]);
 
   // Empty state when no script or chapter is selected
   if (!selectedScriptId || !chapterId) {
@@ -858,23 +872,23 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         <button
           onClick={() => setShowSettings(!showSettings)}
           disabled={isDisabled}
-          className="flex items-center space-x-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center space-x-2 px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Settings className="w-4 h-4" />
           <span>Settings</span>
         </button>
-        <div className="flex border rounded-md">
+        <div className="flex border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden">
           <button
             onClick={() => setViewMode('grid')}
             disabled={isDisabled}
-            className={`p-2 ${viewMode === 'grid' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+            className={`p-2 ${viewMode === 'grid' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             <Grid3X3 className="w-4 h-4" />
           </button>
           <button
             onClick={() => setViewMode('list')}
             disabled={isDisabled}
-            className={`p-2 ${viewMode === 'list' ? 'bg-blue-100 text-blue-600' : 'text-gray-600 hover:bg-gray-100'} disabled:opacity-50 disabled:cursor-not-allowed`}
+            className={`p-2 ${viewMode === 'list' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600'} disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             <List className="w-4 h-4" />
           </button>
@@ -885,19 +899,19 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
   const renderGenerationSettings = () => (
     showSettings && (
-      <div className="bg-white border rounded-lg p-6 mb-6">
-        <h4 className="text-lg font-semibold text-gray-900 mb-4">Generation Settings</h4>
+      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6 mb-6">
+        <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Generation Settings</h4>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Style</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Style</label>
             <select
               value={generationOptions.style}
               onChange={(e) => setGenerationOptions(prev => ({ 
                 ...prev, 
                 style: e.target.value as any 
               }))}
-              className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="realistic">Realistic</option>
               <option value="cinematic">Cinematic</option>
@@ -908,14 +922,14 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Quality</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Quality</label>
             <select
               value={generationOptions.quality}
               onChange={(e) => setGenerationOptions(prev => ({ 
                 ...prev, 
                 quality: e.target.value as any 
               }))}
-              className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="standard">Standard</option>
               <option value="hd">High Definition</option>
@@ -923,14 +937,14 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Aspect Ratio</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Aspect Ratio</label>
             <select
               value={generationOptions.aspectRatio}
               onChange={(e) => setGenerationOptions(prev => ({ 
                 ...prev, 
                 aspectRatio: e.target.value as any 
               }))}
-              className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option value="16:9">16:9 (Widescreen)</option>
               <option value="4:3">4:3 (Standard)</option>
@@ -949,9 +963,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 ...prev, 
                 useCharacterReferences: e.target.checked 
               }))}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 dark:bg-gray-700"
             />
-            <span className="ml-2 text-sm text-gray-700">Use character reference images</span>
+            <span className="ml-2 text-sm text-gray-700 dark:text-gray-200">Use character reference images</span>
           </label>
 
           <label className="flex items-center">
@@ -962,14 +976,14 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 ...prev, 
                 includeBackground: e.target.checked 
               }))}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 dark:bg-gray-700"
             />
-            <span className="ml-2 text-sm text-gray-700">Include detailed backgrounds</span>
+            <span className="ml-2 text-sm text-gray-700 dark:text-gray-200">Include detailed backgrounds</span>
           </label>
         </div>
 
         <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Lighting Mood</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Lighting Mood</label>
           <input
             type="text"
             value={generationOptions.lightingMood}
@@ -977,7 +991,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
               ...prev, 
               lightingMood: e.target.value 
             }))}
-            className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             placeholder="e.g., natural, dramatic, soft, moody"
           />
         </div>
@@ -1140,9 +1154,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <h4 className="text-lg font-semibold text-gray-900">Scene Images</h4>
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Scene Images</h4>
             {selectedSceneIds.size > 0 && (
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
+              <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-sm rounded-full">
                 {selectedSceneIds.size} selected
               </span>
             )}
@@ -1152,7 +1166,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
               <>
                 <button
                   onClick={handleSelectAllScenes}
-                  className="flex items-center space-x-2 px-3 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50"
+                  className="flex items-center space-x-2 px-3 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600"
                   title={isAllSelected ? "Deselect all" : "Select all"}
                 >
                   <input
@@ -1162,14 +1176,14 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       if (el) el.indeterminate = isIndeterminate;
                     }}
                     readOnly
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 dark:bg-gray-700"
                   />
                   <span>{isAllSelected ? "Deselect All" : "Select All"}</span>
                 </button>
                 <button
                   onClick={handleDeleteSelected}
                   disabled={selectedSceneIds.size === 0}
-                  className="flex items-center space-x-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:bg-gray-400"
+                  className="flex items-center space-x-2 px-3 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:bg-gray-400 dark:disabled:bg-gray-600"
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>Delete Selected</span>
@@ -1177,7 +1191,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 <button
                   onClick={handleDeleteAllScenes}
                   disabled={!hasImages}
-                  className="flex items-center space-x-2 px-3 py-2 bg-red-700 text-white rounded-md hover:bg-red-800 disabled:bg-gray-400"
+                  className="flex items-center space-x-2 px-3 py-2 bg-red-700 text-white rounded-md hover:bg-red-800 disabled:bg-gray-400 dark:disabled:bg-gray-600"
                 >
                   <Trash2 className="w-4 h-4" />
                   <span>Delete All</span>
@@ -1187,7 +1201,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             <button
               onClick={handleGenerateAllScenes}
               disabled={!scenes.length || generatingScenes.size > 0}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400"
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600"
             >
               <Wand2 className="w-4 h-4" />
               <span>Generate All Scenes</span>
@@ -1230,7 +1244,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     sceneImages={images}
                     isGenerating={generatingScenes.has(sceneNumber)}
                     selectedIds={selectedSceneIds}
-                    keySceneId={keySceneIds[sceneNumber]}
+                    keySceneId={keySceneImages[sceneNumber]}
                     dialogueMoments={sceneMoments}
                     onSelect={(selected, imageId) => {
                       if (!imageId) return;
@@ -1256,12 +1270,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     )}
                     onDelete={(imageId) => deleteImage('scene', sceneNumber, imageId)}
                     onView={(url) => setSelectedImage(url)}
-                    onSetKeyScene={(imageId) => {
-                      setKeySceneIds(prev => ({
-                        ...prev,
-                        [sceneNumber]: imageId
-                      }));
-                    }}
+                    onSetKeyScene={(imageId) => setKeySceneImage(sceneNumber, imageId)}
                     onGenerateMoment={(shotDescription, parentSceneImageUrl) => handleGenerateSceneImage(
                       sceneNumber,
                       false,
@@ -1587,7 +1596,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     const finalSceneOrder = validScenes; // Use the robust list
 
     return (
-      <div className="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-xl min-h-[600px]">
+      <div className="bg-gray-50 dark:bg-gray-900/50 p-6 rounded-xl min-h-[600px] w-full max-w-full overflow-hidden">
          <div className="mb-6 flex items-center justify-between">
             <div>
                 <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 flex items-center">

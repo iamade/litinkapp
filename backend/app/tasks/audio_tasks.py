@@ -797,35 +797,17 @@ async def generate_character_audio(
         """Detect gender from character name. Returns 'male', 'female', or 'unknown'."""
         name_upper = name.upper().strip()
 
-        # Female indicators
-        female_prefixes = [
-            "MRS.",
-            "MRS ",
-            "MS.",
-            "MS ",
-            "MISS ",
-            "MISS.",
-            "LADY ",
-            "LADY.",
-            "QUEEN ",
-            "PRINCESS ",
-            "DUCHESS ",
-            "MADAM ",
-            "MADAME ",
-        ]
-        female_names = [
-            "SHE",
-            "HER",
-            "HERSELF",
-            "WOMAN",
-            "GIRL",
-            "MOTHER",
+        # Female identifiers (exact match)
+        if name_upper in [
             "MOM",
-            "MAMMA",
+            "MOTHER",
             "SISTER",
             "AUNT",
-            "GRANDMOTHER",
             "GRANDMA",
+            "GIRL",
+            "WOMAN",
+            "SHE",
+            "HER",
             "WIFE",
             "DAUGHTER",
             "NIECE",
@@ -838,34 +820,20 @@ async def generate_character_audio(
             "HOSTESS",
             "STEWARDESS",
             "EMPRESS",
-        ]
+        ]:
+            return "female"
 
-        # Male indicators
-        male_prefixes = [
-            "MR.",
-            "MR ",
-            "SIR ",
-            "SIR.",
-            "LORD ",
-            "LORD.",
-            "KING ",
-            "PRINCE ",
-            "DUKE ",
-            "MASTER ",
-        ]
-        male_names = [
-            "HE",
-            "HIM",
-            "HIMSELF",
-            "MAN",
-            "BOY",
-            "FATHER",
+        # Male identifiers (exact match)
+        if name_upper in [
             "DAD",
-            "PAPA",
+            "FATHER",
             "BROTHER",
             "UNCLE",
-            "GRANDFATHER",
             "GRANDPA",
+            "BOY",
+            "MAN",
+            "HE",
+            "HIM",
             "HUSBAND",
             "SON",
             "NEPHEW",
@@ -878,25 +846,43 @@ async def generate_character_audio(
             "HOST",
             "STEWARD",
             "EMPEROR",
-        ]
+        ]:
+            return "male"
 
-        # Check prefixes first (most reliable)
-        for prefix in female_prefixes:
-            if name_upper.startswith(prefix):
+        # Female Titles (startswith)
+        if any(
+            name_upper.startswith(p)
+            for p in [
+                "MRS",
+                "MS",
+                "MISS",
+                "LADY",
+                "QUEEN",
+                "PRINCESS",
+                "DUCHESS",
+                "MADAM",
+            ]
+        ):
+            return "female"
+
+        # Male Titles (startswith)
+        if any(
+            name_upper.startswith(p)
+            for p in ["MR", "SIR", "LORD", "KING", "PRINCE", "DUKE", "MASTER"]
+        ):
+            return "male"
+
+            # Check descriptions from database if available
+            desc = character_descriptions[name_upper]
+            role = desc.get("role", "").lower()
+            physical = desc.get("physical_description", "").lower()
+
+            if "female" in role or "woman" in role or "girl" in role or "she" in role:
                 return "female"
-        for prefix in male_prefixes:
-            if name_upper.startswith(prefix):
+            if "male" in role or "man" in role or "boy" in role or "he" in role:
                 return "male"
 
-        # Check if name contains gender-specific words
-        name_words = name_upper.replace(".", " ").split()
-        for word in name_words:
-            if word in female_names:
-                return "female"
-            if word in male_names:
-                return "male"
-
-        # Common female first names (when all else fails)
+        # Common female first names fallback
         female_first_names = [
             "LILY",
             "PETUNIA",
@@ -913,108 +899,85 @@ async def generate_character_audio(
             "ALICE",
             "SUSAN",
             "HELEN",
-            "MARGARET",
-            "NANCY",
         ]
-        for first_name in female_first_names:
-            if first_name in name_upper:
+        for first in female_first_names:
+            if first in name_upper:
                 return "female"
-
-        # Check character descriptions from database (enhanced detection)
-        # Look up by full name or last name
-        char_desc = None
-        if name_upper in character_descriptions:
-            char_desc = character_descriptions[name_upper]
-        else:
-            # Try last name only
-            name_parts = name_upper.split()
-            if name_parts:
-                last_name = name_parts[-1]
-                if last_name in character_descriptions:
-                    char_desc = character_descriptions[last_name]
-
-        if char_desc:
-            # Combine all description fields for analysis
-            full_desc = f"{char_desc.get('role', '')} {char_desc.get('physical_description', '')} {char_desc.get('personality', '')}".upper()
-
-            # Female indicators in descriptions
-            female_desc_words = [
-                "SHE",
-                "HER",
-                "HERSELF",
-                "WOMAN",
-                "FEMALE",
-                "LADY",
-                "GIRL",
-                "WITCH",
-                "SISTER",
-                "MOTHER",
-                "DAUGHTER",
-                "WIFE",
-                "AUNT",
-                "GRANDMOTHER",
-                "PRINCESS",
-                "QUEEN",
-                "DUCHESS",
-                "EMPRESS",
-                "PRIESTESS",
-                "SORCERESS",
-                "ACTRESS",
-                "WAITRESS",
-            ]
-
-            # Male indicators in descriptions
-            male_desc_words = [
-                "HE",
-                "HIS",
-                "HIM",
-                "HIMSELF",
-                "MAN",
-                "MALE",
-                "GUY",
-                "BOY",
-                "WIZARD",
-                "BROTHER",
-                "FATHER",
-                "SON",
-                "HUSBAND",
-                "UNCLE",
-                "GRANDFATHER",
-                "PRINCE",
-                "KING",
-                "DUKE",
-                "EMPEROR",
-                "PRIEST",
-                "SORCERER",
-                "ACTOR",
-                "WAITER",
-                "HALF-GIANT",
-                "GIANT",
-            ]
-
-            female_score = sum(1 for word in female_desc_words if word in full_desc)
-            male_score = sum(1 for word in male_desc_words if word in full_desc)
-
-            if female_score > male_score:
-                print(
-                    f"[CHARACTER AUDIO] Detected FEMALE from description: {name_upper} (score: {female_score} vs {male_score})"
-                )
-                return "female"
-            elif male_score > female_score:
-                print(
-                    f"[CHARACTER AUDIO] Detected MALE from description: {name_upper} (score: {male_score} vs {female_score})"
-                )
-                return "male"
 
         return "unknown"
+
+    # EMOTION MAPPING HELPER
+    def get_emotion_style(emotion: str) -> float:
+        """Map emotional state to ElevenLabs style parameter (0.0 to 1.0)"""
+        emotion = emotion.lower()
+        mapping = {
+            "neutral": 0.0,
+            "calm": 0.1,
+            "serene": 0.2,
+            "happy": 0.35,
+            "cheerful": 0.4,
+            "friendly": 0.3,
+            "sad": 0.2,
+            "melancholic": 0.1,
+            "depressed": 0.05,
+            "angry": 0.7,
+            "furious": 0.9,
+            "intense": 0.8,
+            "excited": 0.6,
+            "shouting": 0.9,
+            "whispered": 0.1,
+            "fearful": 0.5,
+            "anxious": 0.6,
+            "surprised": 0.5,
+        }
+        for key, val in mapping.items():
+            if key in emotion:
+                return val
+        return 0.0
+
+    # Load emotional map logic
+    emotional_map_lookup = {}
+    try:
+        pass
+    except Exception:
+        pass
 
     for i, dialogue in enumerate(character_dialogues):
         try:
             character_name = dialogue["character"]
             scene_id = dialogue.get("scene", 1)
+            dialogue_text = dialogue.get("text", "")
+
             print(
                 f"[CHARACTER AUDIO] Processing dialogue {i+1}/{len(character_dialogues)} for {character_name} in scene {scene_id}"
             )
+
+            # Determine Emotion Style
+            style_value = 0.0
+            emotion_info = "neutral"
+
+            # Lookup in emotional map
+            char_key = character_name.upper().strip()
+            text_key = dialogue_text.strip()[:30]
+
+            # Try exact match first, then fuzzy
+            map_entry = emotional_map_lookup.get((char_key, text_key))
+
+            if map_entry:
+                emotional_state = map_entry.get("emotional_state", "neutral")
+                intensity = map_entry.get("emotional_intensity", "medium")
+                style_value = get_emotion_style(emotional_state)
+
+                # Adjust style based on intensity
+                if intensity == "high":
+                    style_value = min(1.0, style_value * 1.25)
+                elif intensity == "low":
+                    style_value = style_value * 0.75
+
+                emotion_info = f"{emotional_state} ({intensity})"
+                print(
+                    f"[CHARACTER AUDIO] Applied emotional cue: {emotion_info} -> style={style_value:.2f}"
+                )
 
             # Assign voice to character if not already assigned
             if character_name not in character_voice_mapping:
@@ -1062,6 +1025,7 @@ async def generate_character_audio(
                     voice_id=voice_info["voice_id"],
                     model_id="eleven_multilingual_v2",
                     speed=1.0,
+                    style=style_value,
                 )
             except Exception as e:
                 # Check for Fallback

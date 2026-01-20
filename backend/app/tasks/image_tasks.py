@@ -543,9 +543,24 @@ async def generate_scene_images_optimized(
 
             print(f"[SCENE IMAGE {i+1}] Processing: {scene_text[:50]}...")
 
+            # Add style modifiers for better image generation (matches frontend options)
+            style_modifiers = {
+                "realistic": "photorealistic scene, natural lighting, high detail, realistic environment",
+                "cinematic": "cinematic composition, dramatic lighting, film-like atmosphere, professional cinematography",
+                "cartoon": "animated cartoon style, stylized characters, vibrant colors, clean lines",
+                "animated": "animated scene, stylized environment, vibrant colors, fluid motion aesthetic",
+                "fantasy": "fantasy art style, magical atmosphere, mystical lighting, ethereal environment",
+                "sketch": "pencil sketch style, hand-drawn appearance, artistic linework, illustration",
+                "comic": "comic book style, bold outlines, dynamic composition, vibrant panel art",
+            }
+            style_suffix = style_modifiers.get(
+                style.lower(), style_modifiers.get("cinematic", "")
+            )
+            enhanced_scene_text = f"{scene_text}. {style_suffix}. High quality, detailed background, no text, no watermark."
+
             # ✅ OPTIMIZATION: Try with shorter timeout first
             result = await image_service.generate_scene_image(
-                scene_description=scene_text,
+                scene_description=enhanced_scene_text,
                 style=style,
                 aspect_ratio="16:9",
                 user_tier=user_tier,
@@ -950,27 +965,6 @@ async def async_generate_character_image_task(
             raise Exception(error_message)
 
 
-def create_scene_image_prompt(scene_description: str, style: str) -> str:
-    """Create detailed prompt for scene image generation"""
-
-    style_modifiers = {
-        "realistic": "photorealistic scene, natural lighting, high detail, realistic environment",
-        "cinematic": "cinematic composition, dramatic lighting, film-like atmosphere, professional cinematography",
-        "animated": "animated scene, stylized environment, vibrant colors, cartoon background",
-        "fantasy": "fantasy landscape, magical atmosphere, mystical environment, fantasy art style",
-        "comic": "comic book scene, bold composition, dynamic angles, comic art style",
-        "artistic": "artistic scene, painterly environment, creative composition, artistic style",
-    }
-
-    base_prompt = f"Scene: {scene_description}, "
-    style_prompt = style_modifiers.get(style.lower(), style_modifiers["realistic"])
-    technical_prompt = (
-        ", 16:9 aspect ratio, high quality, detailed background, cinematic framing"
-    )
-
-    return base_prompt + style_prompt + technical_prompt
-
-
 @celery_app.task(bind=True)
 def generate_scene_image_task(
     self,
@@ -1131,7 +1125,20 @@ async def async_generate_scene_image_task(
             elif custom_prompt:
                 final_description = f"{scene_description}. {custom_prompt}"
             else:
-                final_description = scene_description
+                # Add style modifiers for better image generation (matches frontend options)
+                style_modifiers = {
+                    "realistic": "photorealistic scene, natural lighting, high detail, realistic environment",
+                    "cinematic": "cinematic composition, dramatic lighting, film-like atmosphere, professional cinematography",
+                    "cartoon": "animated cartoon style, stylized characters, vibrant colors, clean lines",
+                    "animated": "animated scene, stylized environment, vibrant colors, fluid motion aesthetic",
+                    "fantasy": "fantasy art style, magical atmosphere, mystical lighting, ethereal environment",
+                    "sketch": "pencil sketch style, hand-drawn appearance, artistic linework, illustration",
+                    "comic": "comic book style, bold outlines, dynamic composition, vibrant panel art",
+                }
+                style_suffix = style_modifiers.get(
+                    (style or "cinematic").lower(), style_modifiers.get("cinematic", "")
+                )
+                final_description = f"{scene_description}. {style_suffix}. High quality, no text, no watermark."
 
             logger.info(f"[SceneImageTask] Final prompt: {final_description[:100]}...")
 

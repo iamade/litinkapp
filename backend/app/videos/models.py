@@ -341,6 +341,10 @@ class Script(SQLModel, table=True):
         default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
     )
 
+    emotional_map: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(

@@ -20,6 +20,7 @@ class ModelConfig:
     primary: str
     fallback: str
     fallback2: Optional[str] = None
+    fallback3: Optional[str] = None  # Added for additional fallback (Veo 3 direct, Grok AI)
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     cost_per_1k_input: Optional[float] = None
@@ -173,14 +174,14 @@ IMAGE_I2I_MULTI_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="seedream-4.5-i2i",
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
-        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468 (Limit 2)
-        fallback2="seedream-4.5-i2i",
+        primary="nano-banana",  # Seedream (ModelsLab) $0.033
+        fallback="seedream-4.5-i2i",  # Nano Banana (ModelsLab) $0.0468 (Limit 2)
+        fallback2="seedream-4.0-i2i",
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        primary="seedream-4.5-i2i",  # Nano Banana (ModelsLab) $0.0468
         fallback="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
-        fallback2="seedream-4.5-i2i",
+        fallback2="nano-banana",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="nano-banana",  # Nano Banana (ModelsLab) $0.0468
@@ -203,36 +204,46 @@ IMAGE_I2I_MULTI_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 # Video Generation Strategy
 # Optimizing for high-fidelity motion and consistency while managing compute costs
 # ModelsLab aggregates top video models; Google's Veo accessed directly for enterprise-grade performance
+# Direct API integrations: veo-3-direct (Google AI Studio), grok-video (xAI - when available)
 VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
         primary="seedance-1-5-pro",  # Seedance-v1.5-Pro (ModelsLab) $0.044/s
         fallback="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p $0.05/s
         fallback2="kling-2.5-turbo",
+        fallback3=None,  # No additional fallback for free tier
     ),
     ModelTier.BASIC: ModelConfig(
         primary="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 720p $0.10/s
         fallback="seedance-1-5-pro",  # Seedance-v1.5-Pro (ModelsLab) $0.044/s
         fallback2="wan2.6-t2v",
+        fallback3=None,  # No additional fallback for basic tier
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) $0.14/s
         fallback="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 720p $0.10/s
         fallback2="seedance-1-5-pro",
+        fallback3="veo-3-direct",  # Veo 3 Direct API (Google AI Studio) as final fallback
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="omni-human",  # Omni-Human (ModelsLab) $0.168/s
-        fallback="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) $0.14/s
-        fallback2="wan2.5-i2v",
+        primary="veo-3-direct",  # Veo 3 Direct API (Google AI Studio) - promoted to primary
+        fallback="omni-human",  # Omni-Human (ModelsLab) $0.168/s
+        fallback2="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) $0.14/s
+        fallback3="grok-video",  # xAI Grok Video (when API keys available)
+        # PREVIOUS: primary="omni-human", fallback="omni-human-1.5", fallback2="wan2.5-i2v"
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="veo-3.1-fast",  # Veo-3.1-Fast (ModelsLab) $0.24/s
-        fallback="omni-human",  # Omni-Human (ModelsLab) $0.168/s
-        fallback2="omni-human-1.5",
+        primary="veo-3-direct",  # Veo 3 Direct API (Google AI Studio)
+        fallback="veo-3.1-fast",  # Veo-3.1-Fast (ModelsLab) $0.24/s - fallback via ModelsLab
+        fallback2="omni-human",  # Omni-Human (ModelsLab) $0.168/s
+        fallback3="grok-video",  # xAI Grok Video (when API keys available)
+        # PREVIOUS: primary="veo-3.1-fast", fallback="omni-human", fallback2="omni-human-1.5"
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="veo-3.1-fast",  # Veo-3.1-Fast (ModelsLab) Max Quality
-        fallback="omni-human",  # Omni-Human (ModelsLab) $0.168/s
-        fallback2="veo-3-fast",
+        primary="veo-3-direct",  # Veo 3 Direct API (Google AI Studio) - highest quality
+        fallback="veo-3.1-fast",  # Veo-3.1-Fast (ModelsLab) Max Quality
+        fallback2="grok-video",  # xAI Grok Video (when API keys available)
+        fallback3="omni-human",  # Omni-Human (ModelsLab) $0.168/s
+        # PREVIOUS: primary="veo-3.1-fast", fallback="omni-human", fallback2="veo-3-fast"
     ),
 }
 

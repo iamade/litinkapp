@@ -129,6 +129,14 @@ class Character(SQLModel, table=True):
     lie: Optional[str] = Field(default=None)
     ghost: Optional[str] = Field(default=None)
 
+    # Voice/Accent fields for video generation prompts
+    # Accent options: neutral, nigerian, british, american, indian, australian, jamaican, french, german
+    accent: str = Field(default="neutral")
+    # Voice characteristics: "deep and authoritative", "warm and friendly", "sharp and commanding", etc.
+    voice_characteristics: Optional[str] = Field(default=None)
+    # Voice gender: male, female, auto (inferred from character profile)
+    voice_gender: str = Field(default="auto")
+
     image_url: Optional[str] = Field(default=None)
     image_generation_prompt: Optional[str] = Field(default=None)
     image_generation_status: Optional[str] = Field(

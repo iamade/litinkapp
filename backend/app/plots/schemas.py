@@ -127,6 +127,22 @@ class CharacterBase(BaseModel):
     ghost: Optional[str] = Field(
         None, max_length=500, description="Past trauma or ghost"
     )
+    # Voice/Accent fields for video generation prompts
+    accent: str = Field(
+        "neutral",
+        max_length=50,
+        description="Voice accent (neutral, nigerian, british, american, indian, australian, jamaican, french, german)",
+    )
+    voice_characteristics: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Voice characteristics (e.g., 'deep and authoritative', 'warm and friendly')",
+    )
+    voice_gender: str = Field(
+        "auto",
+        max_length=20,
+        description="Voice gender (male, female, auto - inferred from character profile)",
+    )
     image_url: Optional[str] = Field(
         None, max_length=500, description="URL of character image"
     )
@@ -198,6 +214,10 @@ class CharacterUpdate(BaseModel):
     need: Optional[str] = Field(None, max_length=500)
     lie: Optional[str] = Field(None, max_length=500)
     ghost: Optional[str] = Field(None, max_length=500)
+    # Voice/Accent fields for video generation prompts
+    accent: Optional[str] = Field(None, max_length=50)
+    voice_characteristics: Optional[str] = Field(None, max_length=200)
+    voice_gender: Optional[str] = Field(None, max_length=20)
     image_url: Optional[str] = Field(None, max_length=500)
     image_generation_prompt: Optional[str] = Field(None, max_length=1000)
     image_metadata: Optional[Dict[str, Any]] = None

@@ -88,6 +88,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
     need: '',
     lie: '',
     ghost: '',
+    accent: 'neutral',
+    voice_characteristics: '',
+    voice_gender: 'auto',
     entity_type: 'character' as 'character' | 'object' | 'location',
   });
 
@@ -718,6 +721,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
         need: '',
         lie: '',
         ghost: '',
+        accent: 'neutral',
+        voice_characteristics: '',
+        voice_gender: 'auto',
         entity_type: 'character',
       });
 
@@ -1199,7 +1205,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                <div className="flex flex-col items-center gap-3 mt-4">
                  <button
                     onClick={() => {
-                        setNewCharacter(prev => ({ ...prev, entity_type: 'character', name: searchQuery || '' }));
+                        setNewCharacter(prev => ({ ...prev, entity_type: 'character', name: searchQuery || '', accent: 'neutral', voice_characteristics: '', voice_gender: 'auto' }));
                         setShowCreateModal(true);
                     }}
                     className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
@@ -1210,7 +1216,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                   <div className="flex gap-3">
                      <button
                       onClick={() => {
-                           setNewCharacter(prev => ({ ...prev, entity_type: 'object', name: searchQuery || '' }));
+                           setNewCharacter(prev => ({ ...prev, entity_type: 'object', name: searchQuery || '', accent: 'neutral', voice_characteristics: '', voice_gender: 'auto' }));
                            setShowCreateModal(true);
                       }}
                       className="inline-flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm"
@@ -1220,7 +1226,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                     </button>
                     <button
                       onClick={() => {
-                           setNewCharacter(prev => ({ ...prev, entity_type: 'location', name: searchQuery || '' }));
+                           setNewCharacter(prev => ({ ...prev, entity_type: 'location', name: searchQuery || '', accent: 'neutral', voice_characteristics: '', voice_gender: 'auto' }));
                            setShowCreateModal(true);
                       }}
                       className="inline-flex items-center space-x-2 px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 text-sm"
@@ -1245,7 +1251,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
             <p className="text-gray-600 dark:text-gray-400 mb-4">No characters yet</p>
             <button
               onClick={() => {
-                   setNewCharacter(prev => ({ ...prev, entity_type: 'character', name: searchQuery || '' }));
+                   setNewCharacter(prev => ({ ...prev, entity_type: 'character', name: searchQuery || '', accent: 'neutral', voice_characteristics: '', voice_gender: 'auto' }));
                    setShowCreateModal(true);
               }}
               className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
@@ -1257,7 +1263,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
               <div className="flex gap-2 mt-4 justify-center">
                  <button
                   onClick={() => {
-                       setNewCharacter(prev => ({ ...prev, entity_type: 'object', name: searchQuery || '' }));
+                       setNewCharacter(prev => ({ ...prev, entity_type: 'object', name: searchQuery || '', accent: 'neutral', voice_characteristics: '', voice_gender: 'auto' }));
                        setShowCreateModal(true);
                   }}
                   className="inline-flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm"
@@ -1267,7 +1273,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                 </button>
                 <button
                   onClick={() => {
-                       setNewCharacter(prev => ({ ...prev, entity_type: 'location', name: searchQuery || '' }));
+                       setNewCharacter(prev => ({ ...prev, entity_type: 'location', name: searchQuery || '', accent: 'neutral', voice_characteristics: '', voice_gender: 'auto' }));
                        setShowCreateModal(true);
                   }}
                   className="inline-flex items-center space-x-2 px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 text-sm"
@@ -1343,6 +1349,9 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                       need: '',
                       lie: '',
                       ghost: '',
+                      accent: 'neutral',
+                      voice_characteristics: '',
+                      voice_gender: 'auto',
                       entity_type: 'object',
                     });
                     setShowCreateModal(true);
@@ -1470,6 +1479,59 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                       <option value="mentor">Mentor</option>
                       <option value="sidekick">Sidekick</option>
                     </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Accent
+                      </label>
+                      <select
+                        value={newCharacter.accent || 'neutral'}
+                        onChange={(e) => setNewCharacter(prev => ({ ...prev, accent: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={isCreatingCharacter || isGeneratingWithAI}
+                      >
+                        <option value="neutral">Neutral</option>
+                        <option value="nigerian">Nigerian</option>
+                        <option value="british">British</option>
+                        <option value="american">American</option>
+                        <option value="indian">Indian</option>
+                        <option value="australian">Australian</option>
+                        <option value="jamaican">Jamaican</option>
+                        <option value="french">French</option>
+                        <option value="german">German</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Voice Gender
+                      </label>
+                      <select
+                        value={newCharacter.voice_gender || 'auto'}
+                        onChange={(e) => setNewCharacter(prev => ({ ...prev, voice_gender: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        disabled={isCreatingCharacter || isGeneratingWithAI}
+                      >
+                        <option value="auto">Auto (Detect)</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                       Voice Characteristics
+                    </label>
+                    <textarea
+                      value={newCharacter.voice_characteristics || ''}
+                      onChange={(e) => setNewCharacter(prev => ({ ...prev, voice_characteristics: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
+                      rows={2}
+                      placeholder="e.g. Deep, raspy, warm, cheerful..."
+                      disabled={isCreatingCharacter || isGeneratingWithAI}
+                    />
                   </div>
                 </>
               )}

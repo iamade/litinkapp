@@ -31,6 +31,9 @@ from app.ai.schemas import (
     AIResponse,
     QuizGenerationRequest,
     AnalyzeChapterSafetyRequest,
+    EmotionalMapRequest,
+    EmotionalMapResponse,
+    EmotionalMapEntry,
 )
 
 from app.core.services.ai import AIService
@@ -411,6 +414,51 @@ async def generate_voice(
         raise HTTPException(status_code=500, detail=result["error"])
 
     return {"voice_url": result.get("audio_url")}
+
+
+@router.post("/generate-emotional-map", response_model=EmotionalMapResponse)
+async def generate_emotional_map(
+    request: EmotionalMapRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Generate cinematic emotional map for script dialogues"""
+    ai_service = AIService()
+    entries = await ai_service.generate_emotional_map(
+        request.script_content, request.characters
+    )
+
+    # Validation/Conversion to Schema model
+    validated_entries = []
+    for entry in entries:
+        # Generate a fake ID if missing (though service handles it, safety first)
+        if "line_id" not in entry:
+            entry["line_id"] = str(uuid.uuid4())
+
+        validated_entries.append(EmotionalMapEntry(**entry))
+
+    # Save to database if script_id provided
+    if request.script_id:
+        try:
+            statement = select(Script).where(Script.id == request.script_id)
+            result = await session.exec(statement)
+            script_record = result.first()
+
+            if script_record:
+                # Ensure we are saving a list of dicts (JSON serializable)
+                script_record.emotional_map = [
+                    entry.dict() for entry in validated_entries
+                ]
+                session.add(script_record)
+                await session.commit()
+            else:
+                print(
+                    f"Warning: Script {request.script_id} not found, could not save emotional map."
+                )
+        except Exception as e:
+            print(f"Error saving emotional map to DB: {e}")
+
+    return EmotionalMapResponse(entries=validated_entries)
 
 
 # New RAG-based video generation endpoints
@@ -4688,7 +4736,9 @@ async def enhance_scene_prompt(
 
         # Check usage limits
         subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(user_id, "ai_assist")
+        usage_check = await subscription_manager.check_usage_limits(
+            user_id, "ai_assist"
+        )
 
         if not usage_check.get("can_generate", True):
             raise HTTPException(
@@ -4696,9 +4746,11 @@ async def enhance_scene_prompt(
                 detail={
                     "message": "AI assist limit reached for your subscription tier",
                     "tier": usage_check.get("tier", "free"),
-                    "limit": usage_check.get("limits", {}).get("ai_assists_per_month", 0),
+                    "limit": usage_check.get("limits", {}).get(
+                        "ai_assists_per_month", 0
+                    ),
                     "used": usage_check.get("current_usage", {}).get("ai_assist", 0),
-                }
+                },
             )
 
         # Detect shot type from description
@@ -4774,11 +4826,14 @@ Provide ONLY the enhanced description, no explanations or formatting."""
         result = await openrouter.analyze_content(
             content=combined_prompt,
             user_tier=user_model_tier,
-            analysis_type="enhancement"  # Custom type for scene enhancement
+            analysis_type="enhancement",  # Custom type for scene enhancement
         )
 
-        # Extract enhanced text from result
-        enhanced_text = result.get("analysis", result.get("summary", request.scene_description))
+        # Extract enhanced text from result - OpenRouter returns 'result' key
+        enhanced_text = result.get(
+            "result",
+            result.get("analysis", result.get("summary", request.scene_description)),
+        )
 
         # Clean up the response
         if isinstance(enhanced_text, str):
@@ -4787,15 +4842,26 @@ Provide ONLY the enhanced description, no explanations or formatting."""
             enhanced_text = re.sub(r"^[*#]+\s*", "", enhanced_text)
             enhanced_text = re.sub(r"\s*[*#]+$", "", enhanced_text)
             # Remove any leading labels like "Enhanced description:" or similar
-            enhanced_text = re.sub(r"^(Enhanced description|Result|Output):\s*", "", enhanced_text, flags=re.IGNORECASE)
+            enhanced_text = re.sub(
+                r"^(Enhanced description|Result|Output):\s*",
+                "",
+                enhanced_text,
+                flags=re.IGNORECASE,
+            )
         else:
             enhanced_text = request.scene_description  # Fallback to original
 
         # Suggest shot types based on the scene
         suggested_shots = []
-        if "character" in request.scene_description.lower() or request.characters_in_scene:
+        if (
+            "character" in request.scene_description.lower()
+            or request.characters_in_scene
+        ):
             suggested_shots = ["close-up", "medium shot", "over-the-shoulder"]
-        elif "environment" in request.scene_description.lower() or "room" in request.scene_description.lower():
+        elif (
+            "environment" in request.scene_description.lower()
+            or "room" in request.scene_description.lower()
+        ):
             suggested_shots = ["wide shot", "establishing shot"]
         else:
             suggested_shots = ["wide shot", "medium shot", "close-up"]
@@ -4805,7 +4871,7 @@ Provide ONLY the enhanced description, no explanations or formatting."""
             user_id,
             "ai_assist",
             cost_usd=0.001,  # Small cost for tracking
-            metadata={"scene_number": None, "enhanced": True}
+            metadata={"scene_number": None, "enhanced": True},
         )
 
         return EnhanceScenePromptResponse(
@@ -4813,7 +4879,7 @@ Provide ONLY the enhanced description, no explanations or formatting."""
             enhanced_description=enhanced_text,
             detected_shot_type=detected_shot,
             suggested_shot_types=suggested_shots,
-            enhancement_notes="Enhanced for better image generation. Shot type instructions added for proper framing."
+            enhancement_notes="Enhanced for better image generation. Shot type instructions added for proper framing.",
         )
 
     except HTTPException:
@@ -4821,8 +4887,8 @@ Provide ONLY the enhanced description, no explanations or formatting."""
     except Exception as e:
         print(f"❌ Error enhancing scene prompt: {e}")
         import traceback
+
         print(f"🔍 Full traceback: {traceback.format_exc()}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to enhance scene prompt: {str(e)}"
+            status_code=500, detail=f"Failed to enhance scene prompt: {str(e)}"
         )

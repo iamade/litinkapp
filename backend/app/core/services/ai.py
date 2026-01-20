@@ -775,6 +775,92 @@ Return only the list of scene descriptions.
             print(f"[AI SERVICE] Error: {e}")
             raise
 
+    async def generate_emotional_map(
+        self, script_content: str, characters: List[str], provider: str = "auto"
+    ) -> List[Dict[str, Any]]:
+        """Generate emotional map for script dialogues using AI"""
+        if not self.client:
+            return []
+
+        try:
+            # Sanitize script content (it can be long)
+            sanitized_script = TextSanitizer.sanitize_for_openai(script_content)
+
+            prompt = f"""
+            Analyze the following script excerpt and generate a detailed "Emotional Map" for each line of dialogue.
+            
+            CHARACTERS: {', '.join(characters)}
+            
+            SCRIPT CONTENT:
+            {sanitized_script}
+            
+            For EACH line of dialogue, determine:
+            1. Emotional State (e.g. "Angry", "Hesitant", "Joyful", "Sarcastic")
+            2. Intensity (1-10)
+            3. Subtext (What they really mean/think)
+            4. Vocal Direction (How it should be spoken, e.g. "Whispered", "Fast paced", "Staccato")
+            5. Facial Expression (Visual cue, e.g. "Furrowed brow", "Wide smile")
+            6. Body Language (e.g. "Clenching fists", "Looking away")
+
+            Return a valid JSON object with a single key "entries" containing a list of objects.
+            Each object must match this schema:
+            {{
+                "line_id": "unique_id_or_index", 
+                "character": "Character Name",
+                "dialogue": "Start of dialogue line...",
+                "emotional_state": "string",
+                "emotional_intensity": int,
+                "subtext": "string",
+                "vocal_direction": "string",
+                "facial_expression": "string",
+                "body_language": "string"
+            }}
+            
+            Only include actual spoken dialogue lines, not action lines or scene headers.
+            """
+
+            # Create safe messages
+            messages, total_tokens = create_safe_openai_messages(
+                system_prompt="You are a professional acting coach and director analyzing a script.",
+                user_content=prompt,
+                max_tokens=16385,
+                reserved_tokens=4000,  # Reserve significant tokens for the map response
+            )
+
+            response = await self._make_completion(
+                messages=messages,
+                provider=provider,
+                response_format=(
+                    {"type": "json_object"} if provider != "deepseek" else None
+                ),
+                temperature=0.5,  # Balanced creativity and adherence to context
+                max_tokens=4000,
+            )
+
+            response_content = response.choices[0].message.content
+            # Basic JSON cleanup if needed (for DeepSeek acting weird sometimes)
+            if response_content.strip().startswith("```json"):
+                response_content = (
+                    response_content.strip().strip("`").replace("json\n", "", 1)
+                )
+
+            result = json.loads(response_content)
+            entries = result.get("entries", [])
+
+            # Post-processing: Ensure all required fields exist
+            final_entries = []
+            for entry in entries:
+                # Add a generate logic for missing IDs if AI skipped them
+                if "line_id" not in entry:
+                    entry["line_id"] = str(uuid.uuid4())[:8]
+                final_entries.append(entry)
+
+            return final_entries
+
+        except Exception as e:
+            print(f"AI service error in generate_emotional_map: {e}")
+            return []
+
 
 # class AIService:
 #     """AI service for generating educational content"""

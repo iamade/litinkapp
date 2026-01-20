@@ -1017,6 +1017,228 @@ class ModelsLabV7ImageService:
             "message": "Image ready for video production",
         }
 
+    async def expand_image(
+        self,
+        image_url: str,
+        target_aspect_ratio: str = "16:9",
+        prompt: str = "",
+        user_tier: Optional[str] = None,
+        wait_for_completion: bool = True,
+        max_wait_time: int = 300,
+    ) -> Dict[str, Any]:
+        """
+        Expand/outpaint an image to a target aspect ratio using ModelsLab outpainting API.
+
+        This is useful for converting portrait images (e.g., 3:4) to landscape (16:9)
+        for video production by expanding the background.
+
+        Args:
+            image_url: URL of the source image to expand
+            target_aspect_ratio: Target aspect ratio (16:9, 21:9, 4:3, etc.)
+            prompt: Optional prompt to guide background generation
+            user_tier: User subscription tier for model selection
+            wait_for_completion: Whether to wait for async processing
+            max_wait_time: Maximum wait time in seconds
+
+        Returns:
+            Dict with expanded image URL and metadata
+        """
+        try:
+            logger.info(
+                f"[IMAGE EXPAND] Expanding image to {target_aspect_ratio}: {image_url[:50]}..."
+            )
+
+            # Calculate expansion dimensions
+            expansion_params = self._calculate_expansion_params(target_aspect_ratio)
+
+            # Build outpainting payload
+            # ModelsLab outpainting endpoint uses v6 API
+            outpaint_url = f"{settings.MODELSLAB_V6_BASE_URL}/image_editing/outpaint"
+
+            # Default expansion prompt if none provided
+            if not prompt:
+                prompt = "seamless background extension, natural continuation of scene, consistent lighting and atmosphere"
+
+            payload = {
+                "key": self.api_key,
+                "init_image": image_url,
+                "prompt": prompt,
+                "left_expansion_ratio": expansion_params.get("left", 0),
+                "right_expansion_ratio": expansion_params.get("right", 0),
+                "top_expansion_ratio": expansion_params.get("top", 0),
+                "bottom_expansion_ratio": expansion_params.get("bottom", 0),
+                "webhook": None,
+                "track_id": None,
+            }
+
+            logger.info(f"[IMAGE EXPAND] Payload: {payload}")
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    outpaint_url,
+                    json=payload,
+                    headers=self.headers,
+                    timeout=aiohttp.ClientTimeout(total=60),
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise Exception(f"HTTP {response.status}: {error_text}")
+
+                    result = await response.json()
+                    logger.info(f"[IMAGE EXPAND] Initial response: {result}")
+
+                    # Handle async processing
+                    if result.get("status") == "processing":
+                        if not wait_for_completion:
+                            return {
+                                "status": "processing",
+                                "request_id": result.get("id"),
+                                "fetch_url": result.get("fetch_result"),
+                                "eta": result.get("eta", 30),
+                            }
+
+                        # Wait for completion
+                        fetch_url = result.get("fetch_result")
+                        request_id = result.get("id")
+
+                        if fetch_url:
+                            return await self._wait_for_expansion_completion(
+                                session, fetch_url, request_id, max_wait_time
+                            )
+
+                    # Handle immediate success
+                    if result.get("status") == "success" and result.get("output"):
+                        return {
+                            "status": "success",
+                            "expanded_url": result["output"][0] if isinstance(result["output"], list) else result["output"],
+                            "original_url": image_url,
+                            "target_aspect_ratio": target_aspect_ratio,
+                            "expansion_params": expansion_params,
+                        }
+
+                    # Handle error
+                    error_msg = result.get("message", "Unknown outpainting error")
+                    raise Exception(f"Outpainting failed: {error_msg}")
+
+        except Exception as e:
+            logger.error(f"[IMAGE EXPAND ERROR]: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "original_url": image_url,
+            }
+
+    async def _wait_for_expansion_completion(
+        self,
+        session: aiohttp.ClientSession,
+        fetch_url: str,
+        request_id: str,
+        max_wait_time: int = 300,
+    ) -> Dict[str, Any]:
+        """Wait for async outpainting/expansion to complete"""
+
+        logger.info(f"[IMAGE EXPAND] Waiting for expansion completion: {request_id}")
+
+        start_time = asyncio.get_event_loop().time()
+        check_interval = 5
+
+        while (asyncio.get_event_loop().time() - start_time) < max_wait_time:
+            try:
+                fetch_payload = {"key": self.api_key}
+
+                async with session.post(
+                    fetch_url,
+                    json=fetch_payload,
+                    headers=self.headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        logger.info(f"[IMAGE EXPAND] Fetch response: {result}")
+
+                        if result.get("status") == "success" and result.get("output"):
+                            output = result["output"]
+                            expanded_url = output[0] if isinstance(output, list) else output
+
+                            return {
+                                "status": "success",
+                                "expanded_url": expanded_url,
+                                "generation_time": asyncio.get_event_loop().time() - start_time,
+                            }
+                        elif result.get("status") == "processing":
+                            await asyncio.sleep(check_interval)
+                            continue
+                        else:
+                            error_msg = result.get("message", "Unknown error")
+                            raise Exception(f"Expansion failed: {error_msg}")
+                    else:
+                        logger.warning(f"[IMAGE EXPAND] Fetch failed with status: {response.status}")
+                        await asyncio.sleep(check_interval)
+
+            except Exception as e:
+                logger.warning(f"[IMAGE EXPAND] Fetch error: {e}")
+                await asyncio.sleep(check_interval)
+
+        raise Exception(f"Image expansion timed out after {max_wait_time} seconds")
+
+    def _calculate_expansion_params(self, target_aspect_ratio: str) -> Dict[str, float]:
+        """
+        Calculate expansion ratios for outpainting based on target aspect ratio.
+
+        Assumes source image is typically portrait (e.g., 3:4 character portrait)
+        and calculates how much to expand on each side to reach target ratio.
+
+        Args:
+            target_aspect_ratio: Target aspect ratio (e.g., "16:9", "21:9", "4:3")
+
+        Returns:
+            Dict with left, right, top, bottom expansion ratios (0.0 to 1.0)
+        """
+        # Parse target aspect ratio
+        try:
+            parts = target_aspect_ratio.split(":")
+            target_w = float(parts[0])
+            target_h = float(parts[1])
+            target_ratio = target_w / target_h
+        except (ValueError, IndexError, ZeroDivisionError):
+            logger.warning(f"Invalid aspect ratio '{target_aspect_ratio}', defaulting to 16:9")
+            target_ratio = 16 / 9
+
+        # Assume source is 3:4 portrait (common for character images)
+        source_ratio = 3 / 4  # 0.75
+
+        if target_ratio > source_ratio:
+            # Target is wider - expand horizontally
+            # Calculate how much wider we need to be
+            expansion_factor = target_ratio / source_ratio
+            horizontal_expansion = (expansion_factor - 1) / 2  # Split between left and right
+
+            return {
+                "left": min(horizontal_expansion, 1.0),
+                "right": min(horizontal_expansion, 1.0),
+                "top": 0.0,
+                "bottom": 0.0,
+            }
+        elif target_ratio < source_ratio:
+            # Target is taller - expand vertically
+            expansion_factor = source_ratio / target_ratio
+            vertical_expansion = (expansion_factor - 1) / 2
+
+            return {
+                "left": 0.0,
+                "right": 0.0,
+                "top": min(vertical_expansion, 1.0),
+                "bottom": min(vertical_expansion, 1.0),
+            }
+        else:
+            # Same aspect ratio - no expansion needed
+            return {
+                "left": 0.0,
+                "right": 0.0,
+                "top": 0.0,
+                "bottom": 0.0,
+            }
+
     # Add nano-banana support to your existing service
     def _get_nano_banana_model_for_style(self, style: str) -> str:
         """Get appropriate model ID for the given style"""

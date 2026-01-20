@@ -154,3 +154,28 @@ class ImageUpscaleResponse(BaseModel):
     scale: int
     generation_time: Optional[float] = None
     message: str
+
+
+class ImageExpandRequest(BaseModel):
+    """Request model for image expansion/outpainting"""
+
+    image_url: str
+    target_aspect_ratio: str = "16:9"  # Target aspect ratio (e.g., "16:9", "21:9", "4:3")
+    prompt: Optional[str] = None  # Optional prompt to guide background generation
+    wait_for_completion: bool = True  # Whether to wait for async processing
+
+
+class ImageExpandResponse(BaseModel):
+    """Response model for image expansion/outpainting"""
+
+    status: str
+    expanded_url: Optional[str] = None
+    original_url: str
+    target_aspect_ratio: str
+    expansion_params: Optional[Dict[str, float]] = None  # left, right, top, bottom ratios
+    generation_time: Optional[float] = None
+    message: str
+    # For async processing
+    request_id: Optional[str] = None
+    fetch_url: Optional[str] = None
+    eta: Optional[int] = None

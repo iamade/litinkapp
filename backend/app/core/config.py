@@ -208,8 +208,19 @@ class Settings(BaseSettings):
     MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
 
     # Gemini
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_BASE_URL: str = "https://gemini.google.com/api/v1"
+    # GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    # GEMINI_BASE_URL: str = "https://gemini.google.com/api/v1"
+
+    # Google AI Studio (Veo 3 Direct API)
+    # Get your API key from: https://aistudio.google.com/app/apikey
+    GOOGLE_AI_STUDIO_API_KEY: str = os.getenv("GOOGLE_AI_STUDIO_API_KEY", "")
+    GOOGLE_AI_STUDIO_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+
+    # xAI Grok Video (prepared for future use)
+    # Get your API key from: https://console.x.ai/
+    GROK_API_KEY: str = os.getenv("GROK_API_KEY", "")
+    GROK_BASE_URL: str = "https://api.x.ai/v1"
+    GROK_ENABLED: bool = False  # Set to True when API keys are available
 
     # OTP_EXPIRATION_MINUTES: int = 2 if ENVIRONMENT == "development" else 5
     LOGIN_ATTEMPTS: int = 3
