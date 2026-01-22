@@ -576,7 +576,6 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           {activeView === 'overview' && renderScriptOverview(selectedScript)}
           {activeView === 'acts' && renderActsBreakdown(selectedScript)}
           {activeView === 'scenes' && renderScenesDetail(selectedScript)}
-          {activeView === 'scenes' && renderScenesDetail(selectedScript)}
           {activeView === 'dialogue' && renderDialogueView(selectedScript)}
           {activeView === 'performance' && renderPerformanceMap(selectedScript)}
         </div>
@@ -601,18 +600,32 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   // Helper function to count scenes from script text
   const countScenesFromScript = (script: ChapterScript): number => {
     if (script.scenes && script.scenes.length > 0) return script.scenes.length;
-    // Count SCENE headers from script text (more reliable than scene_descriptions which may have duplicates)
+    
     const scriptText = script.script || '';
-    const sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?/gi);
-    if (sceneMatches) {
+    
+    // Pattern 1: Combined ACT-SCENE format (e.g., "ACT I - SCENE 1")
+    let sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*[-–—]\s*SCENE\s+\d+\*?\*?/gi);
+    if (sceneMatches && sceneMatches.length > 0) {
       return sceneMatches.length;
     }
-    // Fallback to scene_descriptions if no matches in script text
+    
+    // Pattern 2: Standalone SCENE format (e.g., "#### **SCENE 1**" or "SCENE 1")
+    sceneMatches = scriptText.match(/(?:^|\n)(?:#{1,4}\s*)?\*?\*?\s*SCENE\s+\d+\s*\*?\*?/gim);
+    if (sceneMatches && sceneMatches.length > 0) {
+      return sceneMatches.length;
+    }
+    
+    // Pattern 3: INT./EXT. location headers as scene markers
+    sceneMatches = scriptText.match(/(?:^|\n)\*?\*?(?:INT\.|EXT\.)[^\n]+/gim);
+    if (sceneMatches && sceneMatches.length > 0) {
+      return sceneMatches.length;
+    }
+    
+    // Fallback to scene_descriptions
     if (script.scene_descriptions && script.scene_descriptions.length > 0) {
-      // Filter out duplicates - only count entries that start with ACT header
       const actScenes = script.scene_descriptions.filter((desc: any) => {
         const text = typeof desc === 'string' ? desc : desc?.visual_description || '';
-        return text.match(/^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE/i);
+        return text.match(/^\*?\*?ACT\s+[IVX]+\s*[-–—]?\s*SCENE/i) || text.match(/SCENE\s+\d+/i);
       });
       return actScenes.length > 0 ? actScenes.length : Math.ceil(script.scene_descriptions.length / 2);
     }
@@ -988,18 +1001,32 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       const scriptText = script.script || '';
       const scenes: { scene_number: number; header: string; location: string; content: string }[] = [];
       
-      // Find all ACT-SCENE headers
-      const scenePattern = /(\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?)/gi;
-      const matches = [...scriptText.matchAll(scenePattern)];
+      // Try multiple patterns to find scenes
+      // Pattern 1: Combined ACT-SCENE format (e.g., "ACT I - SCENE 1")
+      let scenePattern = /(\*?\*?ACT\s+[IVX]+\s*[-–—]\s*SCENE\s+\d+\*?\*?)/gi;
+      let matches = [...scriptText.matchAll(scenePattern)];
+      
+      // Pattern 2: Standalone SCENE format (e.g., "#### **SCENE 1**" or "SCENE 1")
+      if (matches.length === 0) {
+        scenePattern = /(?:^|\n)(?:#{1,4}\s*)?\*?\*?\s*SCENE\s+(\d+)\s*\*?\*?/gim;
+        matches = [...scriptText.matchAll(scenePattern)];
+      }
+      
+      // Pattern 3: INT./EXT. location headers as scene markers
+      if (matches.length === 0) {
+        scenePattern = /(?:^|\n)\*?\*?(?:INT\.|EXT\.)[^\n]+/gim;
+        matches = [...scriptText.matchAll(scenePattern)];
+      }
       
       if (matches.length === 0) {
         // Fallback to scene_descriptions if available
         if (script.scene_descriptions && script.scene_descriptions.length > 0) {
           return script.scene_descriptions
             .filter((desc: any, idx: number) => {
-              // Only include non-duplicate entries (filter out location-only entries)
               const text = typeof desc === 'string' ? desc : '';
-              return text.match(/^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE/i) || idx % 2 === 0;
+              return text.match(/^\*?\*?ACT\s+[IVX]+\s*[-–—]?\s*SCENE/i) || 
+                     text.match(/SCENE\s+\d+/i) ||
+                     idx % 2 === 0;
             })
             .map((desc: any, idx: number) => ({
               scene_number: idx + 1,
@@ -1128,56 +1155,86 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
             </div>
 
             {hasMap ? (
-                <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-                    <div className="max-h-[600px] overflow-y-auto">
-                        <table className="w-full text-sm text-left">
-                            <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400 sticky top-0 z-10">
-                                <tr>
-                                    <th className="px-6 py-3 w-[15%]">Character</th>
-                                    <th className="px-6 py-3 w-[20%]">Emotion</th>
-                                    <th className="px-6 py-3 w-[25%]">Vocal Direction</th>
-                                    <th className="px-6 py-3 w-[40%]">Subtext & Context</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                                {script.emotional_map!.map((entry, idx) => (
-                                    <tr key={idx} className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                                        <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
-                                            {entry.character}
-                                            <div className="text-xs text-gray-400 font-normal mt-1 truncate max-w-[150px]" title={entry.dialogue}>
-                                                "{entry.dialogue}"
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                                                entry.emotional_intensity === 'high' ? 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800' :
-                                                entry.emotional_intensity === 'low' ? 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800' :
-                                                'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800'
-                                            }`}>
-                                                {entry.emotional_state}
-                                                <span className="ml-1 opacity-70">({entry.emotional_intensity})</span>
-                                            </span>
-                                            {entry.facial_expression && (
-                                                <div className="text-xs text-gray-500 mt-1">
-                                                    Face: {entry.facial_expression}
-                                                </div>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
-                                            {entry.vocal_direction}
-                                            {entry.body_language && (
-                                                <div className="text-xs text-gray-500 mt-1 italic">
-                                                    Body: {entry.body_language}
-                                                </div>
-                                            )}
-                                        </td>
-                                        <td className="px-6 py-4 text-gray-600 dark:text-gray-400 italic">
-                                            "{entry.subtext}"
-                                        </td>
+                <div className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div className="overflow-x-auto">
+                        <div className="max-h-[600px] overflow-y-auto">
+                            <table className="w-full text-sm text-left" style={{ minWidth: '1000px' }}>
+                                <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400 sticky top-0 z-10">
+                                    <tr>
+                                        <th className="px-3 py-3 whitespace-nowrap">Scene</th>
+                                        <th className="px-3 py-3 whitespace-nowrap">Character</th>
+                                        <th className="px-3 py-3 whitespace-nowrap">Emotion</th>
+                                        <th className="px-3 py-3">Vocal Direction</th>
+                                        <th className="px-3 py-3">Subtext</th>
+                                        <th className="px-3 py-3">Sound Effects</th>
+                                        <th className="px-3 py-3">Music</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                    {script.emotional_map!.map((entry, idx) => (
+                                        <tr key={idx} className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                            <td className="px-3 py-3 text-gray-500 dark:text-gray-400 text-center">
+                                                {entry.scene || '-'}
+                                            </td>
+                                            <td className="px-3 py-3 font-medium text-gray-900 dark:text-white">
+                                                <div className="max-w-[120px] truncate" title={entry.character}>
+                                                    {entry.character}
+                                                </div>
+                                                <div className="text-xs text-gray-400 font-normal mt-1 truncate max-w-[120px]" title={entry.dialogue}>
+                                                    "{entry.dialogue}"
+                                                </div>
+                                            </td>
+                                            <td className="px-3 py-3">
+                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                                    entry.emotional_intensity >= 7 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' :
+                                                    entry.emotional_intensity <= 3 ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' :
+                                                    'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                                }`}>
+                                                    {entry.emotional_state}
+                                                    <span className="ml-1 opacity-70">({entry.emotional_intensity})</span>
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-3 text-gray-600 dark:text-gray-300 max-w-[180px]">
+                                                <div className="truncate" title={entry.vocal_direction}>{entry.vocal_direction}</div>
+                                                {entry.body_language && (
+                                                    <div className="text-xs text-gray-500 mt-1 truncate" title={entry.body_language}>
+                                                        Body: {entry.body_language}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-3 text-gray-600 dark:text-gray-400 italic max-w-[200px]">
+                                                <div className="truncate" title={entry.subtext}>"{entry.subtext}"</div>
+                                            </td>
+                                            <td className="px-3 py-3 text-gray-600 dark:text-gray-400 max-w-[150px]">
+                                                {entry.sound_effects && Array.isArray(entry.sound_effects) && entry.sound_effects.length > 0 ? (
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {entry.sound_effects.slice(0, 2).map((sfx: string, i: number) => (
+                                                            <span key={i} className="inline-flex px-1.5 py-0.5 rounded text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300">
+                                                                {sfx.length > 15 ? sfx.substring(0, 15) + '...' : sfx}
+                                                            </span>
+                                                        ))}
+                                                        {entry.sound_effects.length > 2 && (
+                                                            <span className="text-xs text-gray-400">+{entry.sound_effects.length - 2}</span>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-gray-400 text-xs">-</span>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-3 text-gray-600 dark:text-gray-400 max-w-[150px]">
+                                                {entry.background_music ? (
+                                                    <div className="truncate text-xs" title={entry.background_music}>
+                                                        🎵 {entry.background_music}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-gray-400 text-xs">-</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             ) : (
@@ -1307,15 +1364,37 @@ const ScriptCard: React.FC<ScriptCardProps> = ({
     }
   };
 
-  // Count scenes from script text
+  // Count scenes from script text - use robust matching patterns
   const getSceneCount = (): number => {
+    // First check structured scenes array
+    if (script.scenes && script.scenes.length > 0) return script.scenes.length;
+    
     const scriptText = script.script || '';
-    const sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?/gi);
+    
+    // Pattern 1: Combined ACT-SCENE format (e.g., "ACT I - SCENE 1")
+    let sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*[-–—]\s*SCENE\s+\d+\*?\*?/gi);
     if (sceneMatches && sceneMatches.length > 0) {
       return sceneMatches.length;
     }
-    // Fallback
-    return script.scene_descriptions ? Math.ceil(script.scene_descriptions.length / 2) : 0;
+    
+    // Pattern 2: Standalone SCENE format (e.g., "#### **SCENE 1**" or "SCENE 1")
+    sceneMatches = scriptText.match(/(?:^|\n)(?:#{1,4}\s*)?\*?\*?\s*SCENE\s+\d+\s*\*?\*?/gim);
+    if (sceneMatches && sceneMatches.length > 0) {
+      return sceneMatches.length;
+    }
+    
+    // Pattern 3: INT./EXT. location headers as scene markers
+    sceneMatches = scriptText.match(/(?:^|\n)\*?\*?(?:INT\.|EXT\.)[^\n]+/gim);
+    if (sceneMatches && sceneMatches.length > 0) {
+      return sceneMatches.length;
+    }
+    
+    // Fallback to scene_descriptions
+    if (script.scene_descriptions && script.scene_descriptions.length > 0) {
+      return Math.ceil(script.scene_descriptions.length / 2);
+    }
+    
+    return 0;
   };
 
   return (

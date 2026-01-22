@@ -18,6 +18,8 @@ export type AudioFile = {
   // legacy fields
   type?: string;
   sceneNumber?: number;
+  shotType?: 'key_scene' | 'suggested_shot'; // Shot type from backend metadata
+  shotIndex?: number; // Shot index within scene
   duration?: number;
   character?: string;
   name?: string;
@@ -27,6 +29,8 @@ export type AudioFile = {
   volume?: number;
   startTime?: number;
   endTime?: number;
+  text_content?: string;
+  text_prompt?: string;
 };
 
 type State = {
@@ -116,11 +120,63 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken, videoGen
           }
         }
 
+        // Parse scene number - handle various formats
+        // Backend may store as: 1, "1", "scene_1", "scene_1.1"
+        let sceneNumber: number | undefined = undefined;
+        // @ts-expect-error - scene_id comes from backend response
+        const rawScene = metadata?.scene ?? f.scene_id ?? null;
+        if (rawScene !== null && rawScene !== undefined) {
+          if (typeof rawScene === 'number') {
+            sceneNumber = Math.floor(rawScene); // Use integer for display
+          } else if (typeof rawScene === 'string') {
+            // Strip 'scene_' prefix if present
+            const cleaned = rawScene.replace(/^scene_/i, '');
+            const parsed = parseFloat(cleaned);
+            if (!isNaN(parsed)) {
+              sceneNumber = Math.floor(parsed); // Use integer for display
+            }
+          }
+        }
+
+        // Parse shot_type and shot_index from metadata
+        let shotType = metadata?.shot_type as 'key_scene' | 'suggested_shot' | undefined;
+        let shotIndex = typeof metadata?.shot_index === 'number' ? metadata.shot_index : undefined;
+
+        // Fallback: Parse from text content or prompt if metadata is missing
+        const textContent = f.text_content || f.text_prompt || f.name || "";
+        if (shotIndex === undefined) {
+          // Look for "Shot 2", "Shot 3", etc.
+          const shotMatch = textContent.match(/Shot[\s_]*(\d+)/i);
+          if (shotMatch) {
+             // If found "Shot 1", it's index 0. "Shot 2" is index 1.
+             const val = parseInt(shotMatch[1]);
+             if (!isNaN(val) && val > 0) {
+               shotIndex = val - 1;
+               shotType = 'suggested_shot';
+             }
+          }
+        }
+        
+        // Fallback: Check for "Key Scene" explicitly
+        if (!shotType && /key[\s_]*scene/i.test(textContent)) {
+           shotType = 'key_scene';
+           shotIndex = 0;
+        }
+
+        // Final Fallback: If sceneAudio is present but shotIndex is missing, default to 0 (Key Scene)
+        // This ensures audio doesn't disappear from the UI
+        if (shotIndex === undefined) {
+          shotIndex = 0;
+          if (!shotType) shotType = 'key_scene';
+        }
+
         return {
           ...f,
           url: f.url ?? f.audio_url,
           scriptId: f.script_id ?? f.scriptId ?? null,
-          sceneNumber: metadata?.scene ?? f.scene_id ?? null,  // Add scene number for filtering
+          sceneNumber,
+          shotType,
+          shotIndex,
           type: kind // Override type with normalized kind
         };
       });

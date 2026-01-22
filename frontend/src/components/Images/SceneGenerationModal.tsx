@@ -110,8 +110,12 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
       toast.success('Description enhanced for better image generation');
     } catch (error: any) {
       console.error('Failed to enhance description:', error);
-      if (error?.response?.status === 429) {
-        toast.error(`AI assist limit reached (${aiAssistLimit} per day). Upgrade for more.`);
+      // Extract error message from API response
+      const errorDetail = error?.response?.data?.detail;
+      if (error?.response?.status === 429 && errorDetail?.message) {
+        toast.error(errorDetail.message);
+      } else if (typeof errorDetail === 'string') {
+        toast.error(errorDetail);
       } else {
         toast.error('Failed to enhance description. Please try again.');
       }

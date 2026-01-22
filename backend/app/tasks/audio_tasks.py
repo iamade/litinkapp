@@ -385,7 +385,94 @@ def generate_all_audio_for_video(self, video_generation_id: str):
             # Ensure script_id is string
             script_id_str = str(video_gen.script_id) if video_gen.script_id else None
 
+            # Load emotional map audio design to enhance SFX and music
+            if script_id_str:
+                try:
+                    async with session_scope() as session:
+                        from app.videos.models import Script
+
+                        script_stmt = select(Script).where(
+                            Script.id == uuid.UUID(script_id_str)
+                        )
+                        script_result = await session.exec(script_stmt)
+                        script_record = script_result.first()
+                        if script_record and script_record.emotional_map:
+                            # Build audio design from emotional map
+                            audio_design_by_scene = {}
+                            for entry in script_record.emotional_map:
+                                scene = entry.get("scene", 1)
+                                if scene not in audio_design_by_scene:
+                                    audio_design_by_scene[scene] = {
+                                        "sound_effects": [],
+                                        "music": "",
+                                    }
+
+                                sfx = entry.get("sound_effects", [])
+                                if sfx and isinstance(sfx, list):
+                                    audio_design_by_scene[scene][
+                                        "sound_effects"
+                                    ].extend(sfx)
+
+                                music = entry.get("background_music", "")
+                                if music:
+                                    audio_design_by_scene[scene]["music"] = music
+
+                            # Enhance audio_components with audio design
+                            # Add sound effects from emotional map
+                            for scene_num, design in audio_design_by_scene.items():
+                                for sfx_desc in design["sound_effects"]:
+                                    if sfx_desc and sfx_desc not in [
+                                        s.get("description")
+                                        for s in audio_components.get(
+                                            "sound_effects", []
+                                        )
+                                    ]:
+                                        audio_components.setdefault(
+                                            "sound_effects", []
+                                        ).append(
+                                            {
+                                                "scene": scene_num,
+                                                "description": sfx_desc,
+                                                "duration": 10.0,
+                                            }
+                                        )
+
+                                # Add background music from emotional map
+                                if design["music"]:
+                                    existing_music_scenes = [
+                                        m.get("scene")
+                                        for m in audio_components.get(
+                                            "background_music", []
+                                        )
+                                    ]
+                                    if scene_num not in existing_music_scenes:
+                                        audio_components.setdefault(
+                                            "background_music", []
+                                        ).append(
+                                            {
+                                                "scene": scene_num,
+                                                "description": design["music"],
+                                                "type": "emotional",
+                                                "duration": 15.0,  # Shorter duration
+                                            }
+                                        )
+
+                            print(
+                                f"[AUDIO DESIGN] Enhanced with {len(audio_design_by_scene)} scenes from emotional map"
+                            )
+                            print(
+                                f"- Sound effects: {len(audio_components.get('sound_effects', []))}"
+                            )
+                            print(
+                                f"- Background music: {len(audio_components.get('background_music', []))}"
+                            )
+                except Exception as e:
+                    logger.warning(
+                        f"[AUDIO DESIGN] Could not load emotional map audio design: {e}"
+                    )
+
             # Generate audio based on script style
+
             if script_style == "cinematic_movie" or script_style == "cinematic":
                 # For cinematic: generate character dialogue + background music + sound effects
                 narrator_results = []
@@ -573,8 +660,10 @@ async def generate_narrator_audio(
     for i, segment in enumerate(narrator_segments):
         try:
             scene_id = segment.get("scene", 1)
+            shot_type = segment.get("shot_type", "key_scene")
+            shot_index = segment.get("shot_index", 0)
             print(
-                f"[NARRATOR AUDIO] Processing segment {i+1}/{len(narrator_segments)} for scene {scene_id}"
+                f"[NARRATOR AUDIO] Processing segment {i+1}/{len(narrator_segments)} for scene {scene_id} ({shot_type})"
             )
             print(
                 f"[AUDIO GEN] Generating narrator audio for scene_{scene_id}: {segment['text'][:50]}..."
@@ -672,6 +761,8 @@ async def generate_narrator_audio(
                         "chapter_id": chapter_id,
                         "line_number": segment.get("line_number", i + 1),
                         "scene": scene_id,
+                        "shot_type": shot_type,
+                        "shot_index": shot_index,
                         "service": "modelslab_v7",
                         "model_used": result.get(
                             "model_used", "eleven_multilingual_v2"
@@ -935,21 +1026,65 @@ async def generate_character_audio(
                 return val
         return 0.0
 
-    # Load emotional map logic
+    # Load emotional map from script record (includes audio design)
     emotional_map_lookup = {}
-    try:
-        pass
-    except Exception:
-        pass
+    audio_design_by_scene = {}  # scene_num -> {sound_effects: [], music: ""}
+
+    if script_id:
+        try:
+            async with session_scope() as session:
+                from app.videos.models import Script
+
+                script_stmt = select(Script).where(Script.id == uuid.UUID(script_id))
+                script_result = await session.exec(script_stmt)
+                script_record = script_result.first()
+                if script_record and script_record.emotional_map:
+                    for entry in script_record.emotional_map:
+                        # Build emotional lookup for dialogue
+                        char_key = entry.get("character", "").upper().strip()
+                        text_key = entry.get("dialogue", "")[:30].strip()
+                        emotional_map_lookup[(char_key, text_key)] = {
+                            "emotional_state": entry.get("emotional_state", "neutral"),
+                            "emotional_intensity": entry.get("emotional_intensity", 5),
+                            "vocal_direction": entry.get("vocal_direction", ""),
+                        }
+
+                        # Build audio design lookup by scene
+                        scene = entry.get("scene", 1)
+                        if scene not in audio_design_by_scene:
+                            audio_design_by_scene[scene] = {
+                                "sound_effects": [],
+                                "music": "",
+                            }
+
+                        # Collect sound effects
+                        sfx = entry.get("sound_effects", [])
+                        if sfx:
+                            audio_design_by_scene[scene]["sound_effects"].extend(sfx)
+
+                        # Use latest background music for scene
+                        music = entry.get("background_music", "")
+                        if music:
+                            audio_design_by_scene[scene]["music"] = music
+
+                    logger.info(
+                        f"[CHARACTER AUDIO] Loaded {len(emotional_map_lookup)} emotional entries, {len(audio_design_by_scene)} scenes with audio design"
+                    )
+        except Exception as e:
+            logger.warning(f"[CHARACTER AUDIO] Could not load emotional map: {e}")
 
     for i, dialogue in enumerate(character_dialogues):
         try:
             character_name = dialogue["character"]
             scene_id = dialogue.get("scene", 1)
             dialogue_text = dialogue.get("text", "")
+            shot_type = dialogue.get(
+                "shot_type", "key_scene"
+            )  # key_scene or suggested_shot
+            shot_index = dialogue.get("shot_index", 0)
 
             print(
-                f"[CHARACTER AUDIO] Processing dialogue {i+1}/{len(character_dialogues)} for {character_name} in scene {scene_id}"
+                f"[CHARACTER AUDIO] Processing dialogue {i+1}/{len(character_dialogues)} for {character_name} in scene {scene_id} ({shot_type})"
             )
 
             # Determine Emotion Style
@@ -1099,11 +1234,9 @@ async def generate_character_audio(
                         "voice_name": voice_info["voice_name"],
                         "line_number": dialogue.get("line_number", i + 1),
                         "scene": scene_id,
-                        "scene": scene_id,
+                        "shot_type": shot_type,
+                        "shot_index": shot_index,
                         "service": result.get("service", "modelslab_v7"),
-                        "model_used": result.get(
-                            "model_used", "eleven_multilingual_v2"
-                        ),
                         "model_used": result.get(
                             "model_used", "eleven_multilingual_v2"
                         ),
@@ -1203,8 +1336,11 @@ async def generate_sound_effects_audio(
 
     for i, effect in enumerate(sound_effects):
         try:
+            scene_id = effect.get("scene", 1)
+            shot_type = effect.get("shot_type", "key_scene")
+            shot_index = effect.get("shot_index", 0)
             print(
-                f"[SOUND EFFECTS] Processing effect {i+1}/{len(sound_effects)}: {effect['description']}"
+                f"[SOUND EFFECTS] Processing effect {i+1}/{len(sound_effects)}: {effect['description']} (scene {scene_id}, {shot_type})"
             )
 
             # Use V7 sound effects generation
@@ -1230,14 +1366,18 @@ async def generate_sound_effects_audio(
                         user_id=uuid.UUID(user_id) if user_id else None,
                         chapter_id=uuid.UUID(chapter_id) if chapter_id else None,
                         script_id=uuid.UUID(script_id) if script_id else None,
-                        audio_type="sfx",
+                        audio_type="sound_effects",
                         text_content=effect["description"],
                         audio_url=audio_url,
                         duration_seconds=float(duration),
                         sequence_order=i + 1,
                         status="completed",
+                        scene_id=f"scene_{scene_id}",
                         audio_metadata={
                             "chapter_id": chapter_id,
+                            "scene": scene_id,
+                            "shot_type": shot_type,
+                            "shot_index": shot_index,
                             "effect_type": effect.get("type", "sound_effect"),
                             "service": "modelslab_v7",
                             "model_used": result.get(
@@ -1274,7 +1414,7 @@ async def generate_sound_effects_audio(
                     video_generation_id=uuid.UUID(video_gen_id),
                     user_id=uuid.UUID(user_id) if user_id else None,
                     chapter_id=uuid.UUID(chapter_id) if chapter_id else None,
-                    audio_type="sfx",
+                    audio_type="sound_effects",
                     text_content=effect["description"],
                     error_message=str(e),
                     sequence_order=i + 1,
@@ -1310,15 +1450,17 @@ async def generate_background_music(
     for i, music_cue in enumerate(music_cues):
         try:
             scene_id = music_cue["scene"]
+            shot_type = music_cue.get("shot_type", "key_scene")
+            shot_index = music_cue.get("shot_index", 0)
             logger.info(
-                f"[BACKGROUND MUSIC] Processing scene {scene_id}: {music_cue['description']}"
+                f"[BACKGROUND MUSIC] Processing scene {scene_id} ({shot_type}): {music_cue['description']}"
             )
 
             # Use V7 music generation
             result = await audio_service.generate_background_music(
                 description=music_cue["description"],
                 model_id="music_v1",
-                duration=30.0,
+                duration=15.0,  # Reduced from 30s to avoid overshadowing dialogue
             )
 
             if result.get("status") == "success":
@@ -1348,6 +1490,8 @@ async def generate_background_music(
                             "chapter_id": chapter_id,
                             "music_type": music_cue.get("type", "background_music"),
                             "scene": scene_id,
+                            "shot_type": shot_type,
+                            "shot_index": shot_index,
                             "service": "modelslab_v7",
                             "model_used": result.get("model_used", "music_v1"),
                         },

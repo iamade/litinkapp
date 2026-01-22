@@ -14,6 +14,7 @@ class SceneImageRequest(BaseModel):
     character_ids: Optional[List[str]] = None
     character_image_urls: Optional[List[str]] = None
     is_suggested_shot: bool = False  # For suggested shot special handling
+    shot_index: Optional[int] = None  # 0 = Key Scene, 1+ = Suggested Shots
 
 
 class CharacterImageRequest(BaseModel):
@@ -160,7 +161,9 @@ class ImageExpandRequest(BaseModel):
     """Request model for image expansion/outpainting"""
 
     image_url: str
-    target_aspect_ratio: str = "16:9"  # Target aspect ratio (e.g., "16:9", "21:9", "4:3")
+    target_aspect_ratio: str = (
+        "16:9"  # Target aspect ratio (e.g., "16:9", "21:9", "4:3")
+    )
     prompt: Optional[str] = None  # Optional prompt to guide background generation
     wait_for_completion: bool = True  # Whether to wait for async processing
 
@@ -172,7 +175,9 @@ class ImageExpandResponse(BaseModel):
     expanded_url: Optional[str] = None
     original_url: str
     target_aspect_ratio: str
-    expansion_params: Optional[Dict[str, float]] = None  # left, right, top, bottom ratios
+    expansion_params: Optional[Dict[str, float]] = (
+        None  # left, right, top, bottom ratios
+    )
     generation_time: Optional[float] = None
     message: str
     # For async processing

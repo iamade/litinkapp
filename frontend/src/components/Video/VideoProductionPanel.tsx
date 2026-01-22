@@ -19,6 +19,7 @@ import VideoPreview from './VideoPreview';
 import RenderingProgress from './RenderingProgress';
 import MergePanel from './MergePanel';
 import type { VideoScene } from '../../types/videoProduction';
+import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 
 interface SceneDescription {
   scene_number: number;
@@ -75,6 +76,97 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     isSwitching
   } = useScriptSelection();
 
+  const storyboardContext = useStoryboardOptional();
+  
+  // Build scene metadata from storyboard including shotType
+  // Returns array of { url, sceneNumber, shotType, shotIndex } for proper scene initialization
+  const filteredSceneData = React.useMemo(() => {
+    if (!storyboardContext) {
+      // Fallback to simple URLs when no context
+      return imageUrls.map((url, idx) => ({
+        url,
+        sceneNumber: idx + 1,
+        shotType: 'key_scene' as const,
+        shotIndex: 0,
+      }));
+    }
+    
+    const { sceneImagesMap, excludedImageIds, selectedSceneImages, imageOrderByScene } = storyboardContext;
+    
+    // If we have scene images map, use it to get all non-excluded images with metadata
+    if (Object.keys(sceneImagesMap).length > 0) {
+      const allIncludedScenes: Array<{
+        url: string;
+        sceneNumber: number;
+        shotType: 'key_scene' | 'suggested_shot';
+        shotIndex: number;
+        imageId: string;
+      }> = [];
+      
+      // Sort by scene number and get all non-excluded images with their metadata
+      Object.entries(sceneImagesMap)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .forEach(([sceneNumStr, images]) => {
+          const sceneNumber = parseInt(sceneNumStr);
+          const sceneOrder = imageOrderByScene[sceneNumber] || [];
+          
+          // Sort images by their position in imageOrderByScene if available
+          const sortedImages = sceneOrder.length > 0
+            ? [...images].sort((a, b) => {
+                const aIndex = sceneOrder.indexOf(a.id);
+                const bIndex = sceneOrder.indexOf(b.id);
+                // If not in order array, put at end
+                return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+              })
+            : images;
+          
+          sortedImages.forEach((img, idx) => {
+            // Include image if it's not in excluded list
+            if (!excludedImageIds.has(img.id) && img.url) {
+              allIncludedScenes.push({
+                url: img.url,
+                sceneNumber,
+                shotType: img.shotType || 'key_scene',
+                shotIndex: img.shotIndex ?? idx,
+                imageId: img.id,
+              });
+            }
+          });
+        });
+      
+      if (allIncludedScenes.length > 0) {
+        return allIncludedScenes;
+      }
+    }
+    
+    // Fallback: If we only have selectedSceneImages, use those as key scenes
+    if (Object.keys(selectedSceneImages).length > 0) {
+      return Object.entries(selectedSceneImages)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .filter(([, url]) => url)
+        .map(([sceneNumStr, url]) => ({
+          url,
+          sceneNumber: parseInt(sceneNumStr),
+          shotType: 'key_scene' as const,
+          shotIndex: 0,
+        }));
+    }
+    
+    // Otherwise, return all images as key scenes
+    return imageUrls.map((url, idx) => ({
+      url,
+      sceneNumber: idx + 1,
+      shotType: 'key_scene' as const,
+      shotIndex: 0,
+    }));
+  }, [imageUrls, storyboardContext]);
+
+  // Extract just URLs for useVideoProduction (backward compatible)
+  const filteredImageUrls = React.useMemo(() => 
+    filteredSceneData.map(s => s.url), 
+    [filteredSceneData]
+  );
+
   // Move hooks before any conditional returns
   const {
     videoProduction,
@@ -94,29 +186,32 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   } = useVideoProduction({
     chapterId,
     scriptId: selectedScriptId || undefined,
-    imageUrls,
+    imageUrls: filteredImageUrls,
+    sceneMetadata: filteredSceneData, // Pass scene data with shotType/shotIndex
     audioFiles
   });
 
   const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'settings' | 'merge'>('timeline');
-  const [selectedScene, setSelectedScene] = useState<VideoScene | null>(null);
+  const [selectedSceneIndex, setSelectedSceneIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
   // Disable actions during switching or loading
   const controlsDisabled = isSwitching || isLoading;
 
   // Delay scene initialization until script switch completes
+  // Uses filteredImageUrls from Images tab storyboard (not Audio tab)
   useEffect(() => {
-    if (selectedScriptId && !scenes.length && imageUrls.length && !isSwitching) {
+    if (selectedScriptId && !scenes.length && filteredImageUrls.length && !isSwitching) {
       const timeoutId = window.setTimeout(() => {
         if (!isSwitching) {
+          console.log(`[VideoProductionPanel] Initializing scenes with ${filteredImageUrls.length} images from Images tab storyboard`);
           initializeScenes();
         }
       }, 100);
       return () => window.clearTimeout(timeoutId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedScriptId, imageUrls, scenes.length, isSwitching]);
+  }, [selectedScriptId, filteredImageUrls.length, scenes.length, isSwitching]);
 
   // Guarded empty state for no selected script
   if (!selectedScriptId) {
@@ -137,7 +232,9 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   }
 
   const handleSceneSelect = (scene: VideoScene) => {
-    setSelectedScene(scene);
+    // Find the index of the scene in the scenes array
+    const index = scenes.findIndex(s => s.id === scene.id);
+    setSelectedSceneIndex(index >= 0 ? index : 0);
     setActiveView('preview');
   };
 
@@ -291,10 +388,10 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
           {activeView === 'preview' && (
             <VideoPreview
               scenes={scenes}
-              currentSceneIndex={selectedScene ? scenes.findIndex(s => s.id === selectedScene.id) : 0}
+              currentSceneIndex={selectedSceneIndex}
               isPlaying={isPlaying}
               onPlayPause={() => setIsPlaying(!isPlaying)}
-              onSceneChange={(index) => setSelectedScene(scenes[index])}
+              onSceneChange={(index) => setSelectedSceneIndex(index)}
               videoUrl={videoUrl}
               selectedScript={selectedScript}
             />

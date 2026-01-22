@@ -443,13 +443,13 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
         <div>
           {isEditing ? (
             <div className="space-y-1">
-              <div className="flex gap-2">
+              <div className="flex gap-2 items-center">
                 <input
                   ref={nameInputRef}
                   type="text"
                   value={displayValue('name') as string}
                   onChange={(e) => handleInputChange('name', e.target.value)}
-                  className="flex-1 text-lg font-semibold text-gray-900 dark:text-white bg-transparent border-b-2 border-blue-500 focus:outline-none px-1"
+                  className="flex-1 min-w-0 text-lg font-semibold text-gray-900 dark:text-white bg-transparent border-b-2 border-blue-500 focus:outline-none px-1"
                   placeholder="Character name"
                   disabled={isGeneratingWithAI}
                 />
@@ -457,15 +457,15 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
                   <button
                     onClick={handleAIAssist}
                     disabled={isSaving || isGeneratingWithAI || !editedCharacter.name?.trim()}
-                    className="px-3 py-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-md hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 text-sm font-medium transition-all"
+                    className="shrink-0 px-2 py-1 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-md hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 text-xs font-medium transition-all whitespace-nowrap"
                     title="Use AI to generate character details based on the book"
                   >
                     {isGeneratingWithAI ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-3 h-3 animate-spin" />
                     ) : (
-                      <Sparkles className="w-4 h-4" />
+                      <Sparkles className="w-3 h-3" />
                     )}
-                    <span className="hidden sm:inline">{isGeneratingWithAI ? 'AI...' : 'AI Assist'}</span>
+                    <span>{isGeneratingWithAI ? 'AI...' : 'AI Assist'}</span>
                   </button>
                 )}
               </div>

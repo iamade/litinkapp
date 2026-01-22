@@ -209,7 +209,8 @@ export const useImageGeneration = (
     options: ImageGenerationOptions,
     characterIds?: string[],
     characterImageUrls?: string[],
-    isSuggestedShot: boolean = false
+    isSuggestedShot: boolean = false,
+    shotIndex?: number  // 0 = Key Scene, 1+ = Suggested Shots
   ) => {
     setGeneratingScenes((prev) => new Set(prev).add(sceneNumber));
 
@@ -242,7 +243,8 @@ export const useImageGeneration = (
         script_id: selectedScriptId ?? undefined,
         character_ids: characterIds,
         character_image_urls: characterImageUrls,
-        is_suggested_shot: isSuggestedShot  // Pass suggested shot flag to backend
+        is_suggested_shot: isSuggestedShot,  // Pass suggested shot flag to backend
+        shot_index: shotIndex  // Pass shot_index to backend (0 = Key Scene, 1+ = Suggested)
       };
 
       const result = await userService.generateSceneImage(chapterId!, sceneNumber, request);

@@ -32,6 +32,7 @@ import SceneAudioCard from './SceneAudioCard';
 import SceneGalleryModal from './SceneGalleryModal';
 import { deleteAudio } from '../../lib/api';
 import { projectService } from '../../services/projectService';
+import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 
 interface AudioPanelProps {
   // Props are now optional since we use context for script selection
@@ -42,6 +43,7 @@ interface AudioPanelProps {
     scene_descriptions?: any[];
     characters?: string[];
     script?: string;
+    emotional_map?: any[];
   } | null;
   plotOverview?: unknown;
 }
@@ -197,6 +199,48 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     return 0;
   };
 
+  // Sync state to StoryboardContext for Video tab consumption
+  // NOTE: Audio tab ONLY syncs audio files - images come from Images tab storyboard
+  const storyboardContext = useStoryboardOptional();
+
+  // Sync audio files to context when they update
+  // Using ref to track previous state and avoid infinite loops
+  const prevAudioSyncRef = React.useRef<string>('');
+  
+  useEffect(() => {
+    if (!storyboardContext || !files || files.length === 0) return;
+    
+    // Group audio files by scene number
+    const audioByScene: Record<number, any[]> = {};
+    files.forEach((file: AudioFile) => {
+      const sceneNum = file.sceneNumber || 1;
+      if (!audioByScene[sceneNum]) {
+        audioByScene[sceneNum] = [];
+      }
+      audioByScene[sceneNum].push({
+        id: file.id,
+        type: file.type,
+        sceneNumber: sceneNum,
+        shotType: file.shotType, // Include shot type for filtering
+        shotIndex: file.shotIndex, // Include shot index for per-shot audio
+        url: file.url,
+        duration: file.duration,
+        character: file.character,
+        status: file.status,
+      });
+    });
+    
+    // Only update if data has changed (prevent infinite loop)
+    const newSyncKey = JSON.stringify(audioByScene);
+    if (prevAudioSyncRef.current === newSyncKey) return;
+    prevAudioSyncRef.current = newSyncKey;
+    
+    // Update context with audio for each scene
+    Object.entries(audioByScene).forEach(([sceneNum, audioFiles]) => {
+      storyboardContext.setSceneAudio(parseInt(sceneNum), audioFiles);
+    });
+  }, [storyboardContext, files]);
+
   // Load/refresh on script/chapter/version change
   useEffect(() => {
     if (stableSelectedChapterId && selectedScriptId) {
@@ -322,6 +366,18 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   const handleGenerateAll = () => {
     if (!scenes.length) {
       toast.error('No scenes available to generate audio for');
+      return;
+    }
+
+    // Require emotional map for cinematic scripts
+    const isCinematic = selectedScript?.script_style === 'cinematic' || 
+                        selectedScript?.script_style === 'cinematic_movie';
+    const hasEmotionalMap = selectedScript?.emotional_map && 
+                            Array.isArray(selectedScript.emotional_map) && 
+                            selectedScript.emotional_map.length > 0;
+    
+    if (isCinematic && !hasEmotionalMap) {
+      toast.error('Please generate the Cinematic Emotional Map in the Script tab first. This provides the audio design for sound effects and music.');
       return;
     }
 
@@ -763,20 +819,28 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                     </div>
                 )}
 
-                {galleryState.isOpen && galleryState.sceneIndex !== -1 && scenes[galleryState.sceneIndex] && (
-                    <SceneGalleryModal
-                        isOpen={galleryState.isOpen}
-                        onClose={closeGallery}
-                        sceneNumber={galleryState.sceneIndex + 1}
-                        description={typeof scenes[galleryState.sceneIndex] === 'string' 
-                            ? scenes[galleryState.sceneIndex] 
-                            : (scenes[galleryState.sceneIndex].visual_description || scenes[galleryState.sceneIndex].description)}
-                        images={sceneImages[`${selectedScriptId}_${galleryState.sceneIndex + 1}`] || sceneImages[galleryState.sceneIndex + 1] || []}
-                        selectedImageUrl={selectedSceneImages[galleryState.sceneIndex + 1]}
-                        initialIndex={galleryState.initialImageIndex}
-                        onSelectImage={(url) => setSelectedSceneImage(galleryState.sceneIndex + 1, url || null)}
-                    />
-                )}
+                {galleryState.isOpen && galleryState.sceneIndex !== -1 && scenes[galleryState.sceneIndex] && (() => {
+                    const sceneNum = galleryState.sceneIndex + 1;
+                    const rawGalleryImages = sceneImages[`${selectedScriptId}_${sceneNum}`] || sceneImages[sceneNum] || [];
+                    // Filter out excluded images - only show images not in deselectedImages
+                    const includedGalleryImages = rawGalleryImages.filter((img: any) =>
+                        !img.id || !deselectedImages.has(img.id)
+                    );
+                    return (
+                        <SceneGalleryModal
+                            isOpen={galleryState.isOpen}
+                            onClose={closeGallery}
+                            sceneNumber={sceneNum}
+                            description={typeof scenes[galleryState.sceneIndex] === 'string' 
+                                ? scenes[galleryState.sceneIndex] 
+                                : (scenes[galleryState.sceneIndex].visual_description || scenes[galleryState.sceneIndex].description)}
+                            images={includedGalleryImages}
+                            selectedImageUrl={selectedSceneImages[sceneNum]}
+                            initialIndex={galleryState.initialImageIndex}
+                            onSelectImage={(url) => setSelectedSceneImage(sceneNum, url || null)}
+                        />
+                    );
+                })()}
             </div>
         );
     }
@@ -906,6 +970,8 @@ const AudioFileCard: React.FC<{
     script_id?: string;
     scriptId?: string | null;
     chapter_id?: string;
+    shotType?: 'key_scene' | 'suggested_shot';
+    shotIndex?: number;
   };
   isSelected: boolean;
   onSelect: () => void;
@@ -946,7 +1012,13 @@ const AudioFileCard: React.FC<{
               )}
             </div>
             <p className="text-sm text-gray-500">
-              Scene {file.sceneNumber}
+              Scene {file.sceneNumber ?? 'Unknown'}
+              {file.shotType && (
+                <span className={`ml-2 px-1.5 py-0.5 text-xs rounded ${file.shotType === 'key_scene' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                  {file.shotType === 'key_scene' ? 'Key Scene' : 'Suggested Shot'}
+                </span>
+              )}
+              {file.shotIndex !== undefined && file.shotIndex > 0 && ` • Shot ${file.shotIndex}`}
               {file.duration && file.duration > 0 && ` • ${formatTime(file.duration)}`}
               {file.character && ` • ${file.character}`}
             </p>

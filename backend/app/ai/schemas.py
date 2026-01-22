@@ -97,6 +97,7 @@ class EmotionalMapEntry(BaseModel):
     line_id: str
     character: str
     dialogue: str
+    scene: Optional[int] = 1  # Scene number for grouping audio design
     emotional_state: str  # e.g. "Angry", "Hesitant", "Joyful"
     emotional_intensity: int  # 1-10 scale
     subtext: str  # The hidden meaning or internal thought
@@ -107,6 +108,8 @@ class EmotionalMapEntry(BaseModel):
         str  # Visual cue for video generation (e.g. "Furrowed brow", "Wide smile")
     )
     body_language: Optional[str] = None  # e.g. "Clenching fists", "Looking away"
+    sound_effects: List[str] = []  # Ambient sounds and action-based SFX for the scene
+    background_music: Optional[str] = None  # Music mood/style description for the scene
 
 
 class EmotionalMapRequest(BaseModel):

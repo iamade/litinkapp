@@ -794,26 +794,34 @@ Return only the list of scene descriptions.
             SCRIPT CONTENT:
             {sanitized_script}
             
-            For EACH line of dialogue, determine:
-            1. Emotional State (e.g. "Angry", "Hesitant", "Joyful", "Sarcastic")
-            2. Intensity (1-10)
-            3. Subtext (What they really mean/think)
-            4. Vocal Direction (How it should be spoken, e.g. "Whispered", "Fast paced", "Staccato")
-            5. Facial Expression (Visual cue, e.g. "Furrowed brow", "Wide smile")
-            6. Body Language (e.g. "Clenching fists", "Looking away")
+            For EACH line of dialogue, you MUST determine ALL of the following (no exceptions):
+            1. scene - Extract the scene number from the scene header (e.g. "ACT I - SCENE 3" = 3, "SCENE 1" = 1)
+            2. Emotional State (e.g. "Angry", "Hesitant", "Joyful", "Sarcastic")
+            3. Intensity (1-10)
+            4. Subtext (What they really mean/think)
+            5. Vocal Direction (How it should be spoken, e.g. "Whispered", "Fast paced", "Staccato")
+            6. Facial Expression (Visual cue, e.g. "Furrowed brow", "Wide smile")
+            7. Body Language (e.g. "Clenching fists", "Looking away")
+            8. sound_effects - REQUIRED: Array of ambient sounds and action-based sound effects for this scene (e.g. ["clock ticking", "footsteps on wood floor", "door creaking"])
+            9. background_music - REQUIRED: Mood/style description for the scene's music (e.g. "tense orchestral with strings", "soft piano, melancholic")
 
+            IMPORTANT: EVERY entry MUST include "scene", "sound_effects" (array), and "background_music" (string). These are REQUIRED fields.
+            
             Return a valid JSON object with a single key "entries" containing a list of objects.
-            Each object must match this schema:
+            Each object MUST have ALL these fields:
             {{
-                "line_id": "unique_id_or_index", 
-                "character": "Character Name",
-                "dialogue": "Start of dialogue line...",
-                "emotional_state": "string",
-                "emotional_intensity": int,
-                "subtext": "string",
-                "vocal_direction": "string",
-                "facial_expression": "string",
-                "body_language": "string"
+                "line_id": "1", 
+                "character": "CHARACTER NAME",
+                "dialogue": "The dialogue text...",
+                "scene": 1,
+                "emotional_state": "Angry",
+                "emotional_intensity": 7,
+                "subtext": "What they really mean",
+                "vocal_direction": "Sharp, biting tone",
+                "facial_expression": "Narrowed eyes",
+                "body_language": "Clenched fists",
+                "sound_effects": ["ambient office noise", "typing on keyboard"],
+                "background_music": "tense, building suspense with low strings"
             }}
             
             Only include actual spoken dialogue lines, not action lines or scene headers.
@@ -834,7 +842,7 @@ Return only the list of scene descriptions.
                     {"type": "json_object"} if provider != "deepseek" else None
                 ),
                 temperature=0.5,  # Balanced creativity and adherence to context
-                max_tokens=4000,
+                max_tokens=8000,  # Increased for longer scripts with audio design
             )
 
             response_content = response.choices[0].message.content
@@ -844,7 +852,34 @@ Return only the list of scene descriptions.
                     response_content.strip().strip("`").replace("json\n", "", 1)
                 )
 
-            result = json.loads(response_content)
+            # Attempt to repair truncated JSON
+            try:
+                result = json.loads(response_content)
+            except json.JSONDecodeError as json_err:
+                print(f"JSON parse error: {json_err}. Attempting repair...")
+                # Try to close any open objects/arrays
+                repaired = response_content.rstrip()
+                # Count open brackets to determine what needs closing
+                open_braces = repaired.count("{") - repaired.count("}")
+                open_brackets = repaired.count("[") - repaired.count("]")
+
+                # Truncate to last complete entry if possible
+                last_complete = repaired.rfind("},")
+                if last_complete > 0:
+                    repaired = repaired[: last_complete + 1]
+                    repaired += "]}"  # Close entries array and root object
+                    try:
+                        result = json.loads(repaired)
+                        print(
+                            f"JSON repaired successfully with {len(result.get('entries', []))} entries"
+                        )
+                    except:
+                        # If repair fails, return empty
+                        print("JSON repair failed")
+                        return []
+                else:
+                    return []
+
             entries = result.get("entries", [])
 
             # Post-processing: Ensure all required fields exist
@@ -853,6 +888,21 @@ Return only the list of scene descriptions.
                 # Add a generate logic for missing IDs if AI skipped them
                 if "line_id" not in entry:
                     entry["line_id"] = str(uuid.uuid4())[:8]
+
+                # Ensure scene is present (default to 1)
+                if "scene" not in entry or entry.get("scene") is None:
+                    entry["scene"] = 1
+
+                # Ensure sound_effects is a list (critical for audio generation)
+                if "sound_effects" not in entry or not isinstance(
+                    entry.get("sound_effects"), list
+                ):
+                    entry["sound_effects"] = []
+
+                # Ensure background_music is present (can be None/empty string)
+                if "background_music" not in entry:
+                    entry["background_music"] = None
+
                 final_entries.append(entry)
 
             return final_entries

@@ -49,6 +49,7 @@ import { upscaleImage } from '../../lib/api/upscale';
 import { projectService } from '../../services/projectService';
 import SceneGenerationModal from './SceneGenerationModal';
 import { StoryboardSceneRow } from './StoryboardSceneRow';
+import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 
 const SortableStoryboardRow = ({ id, ...props }: any) => {
   const {
@@ -181,6 +182,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         isRegenerate?: boolean;
         parentSceneImageUrl?: string;  // For suggested shots - reference parent scene image
         isSuggestedShot?: boolean;     // Flag to indicate this is a suggested shot
+        shotIndex?: number;           // 0 = Key Scene, 1+ = Suggested Shots
     } | null>(null);
 
   // Filter excluded characters (Set for .has() method)
@@ -258,6 +260,33 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           visual_description: content || location || `Scene ${idx + 1}`,
           description: content || location || `Scene ${idx + 1}`,
           header: match[0].replace(/\*/g, '').trim(),
+          location: location
+        });
+      });
+
+      return parsedScenes;
+    }
+
+    // Pattern 2: INT./EXT. location headers as scene markers
+    const intExtPattern = /(?:^|\n)(\*?\*?(?:INT\.|EXT\.)[^\n]+)/gim;
+    const intExtMatches = [...scriptText.matchAll(intExtPattern)];
+    
+    if (intExtMatches.length > 0) {
+      intExtMatches.forEach((match, idx) => {
+        const location = match[1].replace(/\*/g, '').trim();
+        const startIdx = match.index!;
+        const endIdx = idx < intExtMatches.length - 1 ? intExtMatches[idx + 1].index! : scriptText.length;
+        const sceneContent = scriptText.substring(startIdx, endIdx).trim();
+        
+        // Get first few lines of content for visual description
+        const lines = sceneContent.split('\n').slice(1, 5);
+        const content = lines.filter(l => l.trim()).join(' ').substring(0, 300);
+
+        parsedScenes.push({
+          scene_number: idx + 1,
+          visual_description: content || location,
+          description: content || location,
+          header: `Scene ${idx + 1}`,
           location: location
         });
       });
@@ -461,6 +490,62 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     return () => clearTimeout(timeoutId);
   }, [storyboardDirty, chapterId, selectedScriptId, getStoryboardConfig, markStoryboardClean]);
 
+  // Sync storyboard images to StoryboardContext for Video tab consumption
+  const storyboardContext = useStoryboardOptional();
+  
+  // Ref to track previous sync state and prevent infinite loops
+  const prevImagesSyncRef = React.useRef<string>('');
+  
+  useEffect(() => {
+    if (!storyboardContext || !sceneImages || Object.keys(sceneImages).length === 0) return;
+    
+    // Build sync key for comparison
+    const syncData: Record<number, any[]> = {};
+    
+    // Sync all scene images to context (grouped by scene number)
+    // Convert the sceneImages map to StoryboardContext format
+    scenes.forEach((scene, idx) => {
+      const sceneNum = scene.scene_number || idx + 1;
+      const rawImages = sceneImages[`${selectedScriptId}_${sceneNum}`] || sceneImages[sceneNum] || [];
+      
+      if (rawImages.length > 0) {
+        const formattedImages = rawImages.map((img: any, imgIdx: number) => {
+          const isKeyScene = keySceneImages[sceneNum] === img.id;
+          return {
+            id: img.id || `${sceneNum}-${imgIdx}`,
+            url: img.url || img.imageUrl || img.image_url || '',
+            sceneNumber: sceneNum,
+            shotType: isKeyScene || imgIdx === 0 ? 'key_scene' as const : 'suggested_shot' as const,
+            shotIndex: imgIdx,
+          };
+        });
+        syncData[sceneNum] = formattedImages;
+      }
+    });
+    
+    // Only update if data has changed (prevent infinite loop)
+    const newSyncKey = JSON.stringify({
+      syncData,
+      selectedSceneImages,
+      deselectedImages: Array.from(deselectedImages),
+      imageOrderByScene
+    });
+    if (prevImagesSyncRef.current === newSyncKey) return;
+    prevImagesSyncRef.current = newSyncKey;
+    
+    // Now apply the updates
+    Object.entries(syncData).forEach(([sceneNum, images]) => {
+      storyboardContext.setSceneImages(parseInt(sceneNum), images);
+    });
+    
+    // Sync excluded images
+    storyboardContext.importFromAudioPanel({
+      selectedSceneImages,
+      excludedImageIds: deselectedImages,
+      imageOrderByScene,
+    });
+  }, [storyboardContext, sceneImages, scenes, selectedScriptId, keySceneImages, deselectedImages, selectedSceneImages, imageOrderByScene]);
+
   // Empty state when no script or chapter is selected
   if (!selectedScriptId || !chapterId) {
     return (
@@ -661,6 +746,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
           // Try to find matching character in plot overview for enriched data
           const plotChar = plotOverview?.characters?.find(pc => {
+            // Skip objects and locations - only match against actual characters
+            const entityType = (pc as any).entity_type;
+            if (entityType && entityType !== 'character') {
+              return false;
+            }
+            
             // Normalize strings for comparison
             const normalizeName = (n: string) => n.trim().toLowerCase().replace(/[.,]/g, '');
             const pName = normalizeName(pc.name);
@@ -669,11 +760,16 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             // Exact match
             if (pName === sName) return true;
 
+            // Skip partial matching if script name contains object/location prefixes
+            // This prevents "car of mr dursley" from matching "mr dursley"
+            const objectLocationPrefixes = ['car of', 'house of', 'home of', 'room of', 'office of', 'shop of', 'store of'];
+            const hasObjectPrefix = objectLocationPrefixes.some(prefix => sName.startsWith(prefix));
+            if (hasObjectPrefix) return false;
+
             // Partial match (e.g., "Harry" matches "Harry Potter")
-            // Ensure we aren't matching just on common prefixes
-            if (pName.includes(sName) || sName.includes(pName)) {
-              return true;
-            }
+            // Only valid if the shorter name is at least 3 chars and is the START of the longer name
+            if (sName.length >= 3 && pName.startsWith(sName)) return true;
+            if (pName.length >= 3 && sName.startsWith(pName)) return true;
 
             // Remove common honorifics/titles for first name check
             const honorifics = ['mr', 'mrs', 'ms', 'dr', 'prof', 'professor', 'sir', 'lady', 'lord', 'king', 'queen', 'father', 'mother', 'uncle', 'aunt'];
@@ -761,7 +857,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       }));
     }
 
-
+    // Filter out objects and locations - they belong in the separate objectsAndLocations section
+    baseCharacters = baseCharacters.filter(char => {
+      const entityType = char.entity_type;
+      // Only include actual characters (entity_type is undefined, null, or 'character')
+      return !entityType || entityType === 'character';
+    });
 
     // Filter out excluded characters
     baseCharacters = baseCharacters.filter(char => {
@@ -1101,14 +1202,16 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     isRef = false,
     currentDescription = "",
     parentSceneImageUrl?: string,
-    isSuggestedShot = false
+    isSuggestedShot = false,
+    shotIndex?: number  // Explicitly passed shotIndex, or calculated
   ) => {
     setSelectedSceneForGeneration({
       sceneNumber,
       description: currentDescription,
       isRegenerate: isRef,
       parentSceneImageUrl,
-      isSuggestedShot
+      isSuggestedShot,
+      shotIndex: shotIndex ?? (isSuggestedShot ? 1 : 0)  // Default to 1 for suggested, 0 for key
     });
     setShowSceneGenerationModal(true);
   };
@@ -1271,13 +1374,22 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     onDelete={(imageId) => deleteImage('scene', sceneNumber, imageId)}
                     onView={(url) => setSelectedImage(url)}
                     onSetKeyScene={(imageId) => setKeySceneImage(sceneNumber, imageId)}
-                    onGenerateMoment={(shotDescription, parentSceneImageUrl) => handleGenerateSceneImage(
-                      sceneNumber,
-                      false,
-                      shotDescription,
-                      parentSceneImageUrl,  // Pass parent scene image for I2I consistency
-                      true                   // Mark as suggested shot
-                    )}
+                    onGenerateMoment={(shotDescription, parentSceneImageUrl) => {
+                      // Calculate next shot_index: count existing images for this scene with shot_index >= 1
+                      const existingImages = sceneImages[sceneNumber] || [];
+                      // For now, just increment based on total suggested shots - key scene is always 0
+                      const existingSuggestedCount = existingImages.filter(() => true).length;  // All are shot 0 currently
+                      const nextShotIndex = existingSuggestedCount + 1;  // Suggested shots start at 1
+                      
+                      handleGenerateSceneImage(
+                        sceneNumber,
+                        false,
+                        shotDescription,
+                        parentSceneImageUrl,  // Pass parent scene image for I2I consistency
+                        true,                 // Mark as suggested shot
+                        nextShotIndex         // Pass incremented shotIndex
+                      );
+                    }}
                   />
                 );
               })}
@@ -1810,7 +1922,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     generationOptions,
                     charIds.length > 0 ? charIds : undefined,
                     referenceImages.length > 0 ? referenceImages : undefined,
-                    selectedSceneForGeneration.isSuggestedShot  // Pass suggested shot flag
+                    selectedSceneForGeneration.isSuggestedShot,  // Pass suggested shot flag
+                    selectedSceneForGeneration.shotIndex  // Pass shotIndex (0=Key, 1+=Suggested)
                 );
             }
             setShowSceneGenerationModal(false);

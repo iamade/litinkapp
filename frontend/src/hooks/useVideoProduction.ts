@@ -15,11 +15,19 @@ interface FFmpegOptions {
 }
 
 // New params type for reactive hook
+type SceneMetadata = {
+  url: string;
+  sceneNumber: number;
+  shotType: 'key_scene' | 'suggested_shot';
+  shotIndex: number;
+};
+
 type UseVideoProductionParams = {
   scriptId?: string;
   versionKey?: number;
   chapterId?: string;
   imageUrls?: string[];
+  sceneMetadata?: SceneMetadata[]; // New: scene data with shotType
   audioFiles?: string[];
 };
 
@@ -28,6 +36,7 @@ export const useVideoProduction = (props: {
   chapterId: string;
   scriptId?: string;
   imageUrls?: string[];
+  sceneMetadata?: SceneMetadata[];
   audioFiles?: string[];
 }) => {
   return useVideoProductionWithParams(props);
@@ -35,7 +44,7 @@ export const useVideoProduction = (props: {
 
 // New reactive hook
 export function useVideoProductionWithParams(params: UseVideoProductionParams) {
-  const { scriptId, versionKey, chapterId, imageUrls = [], audioFiles = [] } = params;
+  const { scriptId, versionKey, chapterId, imageUrls = [], sceneMetadata = [], audioFiles = [] } = params;
   
   const [videoProduction, setVideoProduction] = useState<VideoProduction | null>(null);
   const [scenes, setScenes] = useState<VideoScene[]>([]);
@@ -92,7 +101,11 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
 
   // Initialize scenes from images and audio with script context
   const initializeScenes = useCallback(async () => {
-    if (!imageUrls.length) {
+    // Use sceneMetadata if provided, otherwise fallback to imageUrls
+    const hasMetadata = sceneMetadata.length > 0;
+    const sceneCount = hasMetadata ? sceneMetadata.length : imageUrls.length;
+    
+    if (sceneCount === 0) {
       toast.error('No images available to create scenes');
       return;
     }
@@ -103,25 +116,40 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
       return;
     }
 
-    const newScenes: VideoScene[] = imageUrls.map((imageUrl, index) => ({
-      id: `scene-${Date.now()}-${index}-${scriptId || 'no-script'}`,
-      sceneNumber: index + 1,
-      imageUrl,
-      audioFiles: audioFiles[index] ? [audioFiles[index]] : [],
-      duration: 5, // Default 5 seconds per scene
-      transitions: [{
-        type: index === 0 ? 'none' : 'fade',
-        duration: 0.5
-      }],
-      status: 'pending'
-    }));
+    const newScenes: VideoScene[] = hasMetadata
+      ? sceneMetadata.map((meta, index) => ({
+          id: `scene-${Date.now()}-${index}-${scriptId || 'no-script'}`,
+          sceneNumber: meta.sceneNumber,
+          shotType: meta.shotType,
+          shotIndex: meta.shotIndex,
+          imageUrl: meta.url,
+          audioFiles: audioFiles[index] ? [audioFiles[index]] : [],
+          duration: 5, // Default 5 seconds per scene
+          transitions: [{
+            type: index === 0 ? 'none' : 'fade' as const,
+            duration: 0.5
+          }],
+          status: 'pending' as const
+        }))
+      : imageUrls.map((imageUrl, index) => ({
+          id: `scene-${Date.now()}-${index}-${scriptId || 'no-script'}`,
+          sceneNumber: index + 1,
+          imageUrl,
+          audioFiles: audioFiles[index] ? [audioFiles[index]] : [],
+          duration: 5, // Default 5 seconds per scene
+          transitions: [{
+            type: index === 0 ? 'none' : 'fade' as const,
+            duration: 0.5
+          }],
+          status: 'pending' as const
+        }));
 
     // Guard against stale scriptId
     if (activeScriptIdRef.current === scriptId) {
       setScenes(newScenes);
       toast.success(`Initialized ${newScenes.length} scenes for script ${scriptId?.substring(0, 8)}...`);
     }
-  }, [imageUrls, audioFiles, scriptId]);
+  }, [imageUrls, sceneMetadata, audioFiles, scriptId]);
 
   // Update scene
   const updateScene = useCallback((sceneId: string, updates: Partial<VideoScene>) => {

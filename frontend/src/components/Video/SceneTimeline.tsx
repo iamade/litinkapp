@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import type { VideoScene, Transition } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
+import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import { SceneAudioManager } from './SceneAudioManager';
 // Define ChapterScript interface locally to avoid import issues
 interface ChapterScript {
   id: string;
@@ -66,7 +68,9 @@ const SceneCard: React.FC<{
   disabled?: boolean;
   scriptScene?: SceneDescription;
   sceneCharacters?: string[];
-}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters }) => {
+  storyboardAudioCount?: number;
+  onManageAudio: () => void;
+}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters, storyboardAudioCount, onManageAudio }) => {
   const {
     attributes,
     listeners,
@@ -113,8 +117,23 @@ const SceneCard: React.FC<{
           <span className="text-sm font-medium text-gray-900">
             Scene {scene.sceneNumber}
           </span>
+          {scene.shotType && (
+            <span className={`px-1.5 py-0.5 text-xs rounded ${scene.shotType === 'key_scene' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+              {scene.shotType === 'key_scene' ? 'Key Scene' : 'Suggested Shot'}
+            </span>
+          )}
         </div>
         <div className="flex items-center space-x-1">
+          <button
+            onClick={(e) => {
+               e.stopPropagation();
+               onManageAudio();
+            }}
+            className="p-1.5 hover:bg-blue-100 bg-blue-50 text-blue-600 rounded-md border border-blue-200"
+            title="Manage Scene Audio"
+          >
+            <Music className="w-4 h-4" />
+          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -192,7 +211,7 @@ const SceneCard: React.FC<{
                 </div>
                 <div className="flex items-center space-x-1">
                   <Music className="w-3 h-3" />
-                  <span>{scene.audioFiles.length} audio</span>
+                  <span>{storyboardAudioCount !== undefined ? storyboardAudioCount : scene.audioFiles.length} audio</span>
                 </div>
               </div>
               
@@ -236,6 +255,8 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
     selectSegment,
     subscribe,
   } = useScriptSelection();
+  
+  const [managingAudioSceneNum, setManagingAudioSceneNum] = useState<number | null>(null);
 
   // Recompute markers on selection changes
   useEffect(() => {
@@ -269,6 +290,9 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
     if (isSwitching) return;
     selectSegment(sceneId, { reason: 'user' });
   };
+
+  // Storyboard context for audio counts
+  const storyboardContext = useStoryboardOptional();
 
   // Disabled during switching
   const disabled = isSwitching;
@@ -359,12 +383,22 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
                   disabled={disabled}
                   scriptScene={scriptScene}
                   sceneCharacters={sceneCharacters}
+                  storyboardAudioCount={storyboardContext?.getAudioForShot(scene.sceneNumber, scene.shotIndex)?.length ?? 0}
+                  onManageAudio={() => setManagingAudioSceneNum(scene.sceneNumber)}
                 />
               );
             })}
           </div>
         </SortableContext>
       </DndContext>
+      
+      {managingAudioSceneNum !== null && (
+        <SceneAudioManager
+          sceneNumber={managingAudioSceneNum}
+          availableShots={scenes.filter(s => s.sceneNumber === managingAudioSceneNum)}
+          onClose={() => setManagingAudioSceneNum(null)}
+        />
+      )}
 
       {/* Timeline Controls */}
       <div className="flex items-center justify-between pt-4 border-t">

@@ -526,6 +526,12 @@ async def generate_scene_image(
             status="pending",
             progress=0,
             meta=metadata,
+            # Set shot_index: use provided value, or default to 0 (Key Scene) if not a suggested shot
+            shot_index=(
+                request.shot_index
+                if request.shot_index is not None
+                else (1 if request.is_suggested_shot else 0)
+            ),
         )
 
         try:

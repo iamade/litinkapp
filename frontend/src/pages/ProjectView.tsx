@@ -595,8 +595,8 @@ const ProjectView: React.FC = () => {
 
         <div className="flex min-h-screen">
           {/* Main Content Area */}
-          <div className={`flex-1 transition-all duration-300 ${sidebarCollapsed ? "mr-16" : "mr-80"}`}>
-            <div className="p-6">
+          <div className={`flex-1 min-w-0 overflow-hidden transition-all duration-300 ${sidebarCollapsed ? "mr-16" : "mr-80"}`}>
+            <div className="p-6 overflow-x-auto">
               {/* Workflow Tabs */}
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
                 <div className="border-b border-gray-200 dark:border-gray-700">

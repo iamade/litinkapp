@@ -29,6 +29,7 @@ interface ChapterScript {
   created_at: string;
   status: 'draft' | 'ready' | 'approved';
   script_story_type?: string;
+  emotional_map?: any[];
 }
 
 interface Act {
@@ -107,7 +108,8 @@ export const useScriptGeneration = (chapterId: string) => {
           scenes: script.scenes || [],
           created_at: script.created_at,
           status: script.status || 'draft',
-          scriptStoryType: script.scriptStoryType || script.script_story_type // Handle both camelCase and snake_case
+          scriptStoryType: script.scriptStoryType || script.script_story_type,
+          emotional_map: script.emotional_map || []  // Load emotional map from backend
         };
       });
 
@@ -169,8 +171,12 @@ export const useScriptGeneration = (chapterId: string) => {
 
       // Reload in background to sync with server (don't await to show immediately)
       loadScripts().catch(() => {});
-    } catch (error) {
-      toast.error('Failed to generate script');
+    } catch (error: any) {
+      // Extract error message from API response
+      const errorMessage = error?.response?.data?.detail || 
+                          error?.message || 
+                          'Failed to generate script';
+      toast.error(errorMessage);
     } finally {
       setIsGeneratingScript(false);
     }

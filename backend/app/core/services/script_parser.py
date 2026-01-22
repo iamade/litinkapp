@@ -612,11 +612,19 @@ class ScriptParser:
             r"^\*?\*?\s*ACT\s+[IVX\d]+\s*[-–—]\s*SCENE\s+\d+", re.IGNORECASE
         )
 
-        # Helper function to get current scene number (including sub-scene)
+        # Helper function to get current scene number as integer (no floats)
         def get_scene_number():
-            if current_sub_scene == 0:
-                return current_scene
-            return float(f"{current_scene}.{current_sub_scene}")
+            return current_scene if current_scene > 0 else 1
+
+        # Helper function to get full scene info with shot_type
+        def get_scene_info():
+            return {
+                "scene": current_scene if current_scene > 0 else 1,
+                "shot_type": (
+                    "key_scene" if current_sub_scene == 0 else "suggested_shot"
+                ),
+                "shot_index": current_sub_scene,
+            }
 
         for i, line in enumerate(lines):
             line = line.strip()
@@ -645,14 +653,11 @@ class ScriptParser:
                 # Extract environmental sounds from scene description
                 scene_sounds = self._extract_scene_sounds(line)
                 if scene_sounds:
-                    # Add current_scene (as decimal for sub-scene) to each sound effect
-                    scene_number = (
-                        current_scene
-                        if current_sub_scene == 0
-                        else float(f"{current_scene}.{current_sub_scene}")
-                    )
+                    scene_info = get_scene_info()
                     for sound in scene_sounds:
-                        sound["scene"] = scene_number
+                        sound["scene"] = scene_info["scene"]
+                        sound["shot_type"] = scene_info["shot_type"]
+                        sound["shot_index"] = scene_info["shot_index"]
                     audio_components["sound_effects"].extend(scene_sounds)
                 continue
 
@@ -708,15 +713,17 @@ class ScriptParser:
                     )
                     continue
 
-            # Check for dialogue using existing method first
             character_match = self._detect_character_dialogue(line, characters)
             if character_match:
                 character_name, dialogue = character_match
+                scene_info = get_scene_info()
                 audio_components["character_dialogues"].append(
                     {
                         "character": character_name,
                         "text": dialogue,
-                        "scene": get_scene_number(),
+                        "scene": scene_info["scene"],
+                        "shot_type": scene_info["shot_type"],
+                        "shot_index": scene_info["shot_index"],
                         "line_number": i + 1,
                     }
                 )
@@ -730,11 +737,14 @@ class ScriptParser:
                 or (not line.startswith("(") and len(line.split()) > 1)
             ):
                 dialogue = line.strip('"').strip("'")
+                scene_info = get_scene_info()
                 audio_components["character_dialogues"].append(
                     {
                         "character": current_character,
                         "text": dialogue,
-                        "scene": get_scene_number(),
+                        "scene": scene_info["scene"],
+                        "shot_type": scene_info["shot_type"],
+                        "shot_index": scene_info["shot_index"],
                         "line_number": i + 1,
                     }
                 )
@@ -744,11 +754,14 @@ class ScriptParser:
             # Detect sound effects in parentheses or brackets
             sound_effects = self._extract_sound_effects(line)
             if sound_effects:
+                scene_info = get_scene_info()
                 for effect in sound_effects:
                     audio_components["sound_effects"].append(
                         {
                             "description": effect,
-                            "scene": get_scene_number(),
+                            "scene": scene_info["scene"],
+                            "shot_type": scene_info["shot_type"],
+                            "shot_index": scene_info["shot_index"],
                             "line_number": i + 1,
                         }
                     )
@@ -757,10 +770,13 @@ class ScriptParser:
             # Check for explicit sound/music cues
             if line.startswith("SFX:") or "SOUND:" in line.upper():
                 effect = line.replace("SFX:", "").replace("SOUND:", "").strip()
+                scene_info = get_scene_info()
                 audio_components["sound_effects"].append(
                     {
                         "description": effect,
-                        "scene": get_scene_number(),
+                        "scene": scene_info["scene"],
+                        "shot_type": scene_info["shot_type"],
+                        "shot_index": scene_info["shot_index"],
                         "line_number": i + 1,
                     }
                 )
@@ -770,10 +786,13 @@ class ScriptParser:
                 music = (
                     line.replace("MUSIC:", "").replace("BACKGROUND MUSIC:", "").strip()
                 )
+                scene_info = get_scene_info()
                 audio_components["background_music"].append(
                     {
                         "description": music,
-                        "scene": get_scene_number(),
+                        "scene": scene_info["scene"],
+                        "shot_type": scene_info["shot_type"],
+                        "shot_index": scene_info["shot_index"],
                         "line_number": i + 1,
                     }
                 )
@@ -846,11 +865,19 @@ class ScriptParser:
             r"^\*?\*?\s*ACT\s+[IVX\d]+\s*[-–—]\s*SCENE\s+\d+", re.IGNORECASE
         )
 
-        # Helper function to get current scene number (including sub-scene)
+        # Helper function to get current scene number as integer (no floats)
         def get_scene_number():
-            if current_sub_scene == 0:
-                return current_scene
-            return float(f"{current_scene}.{current_sub_scene}")
+            return current_scene if current_scene > 0 else 1
+
+        # Helper function to get full scene info with shot_type
+        def get_scene_info():
+            return {
+                "scene": current_scene if current_scene > 0 else 1,
+                "shot_type": (
+                    "key_scene" if current_sub_scene == 0 else "suggested_shot"
+                ),
+                "shot_index": current_sub_scene,
+            }
 
         for i, line in enumerate(lines):
             line = line.strip()
@@ -876,9 +903,11 @@ class ScriptParser:
                 # Extract environmental sounds from scene description
                 scene_sounds = self._extract_scene_sounds(line)
                 if scene_sounds:
-                    # Add current_scene (as decimal for sub-scene) to each sound effect
+                    scene_info = get_scene_info()
                     for sound in scene_sounds:
-                        sound["scene"] = get_scene_number()
+                        sound["scene"] = scene_info["scene"]
+                        sound["shot_type"] = scene_info["shot_type"]
+                        sound["shot_index"] = scene_info["shot_index"]
                     audio_components["sound_effects"].extend(scene_sounds)
                 continue
 
@@ -892,11 +921,14 @@ class ScriptParser:
             character_match = self._detect_character_dialogue(line, characters)
             if character_match:
                 character_name, dialogue = character_match
+                scene_info = get_scene_info()
                 audio_components["character_dialogues"].append(
                     {
                         "character": character_name,
                         "text": dialogue,
-                        "scene": get_scene_number(),
+                        "scene": scene_info["scene"],
+                        "shot_type": scene_info["shot_type"],
+                        "shot_index": scene_info["shot_index"],
                         "line_number": i + 1,
                     }
                 )
@@ -904,19 +936,29 @@ class ScriptParser:
 
             # Detect narrator text (descriptive text that's not dialogue)
             if self._is_narrator_text(line, characters):
+                scene_info = get_scene_info()
                 audio_components["narrator_segments"].append(
-                    {"text": line, "scene": get_scene_number(), "line_number": i + 1}
+                    {
+                        "text": line,
+                        "scene": scene_info["scene"],
+                        "shot_type": scene_info["shot_type"],
+                        "shot_index": scene_info["shot_index"],
+                        "line_number": i + 1,
+                    }
                 )
                 continue
 
             # Detect sound effects in parentheses or brackets
             sound_effects = self._extract_sound_effects(line)
             if sound_effects:
+                scene_info = get_scene_info()
                 for effect in sound_effects:
                     audio_components["sound_effects"].append(
                         {
                             "description": effect,
-                            "scene": get_scene_number(),
+                            "scene": scene_info["scene"],
+                            "shot_type": scene_info["shot_type"],
+                            "shot_index": scene_info["shot_index"],
                             "line_number": i + 1,
                         }
                     )

@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Maximize2 } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Maximize2, Music } from 'lucide-react';
 import { VideoScene } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
+import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+
 
 interface SceneDescription {
   scene_number: number;
@@ -54,6 +56,9 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     subscribe,
   } = useScriptSelection();
 
+  // Storyboard context for audio access
+  const storyboardContext = useStoryboardOptional();
+
   // DEBUG: Log props to diagnose data flow
   useEffect(() => {
     if (scenes && scenes.length > 0) {
@@ -63,11 +68,19 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   const [volume, setVolume] = useState(1);
   const [showControls, setShowControls] = useState(true);
   const [videoError, setVideoError] = useState(false);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
+  const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
 
   const currentScene = scenes && scenes[currentSceneIndex];
   const totalDuration = scenes ? scenes.reduce((sum, scene) => sum + scene.duration, 0) : 0;
+  
+  // Get audio files for current scene/shot from StoryboardContext
+  // Uses shotIndex to get only audio for this specific shot
+  const sceneAudio = currentScene ? 
+    storyboardContext?.getAudioForShot(currentScene.sceneNumber, currentScene.shotIndex) || [] : 
+    [];
 
   // Get current scene's script data
   const getCurrentSceneScript = () => {
@@ -204,8 +217,10 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     return unsub;
   }, [subscribe]);
 
+  // Only auto-change scenes based on time when video is actively playing
+  // This prevents the scene from resetting to 0 on component mount
   useEffect(() => {
-    if (!scenes) return;
+    if (!scenes || !isPlaying) return;
     // Calculate which scene should be showing based on current time
     let accumulatedTime = 0;
     for (let i = 0; i < scenes.length; i++) {
@@ -217,7 +232,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
       }
       accumulatedTime += scenes[i].duration;
     }
-  }, [currentTime, scenes, currentSceneIndex, onSceneChange]);
+  }, [currentTime, scenes, currentSceneIndex, onSceneChange, isPlaying]);
 
   useEffect(() => {
     // Auto-hide controls after 3 seconds of inactivity
@@ -427,6 +442,68 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
       onMouseMove={disabled ? undefined : handleMouseMove}
       onMouseLeave={disabled ? undefined : () => setShowControls(false)}
     >
+      {/* Audio Panel for Current Scene */}
+      {sceneAudio.length > 0 && (
+        <div className="mb-4 bg-gray-900 rounded-lg p-4 z-10 relative border-b border-gray-800">
+          <div className="flex items-center space-x-2 mb-3">
+            <Music className="w-4 h-4 text-blue-400" />
+            <span className="text-white text-sm font-medium">
+              Audio for Scene {currentScene.sceneNumber} ({sceneAudio.length} files)
+            </span>
+          </div>
+          <div className="space-y-2 max-h-40 overflow-y-auto">
+            {sceneAudio.map((audio) => (
+              <div 
+                key={audio.id} 
+                className="flex items-center justify-between bg-gray-800 rounded px-3 py-2"
+              >
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => {
+                      if (playingAudioId === audio.id) {
+                        audioRefs.current[audio.id]?.pause();
+                        setPlayingAudioId(null);
+                      } else {
+                        // Stop any currently playing audio
+                        Object.values(audioRefs.current).forEach(el => el.pause());
+                        audioRefs.current[audio.id]?.play();
+                        setPlayingAudioId(audio.id);
+                      }
+                    }}
+                    className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center hover:bg-blue-500 transition-colors"
+                  >
+                    {playingAudioId === audio.id ? (
+                      <Pause className="w-4 h-4 text-white" />
+                    ) : (
+                      <Play className="w-4 h-4 text-white ml-0.5" />
+                    )}
+                  </button>
+                  <div>
+                    <span className="text-white text-sm">{audio.character || audio.type}</span>
+                    <span className={`ml-2 px-1.5 py-0.5 text-xs rounded ${
+                      audio.type === 'dialogue' ? 'bg-purple-600' :
+                      audio.type === 'music' ? 'bg-green-600' :
+                      audio.type === 'effects' ? 'bg-orange-600' :
+                      'bg-blue-600'
+                    }`}>
+                      {audio.type}
+                    </span>
+                  </div>
+                </div>
+                {audio.url && (
+                  <audio
+                    ref={(el) => { if (el) audioRefs.current[audio.id] = el; }}
+                    src={audio.url}
+                    onEnded={() => setPlayingAudioId(null)}
+                    className="hidden"
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Video/Image Display */}
       <div className="aspect-video relative">
         {/* Priority 1: Video URL (if available and no error) */}
@@ -650,6 +727,8 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
           </div>
         </div>
       )}
+
+
     </div>
   );
 };
