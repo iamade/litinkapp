@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User, Activity, Mic, Play, Smile } from 'lucide-react';
+import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User, Activity, Mic, Play, Smile, Wand2, Upload } from 'lucide-react';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
 import { apiClient } from '../../lib/api';
+import ExpandScriptModal from './ExpandScriptModal';
 
 interface SceneDescription {
   scene_number: number;
@@ -118,6 +119,12 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
   const [scriptToDelete, setScriptToDelete] = useState<string | null>(null);
   const [isGeneratingMap, setIsGeneratingMap] = useState<Record<string, boolean>>({});
+  const [showExpandModal, setShowExpandModal] = useState(false);
+  const [expandingScriptId, setExpandingScriptId] = useState<string | null>(null);
+  // In-place script editing state
+  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
+  const [editedContent, setEditedContent] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   const generateEmotionalMap = async (scriptId: string, currentScript: ChapterScript) => {
     setIsGeneratingMap(prev => ({...prev, [scriptId]: true}));
@@ -1095,27 +1102,135 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   );
   };
 
-  const renderDialogueView = (script: ChapterScript) => (
-    <div className="space-y-4">
-      <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Full Script</h4>
+  const renderDialogueView = (script: ChapterScript) => {
+    const isEditing = editingScriptId === script.id;
+    
+    const handleStartEdit = () => {
+      setEditingScriptId(script.id);
+      setEditedContent(script.script || '');
+    };
+    
+    const handleCancelEdit = () => {
+      setEditingScriptId(null);
+      setEditedContent('');
+    };
+    
+    const handleSaveEdit = async () => {
+      if (!editedContent.trim()) return;
+      setIsSavingEdit(true);
+      try {
+        await onUpdateScript(script.id, { script: editedContent });
+        setEditingScriptId(null);
+        setEditedContent('');
+      } catch (error) {
+        console.error('Failed to save script edit:', error);
+      } finally {
+        setIsSavingEdit(false);
+      }
+    };
+    
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Full Script</h4>
+          <div className="flex items-center gap-2">
+            {script.script && script.script.trim() && !isEditing && (
+              <>
+                <button
+                  onClick={handleStartEdit}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                >
+                  <Edit2 className="h-4 w-4" />
+                  Edit
+                </button>
+                <label className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors cursor-pointer">
+                  <Upload className="h-4 w-4" />
+                  Replace
+                  <input
+                    type="file"
+                    accept=".txt,.pdf,.docx,.doc,.fountain"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const text = await file.text();
+                        await onUpdateScript(script.id, { script: text });
+                      } catch (error) {
+                        console.error('Failed to read file:', error);
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <button
+                  onClick={() => {
+                    setExpandingScriptId(script.id);
+                    setShowExpandModal(true);
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 rounded-lg transition-colors"
+                >
+                  <Wand2 className="h-4 w-4" />
+                  Expand Story
+                </button>
+              </>
+            )}
+            {isEditing && (
+              <>
+                <button
+                  onClick={handleCancelEdit}
+                  disabled={isSavingEdit}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={isSavingEdit || !editedContent.trim()}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-green-400 rounded-lg transition-colors"
+                >
+                  <Check className="h-4 w-4" />
+                  {isSavingEdit ? 'Saving...' : 'Save'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
 
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
-        <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg max-h-96 overflow-y-auto">
-          {script.script && script.script.trim() ? (
-            <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-mono leading-relaxed">
-              {script.script}
-            </pre>
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
+          {isEditing ? (
+            <textarea
+              value={editedContent}
+              onChange={(e) => setEditedContent(e.target.value)}
+              className="w-full min-h-96 p-4 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300 font-mono leading-relaxed focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y"
+              placeholder="Enter script content..."
+            />
           ) : (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
-              <p className="text-sm">No script content available</p>
-              <p className="text-xs mt-1">The script may still be generating or encountered an error.</p>
+            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg max-h-96 overflow-y-auto">
+              {script.script && script.script.trim() ? (
+                <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-mono leading-relaxed">
+                  {script.script}
+                </pre>
+              ) : (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                  <p className="text-sm">No script content available</p>
+                  <p className="text-xs mt-1">The script may still be generating or encountered an error.</p>
+                  <button
+                    onClick={handleStartEdit}
+                    className="mt-4 px-4 py-2 text-sm font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+                  >
+                    Add Script Content
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderPerformanceMap = (script: ChapterScript) => {
     const hasMap = script.emotional_map && script.emotional_map.length > 0;
@@ -1318,6 +1433,26 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Expand Script Modal */}
+      {showExpandModal && expandingScriptId && (
+        <ExpandScriptModal
+          isOpen={showExpandModal}
+          onClose={() => {
+            setShowExpandModal(false);
+            setExpandingScriptId(null);
+          }}
+          content={generatedScripts.find(s => s.id === expandingScriptId)?.script || ''}
+          scriptId={expandingScriptId}
+          onExpansionAccepted={(expandedContent) => {
+            if (expandingScriptId) {
+              onUpdateScript(expandingScriptId, { script: expandedContent });
+            }
+            setShowExpandModal(false);
+            setExpandingScriptId(null);
+          }}
+        />
       )}
     </div>
   );

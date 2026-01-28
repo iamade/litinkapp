@@ -102,6 +102,12 @@ class Project(SQLModel, table=True):
         ),
     )
 
+    # Cinematic Universe settings
+    content_terminology: Optional[str] = Field(
+        default=None,
+        sa_column=Column(pg.TEXT),
+    )  # Film, Episode, Part, Chapter, or custom
+
     # Relationships
     artifacts: List["Artifact"] = Relationship(
         back_populates="project",
@@ -152,6 +158,18 @@ class Artifact(SQLModel, table=True):
     generation_metadata: Dict[str, Any] = Field(
         default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
     )
+
+    # NEW: Script/Multi-file upload tracking
+    source_file_url: Optional[str] = Field(default=None)  # Original uploaded file URL
+    is_script: bool = Field(
+        default=False
+    )  # True if this is an uploaded script (not a book chapter)
+    script_order: Optional[int] = Field(
+        default=None
+    )  # Position in cinematic universe/phase
+    content_type_label: Optional[str] = Field(
+        default=None
+    )  # Dynamic label: "Film", "Episode", "Part", etc.
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),

@@ -13,6 +13,9 @@ export interface Project {
   input_prompt?: string;
   source_material_url?: string;
   artifacts?: any[];
+  content_terminology?: string;  // Film, Episode, Part, Chapter, or custom
+  pipeline_steps?: string[];
+  current_step?: string;
 }
 
 export interface IntentAnalysisResult {
@@ -34,12 +37,47 @@ export const projectService = {
     return await apiClient.post<Project>("/projects/", data);
   },
 
-  createProjectFromUpload: async (file: File, projectType: string, inputPrompt?: string) => {
+  createProjectFromUpload: async (
+    files: File[], 
+    projectType: string, 
+    inputPrompt?: string,
+    consultationConfig?: {
+      content_terminology?: string;
+      universe_name?: string;
+      content_type?: string;
+      consultation_data?: {
+        conversation: Array<{ role: string; content: string }>;
+        agreements: {
+          universe_name?: string;
+          phases?: any[];
+          terminology?: string;
+          content_type?: string;
+        };
+      };
+    }
+  ) => {
     const formData = new FormData();
-    formData.append("file", file);
+    // Append each file with the same key 'files' - backend will receive as List[UploadFile]
+    files.forEach(file => {
+      formData.append("files", file);
+    });
     formData.append("project_type", projectType);
     if (inputPrompt) {
         formData.append("input_prompt", inputPrompt);
+    }
+    // Add consultation config fields if provided
+    if (consultationConfig?.content_terminology) {
+      formData.append("content_terminology", consultationConfig.content_terminology);
+    }
+    if (consultationConfig?.universe_name) {
+      formData.append("universe_name", consultationConfig.universe_name);
+    }
+    if (consultationConfig?.content_type) {
+      formData.append("content_type", consultationConfig.content_type);
+    }
+    // Pass consultation data as JSON string for backend to parse
+    if (consultationConfig?.consultation_data) {
+      formData.append("consultation_data", JSON.stringify(consultationConfig.consultation_data));
     }
     
     // Use apiClient.upload which handles FormData and multipart

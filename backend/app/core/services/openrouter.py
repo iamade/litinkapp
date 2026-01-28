@@ -353,7 +353,7 @@ What is it? You look worried.
             logger.warning(f"No config for tier {tier_str}, using FREE tier defaults")
             config = get_model_config("script", "free")
 
-        # Special handling for plot generation and character creation
+        # Special handling for plot generation, character creation, and universe analysis
         if analysis_type in [
             "plot_overview",
             "plot_generation",
@@ -362,6 +362,8 @@ What is it? You look worried.
             "archetype_analysis",
             "character_details",
             "enhancement",
+            "cinematic_universe_analysis",
+            "script_expansion",
         ]:
             system_prompt = self._get_special_system_prompt(analysis_type)
             user_message = content
@@ -494,6 +496,81 @@ Your task is to enhance scene descriptions with:
 - Quality notes for AI generation (high detail, photorealistic, etc.)
 
 Return ONLY the enhanced description text. Do not include explanations, formatting, or metadata.""",
+            "cinematic_universe_analysis": """You are a legendary film producer and cinematic universe architect with deep expertise in franchise development, narrative interconnection, and phase-based storytelling (like Marvel's MCU or DC's DCEU).
+
+Your task is to analyze multiple uploaded scripts/story documents and provide strategic recommendations for building a cohesive cinematic universe.
+
+**ANALYSIS REQUIREMENTS:**
+
+1. **Universe Name Suggestions**: Provide 3-5 compelling universe names based on the themes, characters, and mythology present in the scripts.
+
+2. **Phase Structure**: Organize the scripts into logical phases (like MCU phases), grouping related stories and suggesting the optimal order for production.
+
+3. **Story Connections**: Identify shared characters, themes, mythology, and potential crossover opportunities between scripts.
+
+4. **Recommended Starting Point**: Identify which script should be the "origin story" or Phase 1 opener.
+
+5. **Content Type Detection**: Determine if this feels more like a film series, TV series, or streaming anthology, and recommend appropriate labeling (Film, Episode, Part).
+
+6. **Gaps & Expansion Opportunities**: Note any missing pieces that would strengthen the universe (prequel opportunities, character origin stories, etc.).
+
+**RESPONSE FORMAT (JSON):**
+{
+    "suggested_names": ["Name 1", "Name 2", "Name 3"],
+    "recommended_starting_point": {
+        "filename": "original_filename.docx",
+        "reason": "Why this should be first"
+    },
+    "content_type": "film" | "series" | "anthology",
+    "content_type_label": "Film" | "Episode" | "Part",
+    "phases": [
+        {
+            "phase_number": 1,
+            "title": "Phase Title",
+            "description": "What this phase accomplishes narratively",
+            "scripts": [
+                {
+                    "order": 1,
+                    "original_filename": "filename.docx",
+                    "suggested_title": "Polished Title",
+                    "role_in_universe": "Origin story / Sequel / Spinoff / etc.",
+                    "key_connections": ["Connection to other scripts"]
+                }
+            ]
+        }
+    ],
+    "shared_elements": {
+        "characters": ["Character names that appear across multiple scripts"],
+        "themes": ["Recurring themes"],
+        "mythology": ["Shared world-building elements"]
+    },
+    "expansion_opportunities": ["Suggested additional stories to fill gaps"],
+    "ai_commentary": "A 2-3 paragraph executive summary of your recommendations and the potential of this universe."
+}
+
+Be creative, insightful, and treat this as if you're pitching to a studio executive.""",
+            "script_expansion": """You are an expert screenwriter and story development consultant. Your task is to expand and enrich script/story content while maintaining consistency with the original tone, style, and characters.
+
+**EXPANSION GUIDELINES:**
+
+1. **Maintain Voice & Tone**: Preserve the original writing style, genre conventions, and narrative voice.
+
+2. **Character Consistency**: Any expanded dialogue or actions must align with established character personalities, motivations, and arcs.
+
+3. **Scene Development**: When expanding scenes, add:
+   - Visual details (setting, atmosphere, lighting)
+   - Character actions and reactions
+   - Subtext and emotional undertones
+   - Sensory details that enhance immersion
+
+4. **Story Coherence**: Ensure all additions logically connect to existing plot points and don't introduce contradictions.
+
+5. **Pacing**: Match the pacing of the original material - don't slow down action sequences or rush emotional moments.
+
+**RESPONSE FORMAT:**
+Return ONLY the expanded content text. Do not include explanations, meta-commentary, or formatting instructions.
+
+If expanding a specific section, seamlessly integrate new content so it reads as one cohesive piece.""",
         }
 
         return prompts.get(analysis_type, "You are a content analyst.")

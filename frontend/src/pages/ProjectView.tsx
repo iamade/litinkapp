@@ -29,6 +29,7 @@ import ScriptGenerationPanel from '../components/Script/ScriptGenerationPanel';
 import ImagesPanel from '../components/Images/ImagesPanel';
 import AudioPanel from '../components/Audio/AudioPanel';
 import VideoProductionPanel from '../components/Video/VideoProductionPanel';
+import ConsultationPanel from '../components/Consultation/ConsultationPanel';
 
 // Import hooks
 import { usePlotGeneration } from '../hooks/usePlotGeneration';
@@ -51,7 +52,31 @@ interface ChapterArtifact {
   };
   version: number;
   project_id: string;
+  // Cinematic Universe fields
+  content_type_label?: string;  // Film, Episode, Part, etc.
+  script_order?: number;        // Order in the cinematic universe sequence
+  is_script?: boolean;          // True if this is an uploaded script
 }
+
+// Helper to get dynamic label for chapters/scripts
+const getDynamicLabel = (artifact: ChapterArtifact, index: number): { label: string; plural: string } => {
+  const label = artifact.content_type_label || 'Chapter';
+  const number = artifact.script_order || artifact.content.chapter_number || index + 1;
+  
+  // Map labels to plurals
+  const pluralMap: Record<string, string> = {
+    'Film': 'Films',
+    'Episode': 'Episodes', 
+    'Part': 'Parts',
+    'Chapter': 'Chapters',
+    'Script': 'Scripts',
+  };
+  
+  return {
+    label: `${label} ${number}`,
+    plural: pluralMap[label] || `${label}s`
+  };
+};
 
 // Helper to get the actual chapter ID for API calls
 // For uploaded books, content.chapter_id contains the real chapter table ID
@@ -63,6 +88,7 @@ const getActualChapterId = (chapter: ChapterArtifact | null): string => {
 };
 
 interface WorkflowProgress {
+  consultation?: "idle" | "generating" | "completed" | "error";
   plot: "idle" | "generating" | "completed" | "error";
   script: "idle" | "generating" | "completed" | "error";
   images: "idle" | "generating" | "completed" | "error";
@@ -70,7 +96,7 @@ interface WorkflowProgress {
   video: "idle" | "generating" | "completed" | "error";
 }
 
-type WorkflowTab = "plot" | "script" | "images" | "audio" | "video";
+type WorkflowTab = "consultation" | "plot" | "script" | "images" | "audio" | "video";
 
 interface ChapterContentModalProps {
   chapter: ChapterArtifact | null;
@@ -133,6 +159,11 @@ const ProjectView: React.FC = () => {
   const [workflowProgress, setWorkflowProgress] = useState<Record<string, WorkflowProgress>>({});
   const [videoStatus, setVideoStatus] = useState<string | null>("idle");
   // isLimitModalOpen states removed as unused
+  
+  // Terminology settings modal
+  const [showTerminologyModal, setShowTerminologyModal] = useState(false);
+  const [selectedTerminology, setSelectedTerminology] = useState<string>('Chapter');
+  const [isSavingTerminology, setIsSavingTerminology] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
 
   const [editedTitle, setEditedTitle] = useState("");
@@ -305,8 +336,12 @@ const ProjectView: React.FC = () => {
     setGeneratedAudioFiles(audioUrls);
   }, [files]);
 
-  // Workflow tabs configuration
+  // Detect if this is a multi-script project (needs consultation)
+  const isMultiScriptProject = project?.pipeline_steps?.includes('consultation');
+  
+  // Workflow tabs configuration - conditionally include consultation
   const workflowTabs = [
+    ...(isMultiScriptProject ? [{ id: "consultation" as WorkflowTab, label: "Cinematic\nuniverse setup", icon: BookOpen, description: "AI-guided creative setup" }] : []),
     { id: "plot" as WorkflowTab, label: "Plot", icon: BookOpen, description: "Story overview & characters" },
     { id: "script" as WorkflowTab, label: "Script", icon: FileText, description: "Chapter scripts & scenes" },
     { id: "images" as WorkflowTab, label: "Images", icon: Image, description: "Scene & character images" },
@@ -386,6 +421,30 @@ const ProjectView: React.FC = () => {
     if (!project) return null;
 
     switch (activeTab) {
+      case "consultation":
+        return (
+          <ConsultationPanel
+            projectId={project.id}
+            inputPrompt={project.input_prompt}
+            onConsultationComplete={() => {
+              // Move to plot tab after consultation is accepted
+              setActiveTab("plot");
+              // Reload project to get updated structure
+              loadProject(project.id);
+            }}
+            onSkip={() => setActiveTab("plot")}
+            onNavigateToScript={(artifactId) => {
+              // Find the chapter matching this artifact and switch to script tab
+              const chapter = chapters.find((c) => c.id === artifactId);
+              if (chapter) {
+                setSelectedChapter(chapter);
+                selectChapter(chapter.id, { reason: 'user' });
+              }
+              setActiveTab("script");
+            }}
+          />
+        );
+        
       case "plot":
         // Use ProjectPlotPanel for prompt-only projects, PlotOverviewPanel for book-based
         if (isPromptOnlyProject && project.input_prompt) {
@@ -568,7 +627,7 @@ const ProjectView: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <button 
-                  onClick={() => setIsWorkflowMode(false)}
+                  onClick={() => navigate("/creator")}
                   className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   <ArrowLeft size={20} />
@@ -576,7 +635,9 @@ const ProjectView: React.FC = () => {
                 <div>
                   <h1 className="text-xl font-bold text-gray-900 dark:text-white">{project.title}</h1>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Creator Mode • {chapters.length} Chapters
+                    Creator Mode • {chapters.length} {chapters.length > 0 && chapters[0].content_type_label 
+                      ? getDynamicLabel(chapters[0], 0).plural 
+                      : 'Chapters'}
                   </p>
                 </div>
               </div>
@@ -658,10 +719,14 @@ const ProjectView: React.FC = () => {
                 {!sidebarCollapsed ? (
                   <>
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-                      Chapters
+                      {chapters.length > 0 && chapters[0].content_type_label 
+                        ? getDynamicLabel(chapters[0], 0).plural 
+                        : 'Chapters'}
                     </h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {chapters.length} chapters total
+                      {chapters.length} {chapters.length > 0 && chapters[0].content_type_label 
+                        ? getDynamicLabel(chapters[0], 0).plural.toLowerCase() 
+                        : 'chapters'} total
                     </p>
                   </>
                 ) : (
@@ -701,7 +766,7 @@ const ProjectView: React.FC = () => {
                                 {chapter.content.title}
                               </p>
                               <p className="text-sm text-gray-500 dark:text-gray-400">
-                                Chapter {chapter.content.chapter_number || index + 1}
+                                {getDynamicLabel(chapter, index).label}
                               </p>
                             </div>
                           </div>
@@ -723,7 +788,7 @@ const ProjectView: React.FC = () => {
                       ) : (
                         <div className="flex flex-col items-center">
                           <span className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                            {chapter.content.chapter_number || index + 1}
+                            {chapter.script_order || chapter.content.chapter_number || index + 1}
                           </span>
                           <div className="w-8 bg-gray-200 dark:bg-gray-600 rounded-full h-1">
                             <div
@@ -812,14 +877,23 @@ const ProjectView: React.FC = () => {
                   </span>
                   <span className="flex items-center gap-1">
                     <BookOpen size={12} />
-                    {chapters.length} Chapters
+                    {chapters.length} {chapters.length > 0 && chapters[0].content_type_label 
+                      ? getDynamicLabel(chapters[0], 0).plural 
+                      : 'Chapters'}
                   </span>
                 </p>
               </div>
             </div>
             
             <div className="flex items-center gap-3">
-              <button className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+              <button 
+                onClick={() => {
+                  setSelectedTerminology(project?.content_terminology || 'Chapter');
+                  setShowTerminologyModal(true);
+                }}
+                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                title="Project Settings"
+              >
                 <Settings size={20} />
               </button>
               <button className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
@@ -836,7 +910,11 @@ const ProjectView: React.FC = () => {
           {/* Main Content: Chapters */}
           <div className="lg:col-span-2 space-y-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Chapters</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {chapters.length > 0 && chapters[0].content_type_label 
+                  ? getDynamicLabel(chapters[0], 0).plural 
+                  : 'Chapters'}
+              </h2>
               <button className="px-4 py-2 text-sm font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors">
                 Regenerate All
               </button>
@@ -845,7 +923,7 @@ const ProjectView: React.FC = () => {
             {chapters.length === 0 ? (
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
                 <FileText size={48} className="mx-auto text-gray-300 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No Chapters Yet</h3>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No Content Yet</h3>
                 <p className="text-gray-500 dark:text-gray-400 max-w-sm mx-auto">
                   Upload a book or source material to extract chapters, or generate them from a prompt.
                 </p>
@@ -939,6 +1017,85 @@ const ProjectView: React.FC = () => {
         chapter={viewChapter} 
         onClose={() => setViewChapter(null)} 
       />
+
+      {/* Terminology Settings Modal */}
+      {showTerminologyModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Content Terminology</h3>
+              <button
+                onClick={() => setShowTerminologyModal(false)}
+                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Choose how content units are labeled throughout this project.
+            </p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Content Type
+                </label>
+                <select
+                  value={selectedTerminology}
+                  onChange={(e) => setSelectedTerminology(e.target.value)}
+                  className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                >
+                  <option value="Film">Film (Film 1, Film 2...)</option>
+                  <option value="Episode">Episode (Episode 1, Episode 2...)</option>
+                  <option value="Part">Part (Part 1, Part 2...)</option>
+                  <option value="Chapter">Chapter (Chapter 1, Chapter 2...)</option>
+                  <option value="Script">Script (Script 1, Script 2...)</option>
+                </select>
+              </div>
+              
+              <div className="pt-2 text-xs text-gray-500 dark:text-gray-400">
+                This will update how content is labeled in the sidebar and headers.
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowTerminologyModal(false)}
+                className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!project) return;
+                  setIsSavingTerminology(true);
+                  try {
+                    await projectService.updateProject(project.id, { 
+                      content_terminology: selectedTerminology 
+                    });
+                    // Update local project state
+                    setProject({ ...project, content_terminology: selectedTerminology });
+                    // Update all artifacts' content_type_label
+                    setArtifacts((prevArtifacts: any[]) => 
+                      prevArtifacts.map((a: any) => ({ ...a, content_type_label: selectedTerminology }))
+                    );
+                    setShowTerminologyModal(false);
+                  } catch (error) {
+                    console.error('Failed to save terminology:', error);
+                  } finally {
+                    setIsSavingTerminology(false);
+                  }
+                }}
+                disabled={isSavingTerminology}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2"
+              >
+                {isSavingTerminology ? 'Saving...' : 'Apply to Project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

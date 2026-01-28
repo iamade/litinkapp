@@ -824,6 +824,25 @@ export const userService = {
     });
   },
 
+  // Script Expansion - AI-powered story content expansion
+  expandScript: async (request: {
+    content: string;
+    expansion_prompt?: string;
+    target_length_increase?: number;
+    focus_areas?: string[];
+    artifact_id?: string;
+    script_id?: string;
+  }): Promise<{
+    expanded_content: string;
+    original_length: number;
+    expanded_length: number;
+    expansion_ratio: number;
+    saved: boolean;
+    message: string;
+  }> => {
+    return apiClient.post("/ai/expand-script", request);
+  },
+
 };
 
 export async function deleteBook(bookId: string) {

@@ -1,8 +1,17 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 import re
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Body
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    BackgroundTasks,
+    Body,
+    File,
+    UploadFile,
+    Form,
+)
 from app.videos.schemas import VideoGenerationRequest, VideoGenerationResponse
 from app.api.services.character import CharacterService
 from app.api.services.plot import PlotService
@@ -459,6 +468,175 @@ async def generate_emotional_map(
             print(f"Error saving emotional map to DB: {e}")
 
     return EmotionalMapResponse(entries=validated_entries)
+
+
+# Script expansion request/response models
+from pydantic import BaseModel
+
+
+class ScriptExpansionRequest(BaseModel):
+    """Request model for script expansion"""
+
+    content: str  # The original script/story content to expand
+    expansion_prompt: Optional[str] = None  # Optional user guidance for expansion
+    target_length_increase: Optional[float] = 1.5  # Target increase (1.5 = 50% longer)
+    focus_areas: Optional[List[str]] = (
+        None  # Areas to focus on: ["dialogue", "action", "description"]
+    )
+    artifact_id: Optional[str] = None  # If expanding an artifact, provide ID to save
+    script_id: Optional[str] = None  # If expanding a generated script, provide ID
+
+
+class ScriptExpansionResponse(BaseModel):
+    """Response model for script expansion"""
+
+    expanded_content: str
+    original_length: int
+    expanded_length: int
+    expansion_ratio: float
+    saved: bool = False
+    message: str
+
+
+@router.post("/expand-script", response_model=ScriptExpansionResponse)
+async def expand_script(
+    request: ScriptExpansionRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Expand script/story content using AI.
+
+    This endpoint takes existing script content and expands it with:
+    - Additional dialogue and character interactions
+    - Scene details and visual descriptions
+    - Action sequences and emotional beats
+
+    The expansion maintains consistency with the original tone and characters.
+    """
+    try:
+        # Build the expansion prompt
+        user_message_parts = []
+
+        # Add user's expansion guidance if provided
+        if request.expansion_prompt:
+            user_message_parts.append(f"EXPANSION GUIDANCE: {request.expansion_prompt}")
+
+        # Add focus areas if specified
+        if request.focus_areas:
+            user_message_parts.append(f"FOCUS ON: {', '.join(request.focus_areas)}")
+
+        # Add target length guidance
+        if request.target_length_increase:
+            increase_percent = int((request.target_length_increase - 1) * 100)
+            user_message_parts.append(
+                f"TARGET: Expand content by approximately {increase_percent}%"
+            )
+
+        # Add the original content
+        user_message_parts.append(f"\n\nORIGINAL CONTENT TO EXPAND:\n{request.content}")
+
+        user_message = "\n".join(user_message_parts)
+
+        # Determine user tier for model selection
+        tier = (
+            ModelTier.PREMIUM
+            if current_user.subscription_tier in ["premium", "pro", "enterprise"]
+            else ModelTier.FREE
+        )
+
+        # Call OpenRouter with script expansion prompt
+        openrouter = OpenRouterService()
+        response = await openrouter.analyze_content(
+            content=user_message,
+            user_tier=tier,
+            analysis_type="script_expansion",
+        )
+
+        if response.get("status") != "success":
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to expand content: {response.get('error', 'Unknown error')}",
+            )
+
+        expanded_content = response.get("content", {}).get("analysis", "")
+
+        if not expanded_content:
+            raise HTTPException(
+                status_code=500, detail="AI returned empty expansion result"
+            )
+
+        # Calculate expansion statistics
+        original_length = len(request.content)
+        expanded_length = len(expanded_content)
+        expansion_ratio = (
+            expanded_length / original_length if original_length > 0 else 1.0
+        )
+
+        # Save to artifact if artifact_id provided
+        saved = False
+        if request.artifact_id:
+            try:
+                from app.projects.models import Artifact
+
+                stmt = select(Artifact).where(
+                    Artifact.id == request.artifact_id,
+                    Artifact.project.has(user_id=current_user.id),
+                )
+                result = await session.exec(stmt)
+                artifact = result.first()
+
+                if artifact:
+                    # Update the artifact content
+                    if artifact.content:
+                        artifact.content["content"] = expanded_content
+                        artifact.content["expanded"] = True
+                        artifact.content["original_length"] = original_length
+                    else:
+                        artifact.content = {
+                            "content": expanded_content,
+                            "expanded": True,
+                            "original_length": original_length,
+                        }
+                    session.add(artifact)
+                    await session.commit()
+                    saved = True
+            except Exception as e:
+                print(f"Error saving expanded content to artifact: {e}")
+
+        # Save to script if script_id provided
+        if request.script_id and not saved:
+            try:
+                stmt = select(Script).where(
+                    Script.id == request.script_id, Script.user_id == current_user.id
+                )
+                result = await session.exec(stmt)
+                script_record = result.first()
+
+                if script_record:
+                    script_record.script = expanded_content
+                    session.add(script_record)
+                    await session.commit()
+                    saved = True
+            except Exception as e:
+                print(f"Error saving expanded content to script: {e}")
+
+        return ScriptExpansionResponse(
+            expanded_content=expanded_content,
+            original_length=original_length,
+            expanded_length=expanded_length,
+            expansion_ratio=round(expansion_ratio, 2),
+            saved=saved,
+            message="Content expanded successfully" + (" and saved" if saved else ""),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in expand_script: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error expanding content: {str(e)}"
+        )
 
 
 # New RAG-based video generation endpoints
@@ -4891,4 +5069,164 @@ Provide ONLY the enhanced description, no explanations or formatting."""
         print(f"🔍 Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500, detail=f"Failed to enhance scene prompt: {str(e)}"
+        )
+
+
+# ==================== CONSULTATION ENDPOINTS ====================
+
+
+class ConsultationAnalyzeRequest(SQLModel):
+    """Request for initial consultation analysis"""
+
+    prompt: Optional[str] = ""
+
+
+class ConsultationChatRequest(SQLModel):
+    """Request for follow-up conversation"""
+
+    message: str
+    context: Dict = {}
+
+
+@router.post("/consultation/analyze")
+async def analyze_for_consultation(
+    files: List[UploadFile] = File(...),
+    prompt: str = Form(""),
+    current_user: User = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Analyze uploaded files and return AI consultation response with app-specific options.
+    This is used BEFORE project creation to help users decide what to create.
+    """
+    from app.api.services.consultation import ConsultationService
+    import io
+
+    async def extract_text_from_file(content: bytes, filename: str) -> str:
+        """Extract text from uploaded file based on file type."""
+        ext = filename.split(".")[-1].lower() if "." in filename else ""
+
+        try:
+            if ext == "txt":
+                return content.decode("utf-8", errors="ignore")
+
+            elif ext == "docx":
+                try:
+                    from docx import Document
+
+                    doc = Document(io.BytesIO(content))
+                    return "\n".join([para.text for para in doc.paragraphs])
+                except ImportError:
+                    return content.decode("utf-8", errors="ignore")
+
+            elif ext == "pdf":
+                try:
+                    import fitz  # PyMuPDF
+
+                    pdf = fitz.open(stream=content, filetype="pdf")
+                    text = ""
+                    for page in pdf:
+                        text += page.get_text()
+                    pdf.close()
+                    return text
+                except ImportError:
+                    return f"[PDF file: {filename} - install PyMuPDF to extract text]"
+
+            else:
+                # Try to decode as text
+                return content.decode("utf-8", errors="ignore")
+
+        except Exception as e:
+            return f"[Could not extract text: {str(e)}]"
+
+    try:
+        # Extract text from each uploaded file
+        file_contents = []
+        for file in files:
+            try:
+                content = await file.read()
+                await file.seek(0)
+
+                # Parse the document to extract text
+                text_content = await extract_text_from_file(
+                    content, file.filename or "unknown"
+                )
+
+                file_contents.append(
+                    {
+                        "filename": file.filename or "unknown",
+                        "content": text_content[:10000],  # Limit to first 10k chars
+                    }
+                )
+            except Exception as e:
+                print(f"⚠️ Error parsing file {file.filename}: {e}")
+                file_contents.append(
+                    {
+                        "filename": file.filename or "unknown",
+                        "content": f"[Could not parse file: {str(e)}]",
+                    }
+                )
+
+        if not file_contents:
+            raise HTTPException(status_code=400, detail="No files provided")
+
+        # Get user tier
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(current_user.id)
+        user_tier = usage_check.get("tier", "free")
+
+        # Call consultation service
+        consultation_service = ConsultationService(session)
+        result = await consultation_service.generate_guided_analysis(
+            file_contents=file_contents,
+            user_prompt=prompt,
+            user_tier=user_tier,
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in consultation analysis: {e}")
+        import traceback
+
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to analyze for consultation: {str(e)}"
+        )
+
+
+@router.post("/consultation/chat")
+async def consultation_chat(
+    request: ConsultationChatRequest,
+    current_user: User = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Continue the consultation conversation with a follow-up message.
+    """
+    from app.api.services.consultation import ConsultationService
+
+    try:
+        # Get user tier
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(current_user.id)
+        user_tier = usage_check.get("tier", "free")
+
+        consultation_service = ConsultationService(session)
+        result = await consultation_service.continue_conversation(
+            message=request.message,
+            context=request.context,
+            user_tier=user_tier,
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in consultation chat: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Consultation chat failed: {str(e)}"
         )
