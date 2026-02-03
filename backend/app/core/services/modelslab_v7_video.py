@@ -30,7 +30,8 @@ class ModelsLabV7VideoService:
             "veo-3.1-fast": "veo-3.1-fast",
             "omni-human": "omni-human",
             "omni-human-1.5": "omni-human-1.5",
-            "wan2.5-i2v": "wan2.5-i2v",
+            "wan2.5-i2v": "wan2.5-i2v",  # Wan 2.5 I2V with audio support
+            "wan2.6-i2v": "wan2.6-i2v",  # Wan 2.6 I2V with audio support
             "seedance-1-5-pro": "seedance-1-5-pro",
         }
 
@@ -91,8 +92,9 @@ class ModelsLabV7VideoService:
                 }
 
                 # Add optional parameters if they're supported
+                # Note: duration must be a string for wan2.6-i2v compatibility
                 if duration != 5.0:
-                    payload["duration"] = duration
+                    payload["duration"] = str(int(duration))
                 if fps != 24:
                     payload["fps"] = fps
                 if motion_strength != 0.8:
@@ -517,13 +519,19 @@ class ModelsLabV7VideoService:
                     voice_hint += f", {voice_characteristics} tone"
                 voice_hint += "."
             elif voice_characteristics:
-                voice_hint = f"{character_name} speaks with a {voice_characteristics} tone."
+                voice_hint = (
+                    f"{character_name} speaks with a {voice_characteristics} tone."
+                )
 
             # Add voice gender hint if specified
             if voice_gender and voice_gender.lower() != "auto":
-                gender_hint = "masculine" if voice_gender.lower() == "male" else "feminine"
+                gender_hint = (
+                    "masculine" if voice_gender.lower() == "male" else "feminine"
+                )
                 if voice_hint:
-                    voice_hint = voice_hint.rstrip(".") + f" with a {gender_hint} voice."
+                    voice_hint = (
+                        voice_hint.rstrip(".") + f" with a {gender_hint} voice."
+                    )
                 else:
                     voice_hint = f"{character_name} has a {gender_hint} voice."
 
@@ -888,7 +896,9 @@ engaging visual storytelling, seamless transitions, cinematic composition.
 
                 # Add voice/accent hints for video generation
                 accent = character_profile.get("accent", "neutral")
-                voice_characteristics = character_profile.get("voice_characteristics", "")
+                voice_characteristics = character_profile.get(
+                    "voice_characteristics", ""
+                )
                 if accent and accent.lower() != "neutral":
                     char_desc += f", speaks with a {accent} accent"
                     if voice_characteristics:
@@ -1584,7 +1594,9 @@ engaging visual storytelling, seamless transitions, cinematic composition.
         import os
         import base64
 
-        logger.info(f"[CONSISTENCY LOOP] Starting frame extraction from: {video_url[:80]}...")
+        logger.info(
+            f"[CONSISTENCY LOOP] Starting frame extraction from: {video_url[:80]}..."
+        )
 
         try:
             # Step 1: Check if FFmpeg is available
@@ -1617,7 +1629,9 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                         video_url, timeout=aiohttp.ClientTimeout(total=120)
                     ) as response:
                         if response.status != 200:
-                            logger.error(f"[CONSISTENCY LOOP] Failed to download video: HTTP {response.status}")
+                            logger.error(
+                                f"[CONSISTENCY LOOP] Failed to download video: HTTP {response.status}"
+                            )
                             return {
                                 "status": "error",
                                 "error": f"Failed to download video: HTTP {response.status}",
@@ -1627,17 +1641,23 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                         with open(video_temp_path, "wb") as f:
                             f.write(video_content)
 
-                logger.info(f"[CONSISTENCY LOOP] Video downloaded: {len(video_content)} bytes")
+                logger.info(
+                    f"[CONSISTENCY LOOP] Video downloaded: {len(video_content)} bytes"
+                )
 
                 # Step 3: Extract the last frame using FFmpeg
                 # -sseof -0.5 seeks to 0.5 seconds before end
                 # -frames:v 1 extracts only 1 frame
                 ffmpeg_cmd = [
                     "ffmpeg",
-                    "-sseof", "-0.5",  # Seek to 0.5 seconds before end
-                    "-i", video_temp_path,
-                    "-frames:v", "1",  # Extract 1 frame
-                    "-q:v", "2",  # High quality JPEG
+                    "-sseof",
+                    "-0.5",  # Seek to 0.5 seconds before end
+                    "-i",
+                    video_temp_path,
+                    "-frames:v",
+                    "1",  # Extract 1 frame
+                    "-q:v",
+                    "2",  # High quality JPEG
                     "-y",  # Overwrite output
                     frame_temp_path,
                 ]
@@ -1648,20 +1668,29 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                 )
 
                 if result.returncode != 0:
-                    logger.error(f"[CONSISTENCY LOOP] FFmpeg extraction failed: {result.stderr}")
+                    logger.error(
+                        f"[CONSISTENCY LOOP] FFmpeg extraction failed: {result.stderr}"
+                    )
                     return {
                         "status": "error",
                         "error": f"Frame extraction failed: {result.stderr}",
                     }
 
-                if not os.path.exists(frame_temp_path) or os.path.getsize(frame_temp_path) == 0:
-                    logger.error("[CONSISTENCY LOOP] Frame extraction produced no output")
+                if (
+                    not os.path.exists(frame_temp_path)
+                    or os.path.getsize(frame_temp_path) == 0
+                ):
+                    logger.error(
+                        "[CONSISTENCY LOOP] Frame extraction produced no output"
+                    )
                     return {
                         "status": "error",
                         "error": "Frame extraction produced no output",
                     }
 
-                logger.info(f"[CONSISTENCY LOOP] Frame extracted: {os.path.getsize(frame_temp_path)} bytes")
+                logger.info(
+                    f"[CONSISTENCY LOOP] Frame extracted: {os.path.getsize(frame_temp_path)} bytes"
+                )
 
                 # Step 4: Upload frame to ModelsLab for upscaling
                 # First, we need to make the frame accessible via URL
@@ -1690,7 +1719,9 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                     }
                 else:
                     # Fallback: Return the original frame as base64 data URL
-                    logger.warning(f"[CONSISTENCY LOOP] Upscaling failed, using original frame")
+                    logger.warning(
+                        f"[CONSISTENCY LOOP] Upscaling failed, using original frame"
+                    )
                     return {
                         "status": "partial",
                         "upscaled_frame_url": None,
@@ -1738,7 +1769,9 @@ engaging visual storytelling, seamless transitions, cinematic composition.
             # Prepare base64 data URL
             init_image = f"data:image/jpeg;base64,{frame_base64}"
 
-            upscale_endpoint = f"{settings.MODELSLAB_V6_BASE_URL}/image_editing/super_resolution"
+            upscale_endpoint = (
+                f"{settings.MODELSLAB_V6_BASE_URL}/image_editing/super_resolution"
+            )
 
             payload = {
                 "key": self.api_key,
@@ -1759,20 +1792,26 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
-                        logger.error(f"[UPSCALE FRAME] API error: {response.status} - {error_text}")
+                        logger.error(
+                            f"[UPSCALE FRAME] API error: {response.status} - {error_text}"
+                        )
                         return {
                             "status": "error",
                             "error": f"Upscale API error: {error_text}",
                         }
 
                     result = await response.json()
-                    logger.info(f"[UPSCALE FRAME] Response status: {result.get('status')}")
+                    logger.info(
+                        f"[UPSCALE FRAME] Response status: {result.get('status')}"
+                    )
 
                     # Handle async processing
                     if result.get("status") == "processing":
                         fetch_url = result.get("fetch_result")
                         if fetch_url:
-                            return await self._wait_for_upscale_completion(session, fetch_url)
+                            return await self._wait_for_upscale_completion(
+                                session, fetch_url
+                            )
 
                     # Handle immediate success
                     output_urls = result.get("output", [])
@@ -1891,10 +1930,14 @@ engaging visual storytelling, seamless transitions, cinematic composition.
             # Use continuity frame from previous scene if available and enabled
             if use_consistency_loop and continuity_frame_url and i > 0:
                 input_image_url = continuity_frame_url
-                logger.info(f"[CONSISTENCY LOOP] Scene {i+1}/{len(scenes)}: Using continuity frame")
+                logger.info(
+                    f"[CONSISTENCY LOOP] Scene {i+1}/{len(scenes)}: Using continuity frame"
+                )
             else:
                 input_image_url = original_image_url
-                logger.info(f"[CONSISTENCY LOOP] Scene {i+1}/{len(scenes)}: Using original image")
+                logger.info(
+                    f"[CONSISTENCY LOOP] Scene {i+1}/{len(scenes)}: Using original image"
+                )
 
             # Generate video for this scene
             video_result = await self.generate_image_to_video(
@@ -1911,7 +1954,9 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                 "scene_id": scene_id,
                 "scene_index": i,
                 "video_result": video_result,
-                "used_continuity_frame": use_consistency_loop and continuity_frame_url is not None and i > 0,
+                "used_continuity_frame": use_consistency_loop
+                and continuity_frame_url is not None
+                and i > 0,
                 "original_image_url": original_image_url,
                 "input_image_url": input_image_url,
             }
@@ -1921,7 +1966,9 @@ engaging visual storytelling, seamless transitions, cinematic composition.
             if use_consistency_loop and video_result.get("status") == "success":
                 video_url = video_result.get("video_url")
                 if video_url:
-                    logger.info(f"[CONSISTENCY LOOP] Extracting continuity frame for scene {i+1}")
+                    logger.info(
+                        f"[CONSISTENCY LOOP] Extracting continuity frame for scene {i+1}"
+                    )
 
                     frame_result = await self.extract_and_upscale_last_frame(
                         video_url=video_url,
@@ -1933,16 +1980,24 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                     if frame_result.get("status") == "success":
                         continuity_frame_url = frame_result.get("upscaled_frame_url")
                         result["continuity_frame_url"] = continuity_frame_url
-                        logger.info(f"[CONSISTENCY LOOP] ✅ Continuity frame ready for next scene")
+                        logger.info(
+                            f"[CONSISTENCY LOOP] ✅ Continuity frame ready for next scene"
+                        )
                     elif frame_result.get("status") == "partial":
                         # Use original frame if upscaling failed
-                        continuity_frame_url = None  # Will need to handle base64 differently
+                        continuity_frame_url = (
+                            None  # Will need to handle base64 differently
+                        )
                         result["continuity_frame_error"] = frame_result.get("error")
-                        logger.warning(f"[CONSISTENCY LOOP] ⚠️ Using fallback for next scene")
+                        logger.warning(
+                            f"[CONSISTENCY LOOP] ⚠️ Using fallback for next scene"
+                        )
                     else:
                         continuity_frame_url = None
                         result["continuity_frame_error"] = frame_result.get("error")
-                        logger.warning(f"[CONSISTENCY LOOP] ⚠️ No continuity frame available")
+                        logger.warning(
+                            f"[CONSISTENCY LOOP] ⚠️ No continuity frame available"
+                        )
 
             results.append(result)
 

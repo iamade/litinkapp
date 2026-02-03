@@ -510,12 +510,19 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       
       if (rawImages.length > 0) {
         const formattedImages = rawImages.map((img: any, imgIdx: number) => {
-          const isKeyScene = keySceneImages[sceneNum] === img.id;
+          const isExplicitKeyScene = keySceneImages[sceneNum] === img.id;
+          // Determine if this is the key scene:
+          // 1. If a key scene is explicitly selected, only that image is the key scene
+          // 2. If no key scene is selected, the first image (index 0) is the default key scene
+          const isKeyScene = keySceneImages[sceneNum] 
+            ? isExplicitKeyScene 
+            : imgIdx === 0;
+
           return {
             id: img.id || `${sceneNum}-${imgIdx}`,
             url: img.url || img.imageUrl || img.image_url || '',
             sceneNumber: sceneNum,
-            shotType: isKeyScene || imgIdx === 0 ? 'key_scene' as const : 'suggested_shot' as const,
+            shotType: isKeyScene ? 'key_scene' as const : 'suggested_shot' as const,
             shotIndex: imgIdx,
           };
         });
