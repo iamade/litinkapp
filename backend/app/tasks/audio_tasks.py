@@ -257,6 +257,9 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 script_data.get("characters", []),
                 script_data.get("scene_descriptions", []),
                 script_style,
+                dialogue_moments=script_data.get(
+                    "dialogue_moments"
+                ),  # For automatic shot matching
             )
 
             logger.warning(f"[AUDIO PARSER] Using script style: {script_style}")
@@ -305,6 +308,30 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 )
             logger.warning(f"[AUDIO DEBUG] Selected scenes filter: {selected_scenes}")
 
+            # Helper function to check if a scene matches selected scenes
+            # Handles sub-scene matching: Scene 1 matches 1.1, 1.2, 1.3 etc.
+            def matches_selected_scene(scene_value, selected_scene_list):
+                if scene_value is None:
+                    return False
+                scene_str = str(scene_value)
+                for s in selected_scene_list:
+                    s_str = str(s)
+                    # Exact match
+                    if scene_str == s_str:
+                        return True
+                    # Sub-scene match: scene 1.1 matches selected scene 1
+                    # Check if scene_str starts with "s_str." (e.g., "1.1" starts with "1.")
+                    if scene_str.startswith(f"{s_str}."):
+                        return True
+                    # Also check integer match for decimals (1.0 matches 1)
+                    try:
+                        scene_int = int(float(scene_value))
+                        if scene_int == int(float(s)):
+                            return True
+                    except (ValueError, TypeError):
+                        pass
+                return False
+
             if (
                 selected_scenes
                 and isinstance(selected_scenes, list)
@@ -313,30 +340,6 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 logger.info(
                     f"[AUDIO FILTER] Filtering generation for scenes: {selected_scenes}"
                 )
-
-                # Helper function to check if a scene matches selected scenes
-                # Handles sub-scene matching: Scene 1 matches 1.1, 1.2, 1.3 etc.
-                def matches_selected_scene(scene_value, selected_scenes):
-                    if scene_value is None:
-                        return False
-                    scene_str = str(scene_value)
-                    for s in selected_scenes:
-                        s_str = str(s)
-                        # Exact match
-                        if scene_str == s_str:
-                            return True
-                        # Sub-scene match: scene 1.1 matches selected scene 1
-                        # Check if scene_str starts with "s_str." (e.g., "1.1" starts with "1.")
-                        if scene_str.startswith(f"{s_str}."):
-                            return True
-                        # Also check integer match for decimals (1.0 matches 1)
-                        try:
-                            scene_int = int(float(scene_value))
-                            if scene_int == int(float(s)):
-                                return True
-                        except (ValueError, TypeError):
-                            pass
-                    return False
 
                 # Filter narrator segments
                 audio_components["narrator_segments"] = [
@@ -420,6 +423,17 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                             # Enhance audio_components with audio design
                             # Add sound effects from emotional map
                             for scene_num, design in audio_design_by_scene.items():
+                                # Skip scenes not in selected_scenes filter (if filter is active)
+                                if (
+                                    selected_scenes
+                                    and isinstance(selected_scenes, list)
+                                    and len(selected_scenes) > 0
+                                ):
+                                    if not matches_selected_scene(
+                                        scene_num, selected_scenes
+                                    ):
+                                        continue
+
                                 for sfx_desc in design["sound_effects"]:
                                     if sfx_desc and sfx_desc not in [
                                         s.get("description")

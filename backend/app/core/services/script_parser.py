@@ -360,6 +360,7 @@ class ScriptParser:
         characters: List[str],
         scene_descriptions: List[str],
         script_style: str = "cinematic_movie",
+        dialogue_moments: Dict[str, List[Dict]] = None,
     ) -> Dict[str, Any]:
         """Parse script to extract different audio components based on style"""
 
@@ -414,7 +415,7 @@ class ScriptParser:
         # Handle cinematic movie style differently (includes both 'cinematic_movie' and 'cinematic')
         if script_style in ("cinematic_movie", "cinematic"):
             return self._parse_cinematic_movie_script(
-                script, cleaned_characters, scene_descriptions
+                script, cleaned_characters, scene_descriptions, dialogue_moments
             )
         else:
             return self._parse_narration_script(
@@ -583,7 +584,11 @@ class ScriptParser:
         return effects_found
 
     def _parse_cinematic_movie_script(
-        self, script: str, characters: List[str], scene_descriptions: List[str]
+        self,
+        script: str,
+        characters: List[str],
+        scene_descriptions: List[str],
+        dialogue_moments: Dict[str, List[Dict]] = None,
     ) -> Dict[str, Any]:
         """Parse cinematic movie script with character dialogues"""
 
@@ -625,6 +630,47 @@ class ScriptParser:
                 ),
                 "shot_index": current_sub_scene,
             }
+
+        # Helper function to find matching shot index from dialogue_moments
+        def find_matching_shot_index(dialogue: str, scene_num: int) -> tuple:
+            """
+            Match dialogue to suggested shot's dialogue_preview.
+            Returns: (shot_index, shot_type) - position-based index (1, 2, 3...) for suggested shots
+            """
+            if not dialogue_moments:
+                return (
+                    current_sub_scene,
+                    "key_scene" if current_sub_scene == 0 else "suggested_shot",
+                )
+
+            # Try both string and int keys for scene number
+            scene_moments = dialogue_moments.get(
+                str(scene_num)
+            ) or dialogue_moments.get(scene_num, [])
+            if not scene_moments:
+                return (
+                    current_sub_scene,
+                    "key_scene" if current_sub_scene == 0 else "suggested_shot",
+                )
+
+            dialogue_lower = dialogue.lower().strip()
+
+            for idx, moment in enumerate(scene_moments):
+                preview = moment.get("dialogue_preview", "").lower().strip()
+                if preview:
+                    # Fuzzy match: dialogue contains preview OR preview contains dialogue
+                    if dialogue_lower in preview or preview in dialogue_lower:
+                        # Position-based index: first suggested shot = 1, second = 2, etc.
+                        print(
+                            f"[SCRIPT PARSER] Matched dialogue to shot {idx + 1}: '{dialogue[:30]}...' -> '{preview[:30]}...'"
+                        )
+                        return (idx + 1, "suggested_shot")
+
+            # No match found, use fallback
+            return (
+                current_sub_scene,
+                "key_scene" if current_sub_scene == 0 else "suggested_shot",
+            )
 
         for i, line in enumerate(lines):
             line = line.strip()
@@ -717,13 +763,16 @@ class ScriptParser:
             if character_match:
                 character_name, dialogue = character_match
                 scene_info = get_scene_info()
+                matched_shot_index, matched_shot_type = find_matching_shot_index(
+                    dialogue, scene_info["scene"]
+                )
                 audio_components["character_dialogues"].append(
                     {
                         "character": character_name,
                         "text": dialogue,
                         "scene": scene_info["scene"],
-                        "shot_type": scene_info["shot_type"],
-                        "shot_index": scene_info["shot_index"],
+                        "shot_type": matched_shot_type,
+                        "shot_index": matched_shot_index,
                         "line_number": i + 1,
                     }
                 )
@@ -738,13 +787,16 @@ class ScriptParser:
             ):
                 dialogue = line.strip('"').strip("'")
                 scene_info = get_scene_info()
+                matched_shot_index, matched_shot_type = find_matching_shot_index(
+                    dialogue, scene_info["scene"]
+                )
                 audio_components["character_dialogues"].append(
                     {
                         "character": current_character,
                         "text": dialogue,
                         "scene": scene_info["scene"],
-                        "shot_type": scene_info["shot_type"],
-                        "shot_index": scene_info["shot_index"],
+                        "shot_type": matched_shot_type,
+                        "shot_index": matched_shot_index,
                         "line_number": i + 1,
                     }
                 )

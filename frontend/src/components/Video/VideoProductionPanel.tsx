@@ -127,7 +127,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
                 url: img.url,
                 sceneNumber,
                 shotType: img.shotType || 'key_scene',
-                shotIndex: img.shotIndex ?? idx,
+                shotIndex: idx,  // Use position index for consistent audio-to-image matching
                 imageId: img.id,
               });
             }

@@ -152,6 +152,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     files,
     isGenerating,
     loadAudio,
+    reassignAudio,
   } = useAudioGeneration({
     chapterId: stableSelectedChapterId,
     scriptId: selectedScriptId,
@@ -953,6 +954,14 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                   audioRef={(el) => {
                     if (el) el.id = `audio-${file.id}`;
                   }}
+                  onReassign={async (newShotIndex) => {
+                    const success = await reassignAudio(file.id, newShotIndex);
+                    if (success) {
+                      toast.success(`Audio assigned to ${newShotIndex === 0 ? 'Key Scene' : `Shot ${newShotIndex}`}`);
+                    } else {
+                      toast.error('Failed to reassign audio');
+                    }
+                  }}
                 />
               ))}
           </div>
@@ -997,13 +1006,15 @@ const AudioFileCard: React.FC<{
     shotIndex?: number;
   };
   isSelected: boolean;
+  maxShotIndex?: number; // Maximum suggested shot index for this scene
   onSelect: () => void;
   onPlay: () => void;
   onPause: () => void;
   onVolumeChange: (volume: number) => void;
   onDelete: () => void;
+  onReassign?: (newShotIndex: number) => void;
   audioRef: (el: HTMLAudioElement | null) => void;
-}> = ({ file, isSelected, onSelect, onPlay, onPause, onVolumeChange, onDelete, audioRef }) => {
+}> = ({ file, isSelected, maxShotIndex = 5, onSelect, onPlay, onPause, onVolumeChange, onDelete, onReassign, audioRef }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const isGenerating = file.status === 'generating';
   const isFailed = file.status === 'failed';
@@ -1045,6 +1056,22 @@ const AudioFileCard: React.FC<{
               {file.duration && file.duration > 0 && ` • ${formatTime(file.duration)}`}
               {file.character && ` • ${file.character}`}
             </p>
+            {/* Shot Assignment Dropdown - always show if onReassign is provided */}
+            {onReassign && !isGenerating && (
+              <div className="flex items-center mt-1 space-x-2">
+                <span className="text-xs text-gray-400">Assign to:</span>
+                <select
+                  value={file.shotIndex ?? 0}
+                  onChange={(e) => onReassign(parseInt(e.target.value, 10))}
+                  className="text-xs border border-gray-200 rounded px-2 py-0.5 bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white hover:border-purple-400 focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                >
+                  <option value={0}>Key Scene</option>
+                  {[...Array(maxShotIndex)].map((_, i) => (
+                    <option key={i + 1} value={i + 1}>Shot {i + 1}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
 

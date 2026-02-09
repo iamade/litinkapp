@@ -20,7 +20,9 @@ class ModelConfig:
     primary: str
     fallback: str
     fallback2: Optional[str] = None
-    fallback3: Optional[str] = None  # Added for additional fallback (Veo 3 direct, Grok AI)
+    fallback3: Optional[str] = (
+        None  # Added for additional fallback (Veo 3 direct, Grok AI)
+    )
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     cost_per_1k_input: Optional[float] = None
@@ -139,19 +141,17 @@ IMAGE_I2I_SINGLE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.BASIC: ModelConfig(
         primary="seededit-i2i",  # seededit (ModelsLab) $0.04
         fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
-        fallback2="seedream-4.5-i2i"
+        fallback2="seedream-4.5-i2i",
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="nano-banana",  # Nano Banana (ModelsLab) $0.0468
         fallback="seedream-4.0-i2i",
-        fallback2="seedream-4.5-i2i"# seedream-4.5 (ModelsLab) $0.06
+        fallback2="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
     ),
-
     ModelTier.PREMIUM: ModelConfig(
         primary="nano-banana",  # Nano Banana (ModelsLab) $0.0468
         fallback2="seedream-4.5-i2i",
         fallback="seededit-i2i",  # seededit (ModelsLab) $0.04
-        
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
@@ -202,50 +202,90 @@ IMAGE_I2I_MULTI_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 
 
 # Video Generation Strategy
-# Optimizing for high-fidelity motion and consistency while managing compute costs
-# ModelsLab aggregates top video models; Google's Veo accessed directly for enterprise-grade performance
-# Direct API integrations: veo-3-direct (Google AI Studio), grok-video (xAI - when available)
+# UPDATED: All tiers now use ONLY models that accept audio input for lip-sync capability
+# Supported models: wan2.5-i2v, wan2.6-i2v, omni-human, omni-human-1.5
+# These models accept: image + audio + prompt → video with lip-sync
 VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="seedance-1-5-pro",  # Seedance-v1.5-Pro (ModelsLab) $0.044/s 12v cant pass or generate audio
-        fallback="wan2.6-i2v",  # Wan2.5-I2V (ModelsLab) 480p $0.05/s can record and pass audio, pass image and generate video
-        fallback2="kling-2.5-turbo", # can pass image and generate video but no audio Need to change maybe
-        fallback3=None,  # No additional fallback for free tier
+        primary="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p - basic lip-sync capable
+        fallback="wan2.6-i2v",  # Wan2.6-I2V (ModelsLab) - upgraded fallback
+        fallback2=None,
+        fallback3=None,
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="wan2.6-i2v",  # Wan2.5-I2V (ModelsLab) 720p $0.10/s can record and pass audio, pass image and generate video
-        fallback="seedance-1-5-pro",  # Seedance-v1.5-Pro (ModelsLab) $0.044/s
-        fallback2="wan2.5-i2v", # can record and pass audio, pass image and generate video
-        fallback3=None,  # No additional fallback for basic tier
+        primary="wan2.6-i2v",  # Wan2.6-I2V (ModelsLab) 720p - better audio sync
+        fallback="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p fallback
+        fallback2=None,
+        fallback3=None,
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) $0.14/s can pass audio, pass image and generate video
-        fallback="wan2.6-i2v",  # Wan2.5-I2V (ModelsLab) 720p $0.10/s can record and pass audio, pass image and generate video
-        fallback2="seedance-1-5-pro",
-        fallback3="veo-3-direct",  # Veo 3 Direct API (Google AI Studio) as final fallback it prompt and image to video no need to pass audio
+        primary="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) - talking head specialist
+        fallback="wan2.6-i2v",  # Wan2.6-I2V fallback
+        fallback2="wan2.5-i2v",  # Wan2.5-I2V fallback
+        fallback3=None,
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="veo-3-direct",  # Veo 3 Direct API (Google AI Studio) - promoted to primary
-        fallback="omni-human",  # Omni-Human (ModelsLab) $0.168/s perfect lipsync image + audio - prompt = video
-        fallback2="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) $0.14/s
-        fallback3="grok-video",  # xAI Grok Video (when API keys available)
-        # PREVIOUS: primary="omni-human", fallback="omni-human-1.5", fallback2="wan2.5-i2v"
+        primary="omni-human",  # Omni-Human (ModelsLab) - high quality talking head
+        fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
+        fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
+        fallback3=None,
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="veo-3-direct",  # Veo 3 Direct API (Google AI Studio)
-        fallback="veo-3.1-fast",  # Veo-3.1-Fast (ModelsLab) $0.24/s - fallback via ModelsLab
-        fallback2="omni-human",  # Omni-Human (ModelsLab) $0.168/s
-        fallback3="grok-video",  # xAI Grok Video (when API keys available)
-        # PREVIOUS: primary="veo-3.1-fast", fallback="omni-human", fallback2="omni-human-1.5"
+        primary="omni-human",  # Omni-Human (ModelsLab) - professional quality
+        fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
+        fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
+        fallback3=None,
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="veo-3-direct",  # Veo 3 Direct API (Google AI Studio) - highest quality
-        fallback="veo-3.1-fast",  # Veo-3.1-Fast (ModelsLab) Max Quality
-        fallback2="grok-video",  # xAI Grok Video (when API keys available)
-        fallback3="omni-human",  # Omni-Human (ModelsLab) $0.168/s
-        # PREVIOUS: primary="veo-3.1-fast", fallback="omni-human", fallback2="veo-3-fast"
+        primary="omni-human-1.5",  # Omni-Human-1.5 - best for enterprise (stable)
+        fallback="omni-human",  # Omni-Human fallback
+        fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
+        fallback3=None,
     ),
 }
+
+# ============================================================================
+# PREVIOUS VIDEO_MODEL_CONFIG (Commented out for reference)
+# This config included models that don't accept audio (seedance, veo-3, grok-video)
+# ============================================================================
+# VIDEO_MODEL_CONFIG_PREVIOUS: Dict[ModelTier, ModelConfig] = {
+#     ModelTier.FREE: ModelConfig(
+#         primary="seedance-1-5-pro",  # Seedance-v1.5-Pro (ModelsLab) $0.044/s 12v cant pass or generate audio
+#         fallback="wan2.6-i2v",  # Wan2.5-I2V (ModelsLab) 480p $0.05/s can record and pass audio
+#         fallback2="kling-2.5-turbo", # can pass image and generate video but no audio
+#         fallback3=None,
+#     ),
+#     ModelTier.BASIC: ModelConfig(
+#         primary="wan2.6-i2v",  # Wan2.5-I2V (ModelsLab) 720p $0.10/s
+#         fallback="seedance-1-5-pro",  # Seedance-v1.5-Pro (ModelsLab)
+#         fallback2="wan2.5-i2v",
+#         fallback3=None,
+#     ),
+#     ModelTier.STANDARD: ModelConfig(
+#         primary="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) $0.14/s
+#         fallback="wan2.6-i2v",
+#         fallback2="seedance-1-5-pro",
+#         fallback3="veo-3-direct",  # Veo 3 Direct API (no audio input needed)
+#     ),
+#     ModelTier.PREMIUM: ModelConfig(
+#         primary="veo-3-direct",  # Veo 3 Direct API (Google AI Studio)
+#         fallback="omni-human",
+#         fallback2="omni-human-1.5",
+#         fallback3="grok-video",
+#     ),
+#     ModelTier.PROFESSIONAL: ModelConfig(
+#         primary="veo-3-direct",
+#         fallback="veo-3.1-fast",
+#         fallback2="omni-human",
+#         fallback3="grok-video",
+#     ),
+#     ModelTier.ENTERPRISE: ModelConfig(
+#         primary="veo-3-direct",  # Veo 3 Direct API (Google AI Studio) - highest quality
+#         fallback="veo-3.1-fast",
+#         fallback2="grok-video",
+#         fallback3="omni-human",
+#     ),
+# }
 
 
 AUDIO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {

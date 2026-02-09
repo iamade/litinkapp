@@ -130,6 +130,162 @@ async def extract_scene_dialogue_and_generate_audio(
         return {"dialogue_audio": [], "error": str(e)}
 
 
+async def extract_last_frame(
+    video_url: str, user_id: Optional[str] = None
+) -> Optional[str]:
+    """
+    Extract the last frame from a video for use as the starting image of the next scene.
+    This helps maintain visual continuity between scenes.
+
+    Args:
+        video_url: URL of the video to extract frame from
+        user_id: Optional user ID for storage organization
+
+    Returns:
+        URL of the extracted frame image, or None if extraction fails
+    """
+    import tempfile
+    import subprocess
+    import os
+    import httpx
+    from app.core.services.supabase_storage import SupabaseStorageService
+
+    try:
+        print(f"[LAST FRAME] Extracting last frame from video: {video_url[:50]}...")
+
+        # Download video to temp file
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(video_url)
+            if response.status_code != 200:
+                print(f"[LAST FRAME] Failed to download video: {response.status_code}")
+                return None
+
+        # Create temp files
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as video_file:
+            video_file.write(response.content)
+            video_path = video_file.name
+
+        frame_path = video_path.replace(".mp4", "_last_frame.jpg")
+
+        try:
+            # Extract last frame using ffmpeg
+            # First, get video duration
+            probe_cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ]
+            result = subprocess.run(probe_cmd, capture_output=True, text=True)
+            duration = float(result.stdout.strip()) if result.stdout.strip() else 5.0
+
+            # Extract frame at last second
+            seek_time = max(0, duration - 0.1)  # 0.1 seconds before end
+            extract_cmd = [
+                "ffmpeg",
+                "-y",
+                "-ss",
+                str(seek_time),
+                "-i",
+                video_path,
+                "-vframes",
+                "1",
+                "-q:v",
+                "2",
+                frame_path,
+            ]
+            subprocess.run(extract_cmd, capture_output=True, check=True)
+
+            if not os.path.exists(frame_path):
+                print("[LAST FRAME] Frame extraction failed - no output file")
+                return None
+
+            # Upload to storage
+            storage_service = SupabaseStorageService()
+            with open(frame_path, "rb") as f:
+                frame_data = f.read()
+
+            # Generate unique filename
+            import uuid as uuid_lib
+
+            frame_filename = f"frames/{user_id or 'system'}/last_frame_{uuid_lib.uuid4().hex[:8]}.jpg"
+
+            frame_url = await storage_service.upload_file(
+                file_data=frame_data,
+                file_path=frame_filename,
+                content_type="image/jpeg",
+            )
+
+            print(f"[LAST FRAME] ✅ Extracted and uploaded frame: {frame_url[:50]}...")
+            return frame_url
+
+        finally:
+            # Clean up temp files
+            if os.path.exists(video_path):
+                os.unlink(video_path)
+            if os.path.exists(frame_path):
+                os.unlink(frame_path)
+
+    except Exception as e:
+        print(f"[LAST FRAME] ❌ Error extracting frame: {e}")
+        return None
+
+
+async def upscale_frame(
+    image_url: str, user_tier: str = "BASIC", user_id: Optional[str] = None
+) -> str:
+    """
+    Upscale an extracted frame before using it as video input.
+    Uses tier-based upscaling models from UPSCALE_MODEL_CONFIG.
+
+    Args:
+        image_url: URL of the image to upscale
+        user_tier: User's subscription tier for model selection
+        user_id: Optional user ID for storage organization
+
+    Returns:
+        URL of the upscaled image, or original URL if upscaling fails
+    """
+    from app.core.model_config import UPSCALE_MODEL_CONFIG, ModelTier
+
+    try:
+        print(f"[UPSCALE] Upscaling frame for tier: {user_tier}")
+
+        # Get model config based on tier
+        tier_enum = ModelTier[user_tier.upper()] if user_tier else ModelTier.BASIC
+        upscale_config = UPSCALE_MODEL_CONFIG.get(
+            tier_enum, UPSCALE_MODEL_CONFIG[ModelTier.BASIC]
+        )
+        model_id = upscale_config.primary
+
+        # Use ModelsLab upscaling service
+        from app.core.services.modelslab_upscale import ModelsLabUpscaleService
+
+        upscale_service = ModelsLabUpscaleService()
+        result = await upscale_service.upscale_image(
+            image_url=image_url,
+            model_id=model_id,
+            scale=2,  # 2x upscaling is usually sufficient
+        )
+
+        if result.get("status") == "success" and result.get("upscaled_url"):
+            print(f"[UPSCALE] ✅ Frame upscaled successfully")
+            return result["upscaled_url"]
+        else:
+            print(
+                f"[UPSCALE] ⚠️ Upscaling failed, using original: {result.get('error')}"
+            )
+            return image_url
+
+    except Exception as e:
+        print(f"[UPSCALE] ❌ Error upscaling frame: {e}, using original")
+        return image_url
+
+
 # Update the service initialization in generate_all_videos_for_generation
 async def generate_scene_videos(
     modelslab_service: ModelsLabV7VideoService,  # ✅ Updated type hint
@@ -138,8 +294,15 @@ async def generate_scene_videos(
     audio_files: Dict[str, Any],
     image_data: Dict[str, Any],
     video_style: str,
+    user_id: Optional[str] = None,  # Added for storage organization
+    user_tier: str = "BASIC",  # Added for upscaling tier selection
 ) -> List[Dict[str, Any]]:
-    """Generate videos for each scene using V7 Veo 2 image-to-video"""
+    """Generate videos for each scene using V7 Veo 2 image-to-video
+
+    Enhanced with last-frame extraction for visual continuity between scenes.
+    After generating each scene's video, the last frame is extracted and can be
+    used as the starting point for the next scene.
+    """
 
     print(f"[SCENE VIDEOS V7] Generating scene videos with Veo 2...")
     video_results = []
@@ -147,17 +310,35 @@ async def generate_scene_videos(
     scene_images = image_data.get("scene_images", [])  # Fixed key mismatch
     model_id = modelslab_service.get_video_model_for_style(video_style)
 
+    # Track the last frame from the previous scene for visual continuity
+    previous_scene_last_frame: Optional[str] = None
+
     for i, scene_description in enumerate(scene_descriptions):
         try:
             scene_id = f"scene_{i+1}"
             print(f"[SCENE VIDEOS V7] Processing {scene_id}/{len(scene_descriptions)}")
 
-            # Find scene image
-            scene_image = None
-            if i < len(scene_images) and scene_images[i] is not None:
-                scene_image = scene_images[i]
+            # Find scene image - prefer last frame from previous scene for continuity
+            scene_image_url = None
+            used_previous_frame = False
 
-            if not scene_image or not scene_image.get("image_url"):
+            # For scenes after the first, try to use the extracted last frame
+            if i > 0 and previous_scene_last_frame:
+                print(
+                    f"[SCENE VIDEOS V7] 🔗 Using previous scene's last frame for visual continuity"
+                )
+                scene_image_url = previous_scene_last_frame
+                used_previous_frame = True
+            else:
+                # Use the storyboard image
+                scene_image = None
+                if i < len(scene_images) and scene_images[i] is not None:
+                    scene_image = scene_images[i]
+
+                if scene_image and scene_image.get("image_url"):
+                    scene_image_url = scene_image["image_url"]
+
+            if not scene_image_url:
                 print(f"[SCENE VIDEOS V7] ⚠️ No valid image found for {scene_id}")
                 video_results.append(None)
                 continue
@@ -168,7 +349,7 @@ async def generate_scene_videos(
             # ✅ Generate video using V7 Veo 2
             result = await modelslab_service.enhance_video_for_scene(
                 scene_description=scene_description,
-                image_url=scene_image["image_url"],
+                image_url=scene_image_url,  # Use extracted frame or storyboard image
                 audio_url=scene_audio.get("audio_url") if scene_audio else None,
                 style=video_style,
                 include_lipsync=bool(scene_audio),
@@ -186,7 +367,7 @@ async def generate_scene_videos(
                         "scene_id": scene_id,
                         "segment_index": i + 1,
                         "scene_description": scene_description,
-                        "source_image_url": scene_image["image_url"],
+                        "source_image_url": scene_image_url,
                         "video_url": video_url,
                         "duration_seconds": 5.0,  # Veo 2 default
                         "generation_method": "veo2_image_to_video",
@@ -228,16 +409,35 @@ async def generate_scene_videos(
                             "scene_id": scene_id,
                             "video_url": video_url,
                             "duration": 5.0,
-                            "source_image": scene_image["image_url"],
+                            "source_image": scene_image_url,
                             "method": "veo2_image_to_video",
                             "model": model_id,
                             "has_lipsync": has_lipsync,
+                            "used_previous_frame": used_previous_frame,
                         }
                     )
 
                     print(
                         f"[SCENE VIDEOS V7] ✅ Generated {scene_id} - Lip sync: {has_lipsync}"
                     )
+
+                    # Extract last frame for visual continuity with next scene
+                    if i < len(scene_descriptions) - 1:  # Not the last scene
+                        print(
+                            f"[SCENE VIDEOS V7] Extracting last frame for next scene continuity..."
+                        )
+                        extracted_frame = await extract_last_frame(video_url, user_id)
+                        if extracted_frame:
+                            # Optionally upscale the frame before using it
+                            previous_scene_last_frame = await upscale_frame(
+                                extracted_frame, user_tier, user_id
+                            )
+                            print(f"[SCENE VIDEOS V7] 🎬 Frame ready for scene {i+2}")
+                        else:
+                            print(
+                                f"[SCENE VIDEOS V7] ⚠️ Could not extract frame, next scene will use storyboard image"
+                            )
+                            previous_scene_last_frame = None
                 else:
                     raise Exception("No video URL in V7 response")
             else:

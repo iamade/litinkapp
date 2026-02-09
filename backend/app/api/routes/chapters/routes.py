@@ -38,6 +38,8 @@ from app.audio.schemas import (
     AudioExportResponse,
     DeleteAudioResponse,
     AudioStatusResponse,
+    AudioReassignRequest,
+    AudioReassignResponse,
 )
 from app.books.models import Book, Chapter
 from app.videos.models import ImageGeneration, AudioGeneration, Script, AudioExport
@@ -1423,6 +1425,10 @@ async def generate_chapter_audio(
                 "emotion": request.emotion,
                 "speed": request.speed,
                 "duration": request.duration,
+                "shot_type": request.shot_type or "key_scene",
+                "shot_index": (
+                    request.shot_index if request.shot_index is not None else 0
+                ),
             },
         )
 
@@ -1788,3 +1794,84 @@ async def upscale_image(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error upscaling image: {str(e)}")
+
+
+@router.patch(
+    "/{chapter_id}/audio/{audio_id}/reassign",
+    response_model=AudioReassignResponse,
+    summary="Reassign audio to a different shot",
+    description="Update the shot_index of an audio file to assign it to a different image/shot in the Video tab.",
+)
+async def reassign_audio_shot(
+    chapter_id: str,
+    audio_id: str,
+    request: AudioReassignRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+) -> AudioReassignResponse:
+    """
+    Reassign an audio file to a different shot by updating its shot_index in metadata.
+
+    - shot_index=0: Key scene (main establishing shot)
+    - shot_index=1+: Suggested shots
+
+    Note: chapter_id can be a chapter ID, project ID, or script ID.
+    We verify ownership via the audio record's user_id instead.
+    """
+    try:
+        # Find the audio record - verify ownership via user_id
+        # Note: chapter_id from URL is used for API consistency but not strictly verified
+        # because it may be a script_id in some contexts
+        stmt = select(AudioGeneration).where(
+            AudioGeneration.id == audio_id,
+            AudioGeneration.user_id == current_user.id,
+        )
+        result = await session.exec(stmt)
+        audio_record = result.first()
+
+        if not audio_record:
+            raise HTTPException(
+                status_code=404, detail="Audio file not found or not authorized"
+            )
+
+        # Get previous shot_index from metadata
+        current_metadata = audio_record.audio_metadata or {}
+        previous_shot_index = current_metadata.get("shot_index", 0)
+
+        # Determine new shot_type based on shot_index
+        new_shot_type = request.shot_type
+        if new_shot_type is None:
+            new_shot_type = "key_scene" if request.shot_index == 0 else "suggested_shot"
+
+        # Update metadata with new shot_index and shot_type
+        updated_metadata = {
+            **current_metadata,
+            "shot_index": request.shot_index,
+            "shot_type": new_shot_type,
+        }
+        audio_record.audio_metadata = updated_metadata
+
+        # Commit the change
+        session.add(audio_record)
+        await session.commit()
+        await session.refresh(audio_record)
+
+        print(
+            f"[AUDIO REASSIGN] Audio {audio_id} reassigned: shot_index {previous_shot_index} → {request.shot_index}"
+        )
+
+        return AudioReassignResponse(
+            audio_id=audio_id,
+            previous_shot_index=previous_shot_index,
+            new_shot_index=request.shot_index,
+            new_shot_type=new_shot_type,
+            message=f"Audio reassigned to {'Key Scene' if request.shot_index == 0 else f'Shot {request.shot_index}'}",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AUDIO REASSIGN] Error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error reassigning audio: {str(e)}"
+        )

@@ -843,6 +843,28 @@ export const userService = {
     return apiClient.post("/ai/expand-script", request);
   },
 
+  /**
+   * Reassign an audio file to a different shot by updating its shot_index.
+   * @param chapterId - The chapter or project ID
+   * @param audioId - The audio record ID
+   * @param shotIndex - New shot index (0 = key scene, 1+ = suggested shots)
+   */
+  reassignAudioShot: (
+    chapterId: string,
+    audioId: string,
+    shotIndex: number
+  ): Promise<{
+    audio_id: string;
+    previous_shot_index: number;
+    new_shot_index: number;
+    new_shot_type: string;
+    message: string;
+  }> => {
+    return apiClient.patch(`/chapters/${chapterId}/audio/${audioId}/reassign`, {
+      shot_index: shotIndex,
+    });
+  },
+
 };
 
 export async function deleteBook(bookId: string) {

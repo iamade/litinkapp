@@ -263,7 +263,44 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken, videoGen
     };
   }, [videoGenerationId, loadAudio]);
 
-  return { ...state, isGenerating, loadAudio };
+  /**
+   * Reassign an audio file to a different shot by updating its shot_index.
+   * Updates both backend and local state.
+   */
+  const reassignAudio = useCallback(async (audioId: string, newShotIndex: number): Promise<boolean> => {
+    // Use chapterId or scriptId as the chapter identifier
+    const effectiveChapterId = chapterId || scriptId;
+    if (!effectiveChapterId) {
+      console.error('[useAudioGeneration] Cannot reassign audio: no chapterId or scriptId');
+      return false;
+    }
+
+    try {
+      const response = await userService.reassignAudioShot(effectiveChapterId, audioId, newShotIndex);
+      console.log('[useAudioGeneration] Audio reassigned:', response.message);
+
+      // Update local state to reflect the change
+      setState(prev => ({
+        ...prev,
+        files: prev.files.map(file => 
+          file.id === audioId
+            ? {
+                ...file,
+                shotIndex: newShotIndex,
+                shotType: newShotIndex === 0 ? 'key_scene' : 'suggested_shot',
+              }
+            : file
+        ),
+      }));
+
+      return true;
+    } catch (error) {
+      console.error('[useAudioGeneration] Failed to reassign audio:', error);
+      return false;
+    }
+  }, [chapterId, scriptId]);
+
+  return { ...state, isGenerating, loadAudio, reassignAudio };
 }
 
 // New reactive hook
