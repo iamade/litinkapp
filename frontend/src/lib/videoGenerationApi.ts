@@ -79,6 +79,7 @@ export const normalizeGenerationStatus = (status: string | null | undefined): Ge
     case 'failed':
     case 'error':
     case 'lipsync_failed':
+    case 'retrieval_failed':
       return 'failed';
     default:
       // Unknown values map to 'failed' for safety
@@ -212,6 +213,8 @@ export interface StartVideoGenerationRequest {
   script_id: string;
   chapter_id: string;
   quality_tier: 'free' | 'premium' | 'professional';
+  selected_shot_ids?: string[];  // Optional: only generate for these specific shots
+  selected_audio_ids?: string[]; // Optional: only use these audio files
 }
 
 export interface StartVideoGenerationResponse {
@@ -228,13 +231,27 @@ class VideoGenerationAPI {
    async startVideoGeneration(
      scriptId: string,
      chapterId: string,
-     qualityTier: 'free' | 'premium' | 'professional'
+     qualityTier: 'free' | 'premium' | 'professional',
+     selectedShotIds?: string[],
+     selectedAudioIds?: string[]
    ): Promise<StartVideoGenerationResponse> {
-     return apiClient.post<StartVideoGenerationResponse>('/ai/generate-entertainment-video', {
+     const payload: StartVideoGenerationRequest = {
        script_id: scriptId,
        chapter_id: chapterId,
-       quality_tier: qualityTier
-     });
+       quality_tier: qualityTier,
+     };
+     
+     // Only include selected_shot_ids if shots are selected
+     if (selectedShotIds && selectedShotIds.length > 0) {
+       payload.selected_shot_ids = selectedShotIds;
+     }
+     
+     // Only include selected_audio_ids if audio files are selected
+     if (selectedAudioIds && selectedAudioIds.length > 0) {
+       payload.selected_audio_ids = selectedAudioIds;
+     }
+     
+     return apiClient.post<StartVideoGenerationResponse>('/ai/generate-entertainment-video', payload);
    }
 
   /**

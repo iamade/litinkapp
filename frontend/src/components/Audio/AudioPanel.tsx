@@ -226,6 +226,8 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         duration: file.duration,
         character: file.character,
         status: file.status,
+        text_content: file.text_content,  // Add text content for display
+        text_prompt: file.text_prompt,    // Add text prompt for display
       });
     });
     
@@ -1004,6 +1006,8 @@ const AudioFileCard: React.FC<{
     chapter_id?: string;
     shotType?: 'key_scene' | 'suggested_shot';
     shotIndex?: number;
+    text_content?: string;  // For display text
+    text_prompt?: string;   // Fallback display text
   };
   isSelected: boolean;
   maxShotIndex?: number; // Maximum suggested shot index for this scene
@@ -1034,7 +1038,7 @@ const AudioFileCard: React.FC<{
           />
           <div className="flex-1">
             <div className="flex items-center space-x-2">
-              <h5 className="font-medium text-gray-900">{file.name}</h5>
+              <h5 className="font-medium text-gray-900">{file.text_content || file.text_prompt || file.name}</h5>
               {isGenerating && (
                 <div className="flex items-center space-x-1 text-blue-600">
                   <Loader2 className="w-4 h-4 animate-spin" />

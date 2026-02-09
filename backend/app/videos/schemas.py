@@ -18,6 +18,7 @@ class VideoGenerationStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     RETRYING = "retrying"
+    RETRIEVAL_FAILED = "retrieval_failed"
 
 
 class VideoQualityTier(str, Enum):
@@ -37,9 +38,16 @@ class AudioType(str, Enum):
 
 
 class VideoGenerationRequest(BaseModel):
+    script_id: str  # Required: the script to use for video generation
     chapter_id: str
     quality_tier: VideoQualityTier = VideoQualityTier.FREE
     video_style: str = "realistic"
+    selected_shot_ids: Optional[List[str]] = (
+        None  # Optional: only generate for these specific shots
+    )
+    selected_audio_ids: Optional[List[str]] = (
+        None  # Optional: only use these specific audio files
+    )
 
 
 class VideoGenerationResponse(BaseModel):
@@ -100,7 +108,8 @@ class VideoGeneration(BaseModel):
     quality_tier: VideoQualityTier
     video_url: Optional[str] = None
     audio_task_id: Optional[str] = None
-    task_metadata: Optional[Dict[str, Any]] = None
+    task_meta: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
     # Add the data fields that are used in the code
     script_data: Optional[Dict[str, Any]] = None
     audio_files: Optional[Dict[str, Any]] = None

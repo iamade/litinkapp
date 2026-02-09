@@ -739,24 +739,19 @@ async def generate_entertainment_video(
 ):
     """Generate entertainment video using already saved script"""
     try:
+        script_id = request.script_id
         chapter_id = request.chapter_id
         quality_tier = request.quality_tier
         video_style = request.video_style
-        # Extract parameters from request body
-        # chapter_id = request.get('chapter_id')
-        # quality_tier = request.get('quality_tier', 'basic')
-        # video_style = request.get('video_style', 'realistic')  # This is for visual styling
 
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
+        if not script_id:
+            raise HTTPException(status_code=400, detail="script_id is required")
 
-        # Step 1: Get the most recent script for this chapter (regardless of style)
-        # Step 1: Get the most recent script for this chapter (regardless of style)
-        stmt = (
-            select(Script)
-            .where(Script.chapter_id == chapter_id, Script.user_id == current_user.id)
-            .order_by(col(Script.created_at).desc())
-            .limit(1)
+        # Step 1: Get the script by provided script_id
+        stmt = select(Script).where(
+            Script.id == script_id, Script.user_id == current_user.id
         )
         result = await session.exec(stmt)
         script_response = result.first()
@@ -764,15 +759,23 @@ async def generate_entertainment_video(
         if not script_response:
             raise HTTPException(
                 status_code=400,
-                detail="No script found for this chapter. Please generate script first using 'Generate Script & Scene'.",
+                detail="Script not found or you don't have access to it.",
             )
 
         script_data = script_response
 
         # Step 2: Create video generation record
+        selected_shot_ids = request.selected_shot_ids
         print(
-            f"[VIDEO GEN DEBUG] Creating video generation with chapter_id: {chapter_id}, script_id: {script_data['id']}, user_id: {current_user.id}"
+            f"[VIDEO GEN DEBUG] Creating video generation with chapter_id: {chapter_id}, script_id: {script_data.id}, user_id: {current_user.id}, shots: {selected_shot_ids}"
         )
+        # Build task_meta with shot and audio selections
+        task_meta = {}
+        if selected_shot_ids:
+            task_meta["selected_shot_ids"] = selected_shot_ids
+        if request.selected_audio_ids:
+            task_meta["selected_audio_ids"] = request.selected_audio_ids
+
         video_generation = VideoGeneration(
             chapter_id=chapter_id,
             script_id=script_data.id,
@@ -788,6 +791,7 @@ async def generate_entertainment_video(
                 "script_style": script_data.script_style,
                 "video_style": video_style,
             },
+            task_meta=task_meta if task_meta else None,
         )
         session.add(video_generation)
         await session.commit()
@@ -805,10 +809,21 @@ async def generate_entertainment_video(
             print(f"  generation_status: completed (using 'generation_status' column)")
 
             stmt = select(AudioGeneration).where(
-                AudioGeneration.chapter_id == chapter_id,
+                or_(
+                    AudioGeneration.chapter_id == chapter_id,
+                    AudioGeneration.script_id == script_data.id,
+                ),
                 AudioGeneration.user_id == current_user.id,
-                AudioGeneration.generation_status == "completed",
+                AudioGeneration.status == "completed",
             )
+
+            # Apply audio selection filter if provided
+            if request.selected_audio_ids and len(request.selected_audio_ids) > 0:
+                print(
+                    f"[AUDIO QUERY DEBUG] Filtering by {len(request.selected_audio_ids)} selected audio IDs"
+                )
+                stmt = stmt.where(AudioGeneration.id.in_(request.selected_audio_ids))
+
             result = await session.exec(stmt)
             audio_records = result.all()
 
@@ -816,10 +831,12 @@ async def generate_entertainment_video(
             if audio_records:
                 for idx, record in enumerate(audio_records):
                     print(
-                        f"[AUDIO QUERY DEBUG] Record {idx}: status={record.status}, generation_status={record.generation_status}"
+                        f"[AUDIO QUERY DEBUG] Record {idx}: status={record.status}, id={record.id}"
                     )
             else:
-                print("[AUDIO QUERY DEBUG] No records found.")
+                print(
+                    f"[AUDIO QUERY DEBUG] No records found. Checked chapter_id={chapter_id} and script_id={script_data.id}"
+                )
 
             existing_audio = []
             audio_by_type = {
@@ -837,12 +854,12 @@ async def generate_entertainment_video(
                         "id": str(audio_record.id),
                         "url": audio_record.audio_url,
                         "audio_url": audio_record.audio_url,
-                        "duration": audio_record.duration or 0,
+                        "duration": audio_record.duration_seconds or 0,
                         "file_name": audio_record.text_content or "",
                         "scene_number": audio_record.sequence_order or 0,
                         "character_name": (
-                            audio_record.metadata.get("character_name")
-                            if audio_record.metadata
+                            audio_record.audio_metadata.get("character_name")
+                            if audio_record.audio_metadata
                             else None
                         ),
                         "volume": 1.0,
@@ -895,6 +912,7 @@ async def generate_entertainment_video(
                 # Query image_generations table for images associated with this chapter
                 stmt = select(ImageGeneration).where(
                     ImageGeneration.user_id == current_user.id,
+                    ImageGeneration.chapter_id == chapter_id,
                     ImageGeneration.status == "completed",
                 )
                 result = await session.exec(stmt)
@@ -902,34 +920,27 @@ async def generate_entertainment_video(
 
                 if image_records:
                     for img in image_records:
-                        metadata = img.metadata or {}
-                        # Check if image is associated with this chapter
-                        if metadata.get("chapter_id") == chapter_id:
-                            image_type = metadata.get("image_type", "scene")
-                            image_data = {
-                                "id": str(img.id),
-                                "url": img.image_url,
-                                "image_url": img.image_url,
-                                "prompt": img.image_prompt or "",
-                                "created_at": (
-                                    img.created_at.isoformat()
-                                    if img.created_at
-                                    else None
-                                ),
-                            }
+                        image_type = img.image_type or "scene"
+                        image_data = {
+                            "id": str(img.id),
+                            "url": img.image_url,
+                            "image_url": img.image_url,
+                            "prompt": img.image_prompt or "",
+                            "created_at": (
+                                img.created_at.isoformat()
+                                if img.created_at
+                                else None
+                            ),
+                        }
 
-                            if image_type == "character":
-                                image_data["character_name"] = metadata.get(
-                                    "character_name", ""
-                                )
-                                image_by_type["character_images"].append(image_data)
-                            elif image_type == "scene":
-                                image_data["scene_number"] = metadata.get(
-                                    "scene_number", 0
-                                )
-                                image_by_type["scene_images"].append(image_data)
+                        if image_type == "character":
+                            image_data["character_name"] = img.character_name or ""
+                            image_by_type["character_images"].append(image_data)
+                        elif image_type == "scene":
+                            image_data["scene_number"] = img.scene_number or 0
+                            image_by_type["scene_images"].append(image_data)
 
-                            existing_images.append(image_data)
+                        existing_images.append(image_data)
 
                 print(f"📊 Found {len(existing_images)} pre-generated images")
 
@@ -948,7 +959,7 @@ async def generate_entertainment_video(
                         },
                     }
                     video_gen.generation_status = "images_completed"
-                    video_gen.task_metadata = {
+                    video_gen.task_meta = {
                         "audio_source": "pre_generated",
                         "image_source": "pre_generated",
                         "audio_files_count": len(existing_audio),
@@ -996,7 +1007,12 @@ async def generate_entertainment_video(
             video_gen = result.first()
             if video_gen:
                 video_gen.generation_status = "failed"
-                video_gen.error_message = f"Failed to start audio generation: {str(e)}"
+                # Store error in task_meta since VideoGeneration has no error_message field
+                current_meta = video_gen.task_meta or {}
+                current_meta["error_message"] = (
+                    f"Failed to start audio generation: {str(e)}"
+                )
+                video_gen.task_meta = current_meta
                 session.add(video_gen)
                 await session.commit()
 
@@ -1016,17 +1032,17 @@ async def generate_entertainment_video(
 
         return VideoGenerationResponse(
             video_generation_id=video_gen_id,
-            script_id=script_data["id"],
+            script_id=str(script_data.id),
             status=status,
             audio_task_id=audio_task_id,
             task_status=task_status,
             message=message,
             script_info={
-                "script_style": script_data["script_style"],
-                "video_style": video_style,  # ✅ Now this works
-                "scenes": len(script_data.get("scene_descriptions", [])),
-                "characters": len(script_data.get("characters", [])),
-                "created_at": script_data["created_at"],
+                "script_style": script_data.script_style,
+                "video_style": video_style,
+                "scenes": len(script_data.scene_descriptions or []),
+                "characters": len(script_data.characters or []),
+                "created_at": script_data.created_at.isoformat() if script_data.created_at else None,
             },
         )
 
@@ -4697,13 +4713,13 @@ async def get_celery_task_status(video_data: dict, session: AsyncSession) -> dic
         task_info = {"task_id": None, "task_state": None, "eta": None, "result": None}
 
         # Check for task IDs in metadata or direct fields
-        task_metadata = video_data.get("task_metadata", {})
-        audio_task_id = task_metadata.get("audio_task_id") or video_data.get(
+        task_meta = video_data.get("task_meta", {})
+        audio_task_id = task_meta.get("audio_task_id") or video_data.get(
             "audio_task_id"
         )
-        image_task_id = task_metadata.get("image_task_id")
-        video_task_id = task_metadata.get("video_task_id")
-        merge_task_id = task_metadata.get("merge_task_id")
+        image_task_id = task_meta.get("image_task_id")
+        video_task_id = task_meta.get("video_task_id")
+        merge_task_id = task_meta.get("merge_task_id")
 
         # Use the most relevant task ID based on current status
         current_status = video_data.get("generation_status", "pending")
@@ -4795,9 +4811,9 @@ async def retry_video_retrieval(
 
         # Get video URL from request or task data
         if not video_url:
-            # Try to get video URL from task metadata
-            task_metadata = task_data.get("task_metadata", {})
-            video_url = task_metadata.get("future_links_url") or task_metadata.get(
+            # Try to get video URL from task meta
+            task_meta_data = task_data.get("task_meta", {})
+            video_url = task_meta_data.get("future_links_url") or task_meta_data.get(
                 "video_url"
             )
 
@@ -4821,7 +4837,6 @@ async def retry_video_retrieval(
             # Update retry count and status
             new_retry_count = retry_count + 1
             task_response.retry_count = new_retry_count
-            task_response.last_retry_at = datetime.now()
             task_response.generation_status = (
                 "retrieval_failed" if new_retry_count < max_retries else "failed"
             )
@@ -4845,12 +4860,11 @@ async def retry_video_retrieval(
         task_response.generation_status = "completed"
         task_response.video_url = video_url
         task_response.retry_count = retry_count + 1
-        task_response.last_retry_at = datetime.now()
         task_response.error_message = None
         task_response.can_resume = False
 
         # Update metadata
-        metadata = task_data.get("task_metadata", {})
+        metadata = task_data.get("task_meta", {})
         metadata.update(
             {
                 "retry_success": True,

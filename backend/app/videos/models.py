@@ -21,6 +21,7 @@ class VideoGenerationStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     RETRYING = "retrying"
+    RETRIEVAL_FAILED = "retrieval_failed"
 
 
 class VideoQualityTier(str, Enum):
@@ -62,14 +63,14 @@ class VideoGeneration(SQLModel, table=True):
 
     generation_status: VideoGenerationStatus = Field(
         sa_column=Column(
-            pg.ENUM(VideoGenerationStatus, name="video_generation_status"),
+            pg.ENUM(VideoGenerationStatus, name="video_generation_status", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
             default=VideoGenerationStatus.PENDING,
         )
     )
     quality_tier: VideoQualityTier = Field(
         sa_column=Column(
-            pg.ENUM(VideoQualityTier, name="video_quality_tier"),
+            pg.ENUM(VideoQualityTier, name="video_quality_tier", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
             default=VideoQualityTier.FREE,
         )
@@ -80,6 +81,7 @@ class VideoGeneration(SQLModel, table=True):
 
     can_resume: bool = Field(default=False)
     retry_count: int = Field(default=0)
+    error_message: Optional[str] = Field(default=None)
 
     # JSON fields
     task_meta: Dict[str, Any] = Field(
@@ -170,7 +172,7 @@ class AudioGeneration(SQLModel, table=True):
     )
 
     audio_type: AudioType = Field(
-        sa_column=Column(pg.ENUM(AudioType, name="audio_type"), nullable=False)
+        sa_column=Column(pg.ENUM(AudioType, name="audio_type", values_callable=lambda e: [m.value for m in e]), nullable=False)
     )
 
     scene_id: Optional[str] = Field(default=None)

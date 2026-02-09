@@ -37,7 +37,10 @@ import { useScriptGeneration } from '../hooks/useScriptGeneration';
 import { useImageGeneration } from '../hooks/useImageGeneration';
 import { useAudioGeneration } from '../hooks/useAudioGeneration';
 import { useScriptSelection } from '../contexts/ScriptSelectionContext';
+import { useStoryboardOptional } from '../contexts/StoryboardContext';
 import { useAuth } from '../contexts/AuthContext';
+import { videoGenerationAPI } from '../lib/videoGenerationApi';
+import { useVideoGenerationStatus } from '../hooks/useVideoGenerationStatus';
 
 // Types
 interface ChapterArtifact {
@@ -169,6 +172,18 @@ const ProjectView: React.FC = () => {
   const [editedTitle, setEditedTitle] = useState("");
   const [viewChapter, setViewChapter] = useState<ChapterArtifact | null>(null);
 
+  // Video generation polling
+  const [generatingShotIds, setGeneratingShotIds] = useState<Set<string>>(new Set());
+  const {
+    startPolling,
+    stopPolling,
+    isComplete,
+    isFailed,
+    isGenerating: isVideoGenerating,
+    generation,
+    progress: generationProgress,
+  } = useVideoGenerationStatus();
+
   // Context hooks
   const { selectChapter, selectedScriptId } = useScriptSelection();
   const mountedRef = useRef(true);
@@ -177,6 +192,7 @@ const ProjectView: React.FC = () => {
   useEffect(() => {
     return () => {
       mountedRef.current = false;
+      stopPolling();
     };
   }, []);
 
@@ -408,13 +424,75 @@ const ProjectView: React.FC = () => {
   };
 
   // Handle video generation
-  const handleGenerateVideo = async () => {
+  const storyboardContext = useStoryboardOptional();
+  const handleGenerateVideo = async (selectedShotIds?: string[]) => {
     if (!selectedChapter) return;
+
+    // selectedScriptId is already available from useScriptSelection() hook at component level
+    if (!selectedScriptId) {
+      toast.error('Please select a script first');
+      return;
+    }
+
     updateProgress("video", "generating");
     setVideoStatus("starting");
-    // TODO: Integrate with video generation API
-    toast.success("Video generation started!");
+
+    // Track which shots are being generated
+    if (selectedShotIds && selectedShotIds.length > 0) {
+      setGeneratingShotIds(new Set(selectedShotIds));
+    } else {
+      setGeneratingShotIds(new Set(['__all__']));
+    }
+
+    // Get selected audio IDs from StoryboardContext
+    const selectedAudioIds = storyboardContext?.selectedAudioIds
+      ? Array.from(storyboardContext.selectedAudioIds)
+      : undefined;
+
+    try {
+      const response = await videoGenerationAPI.startVideoGeneration(
+        selectedScriptId,
+        selectedChapter.id,
+        'free',
+        selectedShotIds,
+        selectedAudioIds
+      );
+
+      if (response.video_generation_id) {
+        // Start polling for generation status
+        startPolling(response.video_generation_id);
+        setVideoStatus("processing");
+
+        const shotMsg = selectedShotIds?.length
+          ? `for ${selectedShotIds.length} selected shot${selectedShotIds.length > 1 ? 's' : ''}`
+          : 'for all shots';
+        toast.success(`Video generation started ${shotMsg}!`);
+      }
+    } catch (error) {
+      console.error('Failed to start video generation:', error);
+      toast.error('Failed to start video generation');
+      setVideoStatus("ready");
+      setGeneratingShotIds(new Set());
+      updateProgress("video", "ready");
+    }
   };
+
+  // React to video generation polling status changes
+  useEffect(() => {
+    if (isComplete) {
+      setVideoStatus("completed");
+      setGeneratingShotIds(new Set());
+      updateProgress("video", "completed");
+      toast.success('Video generation completed!');
+    } else if (isFailed) {
+      setVideoStatus("failed");
+      setGeneratingShotIds(new Set());
+      updateProgress("video", "error");
+      toast.error('Video generation failed. Please try again.');
+    } else if (isVideoGenerating) {
+      setVideoStatus("processing");
+    }
+  }, [isComplete, isFailed, isVideoGenerating]);
 
   // Render tab content
   const renderTabContent = () => {
@@ -556,6 +634,8 @@ const ProjectView: React.FC = () => {
             videoStatus={videoStatus}
             canGenerateVideo={!!selectedChapter && videoStatus !== "processing" && videoStatus !== "starting"}
             selectedScript={selectedScript}
+            generatingShotIds={generatingShotIds}
+            generationProgress={generationProgress}
           />
         );
 

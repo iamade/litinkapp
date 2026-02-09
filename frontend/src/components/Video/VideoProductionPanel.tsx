@@ -48,16 +48,29 @@ interface ChapterScript {
   status: 'draft' | 'ready' | 'approved';
 }
 
+interface GenerationProgress {
+  overall: number;
+  currentStep: string;
+  stepProgress: {
+    image_generation: { status: string; progress: number };
+    audio_generation: { status: string; progress: number };
+    video_generation: { status: string; progress: number };
+    audio_video_merge: { status: string; progress: number };
+  };
+}
+
 interface VideoProductionPanelProps {
   chapterId: string;
   chapterTitle: string;
   imageUrls?: string[];
   audioFiles?: string[];
-  onGenerateVideo?: () => void;
+  onGenerateVideo?: (selectedShotIds?: string[]) => void;
   videoStatus?: string | null;
   canGenerateVideo?: boolean;
   videoUrl?: string; // Final generated video URL from API response
   selectedScript?: ChapterScript | null; // Script data for synchronization
+  generatingShotIds?: Set<string>; // Shot IDs currently being generated
+  generationProgress?: GenerationProgress; // Progress data from polling
 }
 
 const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
@@ -69,7 +82,9 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   videoStatus,
   canGenerateVideo,
   videoUrl,
-  selectedScript
+  selectedScript,
+  generatingShotIds = new Set(),
+  generationProgress
 }) => {
   const {
     selectedScriptId,
@@ -194,6 +209,16 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'settings' | 'merge'>('timeline');
   const [selectedSceneIndex, setSelectedSceneIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
+
+  // Helper to toggle individual shot selection for per-shot video generation
+  const toggleShotSelection = (shotId: string) => {
+    setSelectedShotIds(prev => 
+      prev.includes(shotId) 
+        ? prev.filter(id => id !== shotId)
+        : [...prev, shotId]
+    );
+  };
 
   // Disable actions during switching or loading
   const controlsDisabled = isSwitching || isLoading;
@@ -253,19 +278,19 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center space-x-3">
-            <h3 className="text-xl font-semibold text-gray-900">
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
               Video Production Studio
             </h3>
             <div className="flex items-center space-x-2">
-              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+              <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
                 Active script: {selectedScriptId.substring(0, 8)}...
               </span>
               {isSwitching && (
-                <span className="text-xs text-gray-500">Switching script...</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">Switching script...</span>
               )}
             </div>
           </div>
-          <p className="text-gray-600">
+          <p className="text-gray-600 dark:text-gray-400">
             Create and edit your video for "{chapterTitle}"
           </p>
         </div>
@@ -289,32 +314,86 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
           </button>
         </div>
       </div>
-      {/* Generate Video Button */}
-      <div className="flex justify-end">
-        <button
-          onClick={onGenerateVideo}
-          disabled={controlsDisabled || !canGenerateVideo}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-        >
-          <Video className="w-4 h-4" />
-          <span>
-            {videoStatus === "processing" || videoStatus === "starting"
-              ? "Generating Video..."
-              : "Generate Video"}
-          </span>
-        </button>
+      {/* Video Generation Controls */}
+      <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg mb-4">
+        <div className="flex items-center justify-between">
+          {/* Selection Info */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              {selectedShotIds.length > 0 
+                ? `${selectedShotIds.length} shot${selectedShotIds.length > 1 ? 's' : ''} selected`
+                : 'Click checkboxes on shots to select for generation'}
+            </span>
+            {selectedShotIds.length > 0 && (
+              <button
+                onClick={() => setSelectedShotIds([])}
+                className="text-xs text-blue-500 hover:text-blue-700 underline"
+              >
+                Clear selection
+              </button>
+            )}
+          </div>
+          
+          {/* Generation Buttons */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => onGenerateVideo?.(selectedShotIds)}
+              disabled={controlsDisabled || !canGenerateVideo || selectedShotIds.length === 0}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              <Video className="w-4 h-4" />
+              <span>
+                {videoStatus === "processing" || videoStatus === "starting"
+                  ? "Generating..."
+                  : `Generate Selected (${selectedShotIds.length})`}
+              </span>
+            </button>
+            <button
+              onClick={() => onGenerateVideo?.()}
+              disabled={controlsDisabled || !canGenerateVideo}
+              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              <Video className="w-4 h-4" />
+              <span>
+                {videoStatus === "processing" || videoStatus === "starting"
+                  ? "Generating..."
+                  : "Generate All Videos"}
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
+      {/* Generation Progress */}
+      {generatingShotIds.size > 0 && generationProgress && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+              {generationProgress.currentStep || 'Starting generation...'}
+            </span>
+            <span className="text-sm text-blue-600 dark:text-blue-400">
+              {generationProgress.overall}%
+            </span>
+          </div>
+          <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2">
+            <div
+              className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+              style={{ width: `${generationProgress.overall}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* View Tabs */}
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="border-b">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
+        <div className="border-b dark:border-gray-700">
           <nav className="flex space-x-8 px-6" aria-label="Tabs">
             <button
               onClick={() => setActiveView('timeline')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeView === 'timeline'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
               <div className="flex items-center space-x-2">
@@ -326,8 +405,8 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               onClick={() => setActiveView('preview')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeView === 'preview'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
               <div className="flex items-center space-x-2">
@@ -339,8 +418,8 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               onClick={() => setActiveView('settings')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeView === 'settings'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
               <div className="flex items-center space-x-2">
@@ -352,8 +431,8 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               onClick={() => setActiveView('merge')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeView === 'merge'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
               <div className="flex items-center space-x-2">
@@ -382,6 +461,9 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               onReorder={reorderScenes}
               onAddTransition={addTransition}
               selectedScript={selectedScript}
+              selectedShotIds={selectedShotIds}
+              onToggleShotSelection={toggleShotSelection}
+              generatingShotIds={generatingShotIds}
             />
           )}
 

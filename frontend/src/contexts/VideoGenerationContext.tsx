@@ -29,7 +29,9 @@ interface VideoGenerationContextType {
   startGeneration: (
     scriptId: string,
     chapterId: string,
-    qualityTier: "free" | "premium" | "professional"
+    qualityTier: "free" | "premium" | "professional",
+    selectedShotIds?: string[],
+    selectedAudioIds?: string[]
   ) => Promise<string>;
   stopPolling: () => void;
   resetGeneration: () => void;
@@ -132,7 +134,9 @@ export const VideoGenerationProvider: React.FC<{
     async (
       scriptId: string,
       chapterId: string,
-      qualityTier: "free" | "premium" | "professional"
+      qualityTier: "free" | "premium" | "professional",
+      selectedShotIds?: string[],
+      selectedAudioIds?: string[]
     ): Promise<string> => {
       try {
         setState((prev) => ({ ...prev, error: null }));
@@ -140,7 +144,9 @@ export const VideoGenerationProvider: React.FC<{
         const response = await videoGenerationAPI.startVideoGeneration(
           scriptId,
           chapterId,
-          qualityTier
+          qualityTier,
+          selectedShotIds,
+          selectedAudioIds
         );
 
         setState((prev) => ({

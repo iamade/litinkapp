@@ -8,7 +8,7 @@ from sqlmodel import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.videos.models import VideoGeneration, VideoSegment
-from app.subscription.models import UserSubscription
+from app.subscriptions.models import UserSubscription
 from app.core.model_config import get_model_config, ModelConfig
 import json
 
@@ -607,11 +607,10 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             # Update status and initialize retry tracking
             update_query = text(
                 """
-                UPDATE video_generations 
-                SET generation_status = 'generating_video', 
-                    retry_count = 0, 
-                    can_resume = true, 
-                    last_retry_at = NULL 
+                UPDATE video_generations
+                SET generation_status = 'generating_video',
+                    retry_count = 0,
+                    can_resume = true
                 WHERE id = :id
             """
             )
@@ -655,16 +654,15 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             )
 
             # Query existing character images from database
-            character_images = await query_existing_character_images(
-                user_id, characters
+            # Query existing character images from database (skipped as per user request/optimization)
+            character_images = []
+            print(
+                f"- Character Images: {len(character_images)} found (database query skipped)"
             )
-            print(f"- Character Images: {len(character_images)} found in database")
 
-            # Query existing scene images from database
-            scene_images = await query_existing_scene_images(
-                user_id, scene_descriptions
-            )
-            print(f"- Scene Images: {len(scene_images)} found in database")
+            # Query existing scene images from database (skipped as per user request/optimization)
+            scene_images = []
+            print(f"- Scene Images: {len(scene_images)} found (database query skipped)")
 
             # For split workflow, prioritize scene images over character images
             if not image_data.get("scene_images"):
@@ -1265,8 +1263,8 @@ async def async_retry_video_retrieval_task(
 
             # Get video URL from parameter or task data
             if not video_url:
-                task_metadata = video_gen.get("task_metadata", {})
-                video_url = task_metadata.get("future_links_url") or task_metadata.get(
+                task_meta = video_gen.get("task_meta", {})
+                video_url = task_meta.get("future_links_url") or task_meta.get(
                     "video_url"
                 )
 
@@ -1291,12 +1289,11 @@ async def async_retry_video_retrieval_task(
 
                 update_query = text(
                     """
-                    UPDATE video_generations 
-                    SET retry_count = :retry_count, 
-                        last_retry_at = NOW(), 
-                        generation_status = :status, 
-                        error_message = :error_message, 
-                        can_resume = :can_resume 
+                    UPDATE video_generations
+                    SET retry_count = :retry_count,
+                        generation_status = :status,
+                        error_message = :error_message,
+                        can_resume = :can_resume
                     WHERE id = :id
                 """
                 )
@@ -1327,8 +1324,8 @@ async def async_retry_video_retrieval_task(
             video_url = retry_result.get("video_url")
             video_duration = retry_result.get("duration", 0)
 
-            task_metadata = video_gen.get("task_metadata", {})
-            task_metadata.update(
+            task_meta = video_gen.get("task_meta", {})
+            task_meta.update(
                 {
                     "retry_success": True,
                     "retry_video_url": video_url,
@@ -1339,14 +1336,13 @@ async def async_retry_video_retrieval_task(
 
             update_query = text(
                 """
-                UPDATE video_generations 
-                SET generation_status = 'completed', 
-                    video_url = :video_url, 
-                    retry_count = :retry_count, 
-                    last_retry_at = NOW(), 
-                    error_message = NULL, 
-                    can_resume = false, 
-                    task_metadata = :task_metadata 
+                UPDATE video_generations
+                SET generation_status = 'completed',
+                    video_url = :video_url,
+                    retry_count = :retry_count,
+                    error_message = NULL,
+                    can_resume = false,
+                    task_meta = :task_meta
                 WHERE id = :id
             """
             )
@@ -1356,7 +1352,7 @@ async def async_retry_video_retrieval_task(
                 {
                     "video_url": video_url,
                     "retry_count": retry_count + 1,
-                    "task_metadata": json.dumps(task_metadata),
+                    "task_meta": json.dumps(task_meta),
                     "id": video_generation_id,
                 },
             )
@@ -1483,9 +1479,9 @@ async def async_automatic_video_retry_task(video_generation_id: str):
             # Wait for exponential backoff
             await asyncio.sleep(actual_delay)
 
-            # Get video URL from task metadata
-            task_metadata = video_gen.get("task_metadata", {})
-            video_url = task_metadata.get("future_links_url") or task_metadata.get(
+            # Get video URL from task meta
+            task_meta_data = video_gen.get("task_meta", {})
+            video_url = task_meta_data.get("future_links_url") or task_meta_data.get(
                 "video_url"
             )
 
@@ -1514,12 +1510,11 @@ async def async_automatic_video_retry_task(video_generation_id: str):
 
                 update_query = text(
                     """
-                    UPDATE video_generations 
-                    SET retry_count = :retry_count, 
-                        last_retry_at = NOW(), 
-                        generation_status = :status, 
-                        error_message = :error_message, 
-                        can_resume = :can_resume 
+                    UPDATE video_generations
+                    SET retry_count = :retry_count,
+                        generation_status = :status,
+                        error_message = :error_message,
+                        can_resume = :can_resume
                     WHERE id = :id
                 """
                 )
@@ -1563,8 +1558,8 @@ async def async_automatic_video_retry_task(video_generation_id: str):
             video_url = retry_result.get("video_url")
             video_duration = retry_result.get("duration", 0)
 
-            task_metadata = video_gen.get("task_metadata", {})
-            task_metadata.update(
+            task_meta = video_gen.get("task_meta", {})
+            task_meta.update(
                 {
                     "retry_success": True,
                     "retry_video_url": video_url,
@@ -1575,14 +1570,13 @@ async def async_automatic_video_retry_task(video_generation_id: str):
 
             update_query = text(
                 """
-                UPDATE video_generations 
-                SET generation_status = 'completed', 
-                    video_url = :video_url, 
-                    retry_count = :retry_count, 
-                    last_retry_at = NOW(), 
-                    error_message = NULL, 
-                    can_resume = false, 
-                    task_metadata = :task_metadata 
+                UPDATE video_generations
+                SET generation_status = 'completed',
+                    video_url = :video_url,
+                    retry_count = :retry_count,
+                    error_message = NULL,
+                    can_resume = false,
+                    task_meta = :task_meta
                 WHERE id = :id
             """
             )
@@ -1592,7 +1586,7 @@ async def async_automatic_video_retry_task(video_generation_id: str):
                 {
                     "video_url": video_url,
                     "retry_count": retry_count + 1,
-                    "task_metadata": json.dumps(task_metadata),
+                    "task_meta": json.dumps(task_meta),
                     "id": video_generation_id,
                 },
             )
