@@ -514,12 +514,14 @@ export default function BookViewForEntertainment() {
             setTaskStatus(data.task_metadata.audio_task_state);
           }
 
-          // Handle completion
-          if (data.generation_status === "completed" && data.video_url && mountedRef.current) {
-            setVideoUrls((prev) => ({
-              ...prev,
-              [selectedChapter!.id]: data.video_url!,
-            }));
+          // Handle completion (video_completed or completed)
+          if (["completed", "video_completed"].includes(data.generation_status) && mountedRef.current) {
+            if (data.video_url) {
+              setVideoUrls((prev) => ({
+                ...prev,
+                [selectedChapter!.id]: data.video_url!,
+              }));
+            }
             updateProgress("video", "completed");
             toast.success("Video generation completed!");
             setShowPipelineStatus(false);
@@ -551,7 +553,6 @@ export default function BookViewForEntertainment() {
             "generating_images",
             "images_completed",
             "generating_video",
-            "video_completed",
             "combining",
             "merging_audio",
             "applying_lipsync",

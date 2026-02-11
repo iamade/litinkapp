@@ -42,6 +42,18 @@ class ModelsLabV7VideoService:
             "lipsync-hd": "lipsync-2",  # HD quality mapping
         }
 
+        # Max audio duration per model (seconds)
+        self.model_audio_limits = {
+            "wan2.5-i2v": 10,
+            "wan2.6-i2v": 15,
+            "omni-human": 28,
+            "omni-human-1.5": 12,
+        }
+
+    def get_max_audio_duration(self, model_id: str) -> Optional[float]:
+        """Return max audio duration in seconds for a model, or None if no limit."""
+        return self.model_audio_limits.get(model_id)
+
     async def generate_image_to_video(
         self,
         image_url: str,
@@ -143,6 +155,27 @@ class ModelsLabV7VideoService:
                             f"[MODELSLAB V7 VIDEO] Response status: {response.status}"
                         )
                         logger.info(f"[MODELSLAB V7 VIDEO] Response: {result}")
+
+                        # Check for audio duration error and retry without audio
+                        if (
+                            result.get("error")
+                            and "audio duration" in str(result.get("error", "")).lower()
+                        ):
+                            logger.warning(
+                                f"[MODELSLAB V7 VIDEO] Audio duration error: {result['error']}. "
+                                f"Retrying without init_audio for model {current_model_id}"
+                            )
+                            payload.pop("init_audio", None)
+                            async with session.post(
+                                self.image_to_video_endpoint,
+                                json=payload,
+                                headers=self.headers,
+                                timeout=aiohttp.ClientTimeout(total=120),
+                            ) as retry_response:
+                                result = await retry_response.json()
+                                logger.info(
+                                    f"[MODELSLAB V7 VIDEO] Retry response: {result}"
+                                )
 
                         # Check for specific veo2 error message
                         if result.get(

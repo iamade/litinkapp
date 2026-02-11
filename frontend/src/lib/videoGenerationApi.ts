@@ -479,6 +479,16 @@ class VideoGenerationAPI {
   }> {
     return apiClient.get(`/ai/chapter-video-generations/${chapterId}`);
   }
+
+  /**
+   * Delete a video generation and its associated data
+   */
+  async deleteGeneration(videoGenId: string): Promise<{
+    message: string;
+    video_generation_id: string;
+  }> {
+    return apiClient.delete(`/ai/video-generation/${videoGenId}`);
+  }
 }
 
 

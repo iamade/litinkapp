@@ -158,13 +158,15 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const toggleAudioSelection = useCallback((audioId: string) => {
     setSelectedAudioIds(prev => {
-      const next = new Set(prev);
-      if (next.has(audioId)) {
+      if (prev.has(audioId)) {
+        // Deselecting — remove it
+        const next = new Set(prev);
         next.delete(audioId);
+        return next;
       } else {
-        next.add(audioId);
+        // Selecting — replace any existing selection (max 1 audio allowed)
+        return new Set([audioId]);
       }
-      return next;
     });
   }, []);
 

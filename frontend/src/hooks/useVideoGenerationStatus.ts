@@ -30,12 +30,7 @@ export interface UseVideoGenerationStatusReturn {
   progress: {
     overall: number;
     currentStep: string;
-    stepProgress: {
-      image_generation: { status: string; progress: number };
-      audio_generation: { status: string; progress: number };
-      video_generation: { status: string; progress: number };
-      audio_video_merge: { status: string; progress: number };
-    };
+    stepProgress: Record<string, { status: string; progress: number }>;
     audio?: AudioProgress;
     images?: ImageProgress;
     video?: VideoProgress;
@@ -65,12 +60,11 @@ export const useVideoGenerationStatus = (
   const [isLoading, setIsLoading] = useState(true); // Start with loading state
   const [currentStep, setCurrentStep] = useState<string>('');
   const [stepProgress, setStepProgress] = useState({
-    image_generation: { status: 'pending', progress: 0 },
-    audio_generation: { status: 'pending', progress: 0 },
     video_generation: { status: 'pending', progress: 0 },
-    audio_video_merge: { status: 'pending', progress: 0 }
-  });
+  } as Record<string, { status: string; progress: number }>);
   const currentVideoGenId = useRef<string | null>(null);
+  const stepProgressRef = useRef(stepProgress);
+  stepProgressRef.current = stepProgress;
 
   // Calculate overall progress from step progress
   const calculateOverallProgress = (): number => {
@@ -97,19 +91,18 @@ export const useVideoGenerationStatus = (
       setIsLoading(true);
       setCurrentStep('');
       setStepProgress({
-        image_generation: { status: 'pending', progress: 0 },
-        audio_generation: { status: 'pending', progress: 0 },
         video_generation: { status: 'pending', progress: 0 },
-        audio_video_merge: { status: 'pending', progress: 0 }
       });
     }
   }, [videoGenId]);
 
   // Polling callbacks with proper structure
+  // Using refs in callbacks to avoid dependency on state that changes every poll,
+  // which would recreate the callback, cascade to startPolling recreation, and stop polling.
   const callbacks: PollingCallbacks = {
     onUpdate: useCallback((updatedGeneration: VideoGeneration) => {
       logDebug('Received generation update', updatedGeneration);
-      
+
       // Handle 204 No Content or null responses
       if (!updatedGeneration) {
         logDebug('Received null/undefined generation, setting data to null');
@@ -117,10 +110,7 @@ export const useVideoGenerationStatus = (
         setError(null);
         setIsLoading(false);
         setStepProgress({
-          image_generation: { status: "pending", progress: 0 },
-          audio_generation: { status: "pending", progress: 0 },
           video_generation: { status: "pending", progress: 0 },
-          audio_video_merge: { status: "pending", progress: 0 },
         });
         return;
       }
@@ -128,67 +118,40 @@ export const useVideoGenerationStatus = (
       setGeneration(updatedGeneration);
       setError(null);
       setIsLoading(false);
-      
+
       // Null-safe access to generation status
       const status = updatedGeneration?.generation_status ?? null;
       let newCurrentStep = '';
-      let newStepProgress = { ...stepProgress };
-      
+      let newStepProgress = { ...stepProgressRef.current };
+
       switch (status) {
         case 'generating_audio':
-          newCurrentStep = 'Audio Generation';
-          newStepProgress.audio_generation = { status: 'processing', progress: 50 };
-          break;
         case 'audio_completed':
-          newCurrentStep = 'Audio Generation';
-          newStepProgress.audio_generation = { status: 'completed', progress: 100 };
-          break;
         case 'generating_images':
-          newCurrentStep = 'Image Generation';
-          newStepProgress.image_generation = { status: 'processing', progress: 50 };
-          break;
         case 'images_completed':
-          newCurrentStep = 'Image Generation';
-          newStepProgress.image_generation = { status: 'completed', progress: 100 };
-          break;
         case 'generating_video':
           newCurrentStep = 'Video Generation';
           newStepProgress.video_generation = { status: 'processing', progress: 50 };
           break;
         case 'video_completed':
-          newCurrentStep = 'Video Generation';
-          newStepProgress.video_generation = { status: 'completed', progress: 100 };
-          break;
-        case 'merging_audio':
-          newCurrentStep = 'Audio/Video Merge';
-          newStepProgress.audio_video_merge = { status: 'processing', progress: 50 };
-          break;
-        case 'applying_lipsync':
-          newCurrentStep = 'Lip Sync';
-          newStepProgress.audio_video_merge = { status: 'completed', progress: 100 };
-          break;
         case 'completed':
           newCurrentStep = 'Complete';
           newStepProgress = {
-            image_generation: { status: 'completed', progress: 100 },
-            audio_generation: { status: 'completed', progress: 100 },
             video_generation: { status: 'completed', progress: 100 },
-            audio_video_merge: { status: 'completed', progress: 100 }
           };
           break;
         case 'failed':
         case 'lipsync_failed':
           newCurrentStep = 'Failed';
-          // Set all steps to failed
           Object.keys(newStepProgress).forEach(key => {
             newStepProgress[key as keyof typeof newStepProgress] = { status: 'failed', progress: 0 };
           });
           break;
       }
-      
+
       setCurrentStep(newCurrentStep);
       setStepProgress(newStepProgress);
-    }, [stepProgress]),
+    }, []),  // stable: uses refs instead of state
     
     onError: useCallback((pollingError: Error) => {
       logDebug('Polling error occurred', pollingError);
@@ -273,7 +236,7 @@ export const useVideoGenerationStatus = (
 
   // Derived state with null-safe guards
   const status = generation?.generation_status ?? null;
-  const isComplete = status ? ['completed', 'lipsync_completed'].includes(status) : false;
+  const isComplete = status ? ['completed', 'video_completed', 'lipsync_completed'].includes(status) : false;
   const isFailed = status ? ['failed', 'lipsync_failed'].includes(status) : false;
   const isGenerating = isPolling && !isComplete && !isFailed;
   const retryAttempts = currentVideoGenId.current

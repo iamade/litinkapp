@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Maximize2, Music } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Maximize2, Music, ChevronLeft, ChevronRight, Clock, Trash2, ChevronDown, AlertTriangle } from 'lucide-react';
 import { VideoScene } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import DeleteGenerationModal from './DeleteGenerationModal';
 
 
 interface SceneDescription {
@@ -32,6 +33,16 @@ interface ChapterScript {
   status: 'draft' | 'ready' | 'approved';
 }
 
+interface SceneVideo {
+  scene_id: string;
+  video_url: string;
+  source_image?: string;
+  duration?: number;
+  model?: string;
+  method?: string;
+  scene_sequence?: number;
+}
+
 interface VideoPreviewProps {
   scenes: VideoScene[];
   currentSceneIndex?: number;
@@ -39,11 +50,14 @@ interface VideoPreviewProps {
   onSceneChange?: (index: number) => void;
   onPlayPause?: () => void;
   videoUrl?: string; // Final generated video URL
+  videoGenerations?: any[]; // All generations for this chapter
   selectedScript?: ChapterScript | null; // Script data for synchronization
+  selectedScene?: VideoScene | null; // Currently selected scene for shot-level filtering
+  onDeleteGeneration?: (genId: string) => void; // Callback to delete a generation
 }
 
 const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
-  const { scenes, currentSceneIndex = 0, isPlaying, onSceneChange, onPlayPause, videoUrl, selectedScript } = props;
+  const { scenes, currentSceneIndex = 0, isPlaying, onSceneChange, onPlayPause, videoUrl, videoGenerations = [], selectedScript, selectedScene, onDeleteGeneration } = props;
 
   // Script selection context integration
   const {
@@ -69,9 +83,25 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   const [showControls, setShowControls] = useState(true);
   const [videoError, setVideoError] = useState(false);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [selectedGenIndex, setSelectedGenIndex] = useState(0);
+  const [selectedSceneVideoIndex, setSelectedSceneVideoIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
+  const sceneStripRef = useRef<HTMLDivElement>(null);
+
+  // Sync isPlaying prop with actual video element playback
+  useEffect(() => {
+    if (!videoRef.current) return;
+
+    if (isPlaying) {
+      videoRef.current.play().catch(() => {
+        // Browser may block autoplay - silently handle
+      });
+    } else {
+      videoRef.current.pause();
+    }
+  }, [isPlaying]);
 
   const currentScene = scenes && scenes[currentSceneIndex];
   const totalDuration = scenes ? scenes.reduce((sum, scene) => sum + scene.duration, 0) : 0;
@@ -219,20 +249,24 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
 
   // Only auto-change scenes based on time when video is actively playing
   // This prevents the scene from resetting to 0 on component mount
+  // Use a ref for currentSceneIndex to avoid re-triggering the effect when scene changes
+  const currentSceneIndexRef = useRef(currentSceneIndex);
+  currentSceneIndexRef.current = currentSceneIndex;
+
   useEffect(() => {
     if (!scenes || !isPlaying) return;
     // Calculate which scene should be showing based on current time
     let accumulatedTime = 0;
     for (let i = 0; i < scenes.length; i++) {
       if (currentTime < accumulatedTime + scenes[i].duration) {
-        if (i !== currentSceneIndex) {
+        if (i !== currentSceneIndexRef.current) {
           onSceneChange?.(i);
         }
         break;
       }
       accumulatedTime += scenes[i].duration;
     }
-  }, [currentTime, scenes, currentSceneIndex, onSceneChange, isPlaying]);
+  }, [currentTime, scenes, onSceneChange, isPlaying]);
 
   useEffect(() => {
     // Auto-hide controls after 3 seconds of inactivity
@@ -308,108 +342,403 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     setVideoError(false);
   }, [currentSceneIndex]);
 
-  // If videoUrl is provided, show the final generated video
-  if (videoUrl) {
-    return (
-      <div
-        className="relative bg-black rounded-lg overflow-hidden group"
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setShowControls(false)}
-      >
-        <div className="aspect-video relative">
-          <video
-            ref={videoRef}
-            src={videoUrl}
-            className="w-full h-full object-contain"
-            controls={false}
-            autoPlay={isPlaying}
-            muted={volume === 0}
-            onError={handleVideoError}
-            onLoadedData={handleVideoLoad}
-            onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-          />
-          
-          {/* Final Video Info Overlay */}
-          <div className="absolute top-4 left-4 bg-black/70 text-white px-3 py-1 rounded">
-            Final Generated Video
-          </div>
+  // --- Generation Carousel Logic ---
+  // Split generations into playable (≥1 valid clip) and failed (0 clips)
+  const { playableGenerations, failedGenerations } = useMemo(() => {
+    const playable: any[] = [];
+    const failed: any[] = [];
 
-          {/* Controls Overlay for Final Video */}
-          <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-opacity duration-300 ${
-            showControls ? 'opacity-100' : 'opacity-0'
-          }`}>
-            {/* Progress Bar */}
-            <div className="mb-4">
-              <input
-                type="range"
-                min="0"
-                max={videoRef.current?.duration || 0}
-                value={currentTime}
-                onChange={handleSeek}
-                className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer slider"
-                style={{
-                  background: `linear-gradient(to right, #3B82F6 0%, #3B82F6 ${(currentTime / (videoRef.current?.duration || 1)) * 100}%, #4B5563 ${(currentTime / (videoRef.current?.duration || 1)) * 100}%, #4B5563 100%)`
-                }}
-              />
-              <div className="flex justify-between text-xs text-gray-300 mt-1">
-                <span>{formatTime(currentTime)}</span>
-                <span>{formatTime(videoRef.current?.duration || 0)}</span>
+    for (const gen of videoGenerations) {
+      const clips = gen.video_data?.scene_videos || [];
+      const validClips = clips.filter((sv: any) => sv && sv.video_url);
+      // Playable if it has valid clips OR a top-level video URL (e.g. legacy/merged)
+      if (validClips.length > 0 || gen.video_url) {
+        playable.push(gen);
+      } else {
+        failed.push(gen);
+      }
+    }
+
+    return { playableGenerations: playable, failedGenerations: failed };
+  }, [videoGenerations]);
+
+  // When a specific scene is selected, further filter playable generations
+  // to only those containing clips for that scene
+  const filteredGenerations = useMemo(() => {
+    if (!selectedScene) return playableGenerations;
+
+    return playableGenerations.filter((gen: any) => {
+      const clips = gen.video_data?.scene_videos || [];
+      return clips.some((sv: any) => {
+        if (!sv) return false;
+        // Match by source_image URL (exact or filename match)
+        if (selectedScene.imageUrl && sv.source_image) {
+          if (sv.source_image === selectedScene.imageUrl) return true;
+          // Also try matching just the filename part for URL variations
+          const selectedFilename = selectedScene.imageUrl.split('/').pop()?.split('?')[0];
+          const svFilename = sv.source_image.split('/').pop()?.split('?')[0];
+          if (selectedFilename && svFilename && selectedFilename === svFilename) return true;
+        }
+        // Match by scene_id (e.g. "scene_1" matches sceneNumber 1)
+        if (sv.scene_id === `scene_${selectedScene.sceneNumber}`) return true;
+        // Match by scene_sequence matching sceneNumber
+        if (sv.scene_sequence === selectedScene.sceneNumber) return true;
+        return false;
+      });
+    });
+  }, [playableGenerations, selectedScene]);
+
+  // Extract scene videos from selected generation
+  const hasGenerations = filteredGenerations.length > 0;
+  const hasAnyGenerations = playableGenerations.length > 0;
+  const selectedGen = hasGenerations ? filteredGenerations[selectedGenIndex] || filteredGenerations[0] : null;
+  const sceneVideos: SceneVideo[] = selectedGen?.video_data?.scene_videos || [];
+  const activeVideoUrl = sceneVideos[selectedSceneVideoIndex]?.video_url || selectedGen?.video_url || videoUrl;
+
+  // State for collapsed failed generations section
+  const [showFailed, setShowFailed] = useState(false);
+  // State for delete confirmation modal
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [genIdToDelete, setGenIdToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteClick = useCallback((genId: string) => {
+    setGenIdToDelete(genId);
+    setDeleteModalOpen(true);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!genIdToDelete || !onDeleteGeneration) return;
+    setIsDeleting(true);
+    try {
+      await onDeleteGeneration(genIdToDelete);
+      setDeleteModalOpen(false);
+      setGenIdToDelete(null);
+    } catch (e) {
+      console.error('Delete failed:', e);
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [genIdToDelete, onDeleteGeneration]);
+
+  // Reset selectedGenIndex when filtered list changes
+  useEffect(() => {
+    setSelectedGenIndex(0);
+  }, [filteredGenerations.length]);
+
+  // Reset scene video index when generation changes
+  useEffect(() => {
+    setSelectedSceneVideoIndex(0);
+    setVideoError(false);
+  }, [selectedGenIndex]);
+
+  // Failed-generations section (always rendered if there are failed gens)
+  const failedGenerationsSection = failedGenerations.length > 0 ? (
+    <div className="bg-gray-800/50 rounded-lg border border-gray-700">
+      <button
+        onClick={() => setShowFailed(!showFailed)}
+        className="w-full flex items-center justify-between px-4 py-2 text-sm text-gray-400 hover:text-gray-300 transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+          {failedGenerations.length} failed generation{failedGenerations.length !== 1 ? 's' : ''}
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${showFailed ? 'rotate-180' : ''}`} />
+      </button>
+      {showFailed && (
+        <div className="px-4 pb-3 space-y-2">
+          {failedGenerations.map((gen: any) => {
+            const date = gen.created_at ? new Date(gen.created_at).toLocaleString() : 'Unknown date';
+            const errorMsg = gen.error_message || gen.task_meta?.error_message || 'Generation produced 0 clips';
+            return (
+              <div key={gen.id} className="flex items-center justify-between bg-gray-900/60 rounded px-3 py-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-400 truncate">{date}</p>
+                  <p className="text-[11px] text-red-400/80 truncate">{typeof errorMsg === 'string' ? errorMsg.slice(0, 100) : '0 clips'}</p>
+                </div>
+                <button
+                  onClick={() => handleDeleteClick(gen.id)}
+                  disabled={isDeleting && genIdToDelete === gen.id}
+                  className="ml-3 shrink-0 p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+                  title="Delete this failed generation"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  // Delete confirmation modal (always rendered)
+  const deleteModal = (
+    <DeleteGenerationModal
+      isOpen={deleteModalOpen}
+      onClose={() => {
+        setDeleteModalOpen(false);
+        setGenIdToDelete(null);
+      }}
+      onConfirm={handleConfirmDelete}
+      isDeleting={isDeleting}
+    />
+  );
+
+  // If we have matching generations for the selected shot, show the player
+  // If there are generations but none match the current shot, show empty state
+  if (hasAnyGenerations && !hasGenerations && selectedScene) {
+    // Generations exist but none match this specific shot
+    return (
+      <div className="space-y-4">
+        <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
+          <div className="text-center">
+            <Play className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+            <p className="text-gray-400 text-sm">No video generated for this shot yet</p>
+            <p className="text-gray-500 text-xs mt-1">Generate a video for this shot from the Timeline view</p>
+          </div>
+        </div>
+        {failedGenerationsSection}
+        {deleteModal}
+      </div>
+    );
+  }
+
+  if (hasGenerations || videoUrl) {
+    return (
+      <div className="space-y-4">
+        {/* Generation Picker (only if multiple playable generations) */}
+        {filteredGenerations.length > 1 && (
+          <div className="flex items-center gap-3 bg-gray-800 rounded-lg px-4 py-2">
+            <Clock className="w-4 h-4 text-gray-400 shrink-0" />
+            <select
+              value={selectedGenIndex}
+              onChange={(e) => setSelectedGenIndex(Number(e.target.value))}
+              className="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 focus:border-blue-500 focus:outline-none flex-1"
+            >
+              {filteredGenerations.map((gen: any, i: number) => {
+                const date = gen.created_at ? new Date(gen.created_at).toLocaleString() : 'Unknown date';
+                const status = gen.generation_status || 'unknown';
+                const videoCount = gen.video_data?.scene_videos?.filter((sv: any) => sv && sv.video_url).length || 0;
+                return (
+                  <option key={gen.id || i} value={i}>
+                    Generation {filteredGenerations.length - i} — {date} ({status}) — {videoCount} clip{videoCount !== 1 ? 's' : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        )}
+
+        {/* Failed Generations Section */}
+        {failedGenerationsSection}
+
+        {/* Main Video Player */}
+        <div
+          className="relative bg-black rounded-lg overflow-hidden group"
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setShowControls(false)}
+        >
+          <div className="aspect-video relative">
+            {activeVideoUrl ? (
+              <video
+                ref={videoRef}
+                key={activeVideoUrl}
+                src={activeVideoUrl}
+                className="w-full h-full object-contain"
+                controls={false}
+                muted={volume === 0}
+                onError={handleVideoError}
+                onLoadedData={handleVideoLoad}
+                onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <p className="text-gray-400">No video available for this generation</p>
+              </div>
+            )}
+            
+            {/* Info Overlay */}
+            <div className="absolute top-4 left-4 bg-black/70 text-white px-3 py-1 rounded text-sm">
+              {sceneVideos.length > 0
+                ? `Scene ${sceneVideos[selectedSceneVideoIndex]?.scene_sequence || selectedSceneVideoIndex + 1} of ${sceneVideos.length}`
+                : 'Generated Video'}
             </div>
 
-            {/* Control Buttons */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                {/* Play/Pause */}
-                <button
-                  onClick={onPlayPause || (() => {})}
-                  className="text-white hover:text-blue-400 transition-colors"
-                >
-                  {isPlaying ? (
-                    <Pause className="w-8 h-8" />
-                  ) : (
-                    <Play className="w-8 h-8" />
-                  )}
-                </button>
-
-                {/* Volume */}
-                <div className="flex items-center space-x-2">
-                  <Volume2 className="w-5 h-5 text-white" />
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={volume}
-                    onChange={handleVolumeChange}
-                    className="w-20 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-                    style={{
-                      background: `linear-gradient(to right, #3B82F6 0%, #3B82F6 ${volume * 100}%, #4B5563 ${volume * 100}%, #4B5563 100%)`
-                    }}
-                  />
+            {/* Controls Overlay */}
+            <div className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-4 transition-opacity duration-300 ${
+              showControls ? 'opacity-100' : 'opacity-0'
+            }`}>
+              {/* Progress Bar */}
+              <div className="mb-4">
+                <input
+                  type="range"
+                  min="0"
+                  max={videoRef.current?.duration || 0}
+                  value={currentTime}
+                  onChange={(e) => {
+                    const t = parseFloat(e.target.value);
+                    setCurrentTime(t);
+                    if (videoRef.current) videoRef.current.currentTime = t;
+                  }}
+                  className="w-full h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, #3B82F6 0%, #3B82F6 ${(currentTime / (videoRef.current?.duration || 1)) * 100}%, #4B5563 ${(currentTime / (videoRef.current?.duration || 1)) * 100}%, #4B5563 100%)`
+                  }}
+                />
+                <div className="flex justify-between text-xs text-gray-300 mt-1">
+                  <span>{formatTime(currentTime)}</span>
+                  <span>{formatTime(videoRef.current?.duration || 0)}</span>
                 </div>
               </div>
 
-              {/* Fullscreen */}
+              {/* Control Buttons */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  {/* Prev scene video */}
+                  {sceneVideos.length > 1 && (
+                    <button
+                      onClick={() => setSelectedSceneVideoIndex(Math.max(0, selectedSceneVideoIndex - 1))}
+                      disabled={selectedSceneVideoIndex === 0}
+                      className="text-white hover:text-blue-400 transition-colors disabled:text-gray-600"
+                    >
+                      <SkipBack className="w-5 h-5" />
+                    </button>
+                  )}
+                  {/* Play/Pause */}
+                  <button
+                    onClick={onPlayPause || (() => {})}
+                    className="text-white hover:text-blue-400 transition-colors"
+                  >
+                    {isPlaying ? <Pause className="w-8 h-8" /> : <Play className="w-8 h-8" />}
+                  </button>
+                  {/* Next scene video */}
+                  {sceneVideos.length > 1 && (
+                    <button
+                      onClick={() => setSelectedSceneVideoIndex(Math.min(sceneVideos.length - 1, selectedSceneVideoIndex + 1))}
+                      disabled={selectedSceneVideoIndex === sceneVideos.length - 1}
+                      className="text-white hover:text-blue-400 transition-colors disabled:text-gray-600"
+                    >
+                      <SkipForward className="w-5 h-5" />
+                    </button>
+                  )}
+                  {/* Volume */}
+                  <div className="flex items-center space-x-2">
+                    <Volume2 className="w-5 h-5 text-white" />
+                    <input
+                      type="range" min="0" max="1" step="0.1"
+                      value={volume}
+                      onChange={handleVolumeChange}
+                      className="w-20 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+                      style={{
+                        background: `linear-gradient(to right, #3B82F6 0%, #3B82F6 ${volume * 100}%, #4B5563 ${volume * 100}%, #4B5563 100%)`
+                      }}
+                    />
+                  </div>
+                </div>
+                <button onClick={handleFullscreen} className="text-white hover:text-blue-400 transition-colors">
+                  <Maximize2 className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Video error indicator */}
+          {videoError && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+              <div className="text-center text-white">
+                <p className="text-lg font-semibold mb-2">Video Failed to Load</p>
+                <p className="text-sm text-gray-300 mb-3">Unable to load this video clip</p>
+                <button
+                  onClick={() => { setVideoError(false); }}
+                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-sm rounded transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Scene Video Card Strip */}
+        {sceneVideos.length > 1 && (
+          <div className="relative">
+            <div className="flex items-center gap-2">
               <button
-                onClick={handleFullscreen}
-                className="text-white hover:text-blue-400 transition-colors"
+                onClick={() => sceneStripRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
+                className="shrink-0 w-8 h-8 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center text-white transition-colors"
               >
-                <Maximize2 className="w-6 h-6" />
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div
+                ref={sceneStripRef}
+                className="flex gap-3 overflow-x-auto py-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent"
+                style={{ scrollbarWidth: 'thin' }}
+              >
+                {sceneVideos.map((sv, i) => (
+                  <button
+                    key={sv.video_url + i}
+                    onClick={() => { setSelectedSceneVideoIndex(i); setVideoError(false); }}
+                    className={`shrink-0 w-40 rounded-lg overflow-hidden border-2 transition-all ${
+                      i === selectedSceneVideoIndex
+                        ? 'border-blue-500 ring-2 ring-blue-500/30'
+                        : 'border-gray-700 hover:border-gray-500'
+                    }`}
+                  >
+                    {/* Thumbnail — use source_image if available, else show a placeholder */}
+                    <div className="aspect-video bg-gray-800 relative">
+                      {sv.source_image ? (
+                        <img src={sv.source_image} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Play className="w-6 h-6 text-gray-500" />
+                        </div>
+                      )}
+                      {/* Duration badge */}
+                      {sv.duration && (
+                        <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded">
+                          {sv.duration}s
+                        </span>
+                      )}
+                      {/* Active indicator */}
+                      {i === selectedSceneVideoIndex && (
+                        <div className="absolute inset-0 bg-blue-500/20 flex items-center justify-center">
+                          <Play className="w-5 h-5 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="px-2 py-1.5 bg-gray-800">
+                      <p className="text-xs text-gray-300 truncate">Scene {sv.scene_sequence || i + 1}</p>
+                      {sv.model && <p className="text-[10px] text-gray-500 truncate">{sv.model}</p>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => sceneStripRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
+                className="shrink-0 w-8 h-8 bg-gray-700 hover:bg-gray-600 rounded-full flex items-center justify-center text-white transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Video error indicator */}
-        {videoError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-            <div className="text-center text-white">
-              <p className="text-lg font-semibold mb-2">Video Failed to Load</p>
-              <p className="text-sm text-gray-300">Unable to load final video</p>
-            </div>
+        {/* Generation info footer */}
+        {selectedGen && (
+          <div className="flex items-center justify-between text-xs text-gray-500 px-1">
+            <span>
+              Status: <span className={selectedGen.generation_status === 'completed' ? 'text-green-400' : selectedGen.generation_status === 'failed' ? 'text-red-400' : 'text-yellow-400'}>
+                {selectedGen.generation_status}
+              </span>
+              {selectedGen.error_message && (
+                <span className="ml-2 text-red-400">— {typeof selectedGen.error_message === 'string' ? selectedGen.error_message.slice(0, 80) : ''}</span>
+              )}
+            </span>
+            <span>{sceneVideos.length} scene clip{sceneVideos.length !== 1 ? 's' : ''}</span>
           </div>
         )}
+        {deleteModal}
       </div>
     );
   }

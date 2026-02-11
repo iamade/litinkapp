@@ -68,9 +68,11 @@ interface VideoProductionPanelProps {
   videoStatus?: string | null;
   canGenerateVideo?: boolean;
   videoUrl?: string; // Final generated video URL from API response
+  videoGenerations?: any[]; // All generations for this chapter
   selectedScript?: ChapterScript | null; // Script data for synchronization
   generatingShotIds?: Set<string>; // Shot IDs currently being generated
   generationProgress?: GenerationProgress; // Progress data from polling
+  onDeleteGeneration?: (genId: string) => void; // Callback to delete a failed generation
 }
 
 const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
@@ -82,9 +84,11 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   videoStatus,
   canGenerateVideo,
   videoUrl,
+  videoGenerations = [],
   selectedScript,
   generatingShotIds = new Set(),
-  generationProgress
+  generationProgress,
+  onDeleteGeneration
 }) => {
   const {
     selectedScriptId,
@@ -475,7 +479,10 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               onPlayPause={() => setIsPlaying(!isPlaying)}
               onSceneChange={(index) => setSelectedSceneIndex(index)}
               videoUrl={videoUrl}
+              videoGenerations={videoGenerations}
               selectedScript={selectedScript}
+              selectedScene={scenes[selectedSceneIndex] || null}
+              onDeleteGeneration={onDeleteGeneration}
             />
           )}
 

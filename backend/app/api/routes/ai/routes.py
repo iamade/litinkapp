@@ -849,74 +849,91 @@ async def generate_entertainment_video(
             if audio_records:
                 for audio_record in audio_records:
                     audio_type = audio_record.audio_type or "narrator"
-                    # Map database fields to expected format
+                    scene_number = audio_record.sequence_order or 0
+                    # Map database fields to format expected by find_scene_audio
+                    # find_scene_audio checks: audio.get("scene") and audio.get("audio_url")
                     audio_data = {
                         "id": str(audio_record.id),
                         "url": audio_record.audio_url,
                         "audio_url": audio_record.audio_url,
                         "duration": audio_record.duration_seconds or 0,
                         "file_name": audio_record.text_content or "",
-                        "scene_number": audio_record.sequence_order or 0,
+                        "scene_number": scene_number,
+                        "scene": scene_number,
                         "character_name": (
                             audio_record.audio_metadata.get("character_name")
                             if audio_record.audio_metadata
                             else None
                         ),
                         "volume": 1.0,
+                        "audio_type": audio_type,
                     }
 
-                    # Categorize by type
+                    # Categorize by type (match AudioType enum values: narrator, character, sound_effects, background_music)
                     if audio_type == "narrator":
                         audio_by_type["narrator"].append(audio_data)
                     elif audio_type == "character":
                         audio_by_type["characters"].append(audio_data)
-                    elif audio_type in ["sfx", "sound_effect"]:
+                    elif audio_type in ["sfx", "sound_effect", "sound_effects"]:
                         audio_by_type["sound_effects"].append(audio_data)
-                    elif audio_type == "music":
+                    elif audio_type in ["music", "background_music"]:
                         audio_by_type["background_music"].append(audio_data)
 
                     existing_audio.append(audio_data)
 
             print(f"📊 Found {len(existing_audio)} pre-generated audio files")
+            for atype, aitems in audio_by_type.items():
+                if aitems:
+                    print(
+                        f"  [{atype}] {len(aitems)} files, scenes: {[a.get('scene') for a in aitems]}"
+                    )
 
             if existing_audio:
                 # Use pre-generated audio - skip audio generation
                 print(f"✅ Using pre-generated audio, skipping audio generation step")
-
-                # Organize audio by type for storage
-                audio_by_type = {
-                    "narrator": [],
-                    "characters": [],
-                    "sound_effects": [],
-                    "background_music": [],
-                }
-
-                for audio_file in existing_audio:
-                    audio_type = audio_file.get("audio_type", "narrator")
-                    audio_by_type[audio_type].append(
-                        {
-                            "id": audio_file["id"],
-                            "url": audio_file["audio_url"],
-                            "duration": audio_file.get("duration", 0),
-                            "name": audio_file.get("file_name", ""),
-                            "scene_number": audio_file.get("scene_number", 0),
-                            "character": audio_file.get("character_name"),
-                            "volume": audio_file.get("volume", 1.0),
-                        }
-                    )
 
                 # Check for pre-generated images from image_generations table
                 existing_images = []
                 image_by_type = {"character_images": [], "scene_images": []}
 
                 # Query image_generations table for images associated with this chapter
-                stmt = select(ImageGeneration).where(
+                # Query image_generations table for images associated with this chapter
+                img_stmt = select(ImageGeneration).where(
                     ImageGeneration.user_id == current_user.id,
                     ImageGeneration.chapter_id == chapter_id,
                     ImageGeneration.status == "completed",
                 )
-                result = await session.exec(stmt)
+
+                # REDUNDANT FILTERING REMOVED:
+                # We pass all chapter images to the video task and let video_tasks.py handle the selection/mapping.
+                # This prevents issues where strict filtering in routes.py excludes images due to scene_number mismatches (e.g. 0 vs 1 based),
+                # leaving the task with no images to fallback on.
+
+                # Debug logging regarding selections (optional, can be kept for visibility)
+                if selected_shot_ids and len(selected_shot_ids) > 0:
+                    print(
+                        f"[IMAGE QUERY] Passing all images to task, letting task filter by selected_shot_ids: {selected_shot_ids}"
+                    )
+
+                result = await session.exec(img_stmt)
                 image_records = result.all()
+                print(
+                    f"[IMAGE QUERY] Found {len(image_records)} images for chapter_id={chapter_id}"
+                )
+
+                # Fallback: if 0 images found by chapter_id, try script_id
+                if not image_records and script_id:
+                    fallback_stmt = select(ImageGeneration).where(
+                        ImageGeneration.user_id == current_user.id,
+                        ImageGeneration.script_id == script_id,
+                        ImageGeneration.status == "completed",
+                        ImageGeneration.image_type == "scene",
+                    )
+                    fallback_result = await session.exec(fallback_stmt)
+                    image_records = fallback_result.all()
+                    print(
+                        f"[IMAGE QUERY FALLBACK] Found {len(image_records)} images by script_id={script_id}"
+                    )
 
                 if image_records:
                     for img in image_records:
@@ -927,9 +944,7 @@ async def generate_entertainment_video(
                             "image_url": img.image_url,
                             "prompt": img.image_prompt or "",
                             "created_at": (
-                                img.created_at.isoformat()
-                                if img.created_at
-                                else None
+                                img.created_at.isoformat() if img.created_at else None
                             ),
                         }
 
@@ -959,13 +974,21 @@ async def generate_entertainment_video(
                         },
                     }
                     video_gen.generation_status = "images_completed"
-                    video_gen.task_meta = {
-                        "audio_source": "pre_generated",
-                        "image_source": "pre_generated",
-                        "audio_files_count": len(existing_audio),
-                        "image_files_count": len(existing_images),
-                        "started_at": datetime.now().isoformat(),
-                    }
+                    # Merge into existing task_meta to preserve selected_shot_ids and selected_audio_ids
+                    existing_meta = video_gen.task_meta or {}
+                    existing_meta.update(
+                        {
+                            "audio_source": "pre_generated",
+                            "image_source": "pre_generated",
+                            "audio_files_count": len(existing_audio),
+                            "image_files_count": len(existing_images),
+                            "started_at": datetime.now().isoformat(),
+                        }
+                    )
+                    video_gen.task_meta = existing_meta
+                    print(
+                        f"[VIDEO GEN DEBUG] task_meta preserved: {list(existing_meta.keys())}"
+                    )
                     session.add(video_gen)
                     await session.commit()
 
@@ -1023,7 +1046,7 @@ async def generate_entertainment_video(
             audio_task_id = task.id
             task_status = task.state
             status = "queued"
-            message = "Video generation started using saved script"
+            message = "Video generation started using pre-generated audio and images"
         else:
             audio_task_id = None
             task_status = "completed"
@@ -1040,9 +1063,20 @@ async def generate_entertainment_video(
             script_info={
                 "script_style": script_data.script_style,
                 "video_style": video_style,
-                "scenes": len(script_data.scene_descriptions or []),
-                "characters": len(script_data.characters or []),
-                "created_at": script_data.created_at.isoformat() if script_data.created_at else None,
+                "selected_scenes": (
+                    len(selected_shot_ids)
+                    if selected_shot_ids
+                    else len(script_data.scene_descriptions or [])
+                ),
+                "selected_audio": (
+                    len(request.selected_audio_ids) if request.selected_audio_ids else 0
+                ),
+                "total_images": len(existing_images),
+                "created_at": (
+                    script_data.created_at.isoformat()
+                    if script_data.created_at
+                    else None
+                ),
             },
         )
 
@@ -1295,6 +1329,76 @@ async def get_chapter_video_generations(
         import traceback
 
         print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/video-generation/{video_gen_id}")
+async def delete_video_generation(
+    video_gen_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Delete a video generation and its associated video segments"""
+    try:
+        # Verify ownership
+        stmt = select(VideoGeneration).where(
+            VideoGeneration.id == video_gen_id,
+            VideoGeneration.user_id == current_user.id,
+        )
+        result = await session.exec(stmt)
+        video_gen = result.first()
+
+        if not video_gen:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+
+        # Unlink audio records — audio is an independent asset, not owned by video generation
+        # Without this, the cascade="all, delete-orphan" on the relationship would delete audio files
+        unlink_audio_stmt = (
+            update(AudioGeneration)
+            .where(AudioGeneration.video_generation_id == uuid.UUID(video_gen_id))
+            .values(video_generation_id=None)
+        )
+        await session.exec(unlink_audio_stmt)
+
+        # Unlink image records — images are also independent assets
+        unlink_image_stmt = (
+            update(ImageGeneration)
+            .where(ImageGeneration.video_generation_id == uuid.UUID(video_gen_id))
+            .values(video_generation_id=None)
+        )
+        await session.exec(unlink_image_stmt)
+
+        # Delete associated video segments first
+        segment_stmt = delete(VideoSegment).where(
+            VideoSegment.video_generation_id == video_gen_id
+        )
+        await session.exec(segment_stmt)
+
+        # Delete associated pipeline steps
+        pipeline_stmt = delete(PipelineStepModel).where(
+            PipelineStepModel.video_generation_id == video_gen_id
+        )
+        await session.exec(pipeline_stmt)
+
+        # Expire the video_gen object to clear cached relationships
+        # This prevents SQLAlchemy from trying to cascade-delete the now-unlinked records
+        await session.refresh(video_gen)
+
+        # Delete the video generation record
+        await session.delete(video_gen)
+        await session.commit()
+
+        print(f"🗑️ Deleted video generation {video_gen_id} (audio/images preserved)")
+
+        return {
+            "message": "Video generation deleted successfully",
+            "video_generation_id": video_gen_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ ERROR deleting video generation {video_gen_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -4624,10 +4728,10 @@ async def get_video_generation_polling_status(
         result = await session.exec(stmt)
         pipeline_steps = [step.model_dump() for step in result.all()]
 
-        # Initialize step progress tracking
+        # Initialize step progress tracking — split workflow uses pre-generated images/audio
         step_progress = {
-            "image_generation": {"status": "pending", "progress": 0},
-            "audio_generation": {"status": "pending", "progress": 0},
+            "image_generation": {"status": "completed", "progress": 100},
+            "audio_generation": {"status": "completed", "progress": 100},
             "video_generation": {"status": "pending", "progress": 0},
             "audio_video_merge": {"status": "pending", "progress": 0},
         }
@@ -4637,41 +4741,40 @@ async def get_video_generation_polling_status(
             step_name = step.get("step_name", "").lower()
             step_status = step.get("status", "pending")
 
-            if "image" in step_name:
-                step_progress["image_generation"]["status"] = step_status
-                step_progress["image_generation"]["progress"] = (
-                    100 if step_status == "completed" else 50
-                )
-            elif "audio" in step_name:
-                step_progress["audio_generation"]["status"] = step_status
-                step_progress["audio_generation"]["progress"] = (
-                    100 if step_status == "completed" else 50
-                )
-            elif "video" in step_name and "merge" not in step_name:
+            if "video" in step_name:
                 step_progress["video_generation"]["status"] = step_status
                 step_progress["video_generation"]["progress"] = (
-                    100 if step_status == "completed" else 50
-                )
-            elif "merge" in step_name:
-                step_progress["audio_video_merge"]["status"] = step_status
-                step_progress["audio_video_merge"]["progress"] = (
                     100 if step_status == "completed" else 50
                 )
 
         # Determine current step based on overall status
         current_step = "pending"
-        if overall_status == "generating_audio":
-            current_step = "audio_generation"
-        elif overall_status == "generating_images":
-            current_step = "image_generation"
-        elif overall_status == "generating_video":
+        if overall_status in (
+            "generating_audio",
+            "audio_completed",
+            "generating_images",
+            "images_completed",
+            "generating_video",
+        ):
             current_step = "video_generation"
-        elif overall_status == "merging_audio":
-            current_step = "audio_video_merge"
-        elif overall_status == "completed":
+            # Force status to processing for split workflow
+            current_step = "video_generation"
+            overall_status = "processing"
+            step_progress["video_generation"]["status"] = "processing"
+            step_progress["video_generation"]["progress"] = 50
+        elif overall_status in ("video_completed", "completed", "lipsync_completed"):
             current_step = "completed"
-        elif overall_status == "failed":
+            overall_status = "completed"
+            step_progress["video_generation"]["status"] = "completed"
+            step_progress["video_generation"]["progress"] = 100
+        elif overall_status in ("failed", "lipsync_failed"):
             current_step = "failed"
+            overall_status = "failed"
+            step_progress["video_generation"]["status"] = "failed"
+
+        # Normalize overall_status to simplified status for frontend
+        if overall_status not in ("pending", "processing", "completed", "failed"):
+            overall_status = "processing"
 
         # Calculate overall progress percentage
         completed_steps = sum(

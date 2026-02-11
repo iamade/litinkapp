@@ -247,7 +247,12 @@ const SceneCard: React.FC<{
                 </div>
                 <div className="flex items-center space-x-1">
                   <Music className="w-3 h-3" />
-                  <span>{storyboardAudioCount !== undefined ? storyboardAudioCount : scene.audioFiles.length} audio</span>
+                  <span>
+                    {(() => {
+                      const total = storyboardAudioCount !== undefined ? storyboardAudioCount : scene.audioFiles.length;
+                      return `${total} audio`;
+                    })()}
+                  </span>
                 </div>
               </div>
               

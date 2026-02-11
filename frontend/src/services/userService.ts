@@ -1,4 +1,5 @@
 import { apiClient } from "../lib/api";
+import { normalizeGenerationStatus } from "../lib/videoGenerationApi";
 
 interface Book {
   id: string;
@@ -37,6 +38,7 @@ interface VideoGenerationResponse {
 
 // Update VideoStatus interface to include task metadata
 interface VideoStatus {
+  status?: string;
   generation_status: string;
   quality_tier: string;
   video_url?: string;
@@ -326,9 +328,17 @@ export const userService = {
   getVideoGenerationStatus: async (
     videoGenId: string
   ): Promise<VideoStatus> => {
-    return apiClient.get<VideoStatus>(
+    const response = await apiClient.get<VideoStatus>(
       `/ai/video-generation-status/${videoGenId}`
     );
+    
+    // Normalize status to ensure consistent frontend handling
+    // This handles cases where backend returns 'status' instead of 'generation_status'
+    // or when status values need normalization (e.g. whitespace, case)
+    return {
+      ...response,
+      generation_status: normalizeGenerationStatus(response.generation_status || response.status)
+    };
   },
 
   // Image generation methods

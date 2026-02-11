@@ -174,6 +174,9 @@ const ProjectView: React.FC = () => {
 
   // Video generation polling
   const [generatingShotIds, setGeneratingShotIds] = useState<Set<string>>(new Set());
+  const [latestVideoUrl, setLatestVideoUrl] = useState<string | null>(null);
+  const [videoGenerations, setVideoGenerations] = useState<any[]>([]);
+  const safetyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const {
     startPolling,
     stopPolling,
@@ -195,6 +198,47 @@ const ProjectView: React.FC = () => {
       stopPolling();
     };
   }, []);
+
+  // Load latest video generation for selected chapter (for Preview tab on page load)
+  useEffect(() => {
+    if (!selectedChapter) {
+      setLatestVideoUrl(null);
+      return;
+    }
+
+    const chapterId = getActualChapterId(selectedChapter);
+    if (!chapterId) return;
+
+    let cancelled = false;
+    const loadLatestVideoGen = async () => {
+      try {
+        const result = await videoGenerationAPI.getChapterVideoGenerations(chapterId);
+        if (cancelled) return;
+        if (result.generations && result.generations.length > 0) {
+          // Store all generations for the carousel
+          setVideoGenerations(result.generations);
+          // Latest generation is first (sorted by created_at desc)
+          const latest = result.generations[0];
+          if (latest.video_url) {
+            setLatestVideoUrl(latest.video_url);
+          } else {
+            setLatestVideoUrl(null);
+          }
+        } else {
+          setVideoGenerations([]);
+          setLatestVideoUrl(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load video generations:', error);
+          setLatestVideoUrl(null);
+        }
+      }
+    };
+
+    loadLatestVideoGen();
+    return () => { cancelled = true; };
+  }, [selectedChapter]);
 
   useEffect(() => {
     if (id) {
@@ -449,10 +493,15 @@ const ProjectView: React.FC = () => {
       ? Array.from(storyboardContext.selectedAudioIds)
       : undefined;
 
+    // Debug logging to verify selections reach the API
+    console.log('[handleGenerateVideo] selectedShotIds:', selectedShotIds);
+    console.log('[handleGenerateVideo] selectedAudioIds:', selectedAudioIds);
+    console.log('[handleGenerateVideo] storyboardContext?.selectedAudioIds size:', storyboardContext?.selectedAudioIds?.size ?? 0);
+
     try {
       const response = await videoGenerationAPI.startVideoGeneration(
         selectedScriptId,
-        selectedChapter.id,
+        getActualChapterId(selectedChapter),
         'free',
         selectedShotIds,
         selectedAudioIds
@@ -462,6 +511,21 @@ const ProjectView: React.FC = () => {
         // Start polling for generation status
         startPolling(response.video_generation_id);
         setVideoStatus("processing");
+
+        // Safety timeout to clear generating spinner if polling never resolves
+        if (safetyTimeoutRef.current) {
+          clearTimeout(safetyTimeoutRef.current);
+        }
+        safetyTimeoutRef.current = setTimeout(() => {
+          setGeneratingShotIds(prev => {
+            if (prev.size > 0) {
+              console.warn('[SAFETY] Clearing stale generatingShotIds after 5min timeout');
+              setVideoStatus("idle");
+              return new Set();
+            }
+            return prev;
+          });
+        }, 5 * 60 * 1000); // 5 minutes max
 
         const shotMsg = selectedShotIds?.length
           ? `for ${selectedShotIds.length} selected shot${selectedShotIds.length > 1 ? 's' : ''}`
@@ -473,26 +537,46 @@ const ProjectView: React.FC = () => {
       toast.error('Failed to start video generation');
       setVideoStatus("ready");
       setGeneratingShotIds(new Set());
-      updateProgress("video", "ready");
+      updateProgress("video", "idle");
     }
   };
 
   // React to video generation polling status changes
   useEffect(() => {
     if (isComplete) {
+      if (safetyTimeoutRef.current) {
+        clearTimeout(safetyTimeoutRef.current);
+        safetyTimeoutRef.current = null;
+      }
       setVideoStatus("completed");
       setGeneratingShotIds(new Set());
       updateProgress("video", "completed");
+      // Update latestVideoUrl from polling data so Preview tab shows the video immediately
+      if (generation?.video_url) {
+        setLatestVideoUrl(generation.video_url);
+      }
       toast.success('Video generation completed!');
     } else if (isFailed) {
+      if (safetyTimeoutRef.current) {
+        clearTimeout(safetyTimeoutRef.current);
+        safetyTimeoutRef.current = null;
+      }
       setVideoStatus("failed");
       setGeneratingShotIds(new Set());
       updateProgress("video", "error");
-      toast.error('Video generation failed. Please try again.');
+      stopPolling();
+      toast.error(generation?.error_message || 'Video generation failed. Please try again.');
     } else if (isVideoGenerating) {
       setVideoStatus("processing");
     }
-  }, [isComplete, isFailed, isVideoGenerating]);
+  }, [isComplete, isFailed, isVideoGenerating, stopPolling]);
+
+  // Handle video generation deletion
+  const handleDeleteVideoGeneration = async (genId: string) => {
+    await videoGenerationAPI.deleteGeneration(genId);
+    setVideoGenerations(prev => prev.filter(g => g.id !== genId));
+    toast.success('Generation deleted successfully');
+  };
 
   // Render tab content
   const renderTabContent = () => {
@@ -636,6 +720,9 @@ const ProjectView: React.FC = () => {
             selectedScript={selectedScript}
             generatingShotIds={generatingShotIds}
             generationProgress={generationProgress}
+            videoUrl={generation?.video_url || latestVideoUrl || undefined}
+            videoGenerations={videoGenerations}
+            onDeleteGeneration={handleDeleteVideoGeneration}
           />
         );
 

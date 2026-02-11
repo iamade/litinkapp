@@ -1235,11 +1235,20 @@ async def list_chapter_audio(
         )
 
         if chapter_exists:
-            # Query by chapter_id (preferred)
-            stmt = select(AudioGeneration).where(
-                AudioGeneration.user_id == current_user.id,
-                AudioGeneration.chapter_id == uuid.UUID(chapter_id),
-            )
+            # Query by chapter_id, and also include script_id if provided (OR condition)
+            if script_id:
+                stmt = select(AudioGeneration).where(
+                    AudioGeneration.user_id == current_user.id,
+                    or_(
+                        AudioGeneration.chapter_id == uuid.UUID(chapter_id),
+                        AudioGeneration.script_id == uuid.UUID(script_id),
+                    ),
+                )
+            else:
+                stmt = select(AudioGeneration).where(
+                    AudioGeneration.user_id == current_user.id,
+                    AudioGeneration.chapter_id == uuid.UUID(chapter_id),
+                )
         elif script_id:
             # Fallback: query by script_id only
             stmt = select(AudioGeneration).where(
