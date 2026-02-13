@@ -4,7 +4,6 @@ import { toast } from 'react-hot-toast';
 import {
   Video,
   Download,
-  Settings,
   Save,
   RefreshCw,
   Film,
@@ -210,7 +209,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     audioFiles
   });
 
-  const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'settings' | 'merge'>('timeline');
+  const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'merge'>('timeline');
   const [selectedSceneIndex, setSelectedSceneIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
@@ -264,6 +263,27 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     // Find the index of the scene in the scenes array
     const index = scenes.findIndex(s => s.id === scene.id);
     setSelectedSceneIndex(index >= 0 ? index : 0);
+    
+    // Guard: check if this scene has a generated video before switching to preview
+    const sceneNumber = scene.sceneNumber || (index + 1);
+    const hasVideo = videoGenerations.some((gen: any) => {
+      if (gen.scene_videos && Array.isArray(gen.scene_videos)) {
+        return gen.scene_videos.some((sv: any) => 
+          sv.video_url && 
+          (sv.scene_number === sceneNumber || sv.scene_id === scene.id)
+        );
+      }
+      return false;
+    });
+    
+    if (!hasVideo && videoGenerations.length > 0) {
+      toast('No video generated yet for this shot. Select it for generation in the Timeline.', {
+        icon: '🎬',
+        duration: 3000
+      });
+      return; // Stay on current view
+    }
+    
     setActiveView('preview');
   };
 
@@ -419,19 +439,6 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               </div>
             </button>
             <button
-              onClick={() => setActiveView('settings')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeView === 'settings'
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-              }`}
-            >
-              <div className="flex items-center space-x-2">
-                <Settings className="w-4 h-4" />
-                <span>Settings</span>
-              </div>
-            </button>
-            <button
               onClick={() => setActiveView('merge')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeView === 'merge'
@@ -441,7 +448,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             >
               <div className="flex items-center space-x-2">
                 <Layers className="w-4 h-4" />
-                <span>Merge</span>
+                <span>Merge Studio</span>
               </div>
             </button>
           </nav>
@@ -458,17 +465,28 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
           )}
 
           {activeView === 'timeline' && (
-            <SceneTimeline
-              scenes={scenes}
-              onSceneSelect={handleSceneSelect}
-              onSceneUpdate={updateScene}
-              onReorder={reorderScenes}
-              onAddTransition={addTransition}
-              selectedScript={selectedScript}
-              selectedShotIds={selectedShotIds}
-              onToggleShotSelection={toggleShotSelection}
-              generatingShotIds={generatingShotIds}
-            />
+            <div className="space-y-4">
+              {/* Inline Settings Panel (compact mode) */}
+              <EditorSettingsPanel
+                settings={editorSettings}
+                onUpdateSettings={updateEditorSettings}
+                compact={true}
+                userTier="free"
+              />
+              
+              {/* Scene Timeline */}
+              <SceneTimeline
+                scenes={scenes}
+                onSceneSelect={handleSceneSelect}
+                onSceneUpdate={updateScene}
+                onReorder={reorderScenes}
+                onAddTransition={addTransition}
+                selectedScript={selectedScript}
+                selectedShotIds={selectedShotIds}
+                onToggleShotSelection={toggleShotSelection}
+                generatingShotIds={generatingShotIds}
+              />
+            </div>
           )}
 
           {activeView === 'preview' && (
@@ -486,15 +504,16 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             />
           )}
 
-          {activeView === 'settings' && (
-            <EditorSettingsPanel
-              settings={editorSettings}
-              onUpdateSettings={updateEditorSettings}
-            />
-          )}
-
           {activeView === 'merge' && (
-            <MergePanel />
+            <MergePanel
+              chapterId={chapterId}
+              scriptId={selectedScriptId || undefined}
+              videoGenerations={videoGenerations}
+              audioFiles={audioFiles}
+              scenes={scenes}
+              editorSettings={editorSettings}
+              userTier="free"
+            />
           )}
         </div>
       </div>

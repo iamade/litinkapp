@@ -359,8 +359,8 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
         {/* Timeline Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <h4 className="text-lg font-semibold text-gray-900">Timeline</h4>
-            <div className="text-sm text-gray-600">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Timeline</h4>
+            <div className="text-sm text-gray-600 dark:text-gray-400">
               Select a script to view timeline
             </div>
           </div>
@@ -369,7 +369,7 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
         {/* Inert Timeline Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="bg-gray-100 rounded-lg border border-gray-200 p-4 opacity-50">
+            <div key={i} className="bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 opacity-50">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-medium text-gray-500">Scene {i}</span>
               </div>
@@ -391,8 +391,8 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
       {/* Timeline Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
-          <h4 className="text-lg font-semibold text-gray-900">Timeline</h4>
-          <div className="text-sm text-gray-600">
+          <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Timeline</h4>
+          <div className="text-sm text-gray-600 dark:text-gray-400">
             {scenes.length} scenes • {totalDuration.toFixed(1)}s total
           </div>
         </div>
@@ -448,13 +448,13 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
       )}
 
       {/* Timeline Controls */}
-      <div className="flex items-center justify-between pt-4 border-t">
+      <div className="flex items-center justify-between pt-4 border-t dark:border-gray-700">
         <div className="flex items-center space-x-2">
           <button
             className={`flex items-center space-x-2 px-3 py-1 rounded text-sm ${
               disabled
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
             }`}
             disabled={disabled}
           >
@@ -463,7 +463,7 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
           </button>
         </div>
         <div className={`text-sm ${
-          disabled ? 'text-gray-400' : 'text-gray-600'
+          disabled ? 'text-gray-400' : 'text-gray-600 dark:text-gray-400'
         }`}>
           {disabled ? 'Switching scripts...' : 'Drag scenes to reorder • Click to edit'}
         </div>

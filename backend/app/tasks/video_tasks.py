@@ -484,6 +484,10 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
                     f"[VIDEO GENERATION] selected_audio_ids: {task_meta['selected_audio_ids']}"
                 )
 
+            # Save original scene_descriptions before any filtering
+            # (needed for correct indexing when building target lists)
+            original_scene_descriptions = list(scene_descriptions)
+
             # Filter scene_descriptions by selected scenes from task_meta
             if task_meta.get("selected_shot_ids"):
                 selected_shot_ids = task_meta["selected_shot_ids"]
@@ -506,11 +510,13 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
                     # Filter scene_descriptions to only selected scenes
                     filtered_descriptions = []
                     for idx in sorted(set(selected_scene_indices)):
-                        if idx < len(scene_descriptions):
-                            filtered_descriptions.append(scene_descriptions[idx])
+                        if idx < len(original_scene_descriptions):
+                            filtered_descriptions.append(
+                                original_scene_descriptions[idx]
+                            )
 
                     print(
-                        f"[VIDEO GENERATION] Filtered scenes: {len(filtered_descriptions)} of {len(scene_descriptions)} (indices: {selected_scene_indices})"
+                        f"[VIDEO GENERATION] Filtered scenes: {len(filtered_descriptions)} of {len(original_scene_descriptions)} (indices: {selected_scene_indices})"
                     )
                     scene_descriptions = filtered_descriptions
                 else:
@@ -588,8 +594,11 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
                     scene_num = idx + 1  # Convert 0-based index to 1-based scene_number
 
                     # Add description and number for generation targets
-                    if idx < len(scene_descriptions):
-                        target_scene_descriptions.append(scene_descriptions[idx])
+                    # Use original_scene_descriptions (not the filtered one) since idx is an index into the original list
+                    if idx < len(original_scene_descriptions):
+                        target_scene_descriptions.append(
+                            original_scene_descriptions[idx]
+                        )
                         target_scene_numbers.append(scene_num)
 
                     # Handle image selection - Try exact match (1-based), then 0-based

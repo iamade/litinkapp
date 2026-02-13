@@ -118,7 +118,9 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
 
     const newScenes: VideoScene[] = hasMetadata
       ? sceneMetadata.map((meta, index) => ({
-          id: `scene-${Date.now()}-${index}-${scriptId || 'no-script'}`,
+          // Use 0-based scene number (meta.sceneNumber - 1) instead of flat array index
+          // so the backend correctly maps this to scene_descriptions[sceneIndex]
+          id: `scene-${Date.now()}-${meta.sceneNumber - 1}-${scriptId || 'no-script'}`,
           sceneNumber: meta.sceneNumber,
           shotType: meta.shotType,
           shotIndex: meta.shotIndex,
