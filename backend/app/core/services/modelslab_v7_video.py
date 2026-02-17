@@ -50,9 +50,21 @@ class ModelsLabV7VideoService:
             "omni-human-1.5": 12,
         }
 
+        # Minimum audio duration (usually 2-3s for models to work well)
+        self.model_audio_min_duration = {
+            "wan2.5-i2v": 2,
+            "wan2.6-i2v": 2,
+            "omni-human": 2,
+            "omni-human-1.5": 2,
+        }
+
     def get_max_audio_duration(self, model_id: str) -> Optional[float]:
         """Return max audio duration in seconds for a model, or None if no limit."""
         return self.model_audio_limits.get(model_id)
+
+    def get_min_audio_duration(self, model_id: str) -> float:
+        """Get min audio duration for a model in seconds"""
+        return self.model_audio_min_duration.get(model_id, 1.0)
 
     async def generate_image_to_video(
         self,
@@ -1083,7 +1095,7 @@ engaging visual storytelling, seamless transitions, cinematic composition.
         self,
         fetch_result_url: str,
         future_links: Optional[List[str]] = None,
-        max_poll_time: int = 120,  # 2 minutes maximum
+        max_poll_time: int = 600,  # Increased to 10 minutes to prevent timeouts
         initial_delay: int = 5,
     ) -> Dict[str, Any]:
         """Poll the fetch_result URL until video is ready with fallback retrieval"""

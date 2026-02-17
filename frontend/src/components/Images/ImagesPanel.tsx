@@ -523,7 +523,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             url: img.url || img.imageUrl || img.image_url || '',
             sceneNumber: sceneNum,
             shotType: isKeyScene ? 'key_scene' as const : 'suggested_shot' as const,
-            shotIndex: imgIdx,
+            shotIndex: (img.shot_index !== undefined) ? img.shot_index : imgIdx,
           };
         });
         syncData[sceneNum] = formattedImages;

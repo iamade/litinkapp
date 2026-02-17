@@ -81,6 +81,7 @@ class ImageRecord(BaseModel):
     # Scene-related fields for async tracking
     chapter_id: Optional[UUID] = None
     scene_number: Optional[int] = None
+    shot_index: int = 0
     retry_count: int = 0
     status: str
     generation_time_seconds: Optional[float] = None

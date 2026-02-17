@@ -21,11 +21,13 @@ const AudioImageCard = ({
   image,
   isKeyScene,
   isExcluded,
+  shotIndex,
   onView,
 }: {
   image: SceneImage;
   isKeyScene?: boolean;
   isExcluded?: boolean;
+  shotIndex?: number;
   onView?: () => void;
 }) => {
   // Determine card styling based on state
@@ -89,7 +91,7 @@ const AudioImageCard = ({
               ? 'text-yellow-600'
               : 'text-gray-500'
           }`}>
-            {isExcluded ? 'Excluded' : isKeyScene ? 'Key Scene' : 'Shot'}
+            {isExcluded ? 'Excluded' : isKeyScene ? 'Key Scene' : (shotIndex !== undefined && shotIndex > 0) ? `Shot ${shotIndex}` : 'Shot'}
           </span>
         </div>
         <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2" title={image.prompt}>
@@ -181,6 +183,7 @@ export const AudioStoryboardSceneRow: React.FC<AudioStoryboardSceneRowProps> = (
               image={img}
               isKeyScene={img.id === keySceneImageId}
               isExcluded={img.id ? deselectedImages?.has(img.id) : false}
+              shotIndex={img.shot_index}
               onView={onView ? () => onView(img.imageUrl) : undefined}
             />
           ))}

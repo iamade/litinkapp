@@ -63,7 +63,7 @@ interface VideoProductionPanelProps {
   chapterTitle: string;
   imageUrls?: string[];
   audioFiles?: string[];
-  onGenerateVideo?: (selectedShotIds?: string[]) => void;
+  onGenerateVideo?: (selectedShotIds?: string[], overrideAudioIds?: string[]) => void;
   videoStatus?: string | null;
   canGenerateVideo?: boolean;
   videoUrl?: string; // Final generated video URL from API response
@@ -145,7 +145,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
                 url: img.url,
                 sceneNumber,
                 shotType: img.shotType || 'key_scene',
-                shotIndex: idx,  // Use position index for consistent audio-to-image matching
+                shotIndex: (img.shotIndex !== undefined) ? img.shotIndex : idx,  // Use metadata shotIndex if available, else position
                 imageId: img.id,
               });
             }
@@ -213,6 +213,10 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   const [selectedSceneIndex, setSelectedSceneIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
+  
+  const handleScenePreviewChange = React.useCallback((index: number) => {
+    setSelectedSceneIndex(index);
+  }, []);
 
   // Helper to toggle individual shot selection for per-shot video generation
   const toggleShotSelection = (shotId: string) => {
@@ -263,28 +267,6 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     // Find the index of the scene in the scenes array
     const index = scenes.findIndex(s => s.id === scene.id);
     setSelectedSceneIndex(index >= 0 ? index : 0);
-    
-    // Guard: check if this scene has a generated video before switching to preview
-    const sceneNumber = scene.sceneNumber || (index + 1);
-    const hasVideo = videoGenerations.some((gen: any) => {
-      if (gen.scene_videos && Array.isArray(gen.scene_videos)) {
-        return gen.scene_videos.some((sv: any) => 
-          sv.video_url && 
-          (sv.scene_number === sceneNumber || sv.scene_id === scene.id)
-        );
-      }
-      return false;
-    });
-    
-    if (!hasVideo && videoGenerations.length > 0) {
-      toast('No video generated yet for this shot. Select it for generation in the Timeline.', {
-        icon: '🎬',
-        duration: 3000
-      });
-      return; // Stay on current view
-    }
-    
-    setActiveView('preview');
   };
 
 
@@ -485,6 +467,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
                 selectedShotIds={selectedShotIds}
                 onToggleShotSelection={toggleShotSelection}
                 generatingShotIds={generatingShotIds}
+                onGenerateVideo={onGenerateVideo}
               />
             </div>
           )}
@@ -495,7 +478,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               currentSceneIndex={selectedSceneIndex}
               isPlaying={isPlaying}
               onPlayPause={() => setIsPlaying(!isPlaying)}
-              onSceneChange={(index) => setSelectedSceneIndex(index)}
+              onSceneChange={handleScenePreviewChange}
               videoUrl={videoUrl}
               videoGenerations={videoGenerations}
               selectedScript={selectedScript}

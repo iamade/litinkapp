@@ -574,100 +574,136 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
 
             # Build scene_images list from pre-generated images
             # Map by scene_number for easy lookup
+            # Build scene_image_map with shot_index support
+            # Structure: {scene_number: {shot_index: image_data}}
             scene_image_map = {}
             for img in pre_gen_scene_images:
                 scene_num = img.get("scene_number", 0)
-                scene_image_map[scene_num] = img
+                shot_idx = img.get("shot_index", 0)
+
+                if scene_num not in scene_image_map:
+                    scene_image_map[scene_num] = {}
+
+                # Store image by shot_index
+                # If multiple images have same scene/shot index, last one wins (or we could list them)
+                scene_image_map[scene_num][shot_idx] = img
 
             print(f"[IMAGE MAPPING] Map keys: {list(scene_image_map.keys())}")
 
-            # If we have selected scene indices, build images matching the filtered scene_descriptions
-            target_scene_descriptions = []
-            target_scene_numbers = []
-
+            # Parse selected shot IDs to get (scene_index, shot_index) tuples
+            # Format: scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
+            # Or legacy: scene-{timestamp}-{scene_index}-{script_id}
             if task_meta.get("selected_shot_ids"):
-                # Use the same selected_scene_indices we computed earlier
+                selected_scene_indices = []
+                for shot_id in task_meta.get("selected_shot_ids"):
+                    try:
+                        # Use maxsplit to handle UUIDs with hyphens in script_id
+                        # Format: scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
+                        # We only need the first few parts to get scene_index and shot_index
+                        parts = shot_id.split("-")
+
+                        # Support legacy format: scene-{timestamp}-{scene_index}-{script_id}
+                        # And new format: scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
+
+                        if len(parts) >= 3:
+                            # parts[2] is always scene_index
+                            scene_index = int(parts[2])
+                            shot_index = 0
+
+                            # Check for shot_index at parts[3]
+                            if len(parts) >= 4:
+                                try:
+                                    candidate = int(parts[3])
+                                    if candidate < 100:
+                                        shot_index = candidate
+                                except ValueError:
+                                    # Not an integer, so it's likely part of the scriptID
+                                    pass
+
+                            selected_scene_indices.append((scene_index, shot_index))
+                    except Exception as e:
+                        print(f"[SCENE VIDEOS] Error parsing shot_id {shot_id}: {e}")
+                        continue
+
+                # Sort by scene index
+                selected_scene_indices.sort(key=lambda x: x[0])
+
+                # IMPORTANT: Use the selected indices to order the generation
+                # This matches the user's timeline order
                 final_scene_images = []
-                sorted_indices = sorted(set(selected_scene_indices))
+                target_scene_descriptions = []
+                target_scene_numbers = []
 
-                for idx in sorted_indices:
-                    scene_num = idx + 1  # Convert 0-based index to 1-based scene_number
+                print(
+                    f"[SCENE VIDEOS] Generating for {len(selected_scene_indices)} selected shots: {selected_scene_indices}"
+                )
 
-                    # Add description and number for generation targets
-                    # Use original_scene_descriptions (not the filtered one) since idx is an index into the original list
+                for idx, shot_idx in selected_scene_indices:
+                    scene_num = idx + 1  # 1-based scene description index
+
+                    # Try to find specific shot first
+                    found_image = None
+                    if scene_num in scene_image_map:
+                        # 1. Try exact match (scene + shot_index)
+                        if shot_idx in scene_image_map[scene_num]:
+                            found_image = scene_image_map[scene_num][shot_idx]
+                        # 2. Try key scene (shot_index 0)
+                        elif 0 in scene_image_map[scene_num]:
+                            found_image = scene_image_map[scene_num][0]
+                        # 3. Fallback to any available image for this scene
+                        elif scene_image_map[scene_num]:
+                            found_image = next(
+                                iter(scene_image_map[scene_num].values())
+                            )
+
+                    if found_image:
+                        final_scene_images.append(found_image)
+                    else:
+                        # Add placeholder if no image found but scene is selected
+                        final_scene_images.append(None)
+
+                    # Add description and number mapping
                     if idx < len(original_scene_descriptions):
                         target_scene_descriptions.append(
                             original_scene_descriptions[idx]
                         )
-                        target_scene_numbers.append(scene_num)
-
-                    # Handle image selection - Try exact match (1-based), then 0-based
-                    if scene_num in scene_image_map:
-                        final_scene_images.append(scene_image_map[scene_num])
-                        print(
-                            f"[IMAGE SELECTION] Scene {scene_num}: using pre-generated image (1-based match)"
-                        )
-                    elif idx in scene_image_map:  # Try 0-based index match
-                        final_scene_images.append(scene_image_map[idx])
-                        print(
-                            f"[IMAGE SELECTION] Scene {scene_num}: using pre-generated image (0-based match with {idx})"
-                        )
-                    elif pre_gen_scene_images:
-                        # Fallback to first available image
-                        # Intelligent fallback: try to find any image that hasn't been used, or just cycle
-                        fallback_img = pre_gen_scene_images[
-                            idx % len(pre_gen_scene_images)
-                        ]
-                        final_scene_images.append(fallback_img)
-                        print(
-                            f"[IMAGE SELECTION] Scene {scene_num}: using fallback image (index match)"
-                        )
                     else:
-                        final_scene_images.append(None)
-                        print(
-                            f"[IMAGE SELECTION] Scene {scene_num}: ⚠️ no image available"
-                        )
+                        target_scene_descriptions.append(f"Scene {scene_num}")
+                    target_scene_numbers.append(scene_num)
+
                 image_data["scene_images"] = final_scene_images
             else:
                 # No selection filter: assign images by order or scene_number
                 target_scene_descriptions = scene_descriptions
                 target_scene_numbers = list(range(1, len(scene_descriptions) + 1))
-
                 final_scene_images = []
+
                 for i in range(len(scene_descriptions)):
                     scene_num = i + 1
+                    found_image = None
 
                     if scene_num in scene_image_map:
-                        final_scene_images.append(scene_image_map[scene_num])
-                        print(f"[IMAGE SELECTION] Scene {scene_num}: 1-based match")
-                    elif i in scene_image_map:
-                        final_scene_images.append(scene_image_map[i])
-                        print(f"[IMAGE SELECTION] Scene {scene_num}: 0-based match")
+                        # Default to key scene (0) or first available
+                        if 0 in scene_image_map[scene_num]:
+                            found_image = scene_image_map[scene_num][0]
+                        else:
+                            found_image = next(
+                                iter(scene_image_map[scene_num].values())
+                            )
                     elif i < len(pre_gen_scene_images):
-                        final_scene_images.append(pre_gen_scene_images[i])
-                        print(
-                            f"[IMAGE SELECTION] Scene {scene_num}: sequential fallback"
-                        )
+                        found_image = pre_gen_scene_images[i]
                     elif pre_gen_character_images:
-                        char_img = pre_gen_character_images[
+                        found_image = pre_gen_character_images[
                             i % len(pre_gen_character_images)
                         ]
-                        final_scene_images.append(char_img)
-                        print(
-                            f"[IMAGE SELECTION] Scene {scene_num}: character image fallback"
-                        )
                     else:
-                        # Fallback to ANY generated image if list exists but indices don't match
+                        # Fallback to ANY generated image if list exists
                         if pre_gen_scene_images:
-                            final_scene_images.append(pre_gen_scene_images[0])
-                            print(
-                                f"[IMAGE SELECTION] Scene {scene_num}: desperate fallback to first image"
-                            )
+                            found_image = pre_gen_scene_images[0]
                         else:
-                            final_scene_images.append(None)
-                            print(
-                                f"[IMAGE SELECTION] Scene {scene_num}: ⚠️ no image available"
-                            )
+                            found_image = None
+
+                    final_scene_images.append(found_image)
 
                 image_data["scene_images"] = final_scene_images
 
@@ -981,6 +1017,80 @@ async def extract_last_frame(video_url: str, user_id: str) -> Optional[str]:
         return None
 
 
+async def pad_audio_to_min_duration(
+    audio_url: str, min_duration: float, user_id: str
+) -> Optional[str]:
+    """
+    Pad audio with silence to reach minimum duration using ffmpeg.
+    """
+    try:
+        if not audio_url:
+            return None
+
+        print(f"[AUDIO PADDING] Padding audio to {min_duration}s: {audio_url}")
+
+        # Create temp files
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_input:
+            input_path = temp_input.name
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_output:
+            output_path = temp_output.name
+
+        try:
+            # Download audio
+            response = requests.get(audio_url, stream=True)
+            response.raise_for_status()
+            with open(input_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            # Pad with silence using ffmpeg
+            # -af apad: add silence indefinitely
+            # -t min_duration: stop after reaching min duration
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+                "-af",
+                "apad",
+                "-t",
+                str(min_duration),
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "192k",
+                output_path,
+            ]
+
+            process = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+            )
+
+            # Upload padded audio
+            file_service = FileService()
+            result = await file_service.upload_file(
+                file_path=output_path,
+                file_name=f"padded_audio_{uuid.uuid4()}.mp3",
+                content_type="audio/mpeg",
+                user_id=user_id,
+                folder="audio_uploads",
+            )
+
+            return result.get("url")
+
+        finally:
+            # Cleanup
+            if os.path.exists(input_path):
+                os.remove(input_path)
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+    except Exception as e:
+        print(f"[AUDIO PADDING ERROR] {e}")
+        return None
+
+
 async def generate_scene_videos(
     modelslab_service: ModelsLabV7VideoService,  # ✅ Updated type hint
     video_gen_id: str,
@@ -1097,6 +1207,7 @@ async def generate_scene_videos(
 
             # Determine model ID before audio check (needed for duration limits)
             current_model_id = primary_model_id
+            min_audio = modelslab_service.get_min_audio_duration(current_model_id)
 
             # Find audio for lip sync / audio-reactive
             scene_audio = find_scene_audio(scene_id, audio_files)
@@ -1108,9 +1219,32 @@ async def generate_scene_videos(
 
                 if max_audio and audio_duration > 0 and audio_duration > max_audio:
                     print(
-                        f"[SCENE AUDIO] {scene_id}: audio duration ({audio_duration}s) exceeds "
-                        f"{current_model_id} limit ({max_audio}s), skipping init_audio"
+                        f"[SCENE AUDIO] {scene_id}: duration ({audio_duration}s) exceeds max ({max_audio}s). Skipping audio."
                     )
+                elif min_audio and audio_duration > 0 and audio_duration < min_audio:
+                    print(
+                        f"[SCENE AUDIO] {scene_id}: duration ({audio_duration}s) below min ({min_audio}s). Padding with silence..."
+                    )
+
+                    try:
+                        # Attempt to pad audio
+                        padded_url = await pad_audio_to_min_duration(
+                            scene_audio.get("audio_url"), min_duration, user_id
+                        )
+
+                        if padded_url:
+                            init_audio_url = padded_url
+                            print(
+                                f"[SCENE AUDIO] {scene_id}: Usage padded audio: {padded_url}"
+                            )
+                        else:
+                            print(
+                                f"[SCENE AUDIO] {scene_id}: Failed to pad audio, skipping."
+                            )
+                            init_audio_url = None
+                    except Exception as e:
+                        print(f"[SCENE AUDIO] {scene_id}: Error padding audio: {e}")
+                        init_audio_url = None
                 else:
                     init_audio_url = scene_audio.get("audio_url")
                     print(

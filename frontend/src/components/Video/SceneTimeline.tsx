@@ -22,6 +22,8 @@ import type { VideoScene, Transition } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 import { SceneAudioManager } from './SceneAudioManager';
+import { SceneDetailModal } from './SceneDetailModal';
+
 // Define ChapterScript interface locally to avoid import issues
 interface ChapterScript {
   id: string;
@@ -60,6 +62,7 @@ interface SceneTimelineProps {
   selectedShotIds?: string[];  // Shot IDs selected for video generation
   onToggleShotSelection?: (shotId: string) => void;  // Toggle shot selection
   generatingShotIds?: Set<string>;  // Shot IDs currently being generated
+  onGenerateVideo?: (selectedShotIds?: string[], overrideAudioIds?: string[]) => void;
 }
 
 const SceneCard: React.FC<{
@@ -287,7 +290,8 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
   selectedScript,
   selectedShotIds = [],
   onToggleShotSelection,
-  generatingShotIds = new Set()
+  generatingShotIds = new Set(),
+  onGenerateVideo
 }) => {
   // Script selection context integration
   const {
@@ -301,6 +305,7 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
   } = useScriptSelection();
   
   const [managingAudioSceneNum, setManagingAudioSceneNum] = useState<number | null>(null);
+  const [viewingScene, setViewingScene] = useState<VideoScene | null>(null);
 
   // Recompute markers on selection changes
   useEffect(() => {
@@ -419,8 +424,11 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
                   key={scene.id}
                   scene={scene}
                   onSelect={() => {
+                    // Highlight the scene
                     onSceneSelect(scene);
                     handleMarkerClick(scene.id);
+                    // Open the detailed modal
+                    setViewingScene(scene);
                   }}
                   onUpdate={(updates) => onSceneUpdate(scene.id, updates)}
                   isSelected={scene.id === selectedSegmentId}
@@ -444,6 +452,21 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
           sceneNumber={managingAudioSceneNum}
           availableShots={scenes.filter(s => s.sceneNumber === managingAudioSceneNum)}
           onClose={() => setManagingAudioSceneNum(null)}
+        />
+      )}
+
+      {viewingScene && (
+        <SceneDetailModal 
+          scene={viewingScene}
+          onClose={() => setViewingScene(null)}
+          onGenerate={(audioId) => {
+             if (onGenerateVideo) {
+                 const overrideAudioIds = audioId ? [audioId] : undefined;
+                 onGenerateVideo([viewingScene.id], overrideAudioIds);
+                 setViewingScene(null);
+             }
+          }}
+          isGenerating={generatingShotIds.has(viewingScene.id)}
         />
       )}
 

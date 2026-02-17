@@ -11,7 +11,10 @@ export interface SceneImage {
   generatedAt?: string;
   id?: string;
   script_id?: string;
+  shot_index?: number;
 }
+
+// ... inside loadImages ... (this needs a separate chunk or I can replace the interface and then use another replace for logic)
 
 interface CharacterImage {
   name: string;
@@ -103,7 +106,7 @@ export const useImageGeneration = (
           return dateB - dateA;
         });
 
-        sortedImages.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; scene_number?: number; scene_description?: string; image_prompt?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string }) => {
+        sortedImages.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; scene_number?: number; scene_description?: string; image_prompt?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string; shot_index?: number }; status?: string; created_at?: string; script_id?: string; scriptId?: string; shot_index?: number }) => {
           const metadata = img.metadata ?? {};
           const url = img.image_url ?? "";
           const imageType = img.image_type || metadata.image_type;
@@ -163,6 +166,7 @@ export const useImageGeneration = (
               generatedAt: img.created_at,
               id: img.id,
               script_id: normalizedScriptId,
+              shot_index: img.shot_index ?? metadata.shot_index,
             });
 
             if (characterName) {
@@ -220,7 +224,8 @@ export const useImageGeneration = (
         imageUrl: '',
         prompt: sceneDescription,
         characters: [],
-        generationStatus: 'generating'
+        generationStatus: 'generating',
+        shot_index: shotIndex // Store shotIndex for temp image
       };
 
       // Use composite key if possible to match loadImages logic
@@ -536,7 +541,8 @@ export const useImageGeneration = (
                         generationStatus: 'completed',
                         generatedAt: new Date().toISOString(),
                         id: recordId,
-                        script_id: status.script_id ?? selectedScriptId ?? undefined
+                        script_id: status.script_id ?? selectedScriptId ?? undefined,
+                        shot_index: status.shot_index ?? undefined
                      }, ...updatedImages];
                 }
             }

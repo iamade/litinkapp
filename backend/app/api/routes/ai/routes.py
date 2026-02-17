@@ -897,10 +897,11 @@ async def generate_entertainment_video(
                 image_by_type = {"character_images": [], "scene_images": []}
 
                 # Query image_generations table for images associated with this chapter
-                # Query image_generations table for images associated with this chapter
+                # Query image_generations table for images associated with this chapter AND script
                 img_stmt = select(ImageGeneration).where(
                     ImageGeneration.user_id == current_user.id,
                     ImageGeneration.chapter_id == chapter_id,
+                    ImageGeneration.script_id == script_data.id,
                     ImageGeneration.status == "completed",
                 )
 
@@ -953,6 +954,7 @@ async def generate_entertainment_video(
                             image_by_type["character_images"].append(image_data)
                         elif image_type == "scene":
                             image_data["scene_number"] = img.scene_number or 0
+                            image_data["shot_index"] = img.shot_index or 0
                             image_by_type["scene_images"].append(image_data)
 
                         existing_images.append(image_data)
@@ -4788,13 +4790,18 @@ async def get_video_generation_polling_status(
         # Check for active Celery tasks
         celery_task_info = await get_celery_task_status(video_data, session)
 
+        # Ensure we have an error message if status is failed
+        error_msg = video_data.get("error_message")
+        if overall_status in ("failed", "lipsync_failed") and not error_msg:
+            error_msg = "Video generation failed. Please check the generation status."
+
         # Build comprehensive response
         response_data = {
             "status": overall_status,
             "current_step": current_step,
             "progress_percentage": progress_percentage,
             "steps": step_progress,
-            "error": video_data.get("error_message"),
+            "error": error_msg,
             "video_url": video_data.get("video_url"),
             "created_at": video_data.get("created_at"),
             "updated_at": video_data.get("updated_at"),

@@ -120,7 +120,8 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
       ? sceneMetadata.map((meta, index) => ({
           // Use 0-based scene number (meta.sceneNumber - 1) instead of flat array index
           // so the backend correctly maps this to scene_descriptions[sceneIndex]
-          id: `scene-${Date.now()}-${meta.sceneNumber - 1}-${scriptId || 'no-script'}`,
+          // Format: scene-{timestamp}-{sceneIndex}-{shotIndex}-{scriptId}
+          id: `scene-${Date.now()}-${meta.sceneNumber - 1}-${meta.shotIndex ?? 0}-${scriptId || 'no-script'}`,
           sceneNumber: meta.sceneNumber,
           shotType: meta.shotType,
           shotIndex: meta.shotIndex,
@@ -134,7 +135,7 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
           status: 'pending' as const
         }))
       : imageUrls.map((imageUrl, index) => ({
-          id: `scene-${Date.now()}-${index}-${scriptId || 'no-script'}`,
+          id: `scene-${Date.now()}-${index}-0-${scriptId || 'no-script'}`, // Default shotIndex 0
           sceneNumber: index + 1,
           imageUrl,
           audioFiles: audioFiles[index] ? [audioFiles[index]] : [],

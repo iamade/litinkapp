@@ -398,6 +398,12 @@ const ProjectView: React.FC = () => {
 
   // Detect if this is a multi-script project (needs consultation)
   const isMultiScriptProject = project?.pipeline_steps?.includes('consultation');
+
+  // Filter video generations by selected script at the top level
+  const filteredVideoGenerations = React.useMemo(() => {
+    if (!selectedScriptId || !videoGenerations) return videoGenerations;
+    return videoGenerations.filter(gen => gen.script_id === selectedScriptId);
+  }, [videoGenerations, selectedScriptId]);
   
   // Workflow tabs configuration - conditionally include consultation
   const workflowTabs = [
@@ -469,7 +475,7 @@ const ProjectView: React.FC = () => {
 
   // Handle video generation
   const storyboardContext = useStoryboardOptional();
-  const handleGenerateVideo = async (selectedShotIds?: string[]) => {
+  const handleGenerateVideo = async (selectedShotIds?: string[], overrideAudioIds?: string[]) => {
     if (!selectedChapter) return;
 
     // selectedScriptId is already available from useScriptSelection() hook at component level
@@ -488,15 +494,15 @@ const ProjectView: React.FC = () => {
       setGeneratingShotIds(new Set(['__all__']));
     }
 
-    // Get selected audio IDs from StoryboardContext
-    const selectedAudioIds = storyboardContext?.selectedAudioIds
+    // Get selected audio IDs: preferably from override (e.g. specific scene generation) or fallback to context
+    const selectedAudioIds = overrideAudioIds || (storyboardContext?.selectedAudioIds
       ? Array.from(storyboardContext.selectedAudioIds)
-      : undefined;
+      : undefined);
 
     // Debug logging to verify selections reach the API
     console.log('[handleGenerateVideo] selectedShotIds:', selectedShotIds);
     console.log('[handleGenerateVideo] selectedAudioIds:', selectedAudioIds);
-    console.log('[handleGenerateVideo] storyboardContext?.selectedAudioIds size:', storyboardContext?.selectedAudioIds?.size ?? 0);
+    console.log('[handleGenerateVideo] overrideAudioIds:', overrideAudioIds);
 
     try {
       const response = await videoGenerationAPI.startVideoGeneration(
@@ -721,7 +727,7 @@ const ProjectView: React.FC = () => {
             generatingShotIds={generatingShotIds}
             generationProgress={generationProgress}
             videoUrl={generation?.video_url || latestVideoUrl || undefined}
-            videoGenerations={videoGenerations}
+            videoGenerations={filteredVideoGenerations}
             onDeleteGeneration={handleDeleteVideoGeneration}
           />
         );

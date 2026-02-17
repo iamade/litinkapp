@@ -114,6 +114,7 @@ interface ImageRecord {
   image_type: string;
   scene_description?: string;
   character_name?: string;
+  shot_index?: number;
   image_url?: string;
   thumbnail_url?: string;
   image_prompt?: string;

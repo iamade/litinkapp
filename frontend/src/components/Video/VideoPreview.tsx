@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Maximize2, Music, ChevronLeft, ChevronRight, Clock, Trash2, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Maximize2, Music, ChevronLeft, ChevronRight, Clock, Trash2, ChevronDown, AlertTriangle, Video } from 'lucide-react';
 import { VideoScene } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
@@ -89,6 +89,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
   const sceneStripRef = useRef<HTMLDivElement>(null);
+  const sceneSelectorRef = useRef<HTMLDivElement>(null);
 
   // Sync isPlaying prop with actual video element playback
   useEffect(() => {
@@ -233,7 +234,9 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
         onSceneChange?.(sceneIndex);
       }
     }
-  }, [selectedChapterId, selectedSegmentId, scenes, currentSceneIndex, onSceneChange]);
+    // Only run when segment selection changes, not when internal seeking updates scene index
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChapterId, selectedSegmentId, scenes]);
 
   // Listen for timeline recalculation requests
   useEffect(() => {
@@ -362,35 +365,54 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     return { playableGenerations: playable, failedGenerations: failed };
   }, [videoGenerations]);
 
+  // Helper function to check if a generation contains a video for a specific scene
+  const generationMatchesScene = useCallback((gen: any, scene: VideoScene): boolean => {
+    // If generation has no video data, we can't match it to a scene (unless we have input params, which we assume we don't for now)
+    // So we rely on scene_videos being present
+    const clips = gen.video_data?.scene_videos || [];
+    if (clips.length === 0) return false;
+
+    return clips.some((sv: any) => {
+      if (!sv) return false;
+      
+      // Match by source_image URL (exact or filename match)
+      if (scene.imageUrl && sv.source_image) {
+        if (sv.source_image === scene.imageUrl) return true;
+        // Also try matching just the filename part for URL variations
+        const selectedFilename = scene.imageUrl.split('/').pop()?.split('?')[0];
+        const svFilename = sv.source_image.split('/').pop()?.split('?')[0];
+        if (selectedFilename && svFilename && selectedFilename === svFilename) return true;
+      }
+      
+      // Match by scene_id (e.g. "scene_1" matches sceneNumber 1)
+      if (sv.scene_id === `scene_${scene.sceneNumber}`) return true;
+      
+      // Match by scene_sequence matching sceneNumber
+      if (sv.scene_sequence === scene.sceneNumber) return true;
+      
+      return false;
+    });
+  }, []);
+
   // When a specific scene is selected, further filter playable generations
   // to only those containing clips for that scene
   const filteredGenerations = useMemo(() => {
     if (!selectedScene) return playableGenerations;
-
-    return playableGenerations.filter((gen: any) => {
-      const clips = gen.video_data?.scene_videos || [];
-      return clips.some((sv: any) => {
-        if (!sv) return false;
-        // Match by source_image URL (exact or filename match)
-        if (selectedScene.imageUrl && sv.source_image) {
-          if (sv.source_image === selectedScene.imageUrl) return true;
-          // Also try matching just the filename part for URL variations
-          const selectedFilename = selectedScene.imageUrl.split('/').pop()?.split('?')[0];
-          const svFilename = sv.source_image.split('/').pop()?.split('?')[0];
-          if (selectedFilename && svFilename && selectedFilename === svFilename) return true;
-        }
-        // Match by scene_id (e.g. "scene_1" matches sceneNumber 1)
-        if (sv.scene_id === `scene_${selectedScene.sceneNumber}`) return true;
-        // Match by scene_sequence matching sceneNumber
-        if (sv.scene_sequence === selectedScene.sceneNumber) return true;
-        return false;
-      });
-    });
-  }, [playableGenerations, selectedScene]);
+    return playableGenerations.filter((gen: any) => generationMatchesScene(gen, selectedScene));
+  }, [playableGenerations, selectedScene, generationMatchesScene]);
+  
+  // Also filter failed generations to strictly show failures RELEVANT to the scene if possible.
+  // Note: Failed generations often lack video_data, so we might miss some.
+  // But the user requested strict filtering.
+  const filteredFailedGenerations = useMemo(() => {
+    if (!selectedScene) return failedGenerations;
+     return failedGenerations.filter((gen: any) => generationMatchesScene(gen, selectedScene));
+  }, [failedGenerations, selectedScene, generationMatchesScene]);
 
   // Extract scene videos from selected generation
   const hasGenerations = filteredGenerations.length > 0;
-  const hasAnyGenerations = playableGenerations.length > 0;
+
+  // We don't check hasAnyGenerations global anymore, we focusing on scene-specific
   const selectedGen = hasGenerations ? filteredGenerations[selectedGenIndex] || filteredGenerations[0] : null;
   const sceneVideos: SceneVideo[] = selectedGen?.video_data?.scene_videos || [];
   const activeVideoUrl = sceneVideos[selectedSceneVideoIndex]?.video_url || selectedGen?.video_url || videoUrl;
@@ -432,22 +454,25 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     setVideoError(false);
   }, [selectedGenIndex]);
 
-  // Failed-generations section (always rendered if there are failed gens)
-  const failedGenerationsSection = failedGenerations.length > 0 ? (
-    <div className="bg-gray-800/50 rounded-lg border border-gray-700">
+  // Failed-generations section (always rendered if there are failed gens for THIS scene)
+  const renderFailedGenerations = () => {
+    if (filteredFailedGenerations.length === 0) return null;
+    
+    return (
+    <div className="bg-gray-800/50 rounded-lg border border-gray-700 mb-4">
       <button
         onClick={() => setShowFailed(!showFailed)}
         className="w-full flex items-center justify-between px-4 py-2 text-sm text-gray-400 hover:text-gray-300 transition-colors"
       >
         <span className="flex items-center gap-2">
           <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
-          {failedGenerations.length} failed generation{failedGenerations.length !== 1 ? 's' : ''}
+          {filteredFailedGenerations.length} failed generation{filteredFailedGenerations.length !== 1 ? 's' : ''} for Scene {currentScene?.sceneNumber}
         </span>
         <ChevronDown className={`w-4 h-4 transition-transform ${showFailed ? 'rotate-180' : ''}`} />
       </button>
       {showFailed && (
         <div className="px-4 pb-3 space-y-2">
-          {failedGenerations.map((gen: any) => {
+          {filteredFailedGenerations.map((gen: any) => {
             const date = gen.created_at ? new Date(gen.created_at).toLocaleString() : 'Unknown date';
             const errorMsg = gen.error_message || gen.task_meta?.error_message || 'Generation produced 0 clips';
             return (
@@ -470,7 +495,8 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
         </div>
       )}
     </div>
-  ) : null;
+  );
+  };
 
   // Delete confirmation modal (always rendered)
   const deleteModal = (
@@ -485,20 +511,96 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     />
   );
 
+  // Scene Selector Component
+  const renderSceneSelector = () => (
+    <div className="mb-4">
+      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2 px-1">Select Scene to Preview</h3>
+      <div className="relative group/sceneselector">
+         <button
+            onClick={() => sceneSelectorRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center opacity-0 group-hover/sceneselector:opacity-100 transition-opacity disabled:opacity-0"
+            disabled={!sceneSelectorRef.current}
+          >
+            <ChevronLeft className="w-5 h-5" />
+          </button>
+        <div 
+          ref={sceneSelectorRef}
+          className="flex gap-3 overflow-x-auto pb-2 px-1 scrollbar-hide snap-x"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        >
+          {scenes.map((scene, idx) => {
+            const isSelected = idx === currentSceneIndex;
+            return (
+              <button
+                key={scene.id}
+                onClick={() => onSceneChange?.(idx)}
+                className={`snap-start shrink-0 w-32 flex flex-col items-start gap-2 p-2 rounded-lg border-2 transition-all ${
+                  isSelected 
+                    ? 'border-blue-500 bg-blue-50/10 dark:bg-blue-900/20' 
+                    : 'border-transparent hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+              >
+                 <div className="w-full aspect-video bg-gray-200 dark:bg-gray-700 rounded overflow-hidden relative">
+                    {scene.imageUrl ? (
+                      <img src={scene.imageUrl} alt={`Scene ${scene.sceneNumber}`} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="flex items-center justify-center w-full h-full text-gray-400">
+                        <span className="text-xs">No img</span>
+                      </div>
+                    )}
+                 </div>
+                 <div className="w-full flex justify-between items-center">
+                    <span className={`text-xs font-medium ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                      Scene {scene.sceneNumber}
+                    </span>
+                    <span className="text-[10px] text-gray-500">
+                      {scene.duration}s
+                    </span>
+                 </div>
+              </button>
+            );
+          })}
+        </div>
+        <button
+            onClick={() => sceneSelectorRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-8 h-8 bg-black/50 hover:bg-black/70 text-white rounded-full flex items-center justify-center opacity-0 group-hover/sceneselector:opacity-100 transition-opacity disabled:opacity-0"
+            disabled={!sceneSelectorRef.current}
+          >
+            <ChevronRight className="w-5 h-5" />
+          </button>
+      </div>
+    </div>
+  );
+
   // If we have matching generations for the selected shot, show the player
   // If there are generations but none match the current shot, show empty state
-  if (hasAnyGenerations && !hasGenerations && selectedScene) {
-    // Generations exist but none match this specific shot
+  // Or if no generations at all
+  if ((!hasGenerations && !videoUrl) || (!hasGenerations && selectedScene)) {
+     // Check if we have failures for this scene specifically
+     const hasFailures = filteredFailedGenerations.length > 0;
+     
     return (
       <div className="space-y-4">
-        <div className="bg-black rounded-lg aspect-video flex items-center justify-center">
-          <div className="text-center">
-            <Play className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-            <p className="text-gray-400 text-sm">No video generated for this shot yet</p>
-            <p className="text-gray-500 text-xs mt-1">Generate a video for this shot from the Timeline view</p>
+        {renderSceneSelector()}
+        
+        <div className="bg-black rounded-lg aspect-video flex items-center justify-center p-8 text-center border border-gray-800">
+          <div className="max-w-md">
+            <Video className="w-12 h-12 text-gray-700 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-300 mb-2">No Video Preview Available</h3>
+            <p className="text-gray-500 text-sm mb-6">
+              {hasFailures 
+                ? `Generation failed for Scene ${currentScene?.sceneNumber}. Check the error details below.`
+                : `No video has been generated for Scene ${currentScene?.sceneNumber} yet.`}
+            </p>
+            {!hasFailures && (
+              <p className="text-gray-600 text-xs">
+                Go to the Timeline tab to generate a video for this scene.
+              </p>
+            )}
           </div>
         </div>
-        {failedGenerationsSection}
+        
+        {renderFailedGenerations()}
         {deleteModal}
       </div>
     );
@@ -507,6 +609,8 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   if (hasGenerations || videoUrl) {
     return (
       <div className="space-y-4">
+        {renderSceneSelector()}
+        
         {/* Generation Picker (only if multiple playable generations) */}
         {filteredGenerations.length > 1 && (
           <div className="flex items-center gap-3 bg-gray-800 rounded-lg px-4 py-2">
@@ -531,7 +635,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
         )}
 
         {/* Failed Generations Section */}
-        {failedGenerationsSection}
+        {renderFailedGenerations()}
 
         {/* Main Video Player */}
         <div
@@ -558,10 +662,10 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
               </div>
             )}
             
-            {/* Info Overlay */}
+            {/* Info Overlay - Improved to show Scene Number of Script */}
             <div className="absolute top-4 left-4 bg-black/70 text-white px-3 py-1 rounded text-sm">
               {sceneVideos.length > 0
-                ? `Scene ${sceneVideos[selectedSceneVideoIndex]?.scene_sequence || selectedSceneVideoIndex + 1} of ${sceneVideos.length}`
+                ? `Scene ${selectedScene?.sceneNumber || (selectedSceneVideoIndex + 1)}`
                 : 'Generated Video'}
             </div>
 
