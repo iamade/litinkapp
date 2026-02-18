@@ -1,9 +1,16 @@
 # Environment files
-.envs/*
-!.envs/.env.example
-.envs/.env.prodreal
-backend/.envs/.env.production
-backend/.envs/.env.production.template
+.env
+.env.local
+.env.production
+.env.test
+.env.*
+!.env.example
+
+# Backend environments
+backend/.envs/*
+!backend/.envs/.env.example
+
+# Frontend environments
 frontend/.env.production
 
 # Celerybeat schedule files
