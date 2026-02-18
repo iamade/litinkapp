@@ -27,9 +27,12 @@ class ModelsLabV7VideoService:
         # ✅ Available video models
         self.video_models = {
             "veo2": "veo2",  # Primary Veo 2 model
-            "veo2_pro": "veo2_pro",  # Enhanced Veo 2 model
-            "veo2_standard": "veo2",  # Standard Veo 2
-            "seedance-i2v": "seedance-i2v",  # Fallback model
+            "veo-3.1-fast": "veo-3.1-fast",
+            "omni-human": "omni-human",
+            "omni-human-1.5": "omni-human-1.5",
+            "wan2.5-i2v": "wan2.5-i2v",  # Wan 2.5 I2V with audio support
+            "wan2.6-i2v": "wan2.6-i2v",  # Wan 2.6 I2V with audio support
+            "seedance-1-5-pro": "seedance-1-5-pro",
         }
 
         # ✅ Available lip sync models
@@ -39,22 +42,63 @@ class ModelsLabV7VideoService:
             "lipsync-hd": "lipsync-2",  # HD quality mapping
         }
 
+        # Max audio duration per model (seconds)
+        self.model_audio_limits = {
+            "wan2.5-i2v": 10,
+            "wan2.6-i2v": 15,
+            "omni-human": 28,
+            "omni-human-1.5": 12,
+        }
+
+        # Minimum audio duration (usually 2-3s for models to work well)
+        self.model_audio_min_duration = {
+            "wan2.5-i2v": 2,
+            "wan2.6-i2v": 2,
+            "omni-human": 2,
+            "omni-human-1.5": 2,
+        }
+
+    def get_max_audio_duration(self, model_id: str) -> Optional[float]:
+        """Return max audio duration in seconds for a model, or None if no limit."""
+        return self.model_audio_limits.get(model_id)
+
+    def get_min_audio_duration(self, model_id: str) -> float:
+        """Get min audio duration for a model in seconds"""
+        return self.model_audio_min_duration.get(model_id, 1.0)
+
     async def generate_image_to_video(
         self,
         image_url: str,
         prompt: str,
-        model_id: str = "veo2",
+        model_id: str = "veo-3.1-fast",
         negative_prompt: str = "",
         duration: float = 5.0,
         fps: int = 24,
         motion_strength: float = 0.8,
+        init_audio: Optional[str] = None,
+        resolution: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Generate video from image using ModelsLab V7 Veo 2 API with fallback to seedance-i2v"""
+        """Generate video from image using ModelsLab V7 API (Strict I2V)"""
 
         attempts = [
             {"model_id": model_id, "description": f"primary model {model_id}"},
-            {"model_id": "seedance-i2v", "description": "fallback model seedance-i2v"},
         ]
+
+        # Add a smart fallback based on the primary model
+        if "veo" in model_id or "omni" in model_id:
+            attempts.append(
+                {
+                    "model_id": "omni-human-1.5",
+                    "description": "fallback model omni-human-1.5",
+                }
+            )
+        elif "wan" in model_id:
+            attempts.append(
+                {
+                    "model_id": "seedance-1-5-pro",
+                    "description": "fallback model seedance",
+                }
+            )
 
         last_error = None
 
@@ -72,16 +116,27 @@ class ModelsLabV7VideoService:
                 }
 
                 # Add optional parameters if they're supported
+                # Note: duration must be a string for wan2.6-i2v compatibility
                 if duration != 5.0:
-                    payload["duration"] = duration
+                    payload["duration"] = str(int(duration))
                 if fps != 24:
                     payload["fps"] = fps
                 if motion_strength != 0.8:
                     payload["motion_strength"] = motion_strength
 
-                if current_model_id == "seedance-i2v":
+                # Add new I2V parameters
+                if init_audio:
+                    payload["init_audio"] = init_audio
                     logger.info(
-                        f"[MODELSLAB V7 VIDEO] Veo2 unavailable, falling back to seedance-i2v model"
+                        f"[MODELSLAB V7 VIDEO] Including init_audio for audio-reactive/lip-sync"
+                    )
+
+                if resolution:
+                    payload["resolution"] = resolution
+
+                if current_model_id != model_id:
+                    logger.info(
+                        f"[MODELSLAB V7 VIDEO] Primary model unavailable, falling back to {current_model_id}"
                     )
                     logger.info(
                         f"[MODELSLAB V7 VIDEO] Retrying with same parameters: image={image_url}, prompt={prompt[:100]}..."
@@ -112,6 +167,27 @@ class ModelsLabV7VideoService:
                             f"[MODELSLAB V7 VIDEO] Response status: {response.status}"
                         )
                         logger.info(f"[MODELSLAB V7 VIDEO] Response: {result}")
+
+                        # Check for audio duration error and retry without audio
+                        if (
+                            result.get("error")
+                            and "audio duration" in str(result.get("error", "")).lower()
+                        ):
+                            logger.warning(
+                                f"[MODELSLAB V7 VIDEO] Audio duration error: {result['error']}. "
+                                f"Retrying without init_audio for model {current_model_id}"
+                            )
+                            payload.pop("init_audio", None)
+                            async with session.post(
+                                self.image_to_video_endpoint,
+                                json=payload,
+                                headers=self.headers,
+                                timeout=aiohttp.ClientTimeout(total=120),
+                            ) as retry_response:
+                                result = await retry_response.json()
+                                logger.info(
+                                    f"[MODELSLAB V7 VIDEO] Retry response: {result}"
+                                )
 
                         # Check for specific veo2 error message
                         if result.get(
@@ -152,8 +228,8 @@ class ModelsLabV7VideoService:
                 )
                 last_error = e
 
-                # If this was the fallback attempt, break and raise the error
-                if current_model_id == "seedance-i2v":
+                # If this was the last attempt, break and raise the error
+                if attempt == attempts[-1]:
                     break
                 # Otherwise, continue to fallback
                 continue
@@ -354,14 +430,21 @@ class ModelsLabV7VideoService:
             character_name = dialogue.get("character", "Unknown")
             dialogue_text = dialogue.get("text", "").strip()
             dialogue_audio_url = dialogue.get("audio_url")
+            # Extract character profile for voice/accent hints (if available)
+            character_profile = dialogue.get("character_profile", {})
 
             logger.info(
-                f"[PER-DIALOGUE VIDEO] Processing dialogue {i+1}: {character_name}"
+                f"[PER-DIALOGUE VIDEO] Processing dialogue {i+1}: {character_name} (accent={character_profile.get('accent', 'neutral')})"
             )
 
-            # Create a focused prompt for this specific dialogue
+            # Create a focused prompt for this specific dialogue with voice/accent hints
             dialogue_prompt = self._create_dialogue_specific_prompt(
-                scene_description, character_name, dialogue_text, style, script_style
+                scene_description,
+                character_name,
+                dialogue_text,
+                style,
+                script_style,
+                character_profile=character_profile,
             )
 
             # Generate video for this dialogue
@@ -446,13 +529,56 @@ class ModelsLabV7VideoService:
         dialogue_text: str,
         style: str = "cinematic",
         script_style: str = None,
+        character_profile: Dict[str, Any] = None,
     ) -> str:
-        """Create a focused video prompt for a specific character's dialogue"""
+        """Create a focused video prompt for a specific character's dialogue
+
+        Args:
+            scene_description: Description of the scene
+            character_name: Name of the speaking character
+            dialogue_text: The dialogue being spoken
+            style: Visual style (cinematic, realistic, etc.)
+            script_style: Script style for special handling
+            character_profile: Character profile with accent and voice info
+                - accent: Voice accent (neutral, nigerian, british, american, etc.)
+                - voice_characteristics: Voice description (e.g., "deep and authoritative")
+                - voice_gender: Voice gender (male, female, auto)
+        """
 
         base_prompt = self._create_scene_video_prompt(scene_description, style)
 
         # Special handling for cinematic scripts
         is_cinematic = script_style and "cinematic" in script_style.lower()
+
+        # Build voice/accent hint from character profile
+        voice_hint = ""
+        if character_profile:
+            accent = character_profile.get("accent", "neutral")
+            voice_characteristics = character_profile.get("voice_characteristics", "")
+            voice_gender = character_profile.get("voice_gender", "auto")
+
+            # Only add voice hint if accent is not neutral or voice characteristics exist
+            if accent and accent.lower() != "neutral":
+                voice_hint = f"{character_name} speaks with a {accent} accent"
+                if voice_characteristics:
+                    voice_hint += f", {voice_characteristics} tone"
+                voice_hint += "."
+            elif voice_characteristics:
+                voice_hint = (
+                    f"{character_name} speaks with a {voice_characteristics} tone."
+                )
+
+            # Add voice gender hint if specified
+            if voice_gender and voice_gender.lower() != "auto":
+                gender_hint = (
+                    "masculine" if voice_gender.lower() == "male" else "feminine"
+                )
+                if voice_hint:
+                    voice_hint = (
+                        voice_hint.rstrip(".") + f" with a {gender_hint} voice."
+                    )
+                else:
+                    voice_hint = f"{character_name} has a {gender_hint} voice."
 
         # Focus on the specific character and dialogue
         character_focus = f'Focus on {character_name} speaking: "{dialogue_text}"'
@@ -461,6 +587,7 @@ class ModelsLabV7VideoService:
             # For cinematic scripts, emphasize character performance
             enhanced_prompt = f"""
 {character_focus}
+{voice_hint}
 
 {base_prompt}
 
@@ -473,6 +600,7 @@ Ensure {character_name} is clearly visible and properly positioned for dialogue 
             # For other scripts, standard character visibility
             enhanced_prompt = f"""
 {character_focus}
+{voice_hint}
 
 {base_prompt}
 
@@ -481,7 +609,7 @@ Ensure {character_name} is clearly visible with proper facial expressions and mo
 """
 
         logger.info(
-            f"[DIALOGUE PROMPT] Created focused prompt for {character_name}: {enhanced_prompt[:200]}..."
+            f"[DIALOGUE PROMPT] Created focused prompt for {character_name} (accent={character_profile.get('accent', 'neutral') if character_profile else 'neutral'}): {enhanced_prompt[:200]}..."
         )
         return enhanced_prompt.strip()
 
@@ -811,6 +939,18 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                 if character_profile.get("personality"):
                     char_desc += f", {character_profile['personality']}"
 
+                # Add voice/accent hints for video generation
+                accent = character_profile.get("accent", "neutral")
+                voice_characteristics = character_profile.get(
+                    "voice_characteristics", ""
+                )
+                if accent and accent.lower() != "neutral":
+                    char_desc += f", speaks with a {accent} accent"
+                    if voice_characteristics:
+                        char_desc += f" and {voice_characteristics} tone"
+                elif voice_characteristics:
+                    char_desc += f", {voice_characteristics} voice"
+
                 character_info.append(char_desc)
 
                 # Include dialogue text for cinematic scripts - but only for the current dialogue
@@ -955,7 +1095,7 @@ engaging visual storytelling, seamless transitions, cinematic composition.
         self,
         fetch_result_url: str,
         future_links: Optional[List[str]] = None,
-        max_poll_time: int = 120,  # 2 minutes maximum
+        max_poll_time: int = 600,  # Increased to 10 minutes to prevent timeouts
         initial_delay: int = 5,
     ) -> Dict[str, Any]:
         """Poll the fetch_result URL until video is ready with fallback retrieval"""
@@ -1456,3 +1596,455 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                 "error": f"Unexpected error: {str(e)}",
                 "retry_method": "unexpected_error",
             }
+
+    # =========================================================================
+    # CONSISTENCY LOOP METHODS
+    # =========================================================================
+    # These methods implement the "Consistency Loop" workflow from DiaryInfluencer:
+    # 1. Generate video from scene image
+    # 2. Extract the last frame from the generated video
+    # 3. Upscale the extracted frame
+    # 4. Use the upscaled frame as input for the next scene's video
+    # This maintains visual continuity between sequential scenes.
+    # =========================================================================
+
+    async def extract_and_upscale_last_frame(
+        self,
+        video_url: str,
+        output_filename: str = "continuity_frame.jpg",
+        upscale_model: str = "realesr-general-x4v3",
+        face_enhance: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Extract the last frame from a video and upscale it for use as the next scene's input.
+
+        This implements the "Consistency Loop" workflow:
+        1. Download the video
+        2. Extract the last frame using FFmpeg
+        3. Upload the frame temporarily
+        4. Upscale the frame using ModelsLab
+        5. Return the upscaled frame URL
+
+        Args:
+            video_url: URL of the video to extract frame from
+            output_filename: Filename for the extracted frame
+            upscale_model: Upscaling model to use
+            face_enhance: Whether to enhance faces during upscaling
+
+        Returns:
+            Dict with status, frame_url (original), upscaled_frame_url, and metadata
+        """
+        import subprocess
+        import tempfile
+        import os
+        import base64
+
+        logger.info(
+            f"[CONSISTENCY LOOP] Starting frame extraction from: {video_url[:80]}..."
+        )
+
+        try:
+            # Step 1: Check if FFmpeg is available
+            try:
+                result = subprocess.run(
+                    ["ffmpeg", "-version"], capture_output=True, text=True, timeout=5
+                )
+                if result.returncode != 0:
+                    logger.error("[CONSISTENCY LOOP] FFmpeg not available")
+                    return {
+                        "status": "error",
+                        "error": "FFmpeg not available for frame extraction",
+                    }
+            except FileNotFoundError:
+                logger.error("[CONSISTENCY LOOP] FFmpeg not found")
+                return {
+                    "status": "error",
+                    "error": "FFmpeg not installed",
+                }
+
+            # Step 2: Download video to temporary file
+            fd, video_temp_path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+            fd, frame_temp_path = tempfile.mkstemp(suffix=".jpg")
+            os.close(fd)
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        video_url, timeout=aiohttp.ClientTimeout(total=120)
+                    ) as response:
+                        if response.status != 200:
+                            logger.error(
+                                f"[CONSISTENCY LOOP] Failed to download video: HTTP {response.status}"
+                            )
+                            return {
+                                "status": "error",
+                                "error": f"Failed to download video: HTTP {response.status}",
+                            }
+
+                        video_content = await response.read()
+                        with open(video_temp_path, "wb") as f:
+                            f.write(video_content)
+
+                logger.info(
+                    f"[CONSISTENCY LOOP] Video downloaded: {len(video_content)} bytes"
+                )
+
+                # Step 3: Extract the last frame using FFmpeg
+                # -sseof -0.5 seeks to 0.5 seconds before end
+                # -frames:v 1 extracts only 1 frame
+                ffmpeg_cmd = [
+                    "ffmpeg",
+                    "-sseof",
+                    "-0.5",  # Seek to 0.5 seconds before end
+                    "-i",
+                    video_temp_path,
+                    "-frames:v",
+                    "1",  # Extract 1 frame
+                    "-q:v",
+                    "2",  # High quality JPEG
+                    "-y",  # Overwrite output
+                    frame_temp_path,
+                ]
+
+                logger.info(f"[CONSISTENCY LOOP] Extracting last frame...")
+                result = subprocess.run(
+                    ffmpeg_cmd, capture_output=True, text=True, timeout=30
+                )
+
+                if result.returncode != 0:
+                    logger.error(
+                        f"[CONSISTENCY LOOP] FFmpeg extraction failed: {result.stderr}"
+                    )
+                    return {
+                        "status": "error",
+                        "error": f"Frame extraction failed: {result.stderr}",
+                    }
+
+                if (
+                    not os.path.exists(frame_temp_path)
+                    or os.path.getsize(frame_temp_path) == 0
+                ):
+                    logger.error(
+                        "[CONSISTENCY LOOP] Frame extraction produced no output"
+                    )
+                    return {
+                        "status": "error",
+                        "error": "Frame extraction produced no output",
+                    }
+
+                logger.info(
+                    f"[CONSISTENCY LOOP] Frame extracted: {os.path.getsize(frame_temp_path)} bytes"
+                )
+
+                # Step 4: Upload frame to ModelsLab for upscaling
+                # First, we need to make the frame accessible via URL
+                # We'll encode it as base64 and use ModelsLab's init_image_base64 if available
+                # Or upload to temporary storage
+
+                with open(frame_temp_path, "rb") as f:
+                    frame_data = f.read()
+                    frame_base64 = base64.b64encode(frame_data).decode("utf-8")
+
+                # Step 5: Upscale the frame using ModelsLab V6 API
+                upscale_result = await self._upscale_frame_base64(
+                    frame_base64=frame_base64,
+                    model_id=upscale_model,
+                    face_enhance=face_enhance,
+                )
+
+                if upscale_result.get("status") == "success":
+                    logger.info(f"[CONSISTENCY LOOP] ✅ Frame upscaled successfully")
+                    return {
+                        "status": "success",
+                        "upscaled_frame_url": upscale_result.get("output_url"),
+                        "original_frame_base64": frame_base64,
+                        "upscale_model": upscale_model,
+                        "face_enhanced": face_enhance,
+                    }
+                else:
+                    # Fallback: Return the original frame as base64 data URL
+                    logger.warning(
+                        f"[CONSISTENCY LOOP] Upscaling failed, using original frame"
+                    )
+                    return {
+                        "status": "partial",
+                        "upscaled_frame_url": None,
+                        "original_frame_base64": frame_base64,
+                        "error": upscale_result.get("error", "Upscaling failed"),
+                        "use_original": True,
+                    }
+
+            finally:
+                # Cleanup temporary files
+                for path in [video_temp_path, frame_temp_path]:
+                    try:
+                        if os.path.exists(path):
+                            os.unlink(path)
+                    except:
+                        pass
+
+        except Exception as e:
+            logger.error(f"[CONSISTENCY LOOP] Error: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e),
+            }
+
+    async def _upscale_frame_base64(
+        self,
+        frame_base64: str,
+        model_id: str = "realesr-general-x4v3",
+        face_enhance: bool = True,
+        scale: int = 2,
+    ) -> Dict[str, Any]:
+        """
+        Upscale a frame using ModelsLab V6 super resolution API.
+
+        Args:
+            frame_base64: Base64 encoded image data
+            model_id: Upscaling model to use
+            face_enhance: Whether to enhance faces
+            scale: Upscale factor (2 or 4)
+
+        Returns:
+            Dict with status and output_url
+        """
+        try:
+            # Prepare base64 data URL
+            init_image = f"data:image/jpeg;base64,{frame_base64}"
+
+            upscale_endpoint = (
+                f"{settings.MODELSLAB_V6_BASE_URL}/image_editing/super_resolution"
+            )
+
+            payload = {
+                "key": self.api_key,
+                "init_image": init_image,
+                "model_id": model_id,
+                "scale": scale,
+                "face_enhance": face_enhance,
+            }
+
+            logger.info(f"[UPSCALE FRAME] Starting upscale with model: {model_id}")
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    upscale_endpoint,
+                    json=payload,
+                    headers=self.headers,
+                    timeout=aiohttp.ClientTimeout(total=180),
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(
+                            f"[UPSCALE FRAME] API error: {response.status} - {error_text}"
+                        )
+                        return {
+                            "status": "error",
+                            "error": f"Upscale API error: {error_text}",
+                        }
+
+                    result = await response.json()
+                    logger.info(
+                        f"[UPSCALE FRAME] Response status: {result.get('status')}"
+                    )
+
+                    # Handle async processing
+                    if result.get("status") == "processing":
+                        fetch_url = result.get("fetch_result")
+                        if fetch_url:
+                            return await self._wait_for_upscale_completion(
+                                session, fetch_url
+                            )
+
+                    # Handle immediate success
+                    output_urls = result.get("output", [])
+                    if output_urls and len(output_urls) > 0:
+                        return {
+                            "status": "success",
+                            "output_url": output_urls[0],
+                        }
+
+                    return {
+                        "status": "error",
+                        "error": "No output URL in upscale response",
+                    }
+
+        except Exception as e:
+            logger.error(f"[UPSCALE FRAME] Error: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e),
+            }
+
+    async def _wait_for_upscale_completion(
+        self,
+        session: aiohttp.ClientSession,
+        fetch_url: str,
+        max_wait_time: int = 120,
+    ) -> Dict[str, Any]:
+        """Wait for async upscaling to complete"""
+        import time
+
+        start_time = time.time()
+        check_interval = 3
+
+        while (time.time() - start_time) < max_wait_time:
+            await asyncio.sleep(check_interval)
+
+            try:
+                async with session.post(
+                    fetch_url,
+                    json={"key": self.api_key},
+                    headers=self.headers,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as response:
+                    if response.status != 200:
+                        continue
+
+                    result = await response.json()
+                    status = result.get("status", "").lower()
+
+                    if status == "success":
+                        output_urls = result.get("output", [])
+                        if output_urls and len(output_urls) > 0:
+                            logger.info("[UPSCALE FRAME] ✅ Upscale completed")
+                            return {
+                                "status": "success",
+                                "output_url": output_urls[0],
+                            }
+
+                    if status == "failed" or status == "error":
+                        return {
+                            "status": "error",
+                            "error": result.get("message", "Upscaling failed"),
+                        }
+
+            except Exception as e:
+                logger.warning(f"[UPSCALE FRAME] Poll error: {e}")
+                continue
+
+        return {
+            "status": "error",
+            "error": "Upscaling timed out",
+        }
+
+    async def generate_video_with_consistency_loop(
+        self,
+        scenes: List[Dict[str, Any]],
+        use_consistency_loop: bool = True,
+        upscale_model: str = "realesr-general-x4v3",
+        face_enhance: bool = True,
+        max_concurrent: int = 1,  # Sequential for consistency
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate videos for multiple scenes with consistency loop.
+
+        The consistency loop ensures visual continuity by:
+        1. Generating video for scene 1 using the original scene image
+        2. Extracting and upscaling the last frame of scene 1
+        3. Using that upscaled frame as input for scene 2
+        4. Repeat for all scenes
+
+        Args:
+            scenes: List of scene dicts with image_url, prompt, style, etc.
+            use_consistency_loop: Whether to use the consistency loop
+            upscale_model: Model for upscaling extracted frames
+            face_enhance: Whether to enhance faces in upscaled frames
+            max_concurrent: Max concurrent generations (1 for consistency)
+
+        Returns:
+            List of video generation results with continuity_frame URLs
+        """
+        if not scenes:
+            return []
+
+        logger.info(
+            f"[CONSISTENCY LOOP] Generating {len(scenes)} scene videos "
+            f"(consistency_loop={use_consistency_loop})"
+        )
+
+        results = []
+        continuity_frame_url = None
+
+        for i, scene in enumerate(scenes):
+            scene_id = scene.get("scene_id", f"scene_{i}")
+            original_image_url = scene.get("image_url")
+
+            # Use continuity frame from previous scene if available and enabled
+            if use_consistency_loop and continuity_frame_url and i > 0:
+                input_image_url = continuity_frame_url
+                logger.info(
+                    f"[CONSISTENCY LOOP] Scene {i+1}/{len(scenes)}: Using continuity frame"
+                )
+            else:
+                input_image_url = original_image_url
+                logger.info(
+                    f"[CONSISTENCY LOOP] Scene {i+1}/{len(scenes)}: Using original image"
+                )
+
+            # Generate video for this scene
+            video_result = await self.generate_image_to_video(
+                image_url=input_image_url,
+                prompt=scene.get("prompt", ""),
+                model_id=scene.get("model_id", "veo-3.1-fast"),
+                negative_prompt=scene.get("negative_prompt", ""),
+                duration=scene.get("duration", 5.0),
+                fps=scene.get("fps", 24),
+                init_audio=scene.get("audio_url"),
+            )
+
+            result = {
+                "scene_id": scene_id,
+                "scene_index": i,
+                "video_result": video_result,
+                "used_continuity_frame": use_consistency_loop
+                and continuity_frame_url is not None
+                and i > 0,
+                "original_image_url": original_image_url,
+                "input_image_url": input_image_url,
+            }
+
+            # If video generation succeeded and consistency loop is enabled,
+            # extract and upscale the last frame for the next scene
+            if use_consistency_loop and video_result.get("status") == "success":
+                video_url = video_result.get("video_url")
+                if video_url:
+                    logger.info(
+                        f"[CONSISTENCY LOOP] Extracting continuity frame for scene {i+1}"
+                    )
+
+                    frame_result = await self.extract_and_upscale_last_frame(
+                        video_url=video_url,
+                        output_filename=f"continuity_frame_{scene_id}.jpg",
+                        upscale_model=upscale_model,
+                        face_enhance=face_enhance,
+                    )
+
+                    if frame_result.get("status") == "success":
+                        continuity_frame_url = frame_result.get("upscaled_frame_url")
+                        result["continuity_frame_url"] = continuity_frame_url
+                        logger.info(
+                            f"[CONSISTENCY LOOP] ✅ Continuity frame ready for next scene"
+                        )
+                    elif frame_result.get("status") == "partial":
+                        # Use original frame if upscaling failed
+                        continuity_frame_url = (
+                            None  # Will need to handle base64 differently
+                        )
+                        result["continuity_frame_error"] = frame_result.get("error")
+                        logger.warning(
+                            f"[CONSISTENCY LOOP] ⚠️ Using fallback for next scene"
+                        )
+                    else:
+                        continuity_frame_url = None
+                        result["continuity_frame_error"] = frame_result.get("error")
+                        logger.warning(
+                            f"[CONSISTENCY LOOP] ⚠️ No continuity frame available"
+                        )
+
+            results.append(result)
+
+        logger.info(f"[CONSISTENCY LOOP] Completed {len(results)} scene videos")
+        return results

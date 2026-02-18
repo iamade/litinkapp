@@ -145,7 +145,9 @@ uvloop==0.21.0
 vine==5.1.0
 watchfiles==1.1.0
 wcwidth==0.2.13
-websockets==15.0.1
+websockets==14.2
 yarl==1.20.1
 pgvector==0.2.4
 boto3==1.42.1
+google-genai
+gunicorn==23.0.0

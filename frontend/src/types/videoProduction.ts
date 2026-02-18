@@ -2,6 +2,8 @@
 export interface VideoScene {
   id: string;
   sceneNumber: number;
+  shotType?: 'key_scene' | 'suggested_shot'; // Shot type from storyboard
+  shotIndex?: number; // Shot index within scene
   imageUrl: string;
   video_url?: string;
   audioFiles: string[];

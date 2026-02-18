@@ -100,9 +100,8 @@ export default function Navbar() {
                           location.pathname.startsWith('/dashboard') || 
                           location.pathname.startsWith('/explore') || 
                           location.pathname.startsWith('/learn') || 
-                          location.pathname.startsWith('/subscription') ||
                           location.pathname.startsWith('/book') ||
-                          (mode === 'explorer' && !location.pathname.startsWith('/creator') && !location.pathname.startsWith('/author') && !location.pathname.startsWith('/upload') && !location.pathname.startsWith('/project') && !location.pathname.startsWith('/profile'))
+                          (mode === 'explorer' && !location.pathname.startsWith('/creator') && !location.pathname.startsWith('/author') && !location.pathname.startsWith('/upload') && !location.pathname.startsWith('/project') && !location.pathname.startsWith('/profile') && !location.pathname.startsWith('/subscription'))
                             ? 'bg-purple-600 text-white shadow-sm'
                             : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                         }`}

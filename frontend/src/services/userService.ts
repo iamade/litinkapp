@@ -1,4 +1,5 @@
 import { apiClient } from "../lib/api";
+import { normalizeGenerationStatus } from "../lib/videoGenerationApi";
 
 interface Book {
   id: string;
@@ -37,6 +38,7 @@ interface VideoGenerationResponse {
 
 // Update VideoStatus interface to include task metadata
 interface VideoStatus {
+  status?: string;
   generation_status: string;
   quality_tier: string;
   video_url?: string;
@@ -112,6 +114,7 @@ interface ImageRecord {
   image_type: string;
   scene_description?: string;
   character_name?: string;
+  shot_index?: number;
   image_url?: string;
   thumbnail_url?: string;
   image_prompt?: string;
@@ -262,6 +265,7 @@ export const userService = {
       sceneCount?: number;
       focusAreas?: string[];
       scriptStoryType?: string;
+      customLogline?: string;
     }
   ): Promise<ScriptResult> => {
     const requestPayload = {
@@ -272,8 +276,16 @@ export const userService = {
       scene_count: options?.sceneCount,
       focus_areas: options?.focusAreas,
       scriptStoryType: options?.scriptStoryType,
+      custom_logline: options?.customLogline,
     };
     return apiClient.post<ScriptResult>(`/ai/generate-script-and-scenes`, requestPayload);
+  },
+
+  updatePlotOverview: async (
+    plotId: string,
+    updates: { logline?: string; [key: string]: any }
+  ) => {
+    return apiClient.put(`/plots/${plotId}`, updates);
   },
 
   getChapterScripts: async (
@@ -290,6 +302,10 @@ export const userService = {
 
   deleteScript: async (scriptId: string) => {
     return apiClient.delete(`/ai/delete-script/${scriptId}`);
+  },
+
+  updateScript: async (scriptId: string, updates: Partial<GeneratedScript>) => {
+    return apiClient.patch<GeneratedScript>(`/ai/script/${scriptId}`, updates);
   },
 
   // Video Generation Functions
@@ -313,15 +329,29 @@ export const userService = {
   getVideoGenerationStatus: async (
     videoGenId: string
   ): Promise<VideoStatus> => {
-    return apiClient.get<VideoStatus>(
+    const response = await apiClient.get<VideoStatus>(
       `/ai/video-generation-status/${videoGenId}`
     );
+    
+    // Normalize status to ensure consistent frontend handling
+    // This handles cases where backend returns 'status' instead of 'generation_status'
+    // or when status values need normalization (e.g. whitespace, case)
+    return {
+      ...response,
+      generation_status: normalizeGenerationStatus(response.generation_status || response.status)
+    };
   },
 
   // Image generation methods
   async getChapterImages(chapterId: string): Promise<ChapterImagesResponse> {
     return apiClient.get<ChapterImagesResponse>(
       `/chapters/${chapterId}/images`
+    );
+  },
+
+  async getScriptImages(scriptId: string): Promise<ChapterImagesResponse> {
+    return apiClient.get<ChapterImagesResponse>(
+      `/ai/script/${scriptId}/images`
     );
   },
 
@@ -358,6 +388,48 @@ export const userService = {
     return apiClient.post(
       `/chapters/${chapterId}/images/characters/link`,
       request
+    );
+  },
+
+  // Create a placeholder character in plot overview (for books)
+  async createPlotCharacter(
+    bookId: string,
+    characterName: string,
+    entityType: 'character' | 'object' | 'location' = 'character'
+  ): Promise<{
+    id: string;
+    name: string;
+    role?: string;
+    physical_description?: string;
+    personality?: string;
+    image_url?: string;
+    entity_type?: string;
+    message: string;
+  }> {
+    return apiClient.post(
+      `/plots/books/${bookId}/characters?character_name=${encodeURIComponent(characterName)}&entity_type=${entityType}`,
+      {}
+    );
+  },
+
+  // Create a placeholder character in project plot overview (for Creator mode)
+  async createProjectCharacter(
+    projectId: string,
+    characterName: string,
+    entityType: 'character' | 'object' | 'location' = 'character'
+  ): Promise<{
+    id: string;
+    name: string;
+    role?: string;
+    physical_description?: string;
+    personality?: string;
+    image_url?: string;
+    entity_type?: string;
+    message: string;
+  }> {
+    return apiClient.post(
+      `/plots/projects/${projectId}/characters?character_name=${encodeURIComponent(characterName)}&entity_type=${entityType}`,
+      {}
     );
   },
 
@@ -412,8 +484,9 @@ export const userService = {
   },
 
   // Audio generation methods
-  async getChapterAudio(chapterId: string) {
-    return apiClient.get<any>(`/chapters/${chapterId}/audio`);
+  async getChapterAudio(chapterId: string, scriptId?: string) {
+    const params = scriptId ? `?script_id=${scriptId}` : '';
+    return apiClient.get<any>(`/chapters/${chapterId}/audio${params}`);
   },
 
   async generateSceneDialogue(
@@ -515,10 +588,22 @@ export const userService = {
   },
 
   // Plot and script methods (if not already present)
-  async generatePlotOverview(bookId: string) {
+  async generatePlotOverview(bookId: string, options?: {
+    refinementPrompt?: string;
+    storyType?: string;
+    genre?: string;
+    tone?: string;
+    audience?: string;
+  }) {
     return apiClient.post<any>(
       `/plots/books/${bookId}/generate`,
-      {}
+      {
+        refinement_prompt: options?.refinementPrompt,
+        story_type: options?.storyType,
+        genre: options?.genre,
+        tone: options?.tone,
+        audience: options?.audience,
+      }
     );
   },
 
@@ -550,6 +635,44 @@ export const userService = {
       `/plots/books/${bookId}/overview`
     );
     return response;
+  },
+
+  // Auto-add more characters to an existing plot (without replacing existing ones)
+  async autoAddCharacters(bookId: string): Promise<{
+    message: string;
+    characters_added: number;
+    total_characters: number;
+    new_characters?: Array<{
+      id: string;
+      name: string;
+      role: string;
+      physical_description: string;
+      personality: string;
+    }>;
+  }> {
+    return apiClient.post(
+      `/plots/books/${bookId}/auto-add-characters`,
+      {}
+    );
+  },
+
+  // Auto-add more characters to an existing project plot (for Creator mode)
+  async autoAddProjectCharacters(projectId: string): Promise<{
+    message: string;
+    characters_added: number;
+    total_characters: number;
+    new_characters?: Array<{
+      id: string;
+      name: string;
+      role: string;
+      physical_description: string;
+      personality: string;
+    }>;
+  }> {
+    return apiClient.post(
+      `/plots/projects/${projectId}/auto-add-characters`,
+      {}
+    );
   },
 
   // Get project plot overview (uses project-specific endpoint)
@@ -618,6 +741,14 @@ export const userService = {
     return apiClient.get(`/characters/${characterId}/image-status`);
   },
 
+  async setDefaultCharacterImage(characterId: string, imageUrl: string) {
+    return apiClient.put(`/characters/${characterId}/image/default`, { image_url: imageUrl });
+  },
+
+  async deleteCharacterHistoryImage(characterId: string, imageId: string) {
+    return apiClient.delete<{ success: boolean; message: string }>(`/characters/${characterId}/image/${imageId}`);
+  },
+
   async generateCharacterDetailsWithAI(
     characterName: string,
     bookId: string,
@@ -678,6 +809,70 @@ export const userService = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       scriptId: data.scriptId,
+    });
+  },
+
+  // AI Assist - Enhance scene prompt for image generation
+  enhanceScenePrompt: async (request: {
+    scene_description: string;
+    scene_context?: string;
+    characters_in_scene?: string[];
+    shot_type?: string;
+    style?: string;
+  }): Promise<{
+    original_description: string;
+    enhanced_description: string;
+    detected_shot_type: string | null;
+    suggested_shot_types: string[];
+    enhancement_notes: string | null;
+  }> => {
+    return apiClient.post("/ai/enhance-scene-prompt", {
+      scene_description: request.scene_description,
+      scene_context: request.scene_context,
+      characters_in_scene: request.characters_in_scene,
+      shot_type: request.shot_type,
+      style: request.style || "cinematic",
+    });
+  },
+
+  // Script Expansion - AI-powered story content expansion
+  expandScript: async (request: {
+    content: string;
+    expansion_prompt?: string;
+    target_length_increase?: number;
+    focus_areas?: string[];
+    artifact_id?: string;
+    script_id?: string;
+  }): Promise<{
+    expanded_content: string;
+    original_length: number;
+    expanded_length: number;
+    expansion_ratio: number;
+    saved: boolean;
+    message: string;
+  }> => {
+    return apiClient.post("/ai/expand-script", request);
+  },
+
+  /**
+   * Reassign an audio file to a different shot by updating its shot_index.
+   * @param chapterId - The chapter or project ID
+   * @param audioId - The audio record ID
+   * @param shotIndex - New shot index (0 = key scene, 1+ = suggested shots)
+   */
+  reassignAudioShot: (
+    chapterId: string,
+    audioId: string,
+    shotIndex: number
+  ): Promise<{
+    audio_id: string;
+    previous_shot_index: number;
+    new_shot_index: number;
+    new_shot_type: string;
+    message: string;
+  }> => {
+    return apiClient.patch(`/chapters/${chapterId}/audio/${audioId}/reassign`, {
+      shot_index: shotIndex,
     });
   },
 

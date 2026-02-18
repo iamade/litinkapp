@@ -214,13 +214,18 @@ class OpenRouterService:
         Prepare messages for different script types
         """
         system_prompts = {
-            "cinematic": """You are a professional screenwriter. Convert the provided content into a cinematic screenplay with proper THREE-ACT STRUCTURE:
+            "cinematic": """You are a professional screenwriter for visual production. Convert the provided content into a cinematic screenplay with proper THREE-ACT STRUCTURE:
 
 **STRUCTURE REQUIREMENTS:**
 - Divide the story into ACT I, ACT II, and ACT III
 - Create 5-10 distinct SCENES per act (15-30 total scenes depending on content length)
 - Each scene must have proper heading: INT./EXT. LOCATION - TIME
-- Label each scene clearly (e.g., "ACT I - SCENE 1:", "ACT II - SCENE 5:")
+- Label each scene clearly with INTEGER numbers (e.g., "ACT I - SCENE 1", "ACT I - SCENE 2", "ACT II - SCENE 1")
+
+**SCENE NUMBERING RULES:**
+- Use INTEGER scene numbers only: SCENE 1, SCENE 2, SCENE 3, etc.
+- Scene numbers reset to 1 for each new ACT (ACT II - SCENE 1, not ACT II - SCENE 11)
+- NEVER use decimal scene numbers (NO 1.1, 1.2, etc.)
 
 **CRITICAL DIALOGUE FORMATTING:**
 Show conversations between characters in proper screenplay format:
@@ -232,22 +237,34 @@ What the character says directly.
 ANOTHER CHARACTER
 Their direct response.
 
-**EXAMPLE:**
+**CAMERA DIRECTIONS FOR IMAGE GENERATION:**
+Include camera directions in parentheses for key visual moments to guide image generation:
+- Use (CLOSE-UP) for emotional dialogue or important character reactions
+- Use (WIDE SHOT) for establishing scenes or group interactions
+- Use (MEDIUM SHOT) for standard dialogue between characters
+- Use (OVER-THE-SHOULDER) for conversations showing perspective
+- Use (TWO SHOT) when two characters interact intimately
+- Use (POV) for character perspective shots
+- Use (TRACKING) for following movement
+
+Place camera directions before action descriptions, e.g.:
+(CLOSE-UP) Sarah's eyes widen as she reads the letter.
+(WIDE SHOT) The entire family gathers around the dinner table.
+
+**EXAMPLE FORMAT:**
 **ACT I - SCENE 1**
-INT. DURSLEY HOUSE - DAY
-A lonely boy sits on the curb.
+INT. LIVING ROOM - DAY
+(WIDE SHOT) The PROTAGONIST enters, looking troubled.
 
-DUDLEY
-(mocking)
-Look at the freak! No one wants you here.
+PROTAGONIST
+(hesitant)
+I need to tell you something important.
 
-HARRY
-(quietly, looking down)
-I just want to be left alone.
+(CLOSE-UP) CHARACTER A turns, concern visible on their face.
 
-AUNT PETUNIA
-(shouting from doorway)
-Get inside this instant! And stop bothering Dudley.
+CHARACTER A
+(turning to face them)
+What is it? You look worried.
 
 **FORMATTING RULES:**
 - Character names in UPPERCASE before their dialogue
@@ -256,6 +273,7 @@ Get inside this instant! And stop bothering Dudley.
 - NO phrases like "The narrator says" or "Voice-over explains"
 - Action descriptions in present tense between dialogue
 - Parentheticals for actor directions only
+- Each location change should be a NEW SCENE with an incremented integer number
 
 **STORY COVERAGE:**
 - Complete character arcs and development
@@ -335,7 +353,7 @@ Get inside this instant! And stop bothering Dudley.
             logger.warning(f"No config for tier {tier_str}, using FREE tier defaults")
             config = get_model_config("script", "free")
 
-        # Special handling for plot generation and character creation
+        # Special handling for plot generation, character creation, and universe analysis
         if analysis_type in [
             "plot_overview",
             "plot_generation",
@@ -343,6 +361,9 @@ Get inside this instant! And stop bothering Dudley.
             "character_generation",
             "archetype_analysis",
             "character_details",
+            "enhancement",
+            "cinematic_universe_analysis",
+            "script_expansion",
         ]:
             system_prompt = self._get_special_system_prompt(analysis_type)
             user_message = content
@@ -464,6 +485,92 @@ Get inside this instant! And stop bothering Dudley.
             "characters": """You are an expert character developer and psychologist specializing in creating deep, multidimensional characters with clear motivations, arcs, and personality traits. You understand Jungian archetypes and narrative character functions.""",
             "archetype_analysis": """You are a Jungian psychology expert specializing in archetypal analysis of characters in literature. You can identify and explain how characters embody classic archetypes and their narrative functions.""",
             "character_details": """You are an expert character development analyst. Analyze the provided book content and generate comprehensive character details in valid JSON format. Always respond with properly formatted JSON containing all requested fields.""",
+            "enhancement": """You are a cinematography and visual storytelling expert specializing in creating detailed scene descriptions for AI image generation.
+
+Your task is to enhance scene descriptions with:
+- Visual style and atmosphere (cinematic, dramatic, ethereal, etc.)
+- Lighting details (warm ambient glow, dramatic shadows, natural daylight, etc.)
+- Camera composition suggestions (wide establishing shot, intimate close-up, etc.)
+- Character expressions and body language when relevant
+- Environmental and atmospheric details
+- Quality notes for AI generation (high detail, photorealistic, etc.)
+
+Return ONLY the enhanced description text. Do not include explanations, formatting, or metadata.""",
+            "cinematic_universe_analysis": """You are a legendary film producer and cinematic universe architect with deep expertise in franchise development, narrative interconnection, and phase-based storytelling (like Marvel's MCU or DC's DCEU).
+
+Your task is to analyze multiple uploaded scripts/story documents and provide strategic recommendations for building a cohesive cinematic universe.
+
+**ANALYSIS REQUIREMENTS:**
+
+1. **Universe Name Suggestions**: Provide 3-5 compelling universe names based on the themes, characters, and mythology present in the scripts.
+
+2. **Phase Structure**: Organize the scripts into logical phases (like MCU phases), grouping related stories and suggesting the optimal order for production.
+
+3. **Story Connections**: Identify shared characters, themes, mythology, and potential crossover opportunities between scripts.
+
+4. **Recommended Starting Point**: Identify which script should be the "origin story" or Phase 1 opener.
+
+5. **Content Type Detection**: Determine if this feels more like a film series, TV series, or streaming anthology, and recommend appropriate labeling (Film, Episode, Part).
+
+6. **Gaps & Expansion Opportunities**: Note any missing pieces that would strengthen the universe (prequel opportunities, character origin stories, etc.).
+
+**RESPONSE FORMAT (JSON):**
+{
+    "suggested_names": ["Name 1", "Name 2", "Name 3"],
+    "recommended_starting_point": {
+        "filename": "original_filename.docx",
+        "reason": "Why this should be first"
+    },
+    "content_type": "film" | "series" | "anthology",
+    "content_type_label": "Film" | "Episode" | "Part",
+    "phases": [
+        {
+            "phase_number": 1,
+            "title": "Phase Title",
+            "description": "What this phase accomplishes narratively",
+            "scripts": [
+                {
+                    "order": 1,
+                    "original_filename": "filename.docx",
+                    "suggested_title": "Polished Title",
+                    "role_in_universe": "Origin story / Sequel / Spinoff / etc.",
+                    "key_connections": ["Connection to other scripts"]
+                }
+            ]
+        }
+    ],
+    "shared_elements": {
+        "characters": ["Character names that appear across multiple scripts"],
+        "themes": ["Recurring themes"],
+        "mythology": ["Shared world-building elements"]
+    },
+    "expansion_opportunities": ["Suggested additional stories to fill gaps"],
+    "ai_commentary": "A 2-3 paragraph executive summary of your recommendations and the potential of this universe."
+}
+
+Be creative, insightful, and treat this as if you're pitching to a studio executive.""",
+            "script_expansion": """You are an expert screenwriter and story development consultant. Your task is to expand and enrich script/story content while maintaining consistency with the original tone, style, and characters.
+
+**EXPANSION GUIDELINES:**
+
+1. **Maintain Voice & Tone**: Preserve the original writing style, genre conventions, and narrative voice.
+
+2. **Character Consistency**: Any expanded dialogue or actions must align with established character personalities, motivations, and arcs.
+
+3. **Scene Development**: When expanding scenes, add:
+   - Visual details (setting, atmosphere, lighting)
+   - Character actions and reactions
+   - Subtext and emotional undertones
+   - Sensory details that enhance immersion
+
+4. **Story Coherence**: Ensure all additions logically connect to existing plot points and don't introduce contradictions.
+
+5. **Pacing**: Match the pacing of the original material - don't slow down action sequences or rush emotional moments.
+
+**RESPONSE FORMAT:**
+Return ONLY the expanded content text. Do not include explanations, meta-commentary, or formatting instructions.
+
+If expanding a specific section, seamlessly integrate new content so it reads as one cohesive piece.""",
         }
 
         return prompts.get(analysis_type, "You are a content analyst.")

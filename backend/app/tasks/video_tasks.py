@@ -1,14 +1,22 @@
 from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List, Optional
-from app.core.services.modelslab_video import ModelsLabVideoService
+
 from app.api.services.video import VideoService
 from app.core.database import async_session, engine
 from sqlmodel import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.videos.models import VideoGeneration, VideoSegment
+from app.subscriptions.models import UserSubscription
+from app.core.model_config import get_model_config, ModelConfig
 import json
+import subprocess
+import os
+import requests
+import tempfile
+import uuid
+from app.core.services.file import FileService
 
 from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
 
@@ -128,194 +136,210 @@ async def extract_scene_dialogue_and_generate_audio(
         return {"dialogue_audio": [], "error": str(e)}
 
 
-# Update the service initialization in generate_all_videos_for_generation
-async def generate_scene_videos(
-    modelslab_service: ModelsLabV7VideoService,  # ✅ Updated type hint
-    video_gen_id: str,
-    scene_descriptions: List[str],
-    audio_files: Dict[str, Any],
-    image_data: Dict[str, Any],
-    video_style: str,
-) -> List[Dict[str, Any]]:
-    """Generate videos for each scene using V7 Veo 2 image-to-video"""
+async def extract_last_frame(
+    video_url: str, user_id: Optional[str] = None
+) -> Optional[str]:
+    """
+    Extract the last frame from a video for use as the starting image of the next scene.
+    This helps maintain visual continuity between scenes.
 
-    print(f"[SCENE VIDEOS V7] Generating scene videos with Veo 2...")
-    video_results = []
+    Args:
+        video_url: URL of the video to extract frame from
+        user_id: Optional user ID for storage organization
 
-    scene_images = image_data.get("scene_images", [])  # Fixed key mismatch
-    model_id = modelslab_service.get_video_model_for_style(video_style)
+    Returns:
+        URL of the extracted frame image, or None if extraction fails
+    """
+    import tempfile
+    import subprocess
+    import os
+    import httpx
+    from app.core.services.supabase_storage import SupabaseStorageService
 
-    for i, scene_description in enumerate(scene_descriptions):
+    try:
+        print(f"[LAST FRAME] Extracting last frame from video: {video_url[:50]}...")
+
+        # Download video to temp file
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(video_url)
+            if response.status_code != 200:
+                print(f"[LAST FRAME] Failed to download video: {response.status_code}")
+                return None
+
+        # Create temp files
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as video_file:
+            video_file.write(response.content)
+            video_path = video_file.name
+
+        frame_path = video_path.replace(".mp4", "_last_frame.jpg")
+
         try:
-            scene_id = f"scene_{i+1}"
-            print(f"[SCENE VIDEOS V7] Processing {scene_id}/{len(scene_descriptions)}")
+            # Extract last frame using ffmpeg
+            # First, get video duration
+            probe_cmd = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                video_path,
+            ]
+            result = subprocess.run(probe_cmd, capture_output=True, text=True)
+            duration = float(result.stdout.strip()) if result.stdout.strip() else 5.0
 
-            # Find scene image
-            scene_image = None
-            if i < len(scene_images) and scene_images[i] is not None:
-                scene_image = scene_images[i]
+            # Extract frame at last second
+            seek_time = max(0, duration - 0.1)  # 0.1 seconds before end
+            extract_cmd = [
+                "ffmpeg",
+                "-y",
+                "-ss",
+                str(seek_time),
+                "-i",
+                video_path,
+                "-vframes",
+                "1",
+                "-q:v",
+                "2",
+                frame_path,
+            ]
+            subprocess.run(extract_cmd, capture_output=True, check=True)
 
-            if not scene_image or not scene_image.get("image_url"):
-                print(f"[SCENE VIDEOS V7] ⚠️ No valid image found for {scene_id}")
-                video_results.append(None)
-                continue
+            if not os.path.exists(frame_path):
+                print("[LAST FRAME] Frame extraction failed - no output file")
+                return None
 
-            # Find audio for lip sync
-            scene_audio = find_scene_audio(scene_id, audio_files)
+            # Upload to storage
+            storage_service = SupabaseStorageService()
+            with open(frame_path, "rb") as f:
+                frame_data = f.read()
 
-            # ✅ Generate video using V7 Veo 2
-            result = await modelslab_service.enhance_video_for_scene(
-                scene_description=scene_description,
-                image_url=scene_image["image_url"],
-                audio_url=scene_audio.get("audio_url") if scene_audio else None,
-                style=video_style,
-                include_lipsync=bool(scene_audio),
+            # Generate unique filename
+            import uuid as uuid_lib
+
+            frame_filename = f"frames/{user_id or 'system'}/last_frame_{uuid_lib.uuid4().hex[:8]}.jpg"
+
+            frame_url = await storage_service.upload_file(
+                file_data=frame_data,
+                file_path=frame_filename,
+                content_type="image/jpeg",
             )
 
-            if result.get("status") == "success":
-                enhanced_video = result.get("enhanced_video", {})
-                video_url = enhanced_video.get("video_url")
-                has_lipsync = enhanced_video.get("has_lipsync", False)
+            print(f"[LAST FRAME] ✅ Extracted and uploaded frame: {frame_url[:50]}...")
+            return frame_url
 
-                if video_url:
-                    # Store in database
-                    video_record_data = {
-                        "video_generation_id": video_gen_id,
-                        "scene_id": scene_id,
-                        "segment_index": i + 1,
-                        "scene_description": scene_description,
-                        "source_image_url": scene_image["image_url"],
-                        "video_url": video_url,
-                        "duration_seconds": 5.0,  # Veo 2 default
-                        "generation_method": "veo2_image_to_video",
-                        "status": "completed",
-                        "processing_service": "modelslab_v7",
-                        "processing_model": model_id,
-                        "metadata": json.dumps(
-                            {
-                                "model_id": model_id,
-                                "video_style": video_style,
-                                "service": "modelslab_v7",
-                                "has_lipsync": has_lipsync,
-                                "veo2_enhanced": True,
-                            }
-                        ),
-                    }
+        finally:
+            # Clean up temp files
+            if os.path.exists(video_path):
+                os.unlink(video_path)
+            if os.path.exists(frame_path):
+                os.unlink(frame_path)
 
-                    insert_query = text(
-                        """
-                        INSERT INTO video_segments (
-                            video_generation_id, scene_id, segment_index, scene_description,
-                            source_image_url, video_url, duration_seconds, generation_method,
-                            status, processing_service, processing_model, metadata
-                        ) VALUES (
-                            :video_generation_id, :scene_id, :segment_index, :scene_description,
-                            :source_image_url, :video_url, :duration_seconds, :generation_method,
-                            :status, :processing_service, :processing_model, :metadata
-                        ) RETURNING id
-                    """
-                    )
+    except Exception as e:
+        print(f"[LAST FRAME] ❌ Error extracting frame: {e}")
+        return None
 
-                    db_result = await session.execute(insert_query, video_record_data)
-                    await session.commit()
-                    record_id = db_result.scalar()
 
-                    video_results.append(
-                        {
-                            "id": record_id,
-                            "scene_id": scene_id,
-                            "video_url": video_url,
-                            "duration": 5.0,
-                            "source_image": scene_image["image_url"],
-                            "method": "veo2_image_to_video",
-                            "model": model_id,
-                            "has_lipsync": has_lipsync,
-                        }
-                    )
+async def upscale_frame(
+    image_url: str, user_tier: str = "BASIC", user_id: Optional[str] = None
+) -> str:
+    """
+    Upscale an extracted frame before using it as video input.
+    Uses tier-based upscaling models from UPSCALE_MODEL_CONFIG.
 
-                    print(
-                        f"[SCENE VIDEOS V7] ✅ Generated {scene_id} - Lip sync: {has_lipsync}"
-                    )
-                else:
-                    raise Exception("No video URL in V7 response")
-            else:
-                raise Exception(
-                    f"V7 Video generation failed: {result.get('error', 'Unknown error')}"
-                )
+    Args:
+        image_url: URL of the image to upscale
+        user_tier: User's subscription tier for model selection
+        user_id: Optional user ID for storage organization
 
-        except Exception as e:
-            print(f"[SCENE VIDEOS V7] ❌ Failed {scene_id}: {str(e)}")
+    Returns:
+        URL of the upscaled image, or original URL if upscaling fails
+    """
+    from app.core.model_config import UPSCALE_MODEL_CONFIG, ModelTier
 
-            # Store failed record
-            # Store failed record
-            try:
-                fail_insert_query = text(
-                    """
-                    INSERT INTO video_segments (
-                        video_generation_id, scene_id, segment_index, scene_description,
-                        generation_method, status, error_message, processing_service, processing_model, metadata
-                    ) VALUES (
-                        :video_generation_id, :scene_id, :segment_index, :scene_description,
-                        :generation_method, :status, :error_message, :processing_service, :processing_model, :metadata
-                    )
-                """
-                )
+    try:
+        print(f"[UPSCALE] Upscaling frame for tier: {user_tier}")
 
-                await session.execute(
-                    fail_insert_query,
-                    {
-                        "video_generation_id": video_gen_id,
-                        "scene_id": scene_id,
-                        "segment_index": i + 1,
-                        "scene_description": scene_description,
-                        "generation_method": "veo2_image_to_video_sequential",
-                        "status": "failed",
-                        "error_message": str(e),
-                        "processing_service": "modelslab_v7",
-                        "processing_model": model_id,
-                        "metadata": json.dumps(
-                            {"service": "modelslab_v7", "veo2_enhanced": False}
-                        ),
-                    },
-                )
-                await session.commit()
-            except Exception as insert_err:
-                print(f"[SCENE VIDEOS V7] Error inserting failed record: {insert_err}")
+        # Get model config based on tier
+        tier_enum = ModelTier[user_tier.upper()] if user_tier else ModelTier.BASIC
+        upscale_config = UPSCALE_MODEL_CONFIG.get(
+            tier_enum, UPSCALE_MODEL_CONFIG[ModelTier.BASIC]
+        )
+        model_id = upscale_config.primary
 
-            video_results.append(None)
+        # Use ModelsLab upscaling service
+        from app.core.services.modelslab_upscale import ModelsLabUpscaleService
 
-    successful_videos = len([r for r in video_results if r is not None])
-    print(
-        f"[SCENE VIDEOS V7] Completed: {successful_videos}/{len(scene_descriptions)} videos"
-    )
-    return video_results
+        upscale_service = ModelsLabUpscaleService()
+        result = await upscale_service.upscale_image(
+            image_url=image_url,
+            model_id=model_id,
+            scale=2,  # 2x upscaling is usually sufficient
+        )
+
+        if result.get("status") == "success" and result.get("upscaled_url"):
+            print(f"[UPSCALE] ✅ Frame upscaled successfully")
+            return result["upscaled_url"]
+        else:
+            print(
+                f"[UPSCALE] ⚠️ Upscaling failed, using original: {result.get('error')}"
+            )
+            return image_url
+
+    except Exception as e:
+        print(f"[UPSCALE] ❌ Error upscaling frame: {e}, using original")
+        return image_url
 
 
 def find_scene_audio(
     scene_id: str, audio_files: Dict[str, Any], script_style: str = None
 ) -> Optional[Dict[str, Any]]:
-    """Find the primary audio file for a scene (for lip sync)"""
+    """Find audio for a scene with progressive fallback.
 
-    # Priority: Character dialogue > Narrator > None
-    character_audio = audio_files.get("characters", [])
-    narrator_audio = audio_files.get("narrator", [])
+    Priority: exact scene match (character > narrator > any type) > any available audio.
+    """
 
     scene_number = int(scene_id.split("_")[1]) if "_" in scene_id else 1
 
-    # Look for character dialogue first
-    for audio in character_audio:
+    # Collect all audio across all types
+    all_audio = []
+    for audio_type in ["characters", "narrator", "sound_effects", "background_music"]:
+        all_audio.extend(audio_files.get(audio_type, []))
+
+    print(
+        f"[FIND AUDIO] Looking for audio for {scene_id} (scene_number={scene_number}), total audio files: {len(all_audio)}"
+    )
+
+    # Priority 1: Exact scene match in character audio
+    for audio in audio_files.get("characters", []):
         if audio.get("scene") == scene_number and audio.get("audio_url"):
+            print(f"[FIND AUDIO] Found character audio for {scene_id}")
             return audio
 
-    # For cinematic scripts, don't fall back to narrator audio
-    if script_style == "cinematic":
-        return None
-
-    # Fall back to narrator audio
-    for audio in narrator_audio:
+    # Priority 2: Exact scene match in narrator audio
+    for audio in audio_files.get("narrator", []):
         if audio.get("scene") == scene_number and audio.get("audio_url"):
+            print(f"[FIND AUDIO] Found narrator audio for {scene_id}")
             return audio
 
+    # Priority 3: Exact scene match in any type
+    for audio in all_audio:
+        if audio.get("scene") == scene_number and audio.get("audio_url"):
+            print(
+                f"[FIND AUDIO] Found audio (type={audio.get('audio_type')}) for {scene_id}"
+            )
+            return audio
+
+    # Priority 4: Any audio with a URL (fallback when sequence_order doesn't match scene)
+    for audio in all_audio:
+        if audio.get("audio_url"):
+            print(
+                f"[AUDIO FALLBACK] Using audio id={audio.get('id')} (scene={audio.get('scene')}) for {scene_id}"
+            )
+            return audio
+
+    print(f"[FIND AUDIO] No audio found for {scene_id}")
     return None
 
 
@@ -368,6 +392,11 @@ async def update_pipeline_step(
 
     except Exception as e:
         print(f"[PIPELINE] Error updating step {step_name}: {e}")
+        if session:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
 
 
 @celery_app.task(bind=True)
@@ -405,16 +434,34 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             # Update status and initialize retry tracking
             update_query = text(
                 """
-                UPDATE video_generations 
-                SET generation_status = 'generating_video', 
-                    retry_count = 0, 
-                    can_resume = true, 
-                    last_retry_at = NULL 
+                UPDATE video_generations
+                SET generation_status = 'generating_video',
+                    retry_count = 0,
+                    can_resume = true
                 WHERE id = :id
             """
             )
             await session.execute(update_query, {"id": video_generation_id})
             await session.commit()
+
+            # Get user subscription tier for model config
+            user_tier = "free"
+            async with session.begin_nested():  # Use nested transaction or just query
+                # Re-using session within transaction is fine
+                pass
+
+            # Simple query for subscription
+            sub_query = text(
+                "SELECT tier FROM user_subscriptions WHERE user_id = :user_id"
+            )
+            sub_result = await session.execute(sub_query, {"user_id": user_id})
+            sub_record = sub_result.first()
+            if sub_record:
+                user_tier = sub_record[0]
+
+            # Get Video Model Config
+            video_config = get_model_config("video", user_tier)
+            print(f"[VIDEO CONFIG] Tier: {user_tier}, Config: {video_config}")
 
             # Get script data and generated assets
             script_data = video_gen.get("script_data", {})
@@ -425,109 +472,265 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             characters = script_data.get("characters", [])
             video_style = script_data.get("video_style", "realistic")
 
+            # Read task_meta for selection filters
+            task_meta = video_gen.get("task_meta", {}) or {}
+            print(f"[VIDEO GENERATION] task_meta keys: {list(task_meta.keys())}")
+            if task_meta.get("selected_shot_ids"):
+                print(
+                    f"[VIDEO GENERATION] selected_shot_ids: {task_meta['selected_shot_ids']}"
+                )
+            if task_meta.get("selected_audio_ids"):
+                print(
+                    f"[VIDEO GENERATION] selected_audio_ids: {task_meta['selected_audio_ids']}"
+                )
+
+            # Save original scene_descriptions before any filtering
+            # (needed for correct indexing when building target lists)
+            original_scene_descriptions = list(scene_descriptions)
+
+            # Filter scene_descriptions by selected scenes from task_meta
+            if task_meta.get("selected_shot_ids"):
+                selected_shot_ids = task_meta["selected_shot_ids"]
+                # Parse scene numbers from composite frontend IDs
+                # Format: "scene-{timestamp}-{index}-{scriptId}" where index is 0-based
+                selected_scene_indices = []
+                for shot_id in selected_shot_ids:
+                    try:
+                        if isinstance(shot_id, str) and shot_id.startswith("scene-"):
+                            parts = shot_id.split("-")
+                            if len(parts) >= 3:
+                                scene_index = int(parts[2])  # 0-based index
+                                selected_scene_indices.append(scene_index)
+                    except (ValueError, IndexError) as e:
+                        print(
+                            f"[VIDEO GENERATION] Could not parse shot ID {shot_id}: {e}"
+                        )
+
+                if selected_scene_indices:
+                    # Filter scene_descriptions to only selected scenes
+                    filtered_descriptions = []
+                    for idx in sorted(set(selected_scene_indices)):
+                        if idx < len(original_scene_descriptions):
+                            filtered_descriptions.append(
+                                original_scene_descriptions[idx]
+                            )
+
+                    print(
+                        f"[VIDEO GENERATION] Filtered scenes: {len(filtered_descriptions)} of {len(original_scene_descriptions)} (indices: {selected_scene_indices})"
+                    )
+                    scene_descriptions = filtered_descriptions
+                else:
+                    print(
+                        f"[VIDEO GENERATION] No valid scene indices parsed, using all {len(scene_descriptions)} scenes"
+                    )
+            else:
+                print(
+                    f"[VIDEO GENERATION] No selected_shot_ids in task_meta, using all {len(scene_descriptions)} scenes"
+                )
+
             print(f"[VIDEO GENERATION] Processing:")
             print(f"- Scenes: {len(scene_descriptions)}")
             print(f"- Characters: {len(characters)}")
             print(f"- Video Style: {video_style}")
+
+            # Detailed audio logging
+            narrator_count = len(audio_files.get("narrator", []))
+            character_count = len(audio_files.get("characters", []))
+            sfx_count = len(audio_files.get("sound_effects", []))
+            music_count = len(audio_files.get("background_music", []))
             print(
-                f"- Audio Files: {len(audio_files.get('narrator', [])) + len(audio_files.get('characters', []))}"
+                f"- Audio Files: narrator={narrator_count}, characters={character_count}, sfx={sfx_count}, music={music_count}"
+            )
+            for audio_type, items in audio_files.items():
+                for item in items:
+                    print(
+                        f"  [{audio_type}] id={item.get('id', 'N/A')}, scene={item.get('scene_number', '?')}, url={'yes' if item.get('url') or item.get('audio_url') else 'NO'}"
+                    )
+
+            # Log image data and prompts
+            img_images = image_data.get("images", {})
+            scene_imgs = img_images.get(
+                "scene_images", image_data.get("scene_images", [])
+            )
+            print(f"- Scene Images: {len(scene_imgs)}")
+            for img in scene_imgs:
+                prompt_preview = (img.get("prompt", "") or "")[:80]
+                print(
+                    f"  [scene] id={img.get('id', 'N/A')}, scene_num={img.get('scene_number', '?')}, prompt={prompt_preview!r}"
+                )
+
+            # Use pre-generated scene images directly from image_data
+            # (images were already stored by routes.py from ImageGeneration records)
+            img_images = image_data.get("images", {})
+            pre_gen_scene_images = img_images.get("scene_images", [])
+            pre_gen_character_images = img_images.get("character_images", [])
+
+            print(
+                f"[IMAGE SELECTION] Pre-generated scene images: {len(pre_gen_scene_images)}"
+            )
+            print(
+                f"[IMAGE SELECTION] Pre-generated character images: {len(pre_gen_character_images)}"
             )
 
-            # Query existing character images from database
-            character_images = await query_existing_character_images(
-                user_id, characters
-            )
-            print(f"- Character Images: {len(character_images)} found in database")
+            # Build scene_images list from pre-generated images
+            # Map by scene_number for easy lookup
+            # Build scene_image_map with shot_index support
+            # Structure: {scene_number: {shot_index: image_data}}
+            scene_image_map = {}
+            for img in pre_gen_scene_images:
+                scene_num = img.get("scene_number", 0)
+                shot_idx = img.get("shot_index", 0)
 
-            # Query existing scene images from database
-            scene_images = await query_existing_scene_images(
-                user_id, scene_descriptions
-            )
-            print(f"- Scene Images: {len(scene_images)} found in database")
+                if scene_num not in scene_image_map:
+                    scene_image_map[scene_num] = {}
 
-            # For split workflow, prioritize scene images over character images
-            if not image_data.get("scene_images"):
-                image_data["scene_images"] = []
-                for i, scene_description in enumerate(scene_descriptions):
-                    scene_image = None
+                # Store image by shot_index
+                # If multiple images have same scene/shot index, last one wins (or we could list them)
+                scene_image_map[scene_num][shot_idx] = img
 
-                    # First, try to find a matching scene image for this specific scene
-                    for scene_img in scene_images:
-                        if (
-                            scene_img.get("scene_description")
-                            and scene_description.lower()
-                            in scene_img["scene_description"].lower()
-                        ):
-                            scene_image = {
-                                "image_url": scene_img.get("image_url"),
-                                "scene_description": scene_img.get("scene_description"),
-                                "image_type": scene_img.get("image_type", "scene"),
-                                "scene_number": i + 1,
-                            }
-                            print(
-                                f"[SCENE IMAGE SELECTION] Using scene image for scene_{i+1}: {scene_img.get('scene_description')}"
+            print(f"[IMAGE MAPPING] Map keys: {list(scene_image_map.keys())}")
+
+            # Parse selected shot IDs to get (scene_index, shot_index) tuples
+            # Format: scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
+            # Or legacy: scene-{timestamp}-{scene_index}-{script_id}
+            if task_meta.get("selected_shot_ids"):
+                selected_scene_indices = []
+                for shot_id in task_meta.get("selected_shot_ids"):
+                    try:
+                        # Use maxsplit to handle UUIDs with hyphens in script_id
+                        # Format: scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
+                        # We only need the first few parts to get scene_index and shot_index
+                        parts = shot_id.split("-")
+
+                        # Support legacy format: scene-{timestamp}-{scene_index}-{script_id}
+                        # And new format: scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
+
+                        if len(parts) >= 3:
+                            # parts[2] is always scene_index
+                            scene_index = int(parts[2])
+                            shot_index = 0
+
+                            # Check for shot_index at parts[3]
+                            if len(parts) >= 4:
+                                try:
+                                    candidate = int(parts[3])
+                                    if candidate < 100:
+                                        shot_index = candidate
+                                except ValueError:
+                                    # Not an integer, so it's likely part of the scriptID
+                                    pass
+
+                            selected_scene_indices.append((scene_index, shot_index))
+                    except Exception as e:
+                        print(f"[SCENE VIDEOS] Error parsing shot_id {shot_id}: {e}")
+                        continue
+
+                # Sort by scene index
+                selected_scene_indices.sort(key=lambda x: x[0])
+
+                # IMPORTANT: Use the selected indices to order the generation
+                # This matches the user's timeline order
+                final_scene_images = []
+                target_scene_descriptions = []
+                target_scene_numbers = []
+
+                print(
+                    f"[SCENE VIDEOS] Generating for {len(selected_scene_indices)} selected shots: {selected_scene_indices}"
+                )
+
+                for idx, shot_idx in selected_scene_indices:
+                    scene_num = idx + 1  # 1-based scene description index
+
+                    # Try to find specific shot first
+                    found_image = None
+                    if scene_num in scene_image_map:
+                        # 1. Try exact match (scene + shot_index)
+                        if shot_idx in scene_image_map[scene_num]:
+                            found_image = scene_image_map[scene_num][shot_idx]
+                        # 2. Try key scene (shot_index 0)
+                        elif 0 in scene_image_map[scene_num]:
+                            found_image = scene_image_map[scene_num][0]
+                        # 3. Fallback to any available image for this scene
+                        elif scene_image_map[scene_num]:
+                            found_image = next(
+                                iter(scene_image_map[scene_num].values())
                             )
-                            break
 
-                    # If no scene image found, fall back to character images
-                    if not scene_image and character_images:
-                        # Use character images in rotation for scenes
-                        char_image = character_images[i % len(character_images)]
-                        scene_image = {
-                            "image_url": char_image.get("image_url"),
-                            "character_name": char_image.get("name"),
-                            "image_type": "character_fallback",
-                            "scene_number": i + 1,
-                        }
-                        print(
-                            f"[SCENE IMAGE SELECTION] ⚠️ Using character image as fallback for scene_{i+1}: {char_image.get('name')}"
+                    if found_image:
+                        final_scene_images.append(found_image)
+                    else:
+                        # Add placeholder if no image found but scene is selected
+                        final_scene_images.append(None)
+
+                    # Add description and number mapping
+                    if idx < len(original_scene_descriptions):
+                        target_scene_descriptions.append(
+                            original_scene_descriptions[idx]
                         )
+                    else:
+                        target_scene_descriptions.append(f"Scene {scene_num}")
+                    target_scene_numbers.append(scene_num)
 
-                # If no images available at all, will use text-to-video fallback
-                image_data["scene_images"].append(scene_image)
+                image_data["scene_images"] = final_scene_images
+            else:
+                # No selection filter: assign images by order or scene_number
+                target_scene_descriptions = scene_descriptions
+                target_scene_numbers = list(range(1, len(scene_descriptions) + 1))
+                final_scene_images = []
 
-            # Log the final image selection breakdown
+                for i in range(len(scene_descriptions)):
+                    scene_num = i + 1
+                    found_image = None
+
+                    if scene_num in scene_image_map:
+                        # Default to key scene (0) or first available
+                        if 0 in scene_image_map[scene_num]:
+                            found_image = scene_image_map[scene_num][0]
+                        else:
+                            found_image = next(
+                                iter(scene_image_map[scene_num].values())
+                            )
+                    elif i < len(pre_gen_scene_images):
+                        found_image = pre_gen_scene_images[i]
+                    elif pre_gen_character_images:
+                        found_image = pre_gen_character_images[
+                            i % len(pre_gen_character_images)
+                        ]
+                    else:
+                        # Fallback to ANY generated image if list exists
+                        if pre_gen_scene_images:
+                            found_image = pre_gen_scene_images[0]
+                        else:
+                            found_image = None
+
+                    final_scene_images.append(found_image)
+
+                image_data["scene_images"] = final_scene_images
+
             scene_count = len(
                 [img for img in image_data.get("scene_images", []) if img is not None]
             )
-            scene_type_count = len(
-                [
-                    img
-                    for img in image_data.get("scene_images", [])
-                    if img and img.get("image_type") == "scene"
-                ]
-            )
-            character_fallback_count = len(
-                [
-                    img
-                    for img in image_data.get("scene_images", [])
-                    if img and img.get("image_type") == "character_fallback"
-                ]
-            )
-
             print(f"[IMAGE SELECTION SUMMARY]")
-            print(f"- Total scene images: {scene_count}")
-            print(f"- Scene images (proper): {scene_type_count}")
-            print(f"- Character fallback images: {character_fallback_count}")
             print(
-                f"- No images (text-to-video fallback): {len(scene_descriptions) - scene_count}"
+                f"- Total scene images assigned: {scene_count} / {len(target_scene_descriptions)} target scenes"
             )
 
             # Generate videos
             modelslab_service = ModelsLabV7VideoService()
 
             # Generate scene videos sequentially with key scene shots
-            # Generate scene videos sequentially with key scene shots
             video_results = await generate_scene_videos(
                 modelslab_service,
                 video_generation_id,
-                scene_descriptions,
+                target_scene_descriptions,
                 audio_files,
                 image_data,
                 video_style,
                 script_data,
                 user_id,
+                model_config=video_config,
                 session=session,
+                scene_numbers=target_scene_numbers,
             )
 
             # Compile results
@@ -542,6 +745,13 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
                 [v.get("duration", 0) for v in video_results if v is not None]
             )
 
+            # Get the first successful video URL for the video_url column
+            first_video_url = None
+            for vr in video_results:
+                if vr is not None and vr.get("video_url"):
+                    first_video_url = vr["video_url"]
+                    break
+
             # Update video generation with video data
             video_data_result = {
                 "scene_videos": video_results,
@@ -555,29 +765,60 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
 
             update_query = text(
                 """
-                UPDATE video_generations 
-                SET video_data = :video_data, 
-                    generation_status = 'video_completed',
-                    error_message = NULL
+                UPDATE video_generations
+                SET video_data = :video_data,
+                    generation_status = :status,
+                    error_message = :error_message,
+                    video_url = :video_url
                 WHERE id = :id
             """
             )
+
+            # If 0 videos were generated, this is a failure — no video_url will be produced
+            if successful_videos == 0:
+                final_status = "failed"
+                error_msg = f"Video generation failed: 0 out of {total_scenes} scene videos were created. Check image availability and ModelsLab API."
+                print(f"[VIDEO GENERATION FAILED] {error_msg}")
+            else:
+                final_status = "video_completed"
+                error_msg = None
+                print(
+                    f"[VIDEO URL] Saving video_url={first_video_url} to video_generation {video_generation_id}"
+                )
+
             await session.execute(
                 update_query,
                 {
                     "video_data": json.dumps(video_data_result),
+                    "status": final_status,
+                    "error_message": error_msg,
+                    "video_url": first_video_url,
                     "id": video_generation_id,
                 },
             )
             await session.commit()
 
-            # ✅ Update pipeline step to completed
-            await update_pipeline_step(
-                video_generation_id, "video_generation", "completed", session=session
-            )
+            # Update pipeline step based on result
+            if successful_videos > 0:
+                await update_pipeline_step(
+                    video_generation_id,
+                    "video_generation",
+                    "completed",
+                    session=session,
+                )
+            else:
+                await update_pipeline_step(
+                    video_generation_id,
+                    "video_generation",
+                    "failed",
+                    error_msg,
+                    session=session,
+                )
 
             success_message = f"Video generation completed! {successful_videos} videos created for {total_scenes} scenes"
-            print(f"[VIDEO GENERATION SUCCESS] {success_message}")
+            print(
+                f"[VIDEO GENERATION {'SUCCESS' if successful_videos > 0 else 'FAILED'}] {success_message}"
+            )
 
             # Log detailed breakdown
             print(f"[VIDEO STATISTICS]")
@@ -587,23 +828,29 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             print(f"- Total video duration: {total_duration:.1f} seconds")
             print(f"- Success rate: {success_rate:.1f}%")
 
-            # ✅ Trigger audio/video merge after video completion
-            print(f"[PIPELINE] Starting audio/video merge after video completion")
-            from app.tasks.merge_tasks import merge_audio_video_for_generation
-
-            merge_audio_video_for_generation.delay(video_generation_id)
+            # Video generation complete — merging is handled separately in the Merge tab
+            print(
+                f"[PIPELINE] Video generation complete. User can merge in the Merge tab."
+            )
 
             return {
-                "status": "success",
-                "message": success_message + " - Starting audio/video merge...",
+                "status": final_status,
+                "message": success_message
+                + (" - Videos ready for review." if final_status != "failed" else ""),
                 "statistics": video_data_result["statistics"],
                 "video_results": video_results,
-                "next_step": "audio_video_merge",
+                "next_step": None,
             }
 
         except Exception as e:
             error_message = f"Video generation failed: {str(e)}"
             print(f"[VIDEO GENERATION ERROR] {error_message}")
+
+            # Rollback any failed transaction before attempting error updates
+            try:
+                await session.rollback()
+            except Exception:
+                pass
 
             # ✅ Update pipeline step to failed
             await update_pipeline_step(
@@ -678,11 +925,12 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
 
         # Regular error handling for non-retrieval failures
         try:
+            await session.rollback()
             update_query = text(
                 """
-                UPDATE video_generations 
-                SET generation_status = 'failed', 
-                    error_message = :error_message 
+                UPDATE video_generations
+                SET generation_status = 'failed',
+                    error_message = :error_message
                 WHERE id = :id
             """
             )
@@ -697,6 +945,152 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
         raise Exception(error_message)
 
 
+async def extract_last_frame(video_url: str, user_id: str) -> Optional[str]:
+    """
+    Extract the last frame from a video URL and upload it to storage.
+    Returns the URL of the extracted image.
+    """
+    try:
+        print(f"[FRAME EXTRACTION] Extracting last frame from {video_url}")
+
+        # Create temp files
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_video:
+            video_path = temp_video.name
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_image:
+            image_path = temp_image.name
+
+        # Download video
+        response = requests.get(video_url, stream=True)
+        response.raise_for_status()
+        with open(video_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        # Extract last frame using ffmpeg
+        # -sseof -3: seek to 3 seconds before end (to ensure we locate valid frames)
+        # -update 1: overwrite output
+        # -q:v 2: high quality
+        cmd = [
+            "ffmpeg",
+            "-sseof",
+            "-1",  # Look at the very end
+            "-i",
+            video_path,
+            "-update",
+            "1",
+            "-q:v",
+            "2",
+            "-y",
+            image_path,
+        ]
+
+        process = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+        )
+
+        # Upload extracted frame
+        file_service = FileService()
+        result = await file_service.upload_file(
+            file_path=image_path,
+            file_name=f"last_frame_{uuid.uuid4()}.jpg",
+            content_type="image/jpeg",
+            user_id=user_id,
+            folder="video_frames",
+        )
+
+        # Cleanup
+        if os.path.exists(video_path):
+            os.remove(video_path)
+        if os.path.exists(image_path):
+            os.remove(image_path)
+
+        return result.get("url")
+
+    except Exception as e:
+        print(f"[FRAME EXTRACTION ERROR] {e}")
+        # Cleanup on error
+        if "video_path" in locals() and os.path.exists(video_path):
+            os.remove(video_path)
+        if "image_path" in locals() and os.path.exists(image_path):
+            os.remove(image_path)
+        return None
+
+
+async def pad_audio_to_min_duration(
+    audio_url: str, min_duration: float, user_id: str
+) -> Optional[str]:
+    """
+    Pad audio with silence to reach minimum duration using ffmpeg.
+    """
+    try:
+        if not audio_url:
+            return None
+
+        print(f"[AUDIO PADDING] Padding audio to {min_duration}s: {audio_url}")
+
+        # Create temp files
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_input:
+            input_path = temp_input.name
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_output:
+            output_path = temp_output.name
+
+        try:
+            # Download audio
+            response = requests.get(audio_url, stream=True)
+            response.raise_for_status()
+            with open(input_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            # Pad with silence using ffmpeg
+            # -af apad: add silence indefinitely
+            # -t min_duration: stop after reaching min duration
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+                "-af",
+                "apad",
+                "-t",
+                str(min_duration),
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "192k",
+                output_path,
+            ]
+
+            process = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
+            )
+
+            # Upload padded audio
+            file_service = FileService()
+            result = await file_service.upload_file(
+                file_path=output_path,
+                file_name=f"padded_audio_{uuid.uuid4()}.mp3",
+                content_type="audio/mpeg",
+                user_id=user_id,
+                folder="audio_uploads",
+            )
+
+            return result.get("url")
+
+        finally:
+            # Cleanup
+            if os.path.exists(input_path):
+                os.remove(input_path)
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+    except Exception as e:
+        print(f"[AUDIO PADDING ERROR] {e}")
+        return None
+
+
 async def generate_scene_videos(
     modelslab_service: ModelsLabV7VideoService,  # ✅ Updated type hint
     video_gen_id: str,
@@ -706,7 +1100,9 @@ async def generate_scene_videos(
     video_style: str,
     script_data: Dict[str, Any] = None,
     user_id: str = None,
+    model_config: Optional[ModelConfig] = None,
     session: AsyncSession = None,
+    scene_numbers: List[int] = None,
 ) -> List[Dict[str, Any]]:
     """Generate videos for each scene using V7 Veo 2 image-to-video with sequential processing and key scene shots"""
 
@@ -718,7 +1114,13 @@ async def generate_scene_videos(
         raise Exception("Session required for generate_scene_videos")
 
     scene_images = image_data.get("scene_images", [])  # Fixed key mismatch
-    model_id = modelslab_service.get_video_model_for_style(video_style)
+
+    # Determine Model ID from Config or fallback
+    primary_model_id = "seedance-1-5-pro"  # Default fallback
+    if model_config and model_config.primary:
+        primary_model_id = model_config.primary
+
+    print(f"[SCENE VIDEOS] Using Primary Model: {primary_model_id}")
 
     # Parse script for enhanced prompt generation if script data is available
     parsed_components = None
@@ -751,9 +1153,15 @@ async def generate_scene_videos(
 
     for i, scene_description in enumerate(scene_descriptions):
         try:
-            scene_id = f"scene_{i+1}"
+            # Determine correct scene ID (1-based)
+            if scene_numbers and i < len(scene_numbers):
+                scene_num = scene_numbers[i]
+                scene_id = f"scene_{scene_num}"
+            else:
+                scene_id = f"scene_{i+1}"
+
             print(
-                f"[SCENE VIDEOS V7] Processing {scene_id}/{len(scene_descriptions)} (Sequential)"
+                f"[SCENE VIDEOS V7] Processing {scene_id} ({i+1}/{len(scene_descriptions)})"
             )
 
             # Determine the starting image for this scene
@@ -797,57 +1205,113 @@ async def generate_scene_videos(
                         video_results.append(None)
                         continue
 
-            # Extract dialogue for this scene and generate audio
-            scene_dialogue_data = await extract_scene_dialogue_and_generate_audio(
-                video_gen_id,
-                scene_id,
-                scene_description,
-                script_data or {},
-                user_id,
-                session=session,
+            # Determine model ID before audio check (needed for duration limits)
+            current_model_id = primary_model_id
+            min_audio = modelslab_service.get_min_audio_duration(current_model_id)
+
+            # Find audio for lip sync / audio-reactive
+            scene_audio = find_scene_audio(scene_id, audio_files)
+            init_audio_url = None
+
+            if scene_audio:
+                audio_duration = scene_audio.get("duration", 0)
+                max_audio = modelslab_service.get_max_audio_duration(current_model_id)
+
+                if max_audio and audio_duration > 0 and audio_duration > max_audio:
+                    print(
+                        f"[SCENE AUDIO] {scene_id}: duration ({audio_duration}s) exceeds max ({max_audio}s). Skipping audio."
+                    )
+                elif min_audio and audio_duration > 0 and audio_duration < min_audio:
+                    print(
+                        f"[SCENE AUDIO] {scene_id}: duration ({audio_duration}s) below min ({min_audio}s). Padding with silence..."
+                    )
+
+                    try:
+                        # Attempt to pad audio
+                        padded_url = await pad_audio_to_min_duration(
+                            scene_audio.get("audio_url"), min_duration, user_id
+                        )
+
+                        if padded_url:
+                            init_audio_url = padded_url
+                            print(
+                                f"[SCENE AUDIO] {scene_id}: Usage padded audio: {padded_url}"
+                            )
+                        else:
+                            print(
+                                f"[SCENE AUDIO] {scene_id}: Failed to pad audio, skipping."
+                            )
+                            init_audio_url = None
+                    except Exception as e:
+                        print(f"[SCENE AUDIO] {scene_id}: Error padding audio: {e}")
+                        init_audio_url = None
+                else:
+                    init_audio_url = scene_audio.get("audio_url")
+                    print(
+                        f"[SCENE AUDIO] {scene_id}: using audio id={scene_audio.get('id')}, "
+                        f"type={scene_audio.get('audio_type')}, duration={audio_duration}s, "
+                        f"model={current_model_id} (limit={max_audio}s)"
+                    )
+            else:
+                print(
+                    f"[SCENE AUDIO] {scene_id}: no audio selected, generating without init_audio"
+                )
+
+            # Decide on Model: Dialogue (Audio) vs Narration (Visual Only)
+            # If we have init_audio, we MIGHT want to use a specific lip-sync capable model if the primary isn't one
+            # But per plan, tiers like Standard+ use Omni/Wan which support it.
+            # Free/Basic might use seedance (no lip sync) or wan2.5 (lip sync).
+
+            logger_msg = f"[SCENE VIDEOS V7] Generating video for {scene_id} using {current_model_id}"
+            if init_audio_url:
+                logger_msg += " with Audio Reactive/Lip Sync"
+            print(logger_msg)
+
+            # Build enhanced video prompt using image generation prompt if available
+            scene_image_for_prompt = None
+            if i < len(scene_images) and scene_images[i] is not None:
+                scene_image_for_prompt = scene_images[i]
+
+            image_prompt = (
+                scene_image_for_prompt.get("prompt", "")
+                if scene_image_for_prompt
+                else ""
             )
 
-            # Find audio for lip sync (legacy support)
-            scene_audio = find_scene_audio(
-                scene_id,
-                audio_files,
-                script_data.get("script_style") if script_data else None,
-            )
+            if image_prompt and image_prompt.strip():
+                # Combine scene description with image prompt for richer video generation
+                enhanced_prompt = f"{scene_description}. Visual style: {image_prompt}"
+                print(
+                    f"[SCENE VIDEOS V7] Using enhanced prompt with image prompt for {scene_id}"
+                )
+            else:
+                enhanced_prompt = scene_description
+                print(
+                    f"[SCENE VIDEOS V7] No image prompt available, using scene description for {scene_id}"
+                )
 
-            # ✅ Generate video using V7 Veo 2 with enhanced prompt generation
-            result = await modelslab_service.enhance_video_for_scene(
-                scene_description=scene_description,
+            # ✅ Generate video using ModelsLab Service
+            result = await modelslab_service.generate_image_to_video(
                 image_url=starting_image_url,
-                audio_url=scene_audio.get("audio_url") if scene_audio else None,
-                dialogue_audio=scene_dialogue_data.get("dialogue_audio", []),
-                style=video_style,
-                include_lipsync=bool(scene_audio)
-                or bool(scene_dialogue_data.get("dialogue_audio")),
-                script_style=script_data.get("script_style") if script_data else None,
-                script_data=(
-                    {"parsed_components": parsed_components}
-                    if parsed_components
-                    else None
-                ),
+                prompt=enhanced_prompt,
+                model_id=current_model_id,
+                negative_prompt="",
+                init_audio=init_audio_url if init_audio_url else None,
             )
+
+            # Process result (Adapt old verify logic to new direct call result)
+            # generate_image_to_video returns dict with status/video_url or error
 
             if result.get("status") == "success":
-                enhanced_video = result.get("enhanced_video", {})
-                video_url = enhanced_video.get("video_url")
-                has_lipsync = enhanced_video.get("has_lipsync", False)
+                video_url = result.get("video_url")
+                has_lipsync = bool(init_audio_url)
 
                 if video_url:
                     # Extract the last frame as key scene shot for the next scene
                     key_scene_shot_url = None
                     try:
-                        from app.api.services.video import VideoService
-
-                        video_service = VideoService(session)
-                        frame_filename = f"key_scene_shot_{video_gen_id}_{scene_id}.jpg"
-                        key_scene_shot_url = (
-                            await video_service.extract_last_frame_from_video(
-                                video_url, frame_filename, user_id
-                            )
+                        key_scene_shot_url = await extract_last_frame(
+                            video_url, user_id
                         )
 
                         if key_scene_shot_url:
@@ -871,13 +1335,11 @@ async def generate_scene_videos(
                         insert_query = text(
                             """
                             INSERT INTO video_segments (
-                                video_generation_id, scene_id, segment_index, scene_description,
-                                source_image_url, video_url, key_scene_shot_url, duration_seconds,
-                                generation_method, status, processing_service, processing_model, metadata
+                                video_generation_id, scene_id, scene_number, scene_description,
+                                video_url, status, target_duration
                             ) VALUES (
-                                :video_generation_id, :scene_id, :segment_index, :scene_description,
-                                :source_image_url, :video_url, :key_scene_shot_url, :duration_seconds,
-                                :generation_method, :status, :processing_service, :processing_model, :metadata
+                                :video_generation_id, :scene_id, :scene_number, :scene_description,
+                                :video_url, :status, :target_duration
                             ) RETURNING id
                         """
                         )
@@ -887,42 +1349,18 @@ async def generate_scene_videos(
                             {
                                 "video_generation_id": video_gen_id,
                                 "scene_id": scene_id,
-                                "segment_index": i + 1,
+                                "scene_number": i + 1,
                                 "scene_description": scene_description,
-                                "source_image_url": starting_image_url,
                                 "video_url": video_url,
-                                "key_scene_shot_url": key_scene_shot_url,
-                                "duration_seconds": 5.0,
-                                "generation_method": "veo2_image_to_video_sequential",
                                 "status": "completed",
-                                "processing_service": "modelslab_v7",
-                                "processing_model": model_id,
-                                "metadata": json.dumps(
-                                    {
-                                        "model_id": model_id,
-                                        "video_style": video_style,
-                                        "service": "modelslab_v7",
-                                        "has_lipsync": has_lipsync,
-                                        "veo2_enhanced": True,
-                                        "dialogue_audio_count": len(
-                                            scene_dialogue_data.get(
-                                                "dialogue_audio", []
-                                            )
-                                        ),
-                                        "character_dialogue_integrated": True,
-                                        "sequential_processing": True,
-                                        "scene_sequence": i + 1,
-                                        "used_previous_key_scene": i > 0,
-                                        "key_scene_extraction_success": key_scene_shot_url
-                                        is not None,
-                                    }
-                                ),
+                                "target_duration": 5.0,
                             },
                         )
                         await session.commit()
                         video_record_id = result.scalar()
                     except Exception as e:
                         print(f"[SCENE VIDEOS V7] Error inserting video segment: {e}")
+                        await session.rollback()
                         video_record_id = None
 
                     video_results.append(
@@ -934,7 +1372,7 @@ async def generate_scene_videos(
                             "duration": 5.0,
                             "source_image": starting_image_url,
                             "method": "veo2_image_to_video_sequential",
-                            "model": model_id,
+                            "model": current_model_id,
                             "has_lipsync": has_lipsync,
                             "scene_sequence": i + 1,
                         }
@@ -959,11 +1397,11 @@ async def generate_scene_videos(
                 fail_insert_query = text(
                     """
                     INSERT INTO video_segments (
-                        video_generation_id, scene_id, segment_index, scene_description,
-                        generation_method, status, error_message, processing_service, processing_model, metadata
+                        video_generation_id, scene_id, scene_number, scene_description,
+                        status
                     ) VALUES (
-                        :video_generation_id, :scene_id, :segment_index, :scene_description,
-                        :generation_method, :status, :error_message, :processing_service, :processing_model, :metadata
+                        :video_generation_id, :scene_id, :scene_number, :scene_description,
+                        :status
                     )
                 """
                 )
@@ -973,25 +1411,15 @@ async def generate_scene_videos(
                     {
                         "video_generation_id": video_gen_id,
                         "scene_id": scene_id,
-                        "segment_index": i + 1,
+                        "scene_number": i + 1,
                         "scene_description": scene_description,
-                        "generation_method": "veo2_image_to_video_sequential",
                         "status": "failed",
-                        "error_message": str(e),
-                        "processing_service": "modelslab_v7",
-                        "processing_model": model_id,
-                        "metadata": json.dumps(
-                            {
-                                "service": "modelslab_v7",
-                                "veo2_enhanced": False,
-                                "sequential_processing": True,
-                            }
-                        ),
                     },
                 )
                 await session.commit()
             except Exception as insert_err:
                 print(f"[SCENE VIDEOS V7] Error inserting failed record: {insert_err}")
+                await session.rollback()
 
             video_results.append(None)
 
@@ -1046,8 +1474,8 @@ async def async_retry_video_retrieval_task(
 
             # Get video URL from parameter or task data
             if not video_url:
-                task_metadata = video_gen.get("task_metadata", {})
-                video_url = task_metadata.get("future_links_url") or task_metadata.get(
+                task_meta = video_gen.get("task_meta", {})
+                video_url = task_meta.get("future_links_url") or task_meta.get(
                     "video_url"
                 )
 
@@ -1072,12 +1500,11 @@ async def async_retry_video_retrieval_task(
 
                 update_query = text(
                     """
-                    UPDATE video_generations 
-                    SET retry_count = :retry_count, 
-                        last_retry_at = NOW(), 
-                        generation_status = :status, 
-                        error_message = :error_message, 
-                        can_resume = :can_resume 
+                    UPDATE video_generations
+                    SET retry_count = :retry_count,
+                        generation_status = :status,
+                        error_message = :error_message,
+                        can_resume = :can_resume
                     WHERE id = :id
                 """
                 )
@@ -1108,8 +1535,8 @@ async def async_retry_video_retrieval_task(
             video_url = retry_result.get("video_url")
             video_duration = retry_result.get("duration", 0)
 
-            task_metadata = video_gen.get("task_metadata", {})
-            task_metadata.update(
+            task_meta = video_gen.get("task_meta", {})
+            task_meta.update(
                 {
                     "retry_success": True,
                     "retry_video_url": video_url,
@@ -1120,14 +1547,13 @@ async def async_retry_video_retrieval_task(
 
             update_query = text(
                 """
-                UPDATE video_generations 
-                SET generation_status = 'completed', 
-                    video_url = :video_url, 
-                    retry_count = :retry_count, 
-                    last_retry_at = NOW(), 
-                    error_message = NULL, 
-                    can_resume = false, 
-                    task_metadata = :task_metadata 
+                UPDATE video_generations
+                SET generation_status = 'completed',
+                    video_url = :video_url,
+                    retry_count = :retry_count,
+                    error_message = NULL,
+                    can_resume = false,
+                    task_meta = :task_meta
                 WHERE id = :id
             """
             )
@@ -1137,7 +1563,7 @@ async def async_retry_video_retrieval_task(
                 {
                     "video_url": video_url,
                     "retry_count": retry_count + 1,
-                    "task_metadata": json.dumps(task_metadata),
+                    "task_meta": json.dumps(task_meta),
                     "id": video_generation_id,
                 },
             )
@@ -1264,9 +1690,9 @@ async def async_automatic_video_retry_task(video_generation_id: str):
             # Wait for exponential backoff
             await asyncio.sleep(actual_delay)
 
-            # Get video URL from task metadata
-            task_metadata = video_gen.get("task_metadata", {})
-            video_url = task_metadata.get("future_links_url") or task_metadata.get(
+            # Get video URL from task meta
+            task_meta_data = video_gen.get("task_meta", {})
+            video_url = task_meta_data.get("future_links_url") or task_meta_data.get(
                 "video_url"
             )
 
@@ -1295,12 +1721,11 @@ async def async_automatic_video_retry_task(video_generation_id: str):
 
                 update_query = text(
                     """
-                    UPDATE video_generations 
-                    SET retry_count = :retry_count, 
-                        last_retry_at = NOW(), 
-                        generation_status = :status, 
-                        error_message = :error_message, 
-                        can_resume = :can_resume 
+                    UPDATE video_generations
+                    SET retry_count = :retry_count,
+                        generation_status = :status,
+                        error_message = :error_message,
+                        can_resume = :can_resume
                     WHERE id = :id
                 """
                 )
@@ -1344,8 +1769,8 @@ async def async_automatic_video_retry_task(video_generation_id: str):
             video_url = retry_result.get("video_url")
             video_duration = retry_result.get("duration", 0)
 
-            task_metadata = video_gen.get("task_metadata", {})
-            task_metadata.update(
+            task_meta = video_gen.get("task_meta", {})
+            task_meta.update(
                 {
                     "retry_success": True,
                     "retry_video_url": video_url,
@@ -1356,14 +1781,13 @@ async def async_automatic_video_retry_task(video_generation_id: str):
 
             update_query = text(
                 """
-                UPDATE video_generations 
-                SET generation_status = 'completed', 
-                    video_url = :video_url, 
-                    retry_count = :retry_count, 
-                    last_retry_at = NOW(), 
-                    error_message = NULL, 
-                    can_resume = false, 
-                    task_metadata = :task_metadata 
+                UPDATE video_generations
+                SET generation_status = 'completed',
+                    video_url = :video_url,
+                    retry_count = :retry_count,
+                    error_message = NULL,
+                    can_resume = false,
+                    task_meta = :task_meta
                 WHERE id = :id
             """
             )
@@ -1373,7 +1797,7 @@ async def async_automatic_video_retry_task(video_generation_id: str):
                 {
                     "video_url": video_url,
                     "retry_count": retry_count + 1,
-                    "task_metadata": json.dumps(task_metadata),
+                    "task_meta": json.dumps(task_meta),
                     "id": video_generation_id,
                 },
             )

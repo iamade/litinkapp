@@ -4,7 +4,6 @@ import { toast } from 'react-hot-toast';
 import {
   Video,
   Download,
-  Settings,
   Save,
   RefreshCw,
   Film,
@@ -19,6 +18,7 @@ import VideoPreview from './VideoPreview';
 import RenderingProgress from './RenderingProgress';
 import MergePanel from './MergePanel';
 import type { VideoScene } from '../../types/videoProduction';
+import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 
 interface SceneDescription {
   scene_number: number;
@@ -47,16 +47,31 @@ interface ChapterScript {
   status: 'draft' | 'ready' | 'approved';
 }
 
+interface GenerationProgress {
+  overall: number;
+  currentStep: string;
+  stepProgress: {
+    image_generation: { status: string; progress: number };
+    audio_generation: { status: string; progress: number };
+    video_generation: { status: string; progress: number };
+    audio_video_merge: { status: string; progress: number };
+  };
+}
+
 interface VideoProductionPanelProps {
   chapterId: string;
   chapterTitle: string;
   imageUrls?: string[];
   audioFiles?: string[];
-  onGenerateVideo?: () => void;
+  onGenerateVideo?: (selectedShotIds?: string[], overrideAudioIds?: string[]) => void;
   videoStatus?: string | null;
   canGenerateVideo?: boolean;
   videoUrl?: string; // Final generated video URL from API response
+  videoGenerations?: any[]; // All generations for this chapter
   selectedScript?: ChapterScript | null; // Script data for synchronization
+  generatingShotIds?: Set<string>; // Shot IDs currently being generated
+  generationProgress?: GenerationProgress; // Progress data from polling
+  onDeleteGeneration?: (genId: string) => void; // Callback to delete a failed generation
 }
 
 const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
@@ -68,12 +83,107 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   videoStatus,
   canGenerateVideo,
   videoUrl,
-  selectedScript
+  videoGenerations = [],
+  selectedScript,
+  generatingShotIds = new Set(),
+  generationProgress,
+  onDeleteGeneration
 }) => {
   const {
     selectedScriptId,
     isSwitching
   } = useScriptSelection();
+
+  const storyboardContext = useStoryboardOptional();
+  
+  // Build scene metadata from storyboard including shotType
+  // Returns array of { url, sceneNumber, shotType, shotIndex } for proper scene initialization
+  const filteredSceneData = React.useMemo(() => {
+    if (!storyboardContext) {
+      // Fallback to simple URLs when no context
+      return imageUrls.map((url, idx) => ({
+        url,
+        sceneNumber: idx + 1,
+        shotType: 'key_scene' as const,
+        shotIndex: 0,
+      }));
+    }
+    
+    const { sceneImagesMap, excludedImageIds, selectedSceneImages, imageOrderByScene } = storyboardContext;
+    
+    // If we have scene images map, use it to get all non-excluded images with metadata
+    if (Object.keys(sceneImagesMap).length > 0) {
+      const allIncludedScenes: Array<{
+        url: string;
+        sceneNumber: number;
+        shotType: 'key_scene' | 'suggested_shot';
+        shotIndex: number;
+        imageId: string;
+      }> = [];
+      
+      // Sort by scene number and get all non-excluded images with their metadata
+      Object.entries(sceneImagesMap)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .forEach(([sceneNumStr, images]) => {
+          const sceneNumber = parseInt(sceneNumStr);
+          const sceneOrder = imageOrderByScene[sceneNumber] || [];
+          
+          // Sort images by their position in imageOrderByScene if available
+          const sortedImages = sceneOrder.length > 0
+            ? [...images].sort((a, b) => {
+                const aIndex = sceneOrder.indexOf(a.id);
+                const bIndex = sceneOrder.indexOf(b.id);
+                // If not in order array, put at end
+                return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+              })
+            : images;
+          
+          sortedImages.forEach((img, idx) => {
+            // Include image if it's not in excluded list
+            if (!excludedImageIds.has(img.id) && img.url) {
+              allIncludedScenes.push({
+                url: img.url,
+                sceneNumber,
+                shotType: img.shotType || 'key_scene',
+                shotIndex: (img.shotIndex !== undefined) ? img.shotIndex : idx,  // Use metadata shotIndex if available, else position
+                imageId: img.id,
+              });
+            }
+          });
+        });
+      
+      if (allIncludedScenes.length > 0) {
+        return allIncludedScenes;
+      }
+    }
+    
+    // Fallback: If we only have selectedSceneImages, use those as key scenes
+    if (Object.keys(selectedSceneImages).length > 0) {
+      return Object.entries(selectedSceneImages)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
+        .filter(([, url]) => url)
+        .map(([sceneNumStr, url]) => ({
+          url,
+          sceneNumber: parseInt(sceneNumStr),
+          shotType: 'key_scene' as const,
+          shotIndex: 0,
+        }));
+    }
+    
+    // Otherwise, return all images as key scenes
+    return imageUrls.map((url, idx) => ({
+      url,
+      sceneNumber: idx + 1,
+      shotType: 'key_scene' as const,
+      shotIndex: 0,
+    }));
+  }, [imageUrls, storyboardContext]);
+
+  // Extract just URLs for useVideoProduction (backward compatible)
+  const filteredImageUrls = React.useMemo(() => 
+    filteredSceneData.map(s => s.url), 
+    [filteredSceneData]
+  );
 
   // Move hooks before any conditional returns
   const {
@@ -94,29 +204,46 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   } = useVideoProduction({
     chapterId,
     scriptId: selectedScriptId || undefined,
-    imageUrls,
+    imageUrls: filteredImageUrls,
+    sceneMetadata: filteredSceneData, // Pass scene data with shotType/shotIndex
     audioFiles
   });
 
-  const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'settings' | 'merge'>('timeline');
-  const [selectedScene, setSelectedScene] = useState<VideoScene | null>(null);
+  const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'merge'>('timeline');
+  const [selectedSceneIndex, setSelectedSceneIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
+  
+  const handleScenePreviewChange = React.useCallback((index: number) => {
+    setSelectedSceneIndex(index);
+  }, []);
+
+  // Helper to toggle individual shot selection for per-shot video generation
+  const toggleShotSelection = (shotId: string) => {
+    setSelectedShotIds(prev => 
+      prev.includes(shotId) 
+        ? prev.filter(id => id !== shotId)
+        : [...prev, shotId]
+    );
+  };
 
   // Disable actions during switching or loading
   const controlsDisabled = isSwitching || isLoading;
 
   // Delay scene initialization until script switch completes
+  // Uses filteredImageUrls from Images tab storyboard (not Audio tab)
   useEffect(() => {
-    if (selectedScriptId && !scenes.length && imageUrls.length && !isSwitching) {
+    if (selectedScriptId && !scenes.length && filteredImageUrls.length && !isSwitching) {
       const timeoutId = window.setTimeout(() => {
         if (!isSwitching) {
+          console.log(`[VideoProductionPanel] Initializing scenes with ${filteredImageUrls.length} images from Images tab storyboard`);
           initializeScenes();
         }
       }, 100);
       return () => window.clearTimeout(timeoutId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedScriptId, imageUrls, scenes.length, isSwitching]);
+  }, [selectedScriptId, filteredImageUrls.length, scenes.length, isSwitching]);
 
   // Guarded empty state for no selected script
   if (!selectedScriptId) {
@@ -137,8 +264,9 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   }
 
   const handleSceneSelect = (scene: VideoScene) => {
-    setSelectedScene(scene);
-    setActiveView('preview');
+    // Find the index of the scene in the scenes array
+    const index = scenes.findIndex(s => s.id === scene.id);
+    setSelectedSceneIndex(index >= 0 ? index : 0);
   };
 
 
@@ -156,19 +284,19 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center space-x-3">
-            <h3 className="text-xl font-semibold text-gray-900">
+            <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
               Video Production Studio
             </h3>
             <div className="flex items-center space-x-2">
-              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+              <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 px-2 py-1 rounded">
                 Active script: {selectedScriptId.substring(0, 8)}...
               </span>
               {isSwitching && (
-                <span className="text-xs text-gray-500">Switching script...</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">Switching script...</span>
               )}
             </div>
           </div>
-          <p className="text-gray-600">
+          <p className="text-gray-600 dark:text-gray-400">
             Create and edit your video for "{chapterTitle}"
           </p>
         </div>
@@ -192,32 +320,86 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
           </button>
         </div>
       </div>
-      {/* Generate Video Button */}
-      <div className="flex justify-end">
-        <button
-          onClick={onGenerateVideo}
-          disabled={controlsDisabled || !canGenerateVideo}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-        >
-          <Video className="w-4 h-4" />
-          <span>
-            {videoStatus === "processing" || videoStatus === "starting"
-              ? "Generating Video..."
-              : "Generate Video"}
-          </span>
-        </button>
+      {/* Video Generation Controls */}
+      <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg mb-4">
+        <div className="flex items-center justify-between">
+          {/* Selection Info */}
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              {selectedShotIds.length > 0 
+                ? `${selectedShotIds.length} shot${selectedShotIds.length > 1 ? 's' : ''} selected`
+                : 'Click checkboxes on shots to select for generation'}
+            </span>
+            {selectedShotIds.length > 0 && (
+              <button
+                onClick={() => setSelectedShotIds([])}
+                className="text-xs text-blue-500 hover:text-blue-700 underline"
+              >
+                Clear selection
+              </button>
+            )}
+          </div>
+          
+          {/* Generation Buttons */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => onGenerateVideo?.(selectedShotIds)}
+              disabled={controlsDisabled || !canGenerateVideo || selectedShotIds.length === 0}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              <Video className="w-4 h-4" />
+              <span>
+                {videoStatus === "processing" || videoStatus === "starting"
+                  ? "Generating..."
+                  : `Generate Selected (${selectedShotIds.length})`}
+              </span>
+            </button>
+            <button
+              onClick={() => onGenerateVideo?.()}
+              disabled={controlsDisabled || !canGenerateVideo}
+              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              <Video className="w-4 h-4" />
+              <span>
+                {videoStatus === "processing" || videoStatus === "starting"
+                  ? "Generating..."
+                  : "Generate All Videos"}
+              </span>
+            </button>
+          </div>
+        </div>
       </div>
 
+      {/* Generation Progress */}
+      {generatingShotIds.size > 0 && generationProgress && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+              {generationProgress.currentStep || 'Starting generation...'}
+            </span>
+            <span className="text-sm text-blue-600 dark:text-blue-400">
+              {generationProgress.overall}%
+            </span>
+          </div>
+          <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2">
+            <div
+              className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+              style={{ width: `${generationProgress.overall}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* View Tabs */}
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="border-b">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
+        <div className="border-b dark:border-gray-700">
           <nav className="flex space-x-8 px-6" aria-label="Tabs">
             <button
               onClick={() => setActiveView('timeline')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeView === 'timeline'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
               <div className="flex items-center space-x-2">
@@ -229,8 +411,8 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               onClick={() => setActiveView('preview')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeView === 'preview'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
               <div className="flex items-center space-x-2">
@@ -239,29 +421,16 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               </div>
             </button>
             <button
-              onClick={() => setActiveView('settings')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeView === 'settings'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <div className="flex items-center space-x-2">
-                <Settings className="w-4 h-4" />
-                <span>Settings</span>
-              </div>
-            </button>
-            <button
               onClick={() => setActiveView('merge')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeView === 'merge'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
               <div className="flex items-center space-x-2">
                 <Layers className="w-4 h-4" />
-                <span>Merge</span>
+                <span>Merge Studio</span>
               </div>
             </button>
           </nav>
@@ -278,37 +447,56 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
           )}
 
           {activeView === 'timeline' && (
-            <SceneTimeline
-              scenes={scenes}
-              onSceneSelect={handleSceneSelect}
-              onSceneUpdate={updateScene}
-              onReorder={reorderScenes}
-              onAddTransition={addTransition}
-              selectedScript={selectedScript}
-            />
+            <div className="space-y-4">
+              {/* Inline Settings Panel (compact mode) */}
+              <EditorSettingsPanel
+                settings={editorSettings}
+                onUpdateSettings={updateEditorSettings}
+                compact={true}
+                userTier="free"
+              />
+              
+              {/* Scene Timeline */}
+              <SceneTimeline
+                scenes={scenes}
+                onSceneSelect={handleSceneSelect}
+                onSceneUpdate={updateScene}
+                onReorder={reorderScenes}
+                onAddTransition={addTransition}
+                selectedScript={selectedScript}
+                selectedShotIds={selectedShotIds}
+                onToggleShotSelection={toggleShotSelection}
+                generatingShotIds={generatingShotIds}
+                onGenerateVideo={onGenerateVideo}
+              />
+            </div>
           )}
 
           {activeView === 'preview' && (
             <VideoPreview
               scenes={scenes}
-              currentSceneIndex={selectedScene ? scenes.findIndex(s => s.id === selectedScene.id) : 0}
+              currentSceneIndex={selectedSceneIndex}
               isPlaying={isPlaying}
               onPlayPause={() => setIsPlaying(!isPlaying)}
-              onSceneChange={(index) => setSelectedScene(scenes[index])}
+              onSceneChange={handleScenePreviewChange}
               videoUrl={videoUrl}
+              videoGenerations={videoGenerations}
               selectedScript={selectedScript}
-            />
-          )}
-
-          {activeView === 'settings' && (
-            <EditorSettingsPanel
-              settings={editorSettings}
-              onUpdateSettings={updateEditorSettings}
+              selectedScene={scenes[selectedSceneIndex] || null}
+              onDeleteGeneration={onDeleteGeneration}
             />
           )}
 
           {activeView === 'merge' && (
-            <MergePanel />
+            <MergePanel
+              chapterId={chapterId}
+              scriptId={selectedScriptId || undefined}
+              videoGenerations={videoGenerations}
+              audioFiles={audioFiles}
+              scenes={scenes}
+              editorSettings={editorSettings}
+              userTier="free"
+            />
           )}
         </div>
       </div>

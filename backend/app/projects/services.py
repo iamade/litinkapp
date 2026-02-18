@@ -18,6 +18,8 @@ from app.projects.schemas import (
 )
 from fastapi import UploadFile
 from app.core.services.file import BookStructureDetector, FileService
+from app.core.services.embeddings import EmbeddingsService
+from app.api.services.plot import PlotService
 
 
 class IntentService:
@@ -143,79 +145,281 @@ class ProjectService:
 
     async def create_project_from_upload(
         self,
-        file: UploadFile,
+        files: List[UploadFile],
         user_id: uuid.UUID,
         project_type: ProjectType = ProjectType.ENTERTAINMENT,
         input_prompt: Optional[str] = None,
+        consultation_config: Optional[dict] = None,
     ) -> Project:
         import tempfile
         import os
         import fitz
         from app.core.services.file import FileService
 
-        # 1. Save uploaded file to temp
-        suffix = os.path.splitext(file.filename)[1] if file.filename else ""
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp:
-            content = await file.read()
-            temp.write(content)
-            temp_path = temp.name
+        file_service = FileService()
+        project_uuid = uuid.uuid4()
 
-        try:
+        # Process all uploaded files - store individual file data
+        file_data_list = []  # List of {filename, text_content, file_url, temp_path}
+        temp_paths = []
+
+        for file in files:
+            # 1. Save uploaded file to temp
+            suffix = os.path.splitext(file.filename)[1] if file.filename else ""
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp:
+                content = await file.read()
+                temp.write(content)
+                temp_path = temp.name
+                temp_paths.append(temp_path)
+
             # 2. Upload to storage using FileService
-            file_service = FileService()
-            # Generate a unique path
-            remote_path = f"users/{user_id}/projects/{uuid.uuid4()}/{file.filename}"
+            remote_path = f"users/{user_id}/projects/{project_uuid}/{file.filename}"
             file_url = await file_service.upload_file(temp_path, remote_path)
 
-            # 3. Extract text
+            # 3. Extract text based on file type
             text_content = ""
-            doc = fitz.open(temp_path)
-            for page in doc:
-                text_content += page.get_text() + "\n"
-            doc.close()
+            if suffix.lower() == ".pdf":
+                doc = fitz.open(temp_path)
+                for page in doc:
+                    text_content += page.get_text() + "\n"
+                doc.close()
+            elif suffix.lower() in [".txt", ".docx"]:
+                # For txt files, read directly; for docx we'd need python-docx
+                # For now, use fitz which can handle some formats
+                try:
+                    doc = fitz.open(temp_path)
+                    for page in doc:
+                        text_content += page.get_text() + "\n"
+                    doc.close()
+                except Exception:
+                    # Fallback: read as text
+                    with open(temp_path, "r", encoding="utf-8", errors="ignore") as f:
+                        text_content = f.read()
+            else:
+                # Try fitz for other formats
+                try:
+                    doc = fitz.open(temp_path)
+                    for page in doc:
+                        text_content += page.get_text() + "\n"
+                    doc.close()
+                except Exception as e:
+                    print(
+                        f"[PROJECT UPLOAD] Could not extract text from {file.filename}: {e}"
+                    )
 
-            # 4. Extract Chapters using Robust Flow (TOC -> AI -> Regex)
-            # Pass both content (for fallback) and storage_path (for TOC/EPUB)
-            try:
-                extracted_data = await file_service.extract_chapters_with_new_flow(
-                    content=text_content,
-                    book_type=(
-                        project_type.value
-                        if hasattr(project_type, "value")
-                        else "entertainment"
-                    ),
-                    original_filename=file.filename or "unknown",
-                    storage_path=remote_path,
-                )
-            except Exception as e:
-                print(f"[PROJECT UPLOAD] Extraction failed: {e}")
-                # Fallback to empty list or re-raise?
-                # For now, let's log and proceed with whatever we have or fail.
-                # Since this is the core value add, we should probably fail if extraction completely dies.
-                raise e
+            file_data_list.append(
+                {
+                    "filename": file.filename or "unknown",
+                    "text_content": text_content,
+                    "file_url": file_url,
+                    "temp_path": temp_path,
+                }
+            )
 
-            # 5. Create Project
-            project = Project(
-                title=(
-                    os.path.splitext(file.filename)[0].replace("_", " ").title()
-                    if file.filename
+        try:
+            # Determine if this is a multi-script upload (Cinematic Universe Mode)
+            is_multi_script = len(files) > 1
+
+            # Use first file for primary reference
+            primary_file = file_data_list[0]
+            file_names = [f["filename"] for f in file_data_list]
+            file_urls = [f["file_url"] for f in file_data_list]
+
+            # Generate project title
+            if len(files) == 1:
+                project_title = (
+                    os.path.splitext(primary_file["filename"])[0]
+                    .replace("_", " ")
+                    .title()
+                    if primary_file["filename"]
                     else "New Project"
+                )
+            else:
+                # Multi-file: use descriptive title indicating universe mode
+                project_title = (
+                    f"Cinematic Universe - {os.path.splitext(primary_file['filename'])[0].replace('_', ' ').title()} (+{len(files)-1} more)"
+                    if primary_file["filename"]
+                    else "Multi-Script Project"
+                )
+
+            # 5. Create Book with source_mode='creator' for RAG integration
+            from app.books.models import Book as BookModel, Chapter as ChapterModel
+
+            book = BookModel(
+                title=project_title,
+                user_id=user_id,
+                book_type=(
+                    project_type.value
+                    if hasattr(project_type, "value")
+                    else "entertainment"
                 ),
+                source_mode="creator",
+                status="ready",
+                description=(
+                    input_prompt
+                    if input_prompt
+                    else f"Project from {len(files)} file(s): {', '.join(file_names[:3])}{'...' if len(file_names) > 3 else ''}"
+                ),
+                original_file_storage_path=file_urls[0] if file_urls else None,
+            )
+            self.session.add(book)
+            await self.session.commit()
+            await self.session.refresh(book)
+
+            # 6. Create Project and link to book
+            # For multi-script projects, add consultation step to pipeline
+            if is_multi_script:
+                pipeline_steps = ["consultation", "plot", "chapters", "script"]
+                current_step = (
+                    "consultation"  # Start with consultation for multi-scripts
+                )
+            else:
+                pipeline_steps = ["plot", "chapters", "script"]
+                current_step = "chapters"
+
+            project = Project(
+                title=project_title,
                 user_id=user_id,
                 project_type=project_type,
                 workflow_mode=WorkflowMode.CREATOR,
                 status=ProjectStatus.DRAFT,
-                source_material_url=file_url,
-                pipeline_steps=["plot", "chapters", "script"],
-                current_step="chapters",
-                input_prompt=input_prompt or f"Uploaded from {file.filename}",
+                source_material_url=", ".join(file_urls),
+                book_id=book.id,
+                pipeline_steps=pipeline_steps,
+                current_step=current_step,
+                input_prompt=input_prompt if input_prompt else None,
             )
             self.session.add(project)
             await self.session.commit()
             await self.session.refresh(project)
 
-            # 6. Create Artifacts from Extracted Data
-            try:
+            # Update book with project_id (bi-directional link)
+            book.project_id = project.id
+            self.session.add(book)
+            await self.session.commit()
+
+            # 7. Create Artifacts - DIFFERENT HANDLING FOR MULTI-SCRIPT vs SINGLE FILE
+            if is_multi_script:
+                # MULTI-SCRIPT MODE: Create one artifact per uploaded file
+                print(
+                    f"[PROJECT UPLOAD] Multi-script mode: Creating {len(file_data_list)} script artifacts..."
+                )
+
+                for idx, file_data in enumerate(file_data_list):
+                    script_title = (
+                        os.path.splitext(file_data["filename"])[0]
+                        .replace("_", " ")
+                        .title()
+                    )
+
+                    # Create Chapter in Book table (for RAG/embeddings)
+                    book_chapter = ChapterModel(
+                        book_id=book.id,
+                        title=script_title,
+                        content=file_data["text_content"],
+                        chapter_number=idx + 1,
+                        summary=f"Script file: {file_data['filename']}",
+                    )
+                    self.session.add(book_chapter)
+                    await self.session.flush()  # Flush to get ID
+
+                    # Generate embeddings for the script (RAG)
+                    try:
+                        embeddings_service = EmbeddingsService(self.session)
+                        await embeddings_service.create_chapter_embeddings(
+                            book_chapter.id, file_data["text_content"]
+                        )
+                        print(
+                            f"[PROJECT UPLOAD] Generated embeddings for script {idx + 1}"
+                        )
+                    except Exception as e:
+                        print(
+                            f"[PROJECT UPLOAD] Error generating embeddings for script {idx + 1}: {e}"
+                        )
+
+                    # Create Artifact in Project with SCRIPT-SPECIFIC FIELDS
+                    artifact = Artifact(
+                        project_id=project.id,
+                        artifact_type=ArtifactType.CHAPTER.value,
+                        version=1,
+                        content={
+                            "title": script_title,
+                            "content": file_data["text_content"],
+                            "chapter_number": idx + 1,
+                            "summary": f"Uploaded script from {file_data['filename']}",
+                            "chapter_id": str(book_chapter.id),
+                            "original_filename": file_data["filename"],
+                        },
+                        generation_metadata={
+                            "source": "upload_multi_script",
+                            "original_structure": "script_file",
+                            "book_chapter_id": str(book_chapter.id),
+                            "source_files": [file_data["filename"]],
+                        },
+                        # NEW FIELDS for script tracking
+                        source_file_url=file_data["file_url"],
+                        is_script=True,
+                        script_order=idx + 1,
+                        content_type_label="Script",  # Will be updated after consultation (Film/Episode/Part)
+                    )
+                    self.session.add(artifact)
+
+                # Update book's total_chapters
+                book.total_chapters = len(file_data_list)
+                self.session.add(book)
+
+                await self.session.commit()
+                print(f"[PROJECT UPLOAD] {len(file_data_list)} script artifacts saved.")
+
+                # Save consultation data if provided (multi-script mode)
+                if consultation_config and consultation_config.get("consultation_data"):
+                    consultation_artifact = Artifact(
+                        project_id=project.id,
+                        artifact_type=ArtifactType.DOCUMENT_SUMMARY.value,
+                        version=1,
+                        content={
+                            "type": "cinematic_universe_consultation",
+                            "consultation": consultation_config.get(
+                                "consultation_data", {}
+                            ).get("agreements", {}),
+                            "conversation": consultation_config.get(
+                                "consultation_data", {}
+                            ).get("conversation", []),
+                            "agreements": consultation_config.get(
+                                "consultation_data", {}
+                            ).get("agreements", {}),
+                        },
+                        generation_metadata={
+                            "source": "ai_consultation_modal",
+                            "universe_name": consultation_config.get("universe_name"),
+                            "content_terminology": consultation_config.get(
+                                "content_terminology"
+                            ),
+                        },
+                    )
+                    self.session.add(consultation_artifact)
+                    await self.session.commit()
+                    print(f"[PROJECT UPLOAD] Consultation data saved as artifact.")
+
+            else:
+                # SINGLE FILE MODE: Use existing chapter extraction logic
+                all_text_content = file_data_list[0]["text_content"]
+
+                try:
+                    extracted_data = await file_service.extract_chapters_with_new_flow(
+                        content=all_text_content,
+                        book_type=(
+                            project_type.value
+                            if hasattr(project_type, "value")
+                            else "entertainment"
+                        ),
+                        original_filename=primary_file["filename"],
+                        storage_path=file_urls[0] if file_urls else "",
+                    )
+                except Exception as e:
+                    print(f"[PROJECT UPLOAD] Extraction failed: {e}")
+                    raise e
+
                 chapters = []
                 structure_type = "flat"
 
@@ -228,47 +432,99 @@ class ProjectService:
                         structure_type = "hierarchical"
                         for section in extracted_data:
                             section_chapters = section.get("chapters", [])
-                            # Add section metadata to chapters if needed?
-                            # For now, just flatten them as requested by Project structure
                             chapters.extend(section_chapters)
                     else:
                         # It's a flat list of Chapters
                         chapters = extracted_data
 
                 print(
-                    f"[PROJECT UPLOAD] Creating artifacts for {len(chapters)} chapters..."
+                    f"[PROJECT UPLOAD] Creating {len(chapters)} chapters + artifacts from single file..."
                 )
 
                 for idx, chapter in enumerate(chapters):
-                    # Artifact content
+                    chapter_title = chapter.get("title", f"Chapter {idx+1}")
+                    chapter_content = chapter.get("content", "")
+                    chapter_number = chapter.get("number", idx + 1)
+                    chapter_summary = chapter.get("summary", "")
+
+                    # Create Chapter in Book table (for RAG/embeddings)
+                    book_chapter = ChapterModel(
+                        book_id=book.id,
+                        title=chapter_title,
+                        content=chapter_content,
+                        chapter_number=chapter_number,
+                        summary=chapter_summary,
+                    )
+                    self.session.add(book_chapter)
+                    await self.session.flush()  # Flush to get ID
+
+                    # Generate embeddings for the chapter (RAG)
+                    try:
+                        embeddings_service = EmbeddingsService(self.session)
+                        await embeddings_service.create_chapter_embeddings(
+                            book_chapter.id, chapter_content
+                        )
+                        print(
+                            f"[PROJECT UPLOAD] Generated embeddings for chapter {chapter_number}"
+                        )
+                    except Exception as e:
+                        print(
+                            f"[PROJECT UPLOAD] Error generating embeddings for chapter {chapter_number}: {e}"
+                        )
+
+                    # Create Artifact in Project (for UI display)
                     artifact = Artifact(
                         project_id=project.id,
                         artifact_type=ArtifactType.CHAPTER.value,
                         version=1,
                         content={
-                            "title": chapter.get("title", f"Chapter {idx+1}"),
-                            "content": chapter.get("content", ""),
-                            "chapter_number": chapter.get("number", idx + 1),
-                            "summary": chapter.get("summary", ""),
+                            "title": chapter_title,
+                            "content": chapter_content,
+                            "chapter_number": chapter_number,
+                            "summary": chapter_summary,
+                            "chapter_id": str(book_chapter.id),
                         },
                         generation_metadata={
                             "source": "upload_extraction",
                             "original_structure": structure_type,
-                            "section_title": chapter.get(
-                                "section_title"
-                            ),  # if available
+                            "section_title": chapter.get("section_title"),
+                            "book_chapter_id": str(book_chapter.id),
+                            "source_files": file_names,
                         },
                     )
                     self.session.add(artifact)
 
+                # Update book's total_chapters
+                book.total_chapters = len(chapters)
+                self.session.add(book)
+
                 await self.session.commit()
-                print("[PROJECT UPLOAD] Artifacts saved successfully.")
-            except Exception as e:
-                print(f"[PROJECT UPLOAD] Error creating artifacts: {e}")
-                # Use verify_partial_success or raise?
-                # If we made the project but failed artifacts, user sees empty project.
-                # Better to raise so FE gets 500 and user knows to retry.
-                raise e
+                print(f"[PROJECT UPLOAD] {len(chapters)} chapters + artifacts saved.")
+
+                # 8. Generate Plot Overview if input_prompt is provided (single file mode only)
+                if input_prompt:
+                    try:
+                        print(
+                            f"[PROJECT UPLOAD] Generating plot overview with prompt: {input_prompt[:50]}..."
+                        )
+                        plot_service = PlotService(self.session)
+                        project_type_str = (
+                            project_type.value
+                            if hasattr(project_type, "value")
+                            else str(project_type)
+                        )
+
+                        await plot_service.generate_plot_from_prompt(
+                            user_id=user_id,
+                            project_id=project.id,
+                            input_prompt=input_prompt,
+                            project_type=project_type_str,
+                            book_id=book.id,
+                        )
+                        print("[PROJECT UPLOAD] Plot generation successful.")
+                    except Exception as e:
+                        print(f"[PROJECT UPLOAD] Plot generation failed: {e}")
+                        # Continue without failing the whole upload
 
             # Re-fetch with artifacts
             statement = (
@@ -280,5 +536,7 @@ class ProjectService:
 
             return project
         finally:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+            # Clean up all temp files
+            for temp_path in temp_paths:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)

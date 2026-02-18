@@ -1,9 +1,8 @@
 from typing import Dict, Any, List, Optional
 import uuid
 import json
-import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.database import get_session
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -11,6 +10,7 @@ from sqlmodel import select, update, delete
 from app.core.services.openrouter import OpenRouterService, ModelTier
 from app.api.services.subscription import SubscriptionManager
 from app.core.services.modelslab_v7_image import ModelsLabV7ImageService
+from app.core.services.embeddings import EmbeddingsService
 from app.plots.models import Character, PlotOverview, CharacterArchetype
 from app.books.models import Book
 from app.videos.models import Script, ImageGeneration
@@ -21,8 +21,9 @@ from app.plots.schemas import (
     CharacterArchetypeResponse,
     CharacterArchetypeMatch,
 )
+from app.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 class CharacterServiceError(Exception):
@@ -68,6 +69,7 @@ class CharacterService:
         self.openrouter = OpenRouterService()
         self.subscription_manager = SubscriptionManager(self.session)
         self.image_service = ModelsLabV7ImageService()
+        self.embeddings_service = EmbeddingsService(self.session)
 
         # Default archetypes for initial setup
         self._default_archetypes = self._get_default_archetypes()
@@ -97,8 +99,10 @@ class CharacterService:
                 f"[CharacterService] Using model tier: {model_tier.value} for user tier: {user_tier.value}"
             )
 
-            # Get book context
-            book_context = await self._get_book_context_for_character(book_id)
+            # Get book context (uses RAG if available)
+            book_context = await self._get_book_context_for_character(
+                book_id=book_id, character_name=character_name
+            )
             if not book_context:
                 raise CharacterServiceError("Unable to retrieve book context")
 
@@ -337,12 +341,24 @@ class CharacterService:
                 or f"Character portrait of {character.name}"
             )
 
+            # Adjust prompt based on entity type
+            if character.entity_type == "object":
+                character_description = (
+                    character.physical_description
+                    or f"A detailed image of {character.name}"
+                )
+                if not custom_prompt:
+                    # For objects, we want object-centric prompts
+                    custom_prompt = (
+                        f"Product shot, detailed, photorealistic, {style} style"
+                    )
+
             # Create initial record in image_generations table
             from datetime import datetime, timezone
             import uuid
 
             image_record = ImageGeneration(
-                user_id=uuid.UUID(user_id),
+                user_id=uuid.UUID(str(user_id)),
                 image_type="character",
                 character_name=character.name,
                 character_id=character_id,
@@ -354,7 +370,7 @@ class CharacterService:
                     character, custom_prompt
                 ),
                 meta={
-                    "character_id": character_id,
+                    "character_id": str(character_id),
                     "image_type": "character_portrait",
                     "created_via": "character_service",
                 },
@@ -368,32 +384,39 @@ class CharacterService:
             if not record_id:
                 raise CharacterServiceError("Failed to create image generation record")
 
-            # Update character status to pending
-            char_stmt = (
-                update(Character)
-                .where(Character.id == character_id)
-                .values(
-                    image_generation_status="pending",
-                    updated_at=datetime.now(timezone.utc),
-                )
-            )
-            await self.session.exec(char_stmt)
-            await self.session.commit()
-
             # Queue the async task
             from app.tasks.image_tasks import generate_character_image_task
+            from app.tasks.celery_app import celery_app
 
-            task = generate_character_image_task.delay(
-                character_name=character.name,
-                character_description=character_description,
-                user_id=user_id,
-                character_id=character_id,
-                style=style,
-                aspect_ratio=aspect_ratio,
-                custom_prompt=custom_prompt,
-                record_id=record_id,
-                user_tier=user_tier,
+            # Debug: Log Celery configuration
+            logger.info(
+                f"[CharacterService] Celery broker URL: {celery_app.conf.broker_url}"
             )
+            logger.info(
+                f"[CharacterService] Celery default queue: {celery_app.conf.task_default_queue}"
+            )
+
+            try:
+                task = generate_character_image_task.delay(
+                    character_name=character.name,
+                    character_description=character_description,
+                    user_id=str(user_id),
+                    character_id=str(character_id),
+                    style=style,
+                    aspect_ratio=aspect_ratio,
+                    custom_prompt=custom_prompt,
+                    record_id=record_id,
+                    user_tier=user_tier,
+                    entity_type=character.entity_type or "character",
+                )
+                logger.info(
+                    f"[CharacterService] Task dispatched successfully! Task ID: {task.id}"
+                )
+            except Exception as dispatch_error:
+                logger.error(
+                    f"[CharacterService] FAILED to dispatch task: {dispatch_error}"
+                )
+                raise
 
             # Record usage immediately (image generation is queued)
             try:
@@ -402,7 +425,7 @@ class CharacterService:
                     resource_type="image",
                     cost_usd=0.0,
                     metadata={
-                        "character_id": character_id,
+                        "character_id": str(character_id),
                         "image_type": "character_portrait",
                         "task_id": task.id,
                     },
@@ -442,7 +465,7 @@ class CharacterService:
         Get the current status of character image generation.
         """
         try:
-            await self._validate_character_permissions(character_id, user_id)
+            await self._validate_character_permissions(character_id, str(user_id))
 
             stmt = select(Character).where(Character.id == character_id)
             result = await self.session.exec(stmt)
@@ -451,17 +474,20 @@ class CharacterService:
             if not character:
                 raise CharacterNotFoundError(f"Character {character_id} not found")
 
+            # Get status directly from Character model
             status = character.image_generation_status or "none"
             task_id = character.image_generation_task_id
             image_url = character.image_url
             metadata = character.image_metadata or {}
 
             response = {
-                "character_id": character_id,
+                "character_id": str(character_id),
                 "status": status,
                 "task_id": task_id,
                 "image_url": image_url,
                 "metadata": metadata,
+                "model_used": character.model_used,
+                "generation_method": character.generation_method,
             }
 
             if status == "failed" and metadata:
@@ -492,7 +518,34 @@ class CharacterService:
             if not character:
                 return None
 
-            return CharacterResponse.model_validate(character)
+            # Fetch recent images for this character
+            from app.videos.models import ImageGeneration
+
+            # Ensure character_id is string for query if column is string
+            char_id_str = str(character_id)
+
+            stmt_images = (
+                select(ImageGeneration)
+                .where(ImageGeneration.character_id == char_id_str)
+                .order_by(ImageGeneration.created_at.desc())
+                .limit(50)
+            )
+            images_result = await self.session.exec(stmt_images)
+            images = images_result.all()
+
+            response = CharacterResponse.model_validate(character)
+            response.images = [
+                {
+                    "id": str(img.id),
+                    "image_url": img.image_url,
+                    "status": img.status,
+                    "created_at": img.created_at,
+                    "model_used": img.model_id if hasattr(img, "model_id") else None,
+                    "generation_method": "async",
+                }
+                for img in images
+            ]
+            return response
 
         except Exception as e:
             logger.error(
@@ -528,6 +581,7 @@ class CharacterService:
                 "image_metadata",
                 "generation_method",
                 "model_used",
+                "entity_type",
             ]:
                 if hasattr(updates, field) and getattr(updates, field) is not None:
                     update_data[field] = getattr(updates, field)
@@ -590,7 +644,47 @@ class CharacterService:
             result = await self.session.exec(stmt)
             characters = result.all()
 
-            return [CharacterResponse.model_validate(char) for char in characters]
+            characters = result.all()
+
+            # Collect all character IDs
+            char_ids = [str(char.id) for char in characters]
+
+            # Fetch images for all characters in one query (optimization)
+            images_map = {}
+            if char_ids:
+                stmt_images = (
+                    select(ImageGeneration)
+                    .where(ImageGeneration.character_id.in_(char_ids))
+                    .order_by(ImageGeneration.created_at.desc())
+                )
+                images_result = await self.session.exec(stmt_images)
+                all_images = images_result.all()
+
+                # Group by character_id
+                for img in all_images:
+                    c_id = img.character_id
+                    if c_id not in images_map:
+                        images_map[c_id] = []
+                    images_map[c_id].append(img)
+
+            results = []
+            for char in characters:
+                resp = CharacterResponse.model_validate(char)
+                char_images = images_map.get(str(char.id), [])
+                resp.images = [
+                    {
+                        "id": str(img.id),
+                        "image_url": img.image_url,
+                        "status": img.status,
+                        "created_at": img.created_at,
+                        "model_used": img.model_id,
+                        "generation_method": "async",
+                    }
+                    for img in char_images[:20]  # Limit to 20 recent
+                ]
+                results.append(resp)
+
+            return results
 
         except PermissionDeniedError:
             raise
@@ -657,6 +751,49 @@ class CharacterService:
         except Exception as e:
             logger.error(
                 f"[CharacterService] Error updating character image URL: {str(e)}"
+            )
+            return False
+
+    async def delete_character_image(
+        self, character_id: str, image_id: str, user_id: str
+    ) -> bool:
+        """
+        Delete a specific generated image for a character.
+        If the image is the current default image, clears the default image.
+        """
+        try:
+            await self._validate_character_permissions(character_id, user_id)
+
+            # Get the image to verify ownership and existence
+            stmt = select(ImageGeneration).where(
+                ImageGeneration.id == image_id,
+                ImageGeneration.character_id == str(character_id),
+            )
+            result = await self.session.exec(stmt)
+            image = result.first()
+
+            if not image:
+                raise CharacterServiceError("Image not found")
+
+            # Check if this is the current profile image
+            char_stmt = select(Character).where(Character.id == character_id)
+            char_result = await self.session.exec(char_stmt)
+            character = char_result.first()
+
+            if character and character.image_url == image.image_url:
+                # Clear the default image if we're deleting it
+                # Optionally, we could set it to the next available image
+                character.image_url = None
+                self.session.add(character)
+
+            # Delete the image record
+            await self.session.delete(image)
+            await self.session.commit()
+            return True
+
+        except Exception as e:
+            logger.error(
+                f"[CharacterService] Error deleting character image {image_id}: {str(e)}"
             )
             return False
 
@@ -771,7 +908,10 @@ class CharacterService:
             if not plot_overview:
                 raise PermissionDeniedError("Plot overview not found or access denied")
 
-            book_id = plot_overview.book_id
+            # Convert asyncpg UUID to Python UUID for proper serialization
+            book_id = (
+                uuid.UUID(str(plot_overview.book_id)) if plot_overview.book_id else None
+            )
 
             # Create character record
             character = Character(
@@ -780,6 +920,7 @@ class CharacterService:
                 book_id=book_id,
                 user_id=uuid.UUID(user_id),
                 name=character_data.name,
+                entity_type=character_data.entity_type or "character",
                 role=character_data.role or "",
                 character_arc=character_data.character_arc or "",
                 physical_description=character_data.physical_description or "",
@@ -802,7 +943,30 @@ class CharacterService:
             await self.session.commit()
             await self.session.refresh(character)
 
-            return CharacterResponse.model_validate(character)
+            # Manually construct response to handle asyncpg UUID conversion
+            return CharacterResponse(
+                id=str(character.id),
+                plot_overview_id=str(character.plot_overview_id),
+                book_id=str(character.book_id) if character.book_id else None,
+                user_id=str(character.user_id),
+                name=character.name,
+                role=character.role or "",
+                character_arc=character.character_arc or "",
+                physical_description=character.physical_description or "",
+                personality=character.personality or "",
+                archetypes=character.archetypes or [],
+                want=character.want or "",
+                need=character.need or "",
+                lie=character.lie or "",
+                ghost=character.ghost or "",
+                image_url=character.image_url,
+                image_generation_prompt=character.image_generation_prompt,
+                image_metadata=character.image_metadata or {},
+                generation_method=character.generation_method or "manual",
+                model_used=character.model_used,
+                created_at=character.created_at,
+                updated_at=character.updated_at,
+            )
 
         except PermissionDeniedError:
             raise
@@ -885,8 +1049,41 @@ class CharacterService:
         self, character: CharacterResponse, custom_prompt: Optional[str] = None
     ) -> str:
         """
-        Build optimized prompt for character image generation.
+        Build optimized prompt for character/object/location image generation.
         """
+        entity_type = getattr(character, "entity_type", "character") or "character"
+
+        # Handle objects and locations differently - explicitly exclude humans
+        if entity_type in ("object", "location"):
+            if entity_type == "location":
+                base_prompt = f"Professional photograph of {character.name}"
+                if character.physical_description:
+                    base_prompt += f", {character.physical_description}"
+                # Add location-specific style
+                base_prompt += ". Cinematic landscape photography, establishing shot, wide angle, dramatic lighting"
+                # Explicitly exclude humans
+                base_prompt += ", no people, no humans, uninhabited, empty of people"
+            else:  # object
+                base_prompt = f"Professional product photograph of {character.name}"
+                if character.physical_description:
+                    base_prompt += f", {character.physical_description}"
+                # Add object/product-specific style
+                base_prompt += ". Studio product photography, isolated object, clean background, detailed textures"
+                # Explicitly exclude humans
+                base_prompt += (
+                    ", no people, no humans, no hands, object only, inanimate"
+                )
+
+            if custom_prompt:
+                base_prompt += f", {custom_prompt}"
+
+            # Add quality modifiers
+            base_prompt += (
+                ". Photorealistic, high quality, 8k resolution, professional lighting"
+            )
+            return base_prompt
+
+        # Original character portrait logic
         base_prompt = f"Professional character portrait of {character.name}"
 
         if character.physical_description:
@@ -993,9 +1190,17 @@ Return a JSON array of matches sorted by confidence:
             character_user_id = result.first()
 
             if not character_user_id:
+                logger.error(
+                    f"[CharacterService] Character {character_id} not found in database or has no user_id"
+                )
+                # Also log if the ID exists but somehow query failed (sanity check)
+                # But here we just know it's not found by ID
                 raise CharacterNotFoundError(f"Character {character_id} not found")
 
-            if str(character_user_id) != user_id:
+            if str(character_user_id) != str(user_id):
+                logger.error(
+                    f"[CharacterService] Access denied: Character {character_id} owned by {character_user_id} but requested by {user_id}"
+                )
                 raise PermissionDeniedError("Access denied to character")
 
             return True
@@ -1268,26 +1473,76 @@ Return a JSON array of matches sorted by confidence:
         ]
 
     async def _get_book_context_for_character(
-        self, book_id: str
+        self, book_id: str, character_name: str = None
     ) -> Optional[Dict[str, Any]]:
         """
         Get book context including chapters for character detail generation.
+        Uses RAG with vector embeddings for semantic search when available,
+        falls back to simple chapter retrieval otherwise.
         """
         try:
-            # Get book information
-            book_stmt = select(Book).where(Book.id == book_id)
+            # Convert book_id to UUID if it's a string
+            book_uuid = uuid.UUID(book_id) if isinstance(book_id, str) else book_id
+
+            logger.info(f"[CharacterService] Looking up book with ID: {book_uuid}")
+
+            # Get book information - first try by book.id
+            book_stmt = select(Book).where(Book.id == book_uuid)
             book_result = await self.session.exec(book_stmt)
             book = book_result.first()
 
+            # If not found by book.id, try by project_id (Creator mode)
             if not book:
+                logger.info(
+                    f"[CharacterService] Book not found by ID, trying project_id: {book_uuid}"
+                )
+                book_stmt = select(Book).where(Book.project_id == book_uuid)
+                book_result = await self.session.exec(book_stmt)
+                book = book_result.first()
+
+            if not book:
+                logger.warning(
+                    f"[CharacterService] Book not found with ID or project_id: {book_uuid}"
+                )
                 return None
 
-            # Get chapter summaries (limit to first 5 chapters for context)
+            book_info = {
+                "id": str(book.id),
+                "title": book.title,
+                "author": book.author_name or "",
+                "genre": getattr(book, "genre", "") or "",
+                "description": book.description or "",
+                "book_type": book.book_type or "fiction",
+            }
+
+            # Try RAG-based semantic search first if character name provided
+            if character_name:
+                try:
+                    rag_context = await self._get_rag_context_for_character(
+                        book_id=book_id, character_name=character_name
+                    )
+                    if rag_context:
+                        logger.info(
+                            f"[CharacterService] Using RAG context for character: {character_name} "
+                            f"(found {len(rag_context)} relevant chunks)"
+                        )
+                        return {
+                            "book": book_info,
+                            "chapters_summary": rag_context,
+                            "total_chapters": -1,  # Indicates RAG mode
+                            "context_source": "rag",
+                        }
+                except Exception as rag_error:
+                    logger.warning(
+                        f"[CharacterService] RAG search failed, falling back to simple method: {rag_error}"
+                    )
+
+            # Fallback: Get chapter summaries (limit to first 5 chapters for context)
             from app.books.models import Chapter
 
             chapters_stmt = (
                 select(Chapter)
-                .where(Chapter.book_id == book_id)
+                .where(Chapter.book_id == book_uuid)
                 .order_by(Chapter.chapter_number)
                 .limit(5)
             )
@@ -1302,21 +1557,84 @@ Return a JSON array of matches sorted by confidence:
                     f"Chapter {chapter.chapter_number}: {chapter.title}\n{content_preview}"
                 )
 
+            logger.info(
+                f"[CharacterService] Using simple context for character (no embeddings or RAG failed)"
+            )
+
             return {
-                "book": {
-                    "id": str(book.id),
-                    "title": book.title,
-                    "author": book.author or "",
-                    "genre": book.genre or "",
-                    "description": book.description or "",
-                    "book_type": book.book_type or "fiction",
-                },
+                "book": book_info,
                 "chapters_summary": "\n\n".join(context_parts),
                 "total_chapters": len(chapters),
+                "context_source": "simple",
             }
 
         except Exception as e:
             logger.error(f"[CharacterService] Error getting book context: {str(e)}")
+            return None
+
+    async def _get_rag_context_for_character(
+        self, book_id: str, character_name: str
+    ) -> Optional[str]:
+        """
+        Use vector embeddings to semantically search for content mentioning the character.
+        Returns combined context from the most relevant text chunks.
+        """
+        try:
+            # Create search query that focuses on finding character mentions
+            search_query = (
+                f"{character_name} character description personality appearance role"
+            )
+
+            # Use EmbeddingsService to search similar chapters
+            similar_chunks = await self.embeddings_service.search_similar_chapters(
+                query=search_query,
+                book_id=uuid.UUID(book_id),
+                limit=10,  # Get top 10 most relevant chunks
+                threshold=0.5,  # Lower threshold to get more results
+            )
+
+            if not similar_chunks:
+                logger.info(
+                    f"[CharacterService] No embeddings found for book {book_id}, "
+                    "will use fallback method"
+                )
+                return None
+
+            # Build context from relevant chunks
+            context_parts = []
+            seen_chunks = set()  # Avoid duplicate content
+
+            for chunk in similar_chunks:
+                content = chunk.get("content_chunk", "")
+                # Deduplicate by first 100 chars
+                chunk_signature = content[:100] if content else ""
+                if chunk_signature in seen_chunks:
+                    continue
+                seen_chunks.add(chunk_signature)
+
+                chapter_info = chunk.get("chapter", {})
+                chapter_title = chapter_info.get("title", "Unknown Chapter")
+                chapter_number = chapter_info.get("chapter_number", "?")
+
+                context_parts.append(
+                    f"[From Chapter {chapter_number}: {chapter_title}]\n{content}"
+                )
+
+            if not context_parts:
+                return None
+
+            # Combine all relevant context
+            combined_context = "\n\n---\n\n".join(context_parts)
+
+            logger.info(
+                f"[CharacterService] RAG found {len(context_parts)} relevant chunks "
+                f"for character '{character_name}'"
+            )
+
+            return combined_context
+
+        except Exception as e:
+            logger.error(f"[CharacterService] RAG context error: {str(e)}")
             return None
 
     def _build_character_detail_prompt(

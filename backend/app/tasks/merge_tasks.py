@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from app.core.database import async_session, engine
 from app.core.services.file import FileService
 import json
-from app.merge.schemas import MergeQualityTier, FFmpegParameters, MergeInputFile
+from app.merges.schemas import MergeQualityTier, FFmpegParameters, MergeInputFile
 from app.videos.models import VideoGeneration, VideoSegment
 from sqlmodel import select, update
 from sqlalchemy.ext.asyncio import AsyncSession

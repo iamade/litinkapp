@@ -1,13 +1,22 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from decimal import Decimal
+import uuid
 
 
 # PlotOverview Schemas
 class PlotOverviewBase(BaseModel):
     logline: Optional[str] = Field(
         None, max_length=1000, description="One-sentence summary of the plot"
+    )
+    original_prompt: Optional[str] = Field(
+        None, max_length=2000, description="The original prompt provided by the user"
+    )
+    creative_directive: Optional[str] = Field(
+        None,
+        max_length=3000,
+        description="Combined directive: prompt (prioritized) + logline, used for all AI generation",
     )
     themes: Optional[List[str]] = Field(None, description="Key themes in the story")
     story_type: Optional[str] = Field(
@@ -24,6 +33,19 @@ class PlotOverviewBase(BaseModel):
     )
     audience: Optional[str] = Field(None, max_length=100, description="Target audience")
     setting: Optional[str] = Field(None, max_length=500, description="Story setting")
+    medium: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Production medium (Animation, Live Action, Hybrid, Puppetry, Stop-Motion)",
+    )
+    format: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Content format (Film, TV Series, Limited Series, Short Film, etc.)",
+    )
+    vibe_style: Optional[str] = Field(
+        None, max_length=200, description="Vibe/Style (Satire, Cinematic, Sitcom, etc.)"
+    )
     generation_method: Optional[str] = Field(
         None, max_length=100, description="Method used for generation"
     )
@@ -40,6 +62,8 @@ class PlotOverviewCreate(PlotOverviewBase):
 
 class PlotOverviewUpdate(BaseModel):
     logline: Optional[str] = Field(None, max_length=1000)
+    original_prompt: Optional[str] = Field(None, max_length=2000)
+    creative_directive: Optional[str] = Field(None, max_length=3000)
     themes: Optional[List[str]] = None
     story_type: Optional[str] = Field(None, max_length=100)
     script_story_type: Optional[str] = Field(None, max_length=100)
@@ -47,6 +71,9 @@ class PlotOverviewUpdate(BaseModel):
     tone: Optional[str] = Field(None, max_length=100)
     audience: Optional[str] = Field(None, max_length=100)
     setting: Optional[str] = Field(None, max_length=500)
+    medium: Optional[str] = Field(None, max_length=100)
+    format: Optional[str] = Field(None, max_length=100)
+    vibe_style: Optional[str] = Field(None, max_length=200)
     generation_method: Optional[str] = Field(None, max_length=100)
     model_used: Optional[str] = Field(None, max_length=100)
     generation_cost: Optional[Decimal] = None
@@ -54,9 +81,27 @@ class PlotOverviewUpdate(BaseModel):
     version: Optional[int] = None
 
 
+class ImageRecord(BaseModel):
+    id: str
+    image_url: Optional[str]
+    status: str
+    created_at: datetime
+    model_used: Optional[str] = None
+    generation_method: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            uuid.UUID: lambda v: str(v),
+        }
+
+
 # Character Schemas
 class CharacterBase(BaseModel):
     name: str = Field(..., max_length=255, description="Character name")
+    entity_type: str = Field(
+        "character", description="Type of entity: 'character' or 'object'"
+    )
     role: Optional[str] = Field(
         None, max_length=100, description="Character's role in the story"
     )
@@ -82,6 +127,22 @@ class CharacterBase(BaseModel):
     ghost: Optional[str] = Field(
         None, max_length=500, description="Past trauma or ghost"
     )
+    # Voice/Accent fields for video generation prompts
+    accent: str = Field(
+        "neutral",
+        max_length=50,
+        description="Voice accent (neutral, nigerian, british, american, indian, australian, jamaican, french, german)",
+    )
+    voice_characteristics: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Voice characteristics (e.g., 'deep and authoritative', 'warm and friendly')",
+    )
+    voice_gender: str = Field(
+        "auto",
+        max_length=20,
+        description="Voice gender (male, female, auto - inferred from character profile)",
+    )
     image_url: Optional[str] = Field(
         None, max_length=500, description="URL of character image"
     )
@@ -98,15 +159,22 @@ class CharacterBase(BaseModel):
 
 
 class CharacterResponse(CharacterBase):
-    id: str = Field(..., description="Unique identifier")
-    plot_overview_id: str
-    book_id: str
-    user_id: str
+    id: Union[str, uuid.UUID] = Field(..., description="Unique identifier")
+    plot_overview_id: Union[str, uuid.UUID]
+    book_id: Optional[Union[str, uuid.UUID]] = None
+    user_id: Union[str, uuid.UUID]
     created_at: datetime
     updated_at: datetime
+    images: List[ImageRecord] = Field(
+        default=[], description="History of generated images"
+    )
 
     class Config:
         from_attributes = True
+        # Handle asyncpg UUID serialization
+        json_encoders = {
+            uuid.UUID: lambda v: str(v),
+        }
 
 
 class PlotOverviewResponse(PlotOverviewBase):
@@ -120,6 +188,13 @@ class PlotOverviewResponse(PlotOverviewBase):
     class Config:
         from_attributes = True
 
+    @field_validator("id", "book_id", "user_id", mode="before")
+    @classmethod
+    def convert_uuid_to_str(cls, v):
+        if isinstance(v, uuid.UUID):
+            return str(v)
+        return v
+
 
 class CharacterCreate(CharacterBase):
     plot_overview_id: str = Field(..., description="ID of the associated plot overview")
@@ -129,6 +204,7 @@ class CharacterCreate(CharacterBase):
 
 class CharacterUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=255)
+    entity_type: Optional[str] = None
     role: Optional[str] = Field(None, max_length=100)
     character_arc: Optional[str] = Field(None, max_length=1000)
     physical_description: Optional[str] = Field(None, max_length=1000)
@@ -138,6 +214,10 @@ class CharacterUpdate(BaseModel):
     need: Optional[str] = Field(None, max_length=500)
     lie: Optional[str] = Field(None, max_length=500)
     ghost: Optional[str] = Field(None, max_length=500)
+    # Voice/Accent fields for video generation prompts
+    accent: Optional[str] = Field(None, max_length=50)
+    voice_characteristics: Optional[str] = Field(None, max_length=200)
+    voice_gender: Optional[str] = Field(None, max_length=20)
     image_url: Optional[str] = Field(None, max_length=500)
     image_generation_prompt: Optional[str] = Field(None, max_length=1000)
     image_metadata: Optional[Dict[str, Any]] = None
@@ -261,6 +341,11 @@ class PlotGenerationRequest(BaseModel):
     genre: Optional[str] = Field(None, max_length=100, description="Desired genre")
     tone: Optional[str] = Field(None, max_length=100, description="Desired tone")
     audience: Optional[str] = Field(None, max_length=100, description="Target audience")
+    refinement_prompt: Optional[str] = Field(
+        None,
+        max_length=2000,
+        description="Follow-up prompt to refine/customize an existing plot (e.g., 'generate more characters')",
+    )
 
 
 class ProjectPlotGenerationRequest(BaseModel):

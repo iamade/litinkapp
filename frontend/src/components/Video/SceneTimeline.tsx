@@ -20,6 +20,10 @@ import {
 } from 'lucide-react';
 import type { VideoScene, Transition } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
+import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import { SceneAudioManager } from './SceneAudioManager';
+import { SceneDetailModal } from './SceneDetailModal';
+
 // Define ChapterScript interface locally to avoid import issues
 interface ChapterScript {
   id: string;
@@ -55,6 +59,10 @@ interface SceneTimelineProps {
   onReorder: (fromIndex: number, toIndex: number) => void;
   onAddTransition: (sceneId: string, transition: Transition) => void;
   selectedScript?: ChapterScript | null;
+  selectedShotIds?: string[];  // Shot IDs selected for video generation
+  onToggleShotSelection?: (shotId: string) => void;  // Toggle shot selection
+  generatingShotIds?: Set<string>;  // Shot IDs currently being generated
+  onGenerateVideo?: (selectedShotIds?: string[], overrideAudioIds?: string[]) => void;
 }
 
 const SceneCard: React.FC<{
@@ -66,7 +74,12 @@ const SceneCard: React.FC<{
   disabled?: boolean;
   scriptScene?: SceneDescription;
   sceneCharacters?: string[];
-}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters }) => {
+  storyboardAudioCount?: number;
+  onManageAudio: () => void;
+  isSelectedForGeneration?: boolean;  // Whether this scene is selected for video generation
+  onToggleSelection?: () => void;     // Toggle selection for video generation
+  isGenerating?: boolean;             // Whether this scene is currently being generated
+}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters, storyboardAudioCount, onManageAudio, isSelectedForGeneration, onToggleSelection, isGenerating }) => {
   const {
     attributes,
     listeners,
@@ -97,12 +110,14 @@ const SceneCard: React.FC<{
     <div
       ref={setNodeRef}
       style={style}
-      className={`bg-white rounded-lg border p-4 cursor-pointer hover:shadow-md transition-shadow ${
+      className={`bg-white dark:bg-gray-800 rounded-lg border p-4 cursor-pointer hover:shadow-md transition-shadow ${
         isSelected
-          ? 'border-blue-500 bg-blue-50'
-          : scene.status === 'completed'
-            ? 'border-green-500'
-            : 'border-gray-200'
+          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+          : isGenerating
+            ? 'border-yellow-400 ring-2 ring-yellow-300/50'
+            : scene.status === 'completed'
+              ? 'border-green-500'
+              : 'border-gray-200 dark:border-gray-700'
       } ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
     >
       <div className="flex items-start justify-between mb-3">
@@ -110,19 +125,34 @@ const SceneCard: React.FC<{
           <div {...attributes} {...listeners} className="cursor-grab">
             <GripVertical className="w-4 h-4 text-gray-400" />
           </div>
-          <span className="text-sm font-medium text-gray-900">
+          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
             Scene {scene.sceneNumber}
           </span>
+          {scene.shotType && (
+            <span className={`px-1.5 py-0.5 text-xs rounded ${scene.shotType === 'key_scene' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'}`}>
+              {scene.shotType === 'key_scene' ? 'Key Scene' : 'Suggested Shot'}
+            </span>
+          )}
         </div>
         <div className="flex items-center space-x-1">
+          <button
+            onClick={(e) => {
+               e.stopPropagation();
+               onManageAudio();
+            }}
+            className="p-1.5 hover:bg-blue-100 bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 rounded-md border border-blue-200 dark:border-blue-800"
+            title="Manage Scene Audio"
+          >
+            <Music className="w-4 h-4" />
+          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
               setIsEditing(!isEditing);
             }}
-            className="p-1 hover:bg-gray-100 rounded"
+            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
           >
-            <Edit2 className="w-3 h-3 text-gray-500" />
+            <Edit2 className="w-3 h-3 text-gray-500 dark:text-gray-400" />
           </button>
           {onDelete && (
             <button
@@ -130,7 +160,7 @@ const SceneCard: React.FC<{
                 e.stopPropagation();
                 onDelete();
               }}
-              className="p-1 hover:bg-red-50 rounded"
+              className="p-1 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
             >
               <Trash2 className="w-3 h-3 text-red-500" />
             </button>
@@ -140,7 +170,28 @@ const SceneCard: React.FC<{
 
       <div onClick={disabled ? undefined : onSelect} className="space-y-3">
         {/* Scene Thumbnail */}
-        <div className="relative aspect-video bg-gray-100 rounded overflow-hidden">
+        <div className="relative aspect-video bg-gray-100 dark:bg-gray-700 rounded overflow-hidden">
+          {/* Selection Checkbox */}
+          <div 
+            className="absolute top-2 left-2 z-10"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelection?.();
+            }}
+          >
+            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center cursor-pointer transition-colors ${
+              isSelectedForGeneration 
+                ? 'bg-blue-500 border-blue-500' 
+                : 'bg-white/80 border-gray-400 hover:border-blue-400 dark:bg-gray-800/80 dark:border-gray-500'
+            }`}>
+              {isSelectedForGeneration && (
+                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+          </div>
+          
           {scene.thumbnailUrl || scene.imageUrl ? (
             <img
               src={scene.thumbnailUrl || scene.imageUrl}
@@ -157,6 +208,13 @@ const SceneCard: React.FC<{
               {scene.transitions[0].type}
             </div>
           )}
+          {/* Generating Overlay */}
+          {isGenerating && (
+            <div className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center z-20 rounded">
+              <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-transparent mb-2" />
+              <span className="text-white text-xs font-medium">Generating...</span>
+            </div>
+          )}
         </div>
 
         {/* Scene Info */}
@@ -167,7 +225,7 @@ const SceneCard: React.FC<{
                 type="number"
                 value={duration}
                 onChange={(e) => setDuration(e.target.value)}
-                className="w-20 px-2 py-1 border rounded text-sm"
+                className="w-20 px-2 py-1 border rounded text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 step="0.1"
                 min="0.1"
                 onClick={(e) => e.stopPropagation()}
@@ -185,14 +243,19 @@ const SceneCard: React.FC<{
           ) : (
             <div className="space-y-2">
               {/* Duration and Audio Info */}
-              <div className="flex items-center justify-between text-xs text-gray-600">
+              <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
                 <div className="flex items-center space-x-1">
                   <Clock className="w-3 h-3" />
                   <span>{scene.duration}s</span>
                 </div>
                 <div className="flex items-center space-x-1">
                   <Music className="w-3 h-3" />
-                  <span>{scene.audioFiles.length} audio</span>
+                  <span>
+                    {(() => {
+                      const total = storyboardAudioCount !== undefined ? storyboardAudioCount : scene.audioFiles.length;
+                      return `${total} audio`;
+                    })()}
+                  </span>
                 </div>
               </div>
               
@@ -224,7 +287,11 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
   onSceneUpdate,
   onReorder,
   onAddTransition,
-  selectedScript
+  selectedScript,
+  selectedShotIds = [],
+  onToggleShotSelection,
+  generatingShotIds = new Set(),
+  onGenerateVideo
 }) => {
   // Script selection context integration
   const {
@@ -236,6 +303,9 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
     selectSegment,
     subscribe,
   } = useScriptSelection();
+  
+  const [managingAudioSceneNum, setManagingAudioSceneNum] = useState<number | null>(null);
+  const [viewingScene, setViewingScene] = useState<VideoScene | null>(null);
 
   // Recompute markers on selection changes
   useEffect(() => {
@@ -270,6 +340,9 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
     selectSegment(sceneId, { reason: 'user' });
   };
 
+  // Storyboard context for audio counts
+  const storyboardContext = useStoryboardOptional();
+
   // Disabled during switching
   const disabled = isSwitching;
   const handleDragEnd = (event: DragEndEvent) => {
@@ -291,8 +364,8 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
         {/* Timeline Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <h4 className="text-lg font-semibold text-gray-900">Timeline</h4>
-            <div className="text-sm text-gray-600">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Timeline</h4>
+            <div className="text-sm text-gray-600 dark:text-gray-400">
               Select a script to view timeline
             </div>
           </div>
@@ -301,7 +374,7 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
         {/* Inert Timeline Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="bg-gray-100 rounded-lg border border-gray-200 p-4 opacity-50">
+            <div key={i} className="bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 opacity-50">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-sm font-medium text-gray-500">Scene {i}</span>
               </div>
@@ -323,8 +396,8 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
       {/* Timeline Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
-          <h4 className="text-lg font-semibold text-gray-900">Timeline</h4>
-          <div className="text-sm text-gray-600">
+          <h4 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Timeline</h4>
+          <div className="text-sm text-gray-600 dark:text-gray-400">
             {scenes.length} scenes • {totalDuration.toFixed(1)}s total
           </div>
         </div>
@@ -351,29 +424,60 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
                   key={scene.id}
                   scene={scene}
                   onSelect={() => {
+                    // Highlight the scene
                     onSceneSelect(scene);
                     handleMarkerClick(scene.id);
+                    // Open the detailed modal
+                    setViewingScene(scene);
                   }}
                   onUpdate={(updates) => onSceneUpdate(scene.id, updates)}
                   isSelected={scene.id === selectedSegmentId}
                   disabled={disabled}
                   scriptScene={scriptScene}
                   sceneCharacters={sceneCharacters}
+                  storyboardAudioCount={storyboardContext?.getAudioForShot(scene.sceneNumber, scene.shotIndex)?.length ?? 0}
+                  onManageAudio={() => setManagingAudioSceneNum(scene.sceneNumber)}
+                  isSelectedForGeneration={selectedShotIds.includes(scene.id)}
+                  onToggleSelection={() => onToggleShotSelection?.(scene.id)}
+                  isGenerating={generatingShotIds.has(scene.id) || generatingShotIds.has('__all__')}
                 />
               );
             })}
           </div>
         </SortableContext>
       </DndContext>
+      
+      {managingAudioSceneNum !== null && (
+        <SceneAudioManager
+          sceneNumber={managingAudioSceneNum}
+          availableShots={scenes.filter(s => s.sceneNumber === managingAudioSceneNum)}
+          onClose={() => setManagingAudioSceneNum(null)}
+        />
+      )}
+
+      {viewingScene && (
+        <SceneDetailModal 
+          scene={viewingScene}
+          onClose={() => setViewingScene(null)}
+          onGenerate={(audioId) => {
+             if (onGenerateVideo) {
+                 const overrideAudioIds = audioId ? [audioId] : undefined;
+                 onGenerateVideo([viewingScene.id], overrideAudioIds);
+                 setViewingScene(null);
+             }
+          }}
+          isGenerating={generatingShotIds.has(viewingScene.id)}
+        />
+      )}
 
       {/* Timeline Controls */}
-      <div className="flex items-center justify-between pt-4 border-t">
+      <div className="flex items-center justify-between pt-4 border-t dark:border-gray-700">
         <div className="flex items-center space-x-2">
           <button
             className={`flex items-center space-x-2 px-3 py-1 rounded text-sm ${
               disabled
-                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+                : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
             }`}
             disabled={disabled}
           >
@@ -382,7 +486,7 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
           </button>
         </div>
         <div className={`text-sm ${
-          disabled ? 'text-gray-400' : 'text-gray-600'
+          disabled ? 'text-gray-400' : 'text-gray-600 dark:text-gray-400'
         }`}>
           {disabled ? 'Switching scripts...' : 'Drag scenes to reorder • Click to edit'}
         </div>

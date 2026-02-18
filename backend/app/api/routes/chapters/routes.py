@@ -1,8 +1,9 @@
 from typing import Any, Dict, List, Optional
 import uuid
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, col, or_
+from sqlmodel import select, col, or_, SQLModel
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_session
@@ -26,6 +27,7 @@ from app.images.schemas import (
     ImageRecord,
     ImageStatusResponse,
 )
+from app.videos.schemas import SceneUpdateRequest
 from app.audio.schemas import (
     AudioGenerationRequest,
     AudioGenerationResponse,
@@ -36,11 +38,14 @@ from app.audio.schemas import (
     AudioExportResponse,
     DeleteAudioResponse,
     AudioStatusResponse,
+    AudioReassignRequest,
+    AudioReassignResponse,
 )
 from app.books.models import Book, Chapter
 from app.videos.models import ImageGeneration, AudioGeneration, Script, AudioExport
 from app.api.services.subscription import SubscriptionManager
 from app.auth.models import User
+from app.projects.models import Project
 
 router = APIRouter()
 
@@ -48,32 +53,58 @@ router = APIRouter()
 async def verify_chapter_access(
     chapter_id: str, user_id: str, session: AsyncSession
 ) -> Dict[str, Any]:
-    """Verify user has access to the chapter and return chapter data"""
+    """Verify user has access to the chapter and return chapter data.
+
+    For prompt-only projects, the frontend uses the project ID as the "chapter ID".
+    This function first checks for a Chapter record, and if not found, falls back
+    to checking for a Project record to support prompt-only projects.
+    """
     try:
         # Get chapter with book info
         stmt = select(Chapter, Book).join(Book).where(Chapter.id == chapter_id)
         result = await session.exec(stmt)
         chapter_book = result.first()
 
-        if not chapter_book:
-            raise HTTPException(status_code=404, detail="Chapter not found")
+        if chapter_book:
+            chapter, book = chapter_book
 
-        chapter, book = chapter_book
+            # Check access permissions (published books or owned by user)
+            if book.status.upper() != "READY" and str(book.user_id) != str(user_id):
+                raise HTTPException(
+                    status_code=403, detail="Not authorized to access this chapter"
+                )
 
-        # Check access permissions (published books or owned by user)
-        if book.status != "READY" and str(book.user_id) != user_id:
-            raise HTTPException(
-                status_code=403, detail="Not authorized to access this chapter"
-            )
+            # Convert to dict for compatibility with existing code
+            chapter_data = chapter.model_dump()
+            return chapter_data
 
-        # Convert to dict for compatibility with existing code
-        chapter_data = chapter.model_dump()
-        # Add book data if needed, or just return chapter_data
-        # The original code returned chapter_data with nested books
-        # We can simulate that or update callers.
-        # Callers use: chapter_data.get("ai_generated_content")
-        # So model_dump is fine.
-        return chapter_data
+        # No chapter found - check if this is a Project ID (for prompt-only projects)
+        project_stmt = select(Project).where(Project.id == chapter_id)
+        project_result = await session.exec(project_stmt)
+        project = project_result.first()
+
+        if project:
+            # Check access permissions for project
+            if str(project.user_id) != user_id:
+                raise HTTPException(
+                    status_code=403, detail="Not authorized to access this project"
+                )
+
+            # Return a virtual chapter-like dict for prompt-only projects
+            virtual_chapter_data = {
+                "id": str(project.id),
+                "title": project.title,
+                "content": project.input_prompt or "",
+                "chapter_number": 1,
+                "book_id": str(project.book_id) if project.book_id else None,
+                "ai_generated_content": {},
+                "is_virtual": True,  # Flag to indicate this is a project, not a real chapter
+                "project_id": str(project.id),
+            }
+            return virtual_chapter_data
+
+        # Neither chapter nor project found
+        raise HTTPException(status_code=404, detail="Chapter not found")
 
     except HTTPException:
         raise
@@ -138,7 +169,163 @@ def get_character_info_from_chapter(
                     "description": f"Character {character_name} appearing in the chapter",
                 }
 
+                # Fallback with basic info
+                return {
+                    "name": character_name,
+                    "description": f"Character {character_name} appearing in the chapter",
+                }
+
     return None
+
+
+class SceneReorderRequest(SQLModel):
+    scene_order: List[int]
+
+
+class StoryboardConfigRequest(SQLModel):
+    """Request model for saving storyboard configuration"""
+
+    key_scene_images: Dict[str, str] = {}  # scene_number (str) -> image_id
+    deselected_images: List[str] = []  # image IDs that are excluded (opt-OUT)
+    image_order: Dict[str, List[str]] = (
+        {}
+    )  # scene_number (str) -> ordered list of image_ids
+
+
+class StoryboardConfigResponse(SQLModel):
+    """Response model for storyboard configuration"""
+
+    key_scene_images: Dict[str, str] = {}
+    deselected_images: List[str] = []
+    image_order: Dict[str, List[str]] = {}
+
+
+@router.patch("/{chapter_id}/scripts/{script_id}/reorder-scenes", response_model=Script)
+async def reorder_scenes(
+    chapter_id: str,
+    script_id: str,
+    request: SceneReorderRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Update the order of scenes in the storyboard"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Get the script
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Update scene order
+        script.scene_order = request.scene_order
+        session.add(script)
+        await session.commit()
+        await session.refresh(script)
+
+        return script
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error reordering scenes: {str(e)}"
+        )
+
+
+@router.get(
+    "/{chapter_id}/scripts/{script_id}/storyboard-config",
+    response_model=StoryboardConfigResponse,
+)
+async def get_storyboard_config(
+    chapter_id: str,
+    script_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get storyboard configuration for a script"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Get the script
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Return storyboard config (default to empty if not set)
+        config = script.storyboard_config or {}
+        return StoryboardConfigResponse(
+            key_scene_images=config.get("key_scene_images", {}),
+            deselected_images=config.get("deselected_images", []),
+            image_order=config.get("image_order", {}),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error getting storyboard config: {str(e)}"
+        )
+
+
+@router.patch(
+    "/{chapter_id}/scripts/{script_id}/storyboard-config",
+    response_model=StoryboardConfigResponse,
+)
+async def update_storyboard_config(
+    chapter_id: str,
+    script_id: str,
+    request: StoryboardConfigRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Save storyboard configuration including key scenes, selections, and image order"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Get the script
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Update storyboard config
+        script.storyboard_config = {
+            "key_scene_images": request.key_scene_images,
+            "deselected_images": request.deselected_images,
+            "image_order": request.image_order,
+        }
+
+        # Force SQLAlchemy to detect the change
+        script.storyboard_config = dict(script.storyboard_config)
+
+        session.add(script)
+        await session.commit()
+        await session.refresh(script)
+
+        return StoryboardConfigResponse(
+            key_scene_images=script.storyboard_config.get("key_scene_images", {}),
+            deselected_images=script.storyboard_config.get("deselected_images", []),
+            image_order=script.storyboard_config.get("image_order", {}),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error updating storyboard config: {str(e)}"
+        )
 
 
 @router.get("/{chapter_id}/images", response_model=ChapterImagesResponse)
@@ -172,7 +359,19 @@ async def list_chapter_images(
                 metadata.get("chapter_id") == chapter_id
                 or root_chapter_id == chapter_id
             ):
-                chapter_images.append(ImageRecord(**img))
+                # Convert UUIDs and datetimes to strings for Pydantic validation
+                img_data = dict(img)
+                for key, value in img_data.items():
+                    if isinstance(value, uuid.UUID):
+                        img_data[key] = str(value)
+                    elif isinstance(value, datetime):
+                        img_data[key] = value.isoformat()
+
+                # Ensure metadata is present
+                if "metadata" not in img_data or img_data["metadata"] is None:
+                    img_data["metadata"] = {}
+
+                chapter_images.append(ImageRecord(**img_data))
 
         return ChapterImagesResponse(
             chapter_id=chapter_id,
@@ -185,6 +384,71 @@ async def list_chapter_images(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error listing chapter images: {str(e)}"
+        )
+
+
+@router.put(
+    "/{chapter_id}/scripts/{script_id}/scenes/{scene_number}",
+)
+async def update_scene_description(
+    chapter_id: str,
+    script_id: str,
+    scene_number: int,
+    request: SceneUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Update description for a specific scene in the script"""
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Get the script
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Initialize scene_descriptions if needed (handling legacy scripts)
+        # Now using dict with string keys to support sub-scenes (1.1, 1.2, etc.)
+        if not script.scene_descriptions:
+            script.scene_descriptions = {}
+        elif isinstance(script.scene_descriptions, list):
+            # Convert legacy list format to dict format
+            legacy_list = script.scene_descriptions
+            script.scene_descriptions = {
+                str(i + 1): desc for i, desc in enumerate(legacy_list) if desc
+            }
+
+        # Use scene_number as string key to support decimals (1.1, 1.2, etc.)
+        scene_key = str(scene_number)
+        # Normalize the key - convert "1.0" to "1" for whole numbers
+        if scene_key.endswith(".0"):
+            scene_key = scene_key[:-2]
+
+        # Store as dict with scene key
+        if isinstance(script.scene_descriptions, dict):
+            script.scene_descriptions[scene_key] = request.scene_description
+        else:
+            # Fallback for unexpected type - convert to dict
+            script.scene_descriptions = {scene_key: request.scene_description}
+
+        # Trigger SQLAlchemy change detection for JSON field
+        script.scene_descriptions = dict(script.scene_descriptions)
+
+        session.add(script)
+        await session.commit()
+        await session.refresh(script)
+
+        return {"success": True, "message": f"Scene {scene_key} description updated"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error updating scene description: {str(e)}"
         )
 
 
@@ -217,11 +481,19 @@ async def generate_scene_image(
         if request.scene_description:
             scene_description = request.scene_description
 
-        # Get user tier for model selection
+        # Get user tier for model selection and check limits
         subscription_manager = SubscriptionManager(session)
         usage_check = await subscription_manager.check_usage_limits(
-            uuid.UUID(current_user.id), "image"
+            current_user.id, "image"
         )
+
+        # Enforce image generation limits
+        if not usage_check["can_generate"]:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Image generation limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
+            )
+
         user_tier = usage_check["tier"]
 
         # Create pending record in database
@@ -233,18 +505,35 @@ async def generate_scene_image(
             "image_type": "scene",
             "style": request.style,
             "aspect_ratio": request.aspect_ratio,
+            "character_ids": request.character_ids,
         }
 
         record = ImageGeneration(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             image_type="scene",
             scene_description=scene_description,
+            image_prompt=(
+                f"{scene_description}. {request.custom_prompt}"
+                if request.custom_prompt
+                else scene_description
+            ),
+            text_prompt=(
+                f"{scene_description}. {request.custom_prompt}"
+                if request.custom_prompt
+                else scene_description
+            ),
             scene_number=scene_number,
             chapter_id=uuid.UUID(chapter_id),
             script_id=uuid.UUID(request.script_id) if request.script_id else None,
             status="pending",
             progress=0,
             meta=metadata,
+            # Set shot_index: use provided value, or default to 0 (Key Scene) if not a suggested shot
+            shot_index=(
+                request.shot_index
+                if request.shot_index is not None
+                else (1 if request.is_suggested_shot else 0)
+            ),
         )
 
         try:
@@ -268,14 +557,17 @@ async def generate_scene_image(
                 record_id=record_id,
                 scene_description=scene_description,
                 scene_number=scene_number,
-                user_id=current_user.id,
+                user_id=str(current_user.id),
                 chapter_id=chapter_id,
-                script_id=request.script_id,
+                script_id=str(request.script_id) if request.script_id else None,
                 style=request.style,
                 aspect_ratio=request.aspect_ratio,
                 custom_prompt=request.custom_prompt,
                 user_tier=user_tier,
                 retry_count=0,
+                character_ids=request.character_ids,
+                character_image_urls=request.character_image_urls,
+                is_suggested_shot=request.is_suggested_shot,
             )
 
             print(
@@ -359,7 +651,7 @@ async def generate_character_image(
         }
 
         record = ImageGeneration(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             image_type="character",
             character_name=character_info["name"],
             scene_description=character_info["description"],
@@ -378,7 +670,7 @@ async def generate_character_image(
         task = generate_character_image_task.delay(
             character_name=character_info["name"],
             character_description=character_info["description"],
-            user_id=current_user.id,
+            user_id=str(current_user.id),
             chapter_id=chapter_id,
             style=request.style,
             aspect_ratio=request.aspect_ratio,
@@ -435,7 +727,7 @@ async def link_character_image(
         }
 
         record = ImageGeneration(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             image_type="character",
             character_name=character_name,
             image_url=image_url,
@@ -818,14 +1110,12 @@ async def get_scene_image_status(
         # Verify chapter access
         await verify_chapter_access(chapter_id, current_user.id, session)
 
-        # Query for the scene image record
-        # Primary filter: chapter_id and scene_number (root-level)
-        # Secondary filter: fallback to metadata->>'scene_number' if root-level is NULL
+        # Query for the scene image record by chapter_id and scene_number
         print(
             f"[DEBUG] [get_scene_image_status] Querying for chapter_id={chapter_id}, scene_number={scene_number}"
         )
 
-        # Try root-level scene_number first
+        # Direct query - scene_number column is now FLOAT in database
         stmt = (
             select(ImageGeneration)
             .where(
@@ -839,35 +1129,6 @@ async def get_scene_image_status(
         result = await session.exec(stmt)
         image_record = result.first()
 
-        # If no results, try metadata-based scene_number as fallback
-        if not image_record:
-            print(
-                f"[DEBUG] [get_scene_image_status] No root-level scene_number match, trying metadata fallback"
-            )
-            # Fetch all records for this chapter with NULL scene_number and filter in Python
-            stmt = (
-                select(ImageGeneration)
-                .where(
-                    ImageGeneration.chapter_id == uuid.UUID(chapter_id),
-                    ImageGeneration.scene_number == None,
-                )
-                .order_by(col(ImageGeneration.created_at).desc())
-            )
-
-            result = await session.exec(stmt)
-            all_chapter_images = result.all()
-
-            # Filter by metadata scene_number in Python
-            for record in all_chapter_images:
-                metadata = record.metadata or {}
-                metadata_scene_number = metadata.get("scene_number")
-                if metadata_scene_number == scene_number:
-                    image_record = record
-                    print(
-                        f"[DEBUG] [get_scene_image_status] Found match via metadata scene_number"
-                    )
-                    break
-
         if not image_record:
             print(
                 f"[WARNING] [get_scene_image_status] No record found for chapter_id={chapter_id}, scene_number={scene_number}"
@@ -878,7 +1139,7 @@ async def get_scene_image_status(
             )
 
         # Verify the record belongs to the current user
-        if str(image_record.user_id) != current_user.id:
+        if str(image_record.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this image generation"
             )
@@ -901,21 +1162,31 @@ async def get_scene_image_status(
             status = "pending"
 
         # Extract retry_count safely (ensure it's an int)
-        retry_count = image_record.retry_count or 0
+        # Check both meta and metadata attributes as they might vary
+        meta_dict = (
+            getattr(image_record, "meta", None)
+            or getattr(image_record, "metadata", {})
+            or {}
+        )
+        retry_count = meta_dict.get("retry_count", 0)
         retry_count = int(retry_count)
 
         return ImageStatusResponse(
             record_id=str(image_record.id),
             status=status,
             image_url=image_record.image_url,
-            prompt=image_record.prompt or image_record.image_prompt,
+            prompt=image_record.image_prompt or image_record.text_prompt,
             script_id=str(image_record.script_id) if image_record.script_id else None,
             scene_number=record_scene_number,
             retry_count=retry_count,
             error_message=image_record.error_message,
             generation_time_seconds=image_record.generation_time_seconds,
-            created_at=image_record.created_at,
-            updated_at=image_record.updated_at,
+            created_at=(
+                image_record.created_at.isoformat() if image_record.created_at else None
+            ),
+            updated_at=(
+                image_record.updated_at.isoformat() if image_record.updated_at else None
+            ),
         )
 
     except HTTPException:
@@ -932,23 +1203,62 @@ async def get_scene_image_status(
 @router.get("/{chapter_id}/audio", response_model=ChapterAudioResponse)
 async def list_chapter_audio(
     chapter_id: str,
+    script_id: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
 ):
-    """List all audio files associated with a chapter"""
+    """List all audio files associated with a chapter or script.
+
+    Tries to verify chapter access first. If chapter doesn't exist but script_id is provided,
+    falls back to querying by script_id only.
+    """
     try:
-        # Verify chapter access
-        chapter_data = await verify_chapter_access(chapter_id, current_user.id, session)
+        chapter_exists = True
+        try:
+            # Verify chapter access
+            chapter_data = await verify_chapter_access(
+                chapter_id, current_user.id, session
+            )
+        except HTTPException as e:
+            if e.status_code == 404 and script_id:
+                # Chapter not found, but we have a script_id - allow fallback
+                print(
+                    f"[DEBUG] Chapter {chapter_id} not found, falling back to script_id query"
+                )
+                chapter_exists = False
+            else:
+                raise
 
-        # Get user's audio files for this chapter
+        # Build query based on available identifiers
         print(
-            f"[DEBUG] Querying audio_generations for user_id: {current_user.id}, chapter_id: {chapter_id}"
+            f"[DEBUG] Querying audio_generations for user_id: {current_user.id}, chapter_id: {chapter_id}, script_id: {script_id}"
         )
 
-        stmt = select(AudioGeneration).where(
-            AudioGeneration.user_id == uuid.UUID(current_user.id),
-            AudioGeneration.chapter_id == uuid.UUID(chapter_id),
-        )
+        if chapter_exists:
+            # Query by chapter_id, and also include script_id if provided (OR condition)
+            if script_id:
+                stmt = select(AudioGeneration).where(
+                    AudioGeneration.user_id == current_user.id,
+                    or_(
+                        AudioGeneration.chapter_id == uuid.UUID(chapter_id),
+                        AudioGeneration.script_id == uuid.UUID(script_id),
+                    ),
+                )
+            else:
+                stmt = select(AudioGeneration).where(
+                    AudioGeneration.user_id == current_user.id,
+                    AudioGeneration.chapter_id == uuid.UUID(chapter_id),
+                )
+        elif script_id:
+            # Fallback: query by script_id only
+            stmt = select(AudioGeneration).where(
+                AudioGeneration.user_id == current_user.id,
+                AudioGeneration.script_id == uuid.UUID(script_id),
+            )
+        else:
+            # No valid identifier
+            raise HTTPException(status_code=404, detail="Chapter not found")
+
         result = await session.exec(stmt)
         chapter_audio_records = result.all()
 
@@ -963,14 +1273,31 @@ async def list_chapter_audio(
             record_dict["video_generation_id"] = (
                 str(r.video_generation_id) if r.video_generation_id else None
             )
-            # Handle metadata rename
-            if hasattr(r, "audio_metadata"):
+
+            # Map 'status' field to 'generation_status' expected by schema
+            record_dict["generation_status"] = r.status or "pending"
+
+            # Convert datetime fields to ISO strings
+            if hasattr(r, "created_at") and r.created_at:
+                record_dict["created_at"] = r.created_at.isoformat()
+            else:
+                record_dict["created_at"] = None
+
+            if hasattr(r, "updated_at") and r.updated_at:
+                record_dict["updated_at"] = r.updated_at.isoformat()
+            else:
+                record_dict["updated_at"] = None
+
+            # Handle metadata rename and ensure it's a dict
+            if hasattr(r, "audio_metadata") and r.audio_metadata:
                 record_dict["metadata"] = r.audio_metadata
+            else:
+                record_dict["metadata"] = {}
 
             chapter_audio.append(AudioRecord(**record_dict))
 
         print(
-            f"[DEBUG] Retrieved {len(chapter_audio)} audio records for chapter {chapter_id}"
+            f"[DEBUG] Retrieved {len(chapter_audio)} audio records for chapter {chapter_id} / script {script_id}"
         )
         return ChapterAudioResponse(
             chapter_id=chapter_id,
@@ -1094,7 +1421,7 @@ async def generate_chapter_audio(
         )
 
         audio_record = AudioGeneration(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             chapter_id=uuid.UUID(chapter_id),
             audio_type=audio_type,
             text_content=text_content,
@@ -1107,6 +1434,10 @@ async def generate_chapter_audio(
                 "emotion": request.emotion,
                 "speed": request.speed,
                 "duration": request.duration,
+                "shot_type": request.shot_type or "key_scene",
+                "shot_index": (
+                    request.shot_index if request.shot_index is not None else 0
+                ),
             },
         )
 
@@ -1170,7 +1501,7 @@ async def delete_chapter_audio(
             raise HTTPException(status_code=404, detail="Audio file not found")
 
         # Verify the record belongs to the current user
-        if str(audio_record.user_id) != current_user.id:
+        if str(audio_record.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to delete this audio file"
             )
@@ -1194,9 +1525,9 @@ async def delete_chapter_audio(
         await session.commit()
 
         return DeleteAudioResponse(
-            status="success",
+            success=True,
             message="Audio file deleted successfully",
-            audio_id=audio_id,
+            record_id=audio_id,
         )
 
     except HTTPException:
@@ -1221,7 +1552,7 @@ async def export_chapter_audio_mix(
 
         # Get all audio files for this chapter
         stmt = select(AudioGeneration).where(
-            AudioGeneration.user_id == uuid.UUID(current_user.id),
+            AudioGeneration.user_id == current_user.id,
             AudioGeneration.chapter_id == uuid.UUID(chapter_id),
         )
         result = await session.exec(stmt)
@@ -1255,7 +1586,7 @@ async def export_chapter_audio_mix(
 
         # Create export record
         export_record = AudioExport(
-            user_id=uuid.UUID(current_user.id),
+            user_id=current_user.id,
             chapter_id=uuid.UUID(chapter_id),
             export_format=request.format,
             status="pending",
@@ -1392,4 +1723,164 @@ async def get_audio_generation_status(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error getting audio generation status: {str(e)}"
+        )
+
+
+@router.post("/{chapter_id}/images/upscale")
+async def upscale_image(
+    chapter_id: str,
+    request: Dict[str, Any],
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Upscale an image using ModelsLab V6 super resolution API.
+
+    Model selection is tier-based with automatic fallback:
+    - FREE: 2x upscaling (RealESRGAN_x2plus)
+    - BASIC/STANDARD: 4x upscaling (realesr-general-x4v3, RealESRGAN_x4plus)
+    - PREMIUM+: 4K+ upscaling (ultra_resolution)
+
+    Optional override: Pass 'model_id' to use a specific model (e.g., anime upscaling).
+    """
+    try:
+        # Verify chapter access
+        await verify_chapter_access(chapter_id, current_user.id, session)
+
+        # Extract request parameters
+        image_url = request.get("image_url")
+        if not image_url:
+            raise HTTPException(status_code=400, detail="image_url is required")
+
+        face_enhance = request.get("face_enhance", False)
+
+        # Get user's subscription tier
+        user_tier = (
+            current_user.subscription_tier
+            if hasattr(current_user, "subscription_tier")
+            else "free"
+        )
+
+        # Import and use upscale service
+        from app.core.services.modelslab_upscale import ModelsLabUpscaleService
+
+        upscale_service = ModelsLabUpscaleService()
+
+        # Check if user wants to override with a specific model (e.g., anime)
+        override_model = request.get("model_id")
+        if override_model:
+            # Use specific model with manual scale
+            scale = request.get("scale", 4)
+            result = await upscale_service.upscale_image(
+                image_url=image_url,
+                model_id=override_model,
+                scale=scale,
+                face_enhance=face_enhance,
+            )
+            result["model_used"] = override_model
+            result["tier"] = user_tier
+            result["scale"] = scale
+        else:
+            # Use tier-based model with automatic fallback
+            result = await upscale_service.upscale_with_tier(
+                image_url=image_url,
+                user_tier=user_tier,
+                face_enhance=face_enhance,
+            )
+
+        return {
+            "status": result.get("status", "success"),
+            "upscaled_url": result.get("upscaled_url"),
+            "original_url": image_url,
+            "model_used": result.get("model_used"),
+            "tier": result.get("tier", user_tier),
+            "scale": result.get("scale"),
+            "generation_time": result.get("generation_time"),
+            "message": f"Image upscaled successfully with {result.get('model_used')} at {result.get('scale')}x",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error upscaling image: {str(e)}")
+
+
+@router.patch(
+    "/{chapter_id}/audio/{audio_id}/reassign",
+    response_model=AudioReassignResponse,
+    summary="Reassign audio to a different shot",
+    description="Update the shot_index of an audio file to assign it to a different image/shot in the Video tab.",
+)
+async def reassign_audio_shot(
+    chapter_id: str,
+    audio_id: str,
+    request: AudioReassignRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+) -> AudioReassignResponse:
+    """
+    Reassign an audio file to a different shot by updating its shot_index in metadata.
+
+    - shot_index=0: Key scene (main establishing shot)
+    - shot_index=1+: Suggested shots
+
+    Note: chapter_id can be a chapter ID, project ID, or script ID.
+    We verify ownership via the audio record's user_id instead.
+    """
+    try:
+        # Find the audio record - verify ownership via user_id
+        # Note: chapter_id from URL is used for API consistency but not strictly verified
+        # because it may be a script_id in some contexts
+        stmt = select(AudioGeneration).where(
+            AudioGeneration.id == audio_id,
+            AudioGeneration.user_id == current_user.id,
+        )
+        result = await session.exec(stmt)
+        audio_record = result.first()
+
+        if not audio_record:
+            raise HTTPException(
+                status_code=404, detail="Audio file not found or not authorized"
+            )
+
+        # Get previous shot_index from metadata
+        current_metadata = audio_record.audio_metadata or {}
+        previous_shot_index = current_metadata.get("shot_index", 0)
+
+        # Determine new shot_type based on shot_index
+        new_shot_type = request.shot_type
+        if new_shot_type is None:
+            new_shot_type = "key_scene" if request.shot_index == 0 else "suggested_shot"
+
+        # Update metadata with new shot_index and shot_type
+        updated_metadata = {
+            **current_metadata,
+            "shot_index": request.shot_index,
+            "shot_type": new_shot_type,
+        }
+        audio_record.audio_metadata = updated_metadata
+
+        # Commit the change
+        session.add(audio_record)
+        await session.commit()
+        await session.refresh(audio_record)
+
+        print(
+            f"[AUDIO REASSIGN] Audio {audio_id} reassigned: shot_index {previous_shot_index} → {request.shot_index}"
+        )
+
+        return AudioReassignResponse(
+            audio_id=audio_id,
+            previous_shot_index=previous_shot_index,
+            new_shot_index=request.shot_index,
+            new_shot_type=new_shot_type,
+            message=f"Audio reassigned to {'Key Scene' if request.shot_index == 0 else f'Shot {request.shot_index}'}",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[AUDIO REASSIGN] Error: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error reassigning audio: {str(e)}"
         )

@@ -5,9 +5,54 @@ from app.core.auth import get_current_user
 from app.auth.models import User
 from app.user_profile.models import Profile
 from app.user_profile.schema import OnboardingData
+from app.subscriptions.models import UserSubscription
 from sqlmodel import select
 
 router = APIRouter(prefix="/users/me", tags=["user_profile"])
+
+
+@router.get("")
+async def get_current_user_profile(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Get current user profile including subscription tier.
+    """
+    # Look up user's subscription tier
+    subscription_tier = "free"  # Default to free
+    try:
+        result = await session.exec(
+            select(UserSubscription).where(UserSubscription.user_id == user.id)
+        )
+        subscription = result.first()
+        if subscription and subscription.tier:
+            subscription_tier = (
+                subscription.tier.value
+                if hasattr(subscription.tier, "value")
+                else str(subscription.tier)
+            )
+    except Exception:
+        # If lookup fails, default to free
+        pass
+
+    # Build response with all user fields + subscription_tier
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "display_name": user.display_name,
+        "roles": [
+            role.value if hasattr(role, "value") else str(role)
+            for role in (user.roles or [])
+        ],
+        "preferred_mode": user.preferred_mode,
+        "onboarding_completed": user.onboarding_completed,
+        "subscription_tier": subscription_tier,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "avatar_url": user.avatar_url,
+        "bio": user.bio,
+    }
 
 
 @router.post("/onboarding")

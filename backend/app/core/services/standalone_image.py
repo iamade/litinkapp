@@ -52,6 +52,8 @@ class StandaloneImageService:
         script_id: Optional[str] = None,
         chapter_id: Optional[str] = None,  # Added for scene metadata tracking
         scene_number: Optional[int] = None,  # Added for scene metadata tracking
+        character_ids: Optional[List[str]] = None,  # Added for character references
+        is_suggested_shot: bool = False,  # For suggested shot special handling
     ) -> Dict[str, Any]:
         """
         Generate a standalone scene image and store in database.
@@ -65,6 +67,8 @@ class StandaloneImageService:
             script_id: Optional script ID for linking
             chapter_id: Optional chapter ID for metadata tracking
             scene_number: Optional scene number for ordering
+            character_ids: Optional list of character image IDs to use as style references
+            is_suggested_shot: If True, uses special prompts to maintain same background
 
         Returns:
             Dict containing image data and database record info
@@ -72,6 +76,7 @@ class StandaloneImageService:
         try:
             logger.info(
                 f"[StandaloneImageService] Generating scene image for user {user_id}"
+                f"{' (suggested shot)' if is_suggested_shot else ''}"
             )
 
             # Get user tier for model selection
@@ -92,8 +97,33 @@ class StandaloneImageService:
                 scene_number=scene_number,  # Pass scene_number for root-level field
             )
 
-            # Build enhanced prompt
-            prompt = self._build_scene_prompt(scene_description, style, custom_prompt)
+            # Build enhanced prompt - use special handling for suggested shots
+            prompt = self._build_scene_prompt(
+                scene_description,
+                style,
+                custom_prompt,
+                is_suggested_shot=is_suggested_shot,
+            )
+
+            # Resolve character IDs to URLs if provided
+            character_image_urls = []
+            if character_ids:
+                try:
+                    # Fetch valid image URLs for the provided IDs
+                    query = (
+                        select(ImageGeneration.image_url)
+                        .where(col(ImageGeneration.id).in_(character_ids))
+                        .where(ImageGeneration.image_url != None)
+                    )
+                    result = await self.session.exec(query)
+                    character_image_urls = result.all()
+                    logger.info(
+                        f"[StandaloneImageService] Resolved {len(character_image_urls)} character reference images"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[StandaloneImageService] Failed to resolve character IDs: {e}"
+                    )
 
             # Generate image using ModelsLab service with tier-based model selection
             generation_result = await self.image_service.generate_scene_image(
@@ -101,6 +131,7 @@ class StandaloneImageService:
                 style=style,
                 aspect_ratio=aspect_ratio,
                 user_tier=user_tier,
+                character_image_urls=character_image_urls,
             )
 
             # Update database record with results
@@ -151,6 +182,7 @@ class StandaloneImageService:
         script_id: Optional[str] = None,
         chapter_id: Optional[str] = None,  # Added for metadata tracking
         user_tier: Optional[str] = None,
+        entity_type: str = "character",  # 'character', 'object', or 'location'
     ) -> Dict[str, Any]:
         """
         Generate a standalone character image and store in database.
@@ -195,7 +227,7 @@ class StandaloneImageService:
 
             # Build enhanced prompt
             prompt = self._build_character_prompt(
-                character_name, character_description, style, custom_prompt
+                character_name, character_description, style, custom_prompt, entity_type
             )
 
             # Generate image using ModelsLab service with tier-based model selection
@@ -516,23 +548,214 @@ class StandaloneImageService:
             return False
 
     def _build_scene_prompt(
-        self, scene_description: str, style: str, custom_prompt: Optional[str] = None
+        self,
+        scene_description: str,
+        style: str,
+        custom_prompt: Optional[str] = None,
+        is_suggested_shot: bool = False,
     ) -> str:
         """
         Build enhanced prompt for scene image generation.
+        Strips dialogue, detects shot types, and adds negative prompts to prevent text in images.
+
+        Args:
+            scene_description: Description of the scene
+            style: Visual style (cinematic, realistic, etc.)
+            custom_prompt: Optional additional prompt text
+            is_suggested_shot: If True, emphasizes keeping same background with only pose changes
         """
+        import re
+
+        # Shot type mappings - translate cinematographic terms to image generation instructions
+        # These ensure the model understands framing without distorting proportions
+        shot_type_mappings = {
+            # Close-ups - camera framing, NOT enlarging the subject
+            r'\b(extreme\s+)?close[-\s]?up\b': {
+                'framing': 'camera positioned close to subject, head and shoulders visible',
+                'instruction': 'IMPORTANT: Subject should be at NATURAL human proportions, camera is simply positioned closer. Do NOT enlarge or distort the head/face size. Frame shows face and upper chest area.',
+                'negative': 'NO oversized heads, NO distorted proportions, NO giant faces'
+            },
+            r'\bECU\b': {
+                'framing': 'extreme close-up, face fills most of frame',
+                'instruction': 'Subject at natural proportions, camera very close showing facial details. Do NOT distort or enlarge features.',
+                'negative': 'NO distorted features, NO unnatural proportions'
+            },
+            # Medium shots
+            r'\bmedium\s+(close[-\s]?up|shot)\b': {
+                'framing': 'medium shot, waist-up framing',
+                'instruction': 'Subject shown from waist up, natural proportions, comfortable conversational distance',
+                'negative': 'NO cropped limbs at awkward points'
+            },
+            r'\bMCU\b': {
+                'framing': 'medium close-up, chest and head visible',
+                'instruction': 'Subject from chest up, natural proportions',
+                'negative': ''
+            },
+            r'\bMS\b': {
+                'framing': 'medium shot, waist-up',
+                'instruction': 'Subject from waist up, natural proportions',
+                'negative': ''
+            },
+            # Wide/Full shots
+            r'\b(wide|full|establishing)\s+shot\b': {
+                'framing': 'wide establishing shot, full scene visible',
+                'instruction': 'Show full environment with characters in context, full bodies visible if characters present',
+                'negative': ''
+            },
+            r'\bWS\b': {
+                'framing': 'wide shot, full scene',
+                'instruction': 'Full environment visible, characters shown in full body',
+                'negative': ''
+            },
+            # Two-shot
+            r'\btwo[-\s]?shot\b': {
+                'framing': 'two-shot, two characters in frame',
+                'instruction': 'Frame two characters together, both visible from similar distance, balanced composition',
+                'negative': 'NO single character focus'
+            },
+            # Over-the-shoulder
+            r'\bover[-\s]?the[-\s]?shoulder\b|OTS\b': {
+                'framing': 'over-the-shoulder shot',
+                'instruction': 'Camera positioned behind one character looking at another, foreground character partially visible from behind',
+                'negative': ''
+            },
+            # POV
+            r'\bPOV\b|point[-\s]?of[-\s]?view': {
+                'framing': 'POV shot, first-person perspective',
+                'instruction': 'Camera shows what the character sees, subjective viewpoint',
+                'negative': 'NO visible camera operator'
+            },
+        }
+
+        # Strip quoted dialogue to prevent text appearing in images
+        # Remove patterns like: "dialogue text" or 'dialogue text'
+        cleaned_description = re.sub(r'["\']([^"\']*)["\']', "", scene_description)
+
+        # Remove character speaking patterns like "CHARACTER_NAME speaking" or "CHARACTER_NAME:"
+        # and convert to action description
+        cleaned_description = re.sub(
+            r"(\w+)\s*:\s*speaking", r"\1 talking", cleaned_description
+        )
+        cleaned_description = re.sub(
+            r"(\w+)\s+speaking\b", r"\1 in conversation", cleaned_description
+        )
+
+        # Remove any remaining colons that might indicate dialogue
+        cleaned_description = re.sub(r"\s+:\s+", " ", cleaned_description)
+
+        # Clean up extra whitespace
+        cleaned_description = " ".join(cleaned_description.split())
+
+        # Detect shot type and extract framing instructions
+        detected_shot_type = None
+        shot_framing = ""
+        shot_instruction = ""
+        shot_negative = ""
+
+        for pattern, mapping in shot_type_mappings.items():
+            if re.search(pattern, cleaned_description, re.IGNORECASE):
+                detected_shot_type = pattern
+                shot_framing = mapping['framing']
+                shot_instruction = mapping['instruction']
+                shot_negative = mapping['negative']
+                # Remove the shot type from description to avoid confusion
+                cleaned_description = re.sub(pattern, '', cleaned_description, flags=re.IGNORECASE)
+                cleaned_description = " ".join(cleaned_description.split())
+                logger.debug(f"[_build_scene_prompt] Detected shot type: {shot_framing}")
+                break
+
+        # If description is too minimal, add context
+        if len(cleaned_description.strip()) < 15:
+            cleaned_description = (
+                f"Cinematic scene showing {cleaned_description.strip()}, indoor setting"
+            )
+
+        # Special handling for suggested shots - emphasize same background, different pose
+        if is_suggested_shot:
+            # Extract location/setting from description if available (e.g., "INT. DURSLEY'S HOUSE - MORNING")
+            location_match = re.search(
+                r"(INT\.|EXT\.)[^\n,]+", cleaned_description, re.IGNORECASE
+            )
+            location_context = location_match.group(0).strip() if location_match else ""
+
+            # Extract time of day if present
+            time_match = re.search(
+                r"(MORNING|AFTERNOON|EVENING|NIGHT|DAY|DAWN|DUSK|SUNSET|SUNRISE)",
+                cleaned_description,
+                re.IGNORECASE,
+            )
+            time_context = time_match.group(0).lower() if time_match else ""
+
+            # Build a focused suggested shot prompt
+            base_prompt = f"Cinematic film still, {cleaned_description}"
+
+            # Add shot type framing if detected
+            if shot_framing:
+                base_prompt += f". Camera framing: {shot_framing}"
+                base_prompt += f". {shot_instruction}"
+
+            # Add location context if available
+            if location_context:
+                base_prompt += f". Setting: {location_context}"
+            if time_context:
+                base_prompt += f" during {time_context}"
+
+            # Strong I2I preservation instructions
+            base_prompt += (
+                ". CRITICAL: Preserve EXACT same background, environment, lighting, and color palette from reference image"
+                ". Keep same room/location, same furniture placement, same wall colors, same atmospheric lighting"
+                ". Only adjust: character pose, facial expression, camera framing/angle"
+                ". Match the visual style, color grading, and mood of the reference exactly"
+                ". Professional cinematography, natural acting, expressive but subtle performance"
+                ". Photorealistic, consistent lighting direction, matching shadows"
+            )
+
+            # Stronger negative prompt for I2I
+            negative_prompt = (
+                ". ABSOLUTELY NO: text, words, captions, labels, watermarks, logos, speech bubbles"
+                ". NO color shifts, NO environment changes, NO different room, NO new furniture"
+                ". NO exaggerated expressions, NO screaming, NO dramatic poses unless specified"
+            )
+            # Add shot-type specific negatives
+            if shot_negative:
+                negative_prompt += f". {shot_negative}"
+            base_prompt += negative_prompt
+
+            if custom_prompt:
+                clean_custom = re.sub(r'["\']([^"\']*)["\']', "", custom_prompt)
+                base_prompt += f". Additional context: {clean_custom}"
+
+            return base_prompt
+
+        # Standard scene prompt
         style_modifiers = {
             "realistic": "photorealistic environment, detailed landscape, natural lighting, high resolution",
-            "cinematic": "cinematic scene, dramatic lighting, movie-quality composition, epic vista",
+            "cinematic": "cinematic scene, dramatic lighting, movie-quality composition, film still",
             "animated": "animated scene background, cartoon environment, vibrant world design",
             "fantasy": "fantasy environment, magical atmosphere, otherworldly landscape, mystical setting",
         }
 
-        base_prompt = f"Scene: {scene_description}. {style_modifiers.get(style, style_modifiers['cinematic'])}. "
-        base_prompt += "Wide establishing shot, detailed environment, atmospheric perspective, immersive background, professional scene composition"
+        # Build base prompt with shot type if detected
+        if shot_framing:
+            base_prompt = f"Cinematic film still, {shot_framing}. {cleaned_description}. "
+            base_prompt += f"{shot_instruction}. "
+            base_prompt += f"{style_modifiers.get(style, style_modifiers['cinematic'])}. "
+            base_prompt += "Professional scene composition, natural human proportions"
+        else:
+            base_prompt = f"Scene: {cleaned_description}. {style_modifiers.get(style, style_modifiers['cinematic'])}. "
+            base_prompt += "Wide establishing shot, detailed environment, atmospheric perspective, immersive background, professional scene composition"
+
+        # Add negative prompt to prevent text in images
+        negative_prompt = ". NO TEXT, no words, no letters, no writing, no captions, no subtitles, no dialogue text, no speech bubbles"
+        # Add shot-type specific negatives
+        if shot_negative:
+            negative_prompt += f". {shot_negative}"
+        base_prompt += negative_prompt
 
         if custom_prompt:
-            base_prompt += f". {custom_prompt}"
+            # Also strip any dialogue from custom prompt
+            clean_custom = re.sub(r'["\']([^"\']*)["\']', "", custom_prompt)
+            base_prompt += f". {clean_custom}"
 
         return base_prompt
 
@@ -542,10 +765,38 @@ class StandaloneImageService:
         character_description: str,
         style: str,
         custom_prompt: Optional[str] = None,
+        entity_type: str = "character",
     ) -> str:
         """
-        Build enhanced prompt for character image generation.
+        Build enhanced prompt for character/object/location image generation.
         """
+        # Handle objects and locations differently - explicitly exclude humans
+        if entity_type in ("object", "location"):
+            if entity_type == "location":
+                base_prompt = f"Professional photograph of {character_name}"
+                if character_description:
+                    base_prompt += f": {character_description}"
+                base_prompt += ". Cinematic landscape photography, establishing shot, wide angle, dramatic lighting"
+                # Explicitly exclude humans
+                base_prompt += ", no people, no humans, uninhabited, empty of people, no figures, no persons"
+            else:  # object
+                base_prompt = f"Professional product photograph of {character_name}"
+                if character_description:
+                    base_prompt += f": {character_description}"
+                base_prompt += ". Studio product photography, isolated object, clean background, detailed textures"
+                # Explicitly exclude humans
+                base_prompt += ", no people, no humans, no hands, object only, inanimate, without any human presence"
+
+            if custom_prompt:
+                base_prompt += f". {custom_prompt}"
+
+            # Add quality modifiers
+            base_prompt += (
+                ". Photorealistic, high quality, 8k resolution, professional lighting"
+            )
+            return base_prompt
+
+        # Original character portrait logic
         style_modifiers = {
             "realistic": "photorealistic portrait, detailed facial features, professional lighting, high quality, 8k resolution",
             "cinematic": "cinematic character portrait, dramatic lighting, film noir style, movie quality",
@@ -725,11 +976,22 @@ class StandaloneImageService:
             record.generation_time_seconds = generation_result.get("generation_time")
             record.meta = merged_metadata
 
-            # Extract dimensions if available
+            # Extract dimensions if available - convert to int for database
             if generation_result.get("meta"):
                 meta = generation_result["meta"]
-                record.width = meta.get("width")
-                record.height = meta.get("height")
+                # Convert string dimensions to integers for database
+                width_val = meta.get("width")
+                height_val = meta.get("height")
+                if width_val is not None:
+                    try:
+                        record.width = int(width_val)
+                    except (ValueError, TypeError):
+                        record.width = None
+                if height_val is not None:
+                    try:
+                        record.height = int(height_val)
+                    except (ValueError, TypeError):
+                        record.height = None
                 record.file_size_bytes = meta.get("file_size_bytes")
 
             record.updated_at = datetime.now()

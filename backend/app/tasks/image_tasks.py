@@ -35,7 +35,7 @@ async def async_generate_all_images_for_video(video_generation_id: str):
 
             # Mark image step as started
             pipeline_manager.mark_step_started(
-                video_generation_id, PipelineStep.IMAGE_GENERATION
+                video_generation_id, PipelineStep.IMAGE_GENERATION, session
             )
 
             # Get video generation data
@@ -342,7 +342,10 @@ async def async_generate_all_images_for_video(video_generation_id: str):
             # Mark step as failed
             try:
                 pipeline_manager.mark_step_failed(
-                    video_generation_id, PipelineStep.IMAGE_GENERATION, error_message
+                    video_generation_id,
+                    PipelineStep.IMAGE_GENERATION,
+                    error_message,
+                    session,
                 )
             except Exception as pm_error:
                 print(f"[PIPELINE] Warning - Failed to mark step failed: {pm_error}")
@@ -540,9 +543,24 @@ async def generate_scene_images_optimized(
 
             print(f"[SCENE IMAGE {i+1}] Processing: {scene_text[:50]}...")
 
+            # Add style modifiers for better image generation (matches frontend options)
+            style_modifiers = {
+                "realistic": "photorealistic scene, natural lighting, high detail, realistic environment",
+                "cinematic": "cinematic composition, dramatic lighting, film-like atmosphere, professional cinematography",
+                "cartoon": "animated cartoon style, stylized characters, vibrant colors, clean lines",
+                "animated": "animated scene, stylized environment, vibrant colors, fluid motion aesthetic",
+                "fantasy": "fantasy art style, magical atmosphere, mystical lighting, ethereal environment",
+                "sketch": "pencil sketch style, hand-drawn appearance, artistic linework, illustration",
+                "comic": "comic book style, bold outlines, dynamic composition, vibrant panel art",
+            }
+            style_suffix = style_modifiers.get(
+                style.lower(), style_modifiers.get("cinematic", "")
+            )
+            enhanced_scene_text = f"{scene_text}. {style_suffix}. High quality, detailed background, no text, no watermark."
+
             # ✅ OPTIMIZATION: Try with shorter timeout first
             result = await image_service.generate_scene_image(
-                scene_description=scene_text,
+                scene_description=enhanced_scene_text,
                 style=style,
                 aspect_ratio="16:9",
                 user_tier=user_tier,
@@ -696,6 +714,7 @@ def generate_character_image_task(
     custom_prompt: Optional[str] = None,
     record_id: Optional[str] = None,
     user_tier: str = "free",
+    entity_type: str = "character",
 ):
     """
     Unified asynchronous Celery task for generating character images.
@@ -729,6 +748,7 @@ def generate_character_image_task(
             custom_prompt,
             record_id,
             user_tier,
+            entity_type,
         )
     )
 
@@ -745,6 +765,7 @@ async def async_generate_character_image_task(
     custom_prompt: Optional[str] = None,
     record_id: Optional[str] = None,
     user_tier: str = "free",
+    entity_type: str = "character",
 ):
     """Async implementation of character image generation task"""
     async with async_session() as session:
@@ -792,7 +813,12 @@ async def async_generate_character_image_task(
                 aspect_ratio=aspect_ratio,
                 custom_prompt=custom_prompt,
                 user_tier=user_tier,
+                entity_type=entity_type,
             )
+
+            # Check for error in result (fallback manager returns dict on error)
+            if result.get("status") == "error":
+                raise Exception(result.get("error", "Unknown error from image service"))
 
             image_url = result.get("image_url")
             generation_time = result.get("generation_time", 0)
@@ -939,27 +965,6 @@ async def async_generate_character_image_task(
             raise Exception(error_message)
 
 
-def create_scene_image_prompt(scene_description: str, style: str) -> str:
-    """Create detailed prompt for scene image generation"""
-
-    style_modifiers = {
-        "realistic": "photorealistic scene, natural lighting, high detail, realistic environment",
-        "cinematic": "cinematic composition, dramatic lighting, film-like atmosphere, professional cinematography",
-        "animated": "animated scene, stylized environment, vibrant colors, cartoon background",
-        "fantasy": "fantasy landscape, magical atmosphere, mystical environment, fantasy art style",
-        "comic": "comic book scene, bold composition, dynamic angles, comic art style",
-        "artistic": "artistic scene, painterly environment, creative composition, artistic style",
-    }
-
-    base_prompt = f"Scene: {scene_description}, "
-    style_prompt = style_modifiers.get(style.lower(), style_modifiers["realistic"])
-    technical_prompt = (
-        ", 16:9 aspect ratio, high quality, detailed background, cinematic framing"
-    )
-
-    return base_prompt + style_prompt + technical_prompt
-
-
 @celery_app.task(bind=True)
 def generate_scene_image_task(
     self,
@@ -974,6 +979,9 @@ def generate_scene_image_task(
     custom_prompt: Optional[str] = None,
     user_tier: Optional[str] = None,
     retry_count: int = 0,
+    character_ids: Optional[List[str]] = None,
+    character_image_urls: Optional[List[str]] = None,
+    is_suggested_shot: bool = False,  # For suggested shot special handling
 ) -> None:
     """
     Asynchronous Celery task for generating scene images with retry mechanism.
@@ -990,6 +998,9 @@ def generate_scene_image_task(
         custom_prompt: Optional custom prompt additions
         user_tier: User subscription tier for model selection
         retry_count: Current retry count for exponential backoff
+        character_ids: Optional list of character image IDs to use as style references
+        character_image_urls: Optional list of direct character image URLs
+        is_suggested_shot: If True, maintains same background with only pose changes
     """
     return asyncio.run(
         async_generate_scene_image_task(
@@ -1003,7 +1014,11 @@ def generate_scene_image_task(
             aspect_ratio,
             custom_prompt,
             user_tier,
-            retry_count,
+            retry_count=retry_count,
+            character_ids=character_ids,
+            character_image_urls=character_image_urls,
+            is_suggested_shot=is_suggested_shot,
+            task_instance=self,
         )
     )
 
@@ -1020,6 +1035,10 @@ async def async_generate_scene_image_task(
     custom_prompt: Optional[str] = None,
     user_tier: Optional[str] = None,
     retry_count: int = 0,
+    character_ids: Optional[List[str]] = None,
+    character_image_urls: Optional[List[str]] = None,
+    is_suggested_shot: bool = False,
+    task_instance: Any = None,
 ):
     """Async implementation of scene image generation task"""
     import random
@@ -1031,7 +1050,7 @@ async def async_generate_scene_image_task(
                 f"[SceneImageTask] Starting generation for scene {scene_number}"
             )
             logger.info(
-                f"[SceneImageTask] Parameters: user={user_id}, chapter={chapter_id}, script={script_id}, record={record_id}, tier={user_tier}, retry={retry_count}"
+                f"[SceneImageTask] Parameters: user={user_id}, chapter={chapter_id}, characters={len(character_ids) if character_ids else 0}, direct_urls={len(character_image_urls) if character_image_urls else 0}"
             )
 
             # Verify record exists
@@ -1048,21 +1067,32 @@ async def async_generate_scene_image_task(
 
             # Update status to in_progress with transaction safety
             try:
+                # Fetch existing meta to update safely
+                meta_query = text("SELECT meta FROM image_generations WHERE id = :id")
+                meta_result = await session.execute(meta_query, {"id": record_id})
+                meta_row = meta_result.mappings().first()
+                current_meta = meta_row.get("meta") if meta_row else {}
+                if current_meta is None:
+                    current_meta = {}
+
+                # Update meta in Python
+                current_meta["last_attempted_at"] = datetime.utcnow().isoformat()
+                current_meta["retry_count"] = retry_count
+
+                # Update with full JSON object
                 status_update_query = text(
                     """
                     UPDATE image_generations 
                     SET status = 'in_progress', 
-                        progress = 0, 
-                        last_attempted_at = :last_attempted, 
-                        retry_count = :retry_count 
+                        progress = 0,
+                        meta = :meta
                     WHERE id = :id
                 """
                 )
                 await session.execute(
                     status_update_query,
                     {
-                        "last_attempted": datetime.utcnow().isoformat(),
-                        "retry_count": retry_count,
+                        "meta": json.dumps(current_meta),
                         "id": record_id,
                     },
                 )
@@ -1078,21 +1108,97 @@ async def async_generate_scene_image_task(
             # ✅ FIX: Combine scene_description with custom_prompt instead of replacing it
             # custom_prompt should enhance the description (e.g., "Lighting mood: natural")
             # NOT replace the actual scene content from the book
-            if custom_prompt:
+            if is_suggested_shot:
+                # Suggested shots should maintain same background, only change pose/expression
+                final_description = f"Cinematic film still, {scene_description}"
+                final_description += ". MAINTAIN EXACT SAME BACKGROUND AND ENVIRONMENT"
+                final_description += (
+                    ". Only change character pose, expression, and camera angle"
+                )
+                final_description += ". Professional cinematography, natural acting"
+                final_description += ". ABSOLUTELY NO TEXT, no words, no captions, no labels, no speech bubbles, no watermarks"
+                if custom_prompt:
+                    final_description += f". {custom_prompt}"
+                logger.info(
+                    f"[SceneImageTask] Generating SUGGESTED SHOT with preserved background"
+                )
+            elif custom_prompt:
                 final_description = f"{scene_description}. {custom_prompt}"
             else:
-                final_description = scene_description
+                # Add style modifiers for better image generation (matches frontend options)
+                style_modifiers = {
+                    "realistic": "photorealistic scene, natural lighting, high detail, realistic environment",
+                    "cinematic": "cinematic composition, dramatic lighting, film-like atmosphere, professional cinematography",
+                    "cartoon": "animated cartoon style, stylized characters, vibrant colors, clean lines",
+                    "animated": "animated scene, stylized environment, vibrant colors, fluid motion aesthetic",
+                    "fantasy": "fantasy art style, magical atmosphere, mystical lighting, ethereal environment",
+                    "sketch": "pencil sketch style, hand-drawn appearance, artistic linework, illustration",
+                    "comic": "comic book style, bold outlines, dynamic composition, vibrant panel art",
+                }
+                style_suffix = style_modifiers.get(
+                    (style or "cinematic").lower(), style_modifiers.get("cinematic", "")
+                )
+                final_description = f"{scene_description}. {style_suffix}. High quality, no text, no watermark."
 
             logger.info(f"[SceneImageTask] Final prompt: {final_description[:100]}...")
 
-            result = await ModelsLabV7ImageService().generate_scene_image(
+            # Fetch character image URLs if IDs are provided
+            resolved_character_urls = []
+            if character_ids and len(character_ids) > 0:
+                try:
+                    # Construct query to get image URLs for the character IDs
+                    # Ensure we claim types properly for list parameter if needed,
+                    # but easiest is to pass tuple or list depending on driver support.
+                    # SQLModel/SQLAlchemy async usually handles list for IN clause with efficient binding.
+                    # Or we can loop if few. Given strict tiers, max is likely small (1-2).
+
+                    # Safer: fetch one by one or construct safe query
+                    char_query_text = "SELECT image_url FROM image_generations WHERE id = ANY(:ids) AND status = 'completed'"
+                    char_result = await session.execute(
+                        text(char_query_text), {"ids": character_ids}
+                    )
+                    resolved_character_urls = [
+                        row[0] for row in char_result.fetchall() if row[0]
+                    ]
+
+                    logger.info(
+                        f"[SceneImageTask] Resolved {len(resolved_character_urls)} character URLs from {len(character_ids)} IDs"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[SceneImageTask] Failed to resolve character images: {e}"
+                    )
+                    # Proceed without resolved characters rather than failing completely
+                    resolved_character_urls = []
+
+            # Combine resolved URLs with direct URLs
+            final_character_urls = list(resolved_character_urls)
+            if character_image_urls:
+                final_character_urls.extend(character_image_urls)
+
+            # Remove duplicates while preserving order
+            final_character_urls = list(dict.fromkeys(final_character_urls))
+
+            if final_character_urls:
+                logger.info(
+                    f"[SceneImageTask] Using {len(final_character_urls)} total character references (Resolved: {len(resolved_character_urls)}, Direct: {len(character_image_urls) if character_image_urls else 0})"
+                )
+
+            image_service = ModelsLabV7ImageService()
+            result = await image_service.generate_scene_image(
                 scene_description=final_description,
                 style=style or "cinematic",
                 aspect_ratio=aspect_ratio or "16:9",
                 user_tier=user_tier,
+                character_image_urls=final_character_urls,
+                is_suggested_shot=is_suggested_shot,  # Pass flag for low-strength I2I
             )
 
             # Extract result data
+            # Check for error in result (fallback manager returns dict on error)
+            if result.get("status") == "error":
+                raise Exception(result.get("error", "Unknown error from image service"))
+
             image_url = result.get("image_url")
             generation_time = result.get("generation_time", 0)
             model_used = result.get("model_used", "gen4_image")
@@ -1103,13 +1209,11 @@ async def async_generate_scene_image_task(
             # Prepare metadata with scene info
             existing_metadata = {}
             try:
-                meta_query = text(
-                    "SELECT metadata FROM image_generations WHERE id = :id"
-                )
+                meta_query = text("SELECT meta FROM image_generations WHERE id = :id")
                 meta_result = await session.execute(meta_query, {"id": record_id})
                 meta_row = meta_result.mappings().first()
-                if meta_row and meta_row.get("metadata"):
-                    existing_metadata = meta_row["metadata"]
+                if meta_row and meta_row.get("meta"):
+                    existing_metadata = meta_row["meta"]
             except Exception as meta_error:
                 logger.warning(
                     f"[SceneImageTask] Could not fetch existing metadata: {meta_error}"
@@ -1146,8 +1250,8 @@ async def async_generate_scene_image_task(
                         script_id = :script_id, 
                         scene_number = :scene_number, 
                         image_type = 'scene', 
-                        metadata = :metadata, 
-                        retry_count = :retry_count 
+                        meta = :meta,
+                        image_prompt = :image_prompt
                     WHERE id = :id
                 """
                 )
@@ -1156,14 +1260,20 @@ async def async_generate_scene_image_task(
                     success_update_query,
                     {
                         "image_url": image_url,
-                        "updated_at": datetime.utcnow().isoformat(),
+                        "updated_at": datetime.utcnow(),
                         "generation_time": generation_time,
                         "model_id": model_used,
                         "chapter_id": chapter_id,
                         "script_id": script_id,
                         "scene_number": scene_number,
-                        "metadata": json.dumps(merged_metadata),
-                        "retry_count": retry_count,
+                        "scene_number": scene_number,
+                        "meta": json.dumps(merged_metadata),
+                        "image_prompt": final_description,
+                        # Store retry count in meta via jsonb_set logic if needed, but since we are replacing metadata,
+                        # we can just assume it's part of the merged_metadata if we want.
+                        # However, the previous query structure used `metadata = :metadata`.
+                        # Let's ensure retry_count is in metadata if we want it preserved.
+                        # For now, just remove the explicit column update.
                         "id": record_id,
                     },
                 )
@@ -1221,6 +1331,17 @@ async def async_generate_scene_image_task(
 
             # Update record with error before retry attempt
             try:
+                # Fetch existing meta
+                meta_query = text("SELECT meta FROM image_generations WHERE id = :id")
+                meta_result = await session.execute(meta_query, {"id": record_id})
+                meta_row = meta_result.mappings().first()
+                current_meta = meta_row.get("meta") if meta_row else {}
+                if current_meta is None:
+                    current_meta = {}
+
+                # Update meta in Python
+                current_meta["retry_count"] = retry_count
+
                 # Only set status to failed if not retryable or max retries exceeded
                 if not is_retryable or retry_count >= 3:
                     error_update_query = text(
@@ -1228,8 +1349,8 @@ async def async_generate_scene_image_task(
                         UPDATE image_generations 
                         SET error_message = :error_message, 
                             updated_at = :updated_at, 
-                            retry_count = :retry_count, 
-                            status = 'failed' 
+                            status = 'failed',
+                            meta = :meta
                         WHERE id = :id
                     """
                     )
@@ -1241,8 +1362,9 @@ async def async_generate_scene_image_task(
                         """
                         UPDATE image_generations 
                         SET error_message = :error_message, 
-                            updated_at = :updated_at, 
-                            retry_count = :retry_count 
+                            updated_at = :updated_at,
+                            status = 'failed',
+                            meta = :meta
                         WHERE id = :id
                     """
                     )
@@ -1251,14 +1373,15 @@ async def async_generate_scene_image_task(
                     error_update_query,
                     {
                         "error_message": error_message,
-                        "updated_at": datetime.utcnow().isoformat(),
-                        "retry_count": retry_count,
+                        "updated_at": datetime.utcnow(),
+                        "meta": json.dumps(current_meta),
                         "id": record_id,
                     },
                 )
                 await session.commit()
 
             except Exception as db_error:
+                await session.rollback()
                 logger.error(
                     f"[SceneImageTask] Failed to update record with error: {db_error}"
                 )
@@ -1276,32 +1399,51 @@ async def async_generate_scene_image_task(
 
                 # Increment retry count in DB before retrying
                 try:
+                    # Fetch existing meta
+                    meta_query = text(
+                        "SELECT meta FROM image_generations WHERE id = :id"
+                    )
+                    meta_result = await session.execute(meta_query, {"id": record_id})
+                    meta_row = meta_result.mappings().first()
+                    current_meta = meta_row.get("meta") if meta_row else {}
+                    if current_meta is None:
+                        current_meta = {}
+
+                    # Update meta in Python
+                    current_meta["retry_count"] = retry_count + 1
+                    current_meta["last_attempted_at"] = datetime.utcnow().isoformat()
+
                     retry_update_query = text(
                         """
                         UPDATE image_generations 
-                        SET retry_count = :retry_count, 
-                            last_attempted_at = :last_attempted 
+                        SET meta = :meta
                         WHERE id = :id
                     """
                     )
+
                     await session.execute(
                         retry_update_query,
                         {
-                            "retry_count": retry_count + 1,
-                            "last_attempted": datetime.utcnow(),
+                            "meta": json.dumps(current_meta),
                             "id": record_id,
                         },
                     )
                     await session.commit()
 
                     # Retry the task
-                    raise self.retry(exc=e, countdown=backoff_seconds)
+                    if task_instance:
+                        raise task_instance.retry(exc=e, countdown=backoff_seconds)
+                    else:
+                        logger.warning(
+                            "[SceneImageTask] No task instance available for retry"
+                        )
                 except Exception as db_error:
                     logger.error(f"Error updating retry count: {db_error}")
                     # Still retry even if DB update fails
-                    raise self.retry(exc=e, countdown=backoff_seconds)
+                    if task_instance:
+                        raise task_instance.retry(exc=e, countdown=backoff_seconds)
 
-        logger.error(
-            f"[SceneImageTask] Final failure for record {record_id}: {error_message}"
-        )
-        raise Exception(error_message)
+            logger.error(
+                f"[SceneImageTask] Final failure for record {record_id}: {error_message}"
+            )
+            raise Exception(error_message)

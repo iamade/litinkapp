@@ -10,6 +10,7 @@ from app.plots.schemas import (
     ImageGenerationRequest,
 )
 from app.api.services.character import CharacterService
+from app.api.services.subscription import SubscriptionManager
 from app.core.database import get_session
 from app.core.auth import get_current_active_user
 
@@ -30,7 +31,7 @@ async def get_character(
     try:
         character_service = CharacterService(session)
         character = await character_service.get_character_by_id(
-            character_id, current_user["id"]
+            character_id, current_user.id
         )
 
         if not character:
@@ -62,7 +63,7 @@ async def update_character(
     try:
         character_service = CharacterService(session)
         updated_character = await character_service.update_character(
-            character_id=character_id, user_id=current_user["id"], updates=updates
+            character_id=character_id, user_id=current_user.id, updates=updates
         )
 
         return updated_character
@@ -89,7 +90,7 @@ async def delete_character(
     try:
         character_service = CharacterService(session)
         success = await character_service.delete_character(
-            character_id, current_user["id"]
+            character_id, current_user.id
         )
 
         if not success:
@@ -127,7 +128,7 @@ async def bulk_delete_characters(
         for character_id in character_ids:
             try:
                 success = await character_service.delete_character(
-                    character_id, current_user["id"]
+                    character_id, current_user.id
                 )
                 if success:
                     deleted_count += 1
@@ -174,15 +175,33 @@ async def generate_character_details_with_ai(
         if not character_name or not character_name.strip():
             raise HTTPException(status_code=400, detail="Character name is required")
 
+        # Check AI assist usage limits
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(
+            current_user.id, "ai_assist"
+        )
+        if not usage_check["can_generate"]:
+            raise HTTPException(
+                status_code=402,
+                detail=f"AI assist limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
+            )
+
         character_service = CharacterService(session)
 
         character_details = (
             await character_service.generate_character_details_from_book(
                 character_name=character_name.strip(),
                 book_id=book_id,
-                user_id=current_user["id"],
+                user_id=current_user.id,
                 role=role,
             )
+        )
+
+        # Record usage after successful generation
+        await subscription_manager.record_usage(
+            user_id=current_user.id,
+            resource_type="ai_assist",
+            metadata={"type": "character_details", "character_name": character_name},
         )
 
         return {
@@ -216,7 +235,9 @@ async def create_character(
         character_service = CharacterService(session)
         character = await character_service.create_character(
             plot_overview_id=plot_overview_id,
-            user_id=current_user["id"],
+            user_id=str(
+                current_user.id
+            ),  # Convert to string to avoid asyncpg UUID issues
             character_data=character_data,
         )
 
@@ -244,7 +265,7 @@ async def get_characters_by_plot(
     try:
         character_service = CharacterService(session)
         characters = await character_service.get_characters_by_plot(
-            plot_overview_id, current_user["id"]
+            plot_overview_id, current_user.id
         )
 
         return characters
@@ -272,7 +293,7 @@ async def analyze_character_archetypes(
         # Get character data first
         character_service = CharacterService(session)
         character = await character_service.get_character_by_id(
-            character_id, current_user["id"]
+            character_id, current_user.id
         )
 
         if not character:
@@ -287,7 +308,7 @@ async def analyze_character_archetypes(
         # Update character with archetype analysis
         await character_service.update_character(
             character_id=character_id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             updates=CharacterUpdate(archetypes=archetype_match.archetype_id),
         )
 
@@ -334,7 +355,7 @@ async def generate_character_image(
 
         result = await character_service.generate_character_image(
             character_id=character_id,
-            user_id=current_user["id"],
+            user_id=current_user.id,
             custom_prompt=request.prompt,
             style=style,
             aspect_ratio=aspect_ratio,
@@ -371,7 +392,7 @@ async def get_character_image_status(
     try:
         character_service = CharacterService(session)
         status = await character_service.get_character_image_status(
-            character_id=character_id, user_id=current_user["id"]
+            character_id=character_id, user_id=current_user.id
         )
 
         return status
@@ -382,6 +403,71 @@ async def get_character_image_status(
         raise HTTPException(
             status_code=500, detail=f"Failed to get image status: {str(e)}"
         )
+
+
+@router.put("/{character_id}/image/default")
+async def set_default_image(
+    character_id: str,
+    payload: dict,
+    session: AsyncSession = Depends(get_session),
+    current_user: dict = Depends(get_current_active_user),
+):
+    """
+    Set a specific image as the default/profile image for a character.
+
+    Payload should contain: {"image_url": "..."}
+    """
+    try:
+        image_url = payload.get("image_url")
+        if not image_url:
+            raise HTTPException(status_code=400, detail="image_url is required")
+
+        character_service = CharacterService(session)
+        success = await character_service.update_character_image_url(
+            character_id=character_id, image_url=image_url, user_id=current_user.id
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=500, detail="Failed to update default image"
+            )
+
+        return {"success": True, "message": "Default image updated"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to set default image: {str(e)}"
+        )
+
+
+@router.delete("/{character_id}/image/{image_id}")
+async def delete_character_image(
+    character_id: str,
+    image_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: dict = Depends(get_current_active_user),
+):
+    """
+    Delete a specific generated image from history.
+    If it is the current default, the default will be cleared.
+    """
+    try:
+        character_service = CharacterService(session)
+        success = await character_service.delete_character_image(
+            character_id=character_id, image_id=image_id, user_id=current_user.id
+        )
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete image")
+
+        return {"success": True, "message": "Image deleted"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete image: {str(e)}")
 
 
 @router.get("/archetypes", response_model=List[CharacterArchetypeResponse])

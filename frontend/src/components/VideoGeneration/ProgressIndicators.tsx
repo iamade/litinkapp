@@ -14,10 +14,8 @@ interface ProgressIndicatorsProps {
   overallProgress: number;
   status: GenerationStatus | null;
   stepProgress?: {
-    image_generation: { status: string; progress: number };
-    audio_generation: { status: string; progress: number };
     video_generation: { status: string; progress: number };
-    audio_video_merge: { status: string; progress: number };
+    [key: string]: { status: string; progress: number };
   };
   currentStepName?: string;
 }
@@ -25,38 +23,14 @@ interface ProgressIndicatorsProps {
 const steps: Step[] = [
   {
     number: 1,
-    title: 'Audio Generation',
-    description: 'Creating narrator voices and character dialogue',
-    key: 'audio_generation'
-  },
-  {
-    number: 2,
-    title: 'Image Generation',
-    description: 'Generating character images and scene visuals',
-    key: 'image_generation'
-  },
-  {
-    number: 3,
     title: 'Video Generation',
-    description: 'Creating video segments for each scene',
+    description: 'Creating video segments from selected scenes',
     key: 'video_generation'
   },
   {
-    number: 4,
-    title: 'Audio/Video Merge',
-    description: 'Synchronizing audio with video content',
-    key: 'audio_video_merge'
-  },
-  {
-    number: 5,
-    title: 'Lip Sync',
-    description: 'Applying realistic lip movements',
-    key: 'lip_sync'
-  },
-  {
-    number: 6,
+    number: 2,
     title: 'Complete',
-    description: 'Your video is ready!',
+    description: 'Videos ready for review!',
     key: 'complete'
   }
 ];
@@ -230,15 +204,12 @@ export const ProgressIndicators: React.FC<ProgressIndicatorsProps> = ({
 const getStatusMessage = (status: GenerationStatus): string => {
   switch (status) {
     case 'generating_audio':
-      return 'Generating character voices and narrator audio...';
     case 'audio_completed':
-      return 'Audio generation completed! Moving to image generation...';
     case 'generating_images':
-      return 'Creating character images and scene visuals...';
     case 'images_completed':
-      return 'Image generation completed! Starting video creation...';
+      return 'Preparing assets for video generation...';
     case 'generating_video':
-      return 'Generating video segments for each scene...';
+      return 'Generating video segments from selected scenes...';
     case 'video_completed':
       return 'Video generation completed! Merging audio and video...';
     case 'merging_audio':
