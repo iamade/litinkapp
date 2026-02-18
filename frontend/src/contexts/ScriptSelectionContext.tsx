@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { StoryboardConfig } from '../services/projectService';
 
 type Reason = 'user' | 'navigation' | 'load' | 'system';
 type ScriptSelectionEvent = 'SCRIPT_CHANGED' | 'CHAPTER_CHANGED' | 'SEGMENT_CHANGED' | 'TIMELINE_RECALC_REQUESTED';
@@ -24,6 +25,12 @@ export type ScriptSelectionState = {
   versionToken: number;
   isSwitching: boolean;
   lastValidChapterId: string | null; // Ensure type matches
+  selectedSceneImages: Record<number, string>; // sceneNumber -> imageUrl (legacy, kept for compatibility)
+  // NEW: Storyboard configuration state
+  keySceneImages: Record<number, string>;       // sceneNumber -> imageId of key scene
+  deselectedImages: Set<string>;                // opt-OUT: image IDs that are excluded
+  imageOrderByScene: Record<number, string[]>;  // sceneNumber -> ordered array of image IDs
+  storyboardDirty: boolean;                     // true if there are unsaved changes
 };
 
 type Listener = (evt: ScriptSelectionEvent, payload: EventPayload) => void;
@@ -35,6 +42,15 @@ type ContextValue = ScriptSelectionState & {
   publish: (evt: ScriptSelectionEvent, extra?: Partial<EventPayload>) => void;
   subscribe: (listener: Listener) => () => void;
   stableSelectedChapterId: string | null; // Ensure type matches
+  setSelectedSceneImage: (sceneNumber: number, imageUrl: string | null) => void;
+  // NEW: Storyboard configuration methods
+  setKeySceneImage: (sceneNumber: number, imageId: string | null) => void;
+  toggleDeselectedImage: (imageId: string) => void;
+  isImageSelected: (imageId: string) => boolean;
+  setImageOrder: (sceneNumber: number, orderedIds: string[]) => void;
+  loadStoryboardConfig: (config: StoryboardConfig) => void;
+  getStoryboardConfig: () => StoryboardConfig;
+  markStoryboardClean: () => void;
 };
 
 const ScriptSelectionContext = createContext<ContextValue | undefined>(undefined);
@@ -49,6 +65,12 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
     versionToken: 0,
     isSwitching: false,
     lastValidChapterId: null, // Ensure type matches
+    selectedSceneImages: {},
+    // NEW: Storyboard configuration initial state
+    keySceneImages: {},
+    deselectedImages: new Set<string>(),
+    imageOrderByScene: {},
+    storyboardDirty: false,
   });
 
   const emit = useCallback((evt: ScriptSelectionEvent, payload: EventPayload) => {
@@ -73,6 +95,12 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
         versionToken: nextVersion,
         isSwitching: true,
         lastValidChapterId: prev.lastValidChapterId, // Preserve last valid chapter
+        selectedSceneImages: {}, // Reset selections on script change
+        // Reset storyboard configuration on script change
+        keySceneImages: {},
+        deselectedImages: new Set<string>(),
+        imageOrderByScene: {},
+        storyboardDirty: false,
       };
       // emit after commit via microtask to ensure consumers see latest state
       queueMicrotask(() => {
@@ -138,6 +166,127 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
     });
   }, [emit]);
 
+  const setSelectedSceneImage = useCallback((sceneNumber: number, imageUrl: string | null) => {
+    setState(prev => {
+        const newImages = { ...prev.selectedSceneImages };
+        if (imageUrl) {
+            newImages[sceneNumber] = imageUrl;
+        } else {
+            delete newImages[sceneNumber];
+        }
+        return {
+            ...prev,
+            selectedSceneImages: newImages
+        };
+    });
+  }, []);
+
+  // NEW: Set key scene image for a scene
+  const setKeySceneImage = useCallback((sceneNumber: number, imageId: string | null) => {
+    setState(prev => {
+      const newKeySceneImages = { ...prev.keySceneImages };
+      if (imageId) {
+        newKeySceneImages[sceneNumber] = imageId;
+      } else {
+        delete newKeySceneImages[sceneNumber];
+      }
+      return {
+        ...prev,
+        keySceneImages: newKeySceneImages,
+        storyboardDirty: true,
+      };
+    });
+  }, []);
+
+  // NEW: Toggle deselected state for an image (opt-OUT: add to deselected = exclude)
+  const toggleDeselectedImage = useCallback((imageId: string) => {
+    setState(prev => {
+      const newDeselected = new Set(prev.deselectedImages);
+      if (newDeselected.has(imageId)) {
+        newDeselected.delete(imageId);  // Re-include the image
+      } else {
+        newDeselected.add(imageId);     // Exclude the image
+      }
+      return {
+        ...prev,
+        deselectedImages: newDeselected,
+        storyboardDirty: true,
+      };
+    });
+  }, []);
+
+  // NEW: Check if an image is selected (not in deselectedImages)
+  const isImageSelected = useCallback((imageId: string) => {
+    return !state.deselectedImages.has(imageId);
+  }, [state.deselectedImages]);
+
+  // NEW: Set image order for a scene
+  const setImageOrder = useCallback((sceneNumber: number, orderedIds: string[]) => {
+    setState(prev => {
+      return {
+        ...prev,
+        imageOrderByScene: {
+          ...prev.imageOrderByScene,
+          [sceneNumber]: orderedIds,
+        },
+        storyboardDirty: true,
+      };
+    });
+  }, []);
+
+  // NEW: Load storyboard configuration from backend
+  const loadStoryboardConfig = useCallback((config: StoryboardConfig) => {
+    setState(prev => {
+      // Convert key_scene_images from string keys to number keys
+      const keySceneImages: Record<number, string> = {};
+      for (const [sceneNumStr, imageId] of Object.entries(config.key_scene_images || {})) {
+        keySceneImages[Number(sceneNumStr)] = imageId;
+      }
+
+      // Convert image_order from string keys to number keys
+      const imageOrderByScene: Record<number, string[]> = {};
+      for (const [sceneNumStr, imageIds] of Object.entries(config.image_order || {})) {
+        imageOrderByScene[Number(sceneNumStr)] = imageIds;
+      }
+
+      return {
+        ...prev,
+        keySceneImages,
+        deselectedImages: new Set(config.deselected_images || []),
+        imageOrderByScene,
+        storyboardDirty: false,  // Just loaded, so it's clean
+      };
+    });
+  }, []);
+
+  // NEW: Get storyboard configuration for saving to backend
+  const getStoryboardConfig = useCallback((): StoryboardConfig => {
+    // Convert number keys to string keys for API
+    const key_scene_images: Record<string, string> = {};
+    for (const [sceneNum, imageId] of Object.entries(state.keySceneImages)) {
+      key_scene_images[String(sceneNum)] = imageId;
+    }
+
+    const image_order: Record<string, string[]> = {};
+    for (const [sceneNum, imageIds] of Object.entries(state.imageOrderByScene)) {
+      image_order[String(sceneNum)] = imageIds;
+    }
+
+    return {
+      key_scene_images,
+      deselected_images: Array.from(state.deselectedImages),
+      image_order,
+    };
+  }, [state.keySceneImages, state.deselectedImages, state.imageOrderByScene]);
+
+  // NEW: Mark storyboard as clean (after saving)
+  const markStoryboardClean = useCallback(() => {
+    setState(prev => ({
+      ...prev,
+      storyboardDirty: false,
+    }));
+  }, []);
+
   const publish = useCallback((evt: ScriptSelectionEvent, extra?: Partial<EventPayload>) => {
     const now = Date.now();
     const payload: EventPayload = {
@@ -167,7 +316,32 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
     publish,
     subscribe,
     stableSelectedChapterId, // Ensure type matches
-  }), [state, selectScript, selectChapter, selectSegment, publish, subscribe]);
+    setSelectedSceneImage,
+    // NEW: Storyboard configuration methods
+    setKeySceneImage,
+    toggleDeselectedImage,
+    isImageSelected,
+    setImageOrder,
+    loadStoryboardConfig,
+    getStoryboardConfig,
+    markStoryboardClean,
+  }), [
+    state,
+    selectScript,
+    selectChapter,
+    selectSegment,
+    publish,
+    subscribe,
+    stableSelectedChapterId,
+    setSelectedSceneImage,
+    setKeySceneImage,
+    toggleDeselectedImage,
+    isImageSelected,
+    setImageOrder,
+    loadStoryboardConfig,
+    getStoryboardConfig,
+    markStoryboardClean,
+  ]);
 
   return <ScriptSelectionContext.Provider value={value}>{children}</ScriptSelectionContext.Provider>;
 };

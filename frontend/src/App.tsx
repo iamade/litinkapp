@@ -23,6 +23,7 @@ import ActivationPage from "./pages/ActivationPage";
 import { setLoadingContextSetter } from "./lib/api";
 import { VideoGenerationProvider } from "./contexts/VideoGenerationContext";
 import { ScriptSelectionProvider } from "./contexts/ScriptSelectionContext";
+import { StoryboardProvider } from "./contexts/StoryboardContext";
 
 // Global Loading Context
 export const LoadingContext = createContext({
@@ -55,32 +56,34 @@ function App() {
       <AuthProvider>
         <ScriptSelectionProvider>
           <VideoGenerationProvider>
-            <LoadingProvider>
-              <Router>
-                <Toaster position="top-center" reverseOrder={false} />
-                <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50 dark:from-gray-900 dark:to-gray-800 transition-colors">
-                  <Navbar />
-                  <Routes>
-                    <Route path="/" element={<HomePage />} />
-                    <Route path="/auth" element={<AuthPage />} />
-                    <Route path="/dashboard" element={<Dashboard />} />
-                    <Route path="/author" element={<AuthorPanel />} />
-                    <Route path="/learn" element={<LearningMode />} />
-                    <Route path="/explore" element={<EntertainmentMode />} />
-                    <Route path="/creator" element={<CreatorMode />} />
-                    <Route path="/project/:id" element={<ProjectView />} />
-                    <Route path="/profile" element={<Profile />} />
-                    <Route path="/upload" element={<BookUpload />} />
-                    <Route path="/book/:id" element={<BookView />} />
-                    <Route path="/subscription" element={<SubscriptionPage />} />
-                    <Route path="/admin" element={<AdminDashboard />} />
-                    <Route path="/reset-password" element={<ResetPasswordPage />} />
-                    <Route path="/onboarding" element={<OnboardingPage />} />
-                    <Route path="/auth/activate/:token" element={<ActivationPage />} />
-                  </Routes>
-                </div>
-              </Router>
-            </LoadingProvider>
+            <StoryboardProvider>
+              <LoadingProvider>
+                <Router>
+                  <Toaster position="top-center" reverseOrder={false} />
+                  <div className="min-h-screen bg-gradient-to-br from-slate-50 to-purple-50 dark:from-gray-900 dark:to-gray-800 transition-colors">
+                    <Navbar />
+                    <Routes>
+                      <Route path="/" element={<HomePage />} />
+                      <Route path="/auth" element={<AuthPage />} />
+                      <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/author" element={<AuthorPanel />} />
+                      <Route path="/learn" element={<LearningMode />} />
+                      <Route path="/explore" element={<EntertainmentMode />} />
+                      <Route path="/creator" element={<CreatorMode />} />
+                      <Route path="/project/:id" element={<ProjectView />} />
+                      <Route path="/profile" element={<Profile />} />
+                      <Route path="/upload" element={<BookUpload />} />
+                      <Route path="/book/:id" element={<BookView />} />
+                      <Route path="/subscription" element={<SubscriptionPage />} />
+                      <Route path="/admin" element={<AdminDashboard />} />
+                      <Route path="/reset-password" element={<ResetPasswordPage />} />
+                      <Route path="/onboarding" element={<OnboardingPage />} />
+                      <Route path="/auth/activate/:token" element={<ActivationPage />} />
+                    </Routes>
+                  </div>
+                </Router>
+              </LoadingProvider>
+            </StoryboardProvider>
           </VideoGenerationProvider>
         </ScriptSelectionProvider>
       </AuthProvider>

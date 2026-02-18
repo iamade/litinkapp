@@ -1,12 +1,22 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict
 import re
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Body
+import uuid
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    BackgroundTasks,
+    Body,
+    File,
+    UploadFile,
+    Form,
+)
 from app.videos.schemas import VideoGenerationRequest, VideoGenerationResponse
 from app.api.services.character import CharacterService
 from app.api.services.plot import PlotService
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, update, delete, col, or_, text, func
+from sqlmodel import select, update, delete, col, or_, text, func, SQLModel, desc
 from sqlalchemy.orm import selectinload
 from app.videos.models import (
     Script,
@@ -30,6 +40,9 @@ from app.ai.schemas import (
     AIResponse,
     QuizGenerationRequest,
     AnalyzeChapterSafetyRequest,
+    EmotionalMapRequest,
+    EmotionalMapResponse,
+    EmotionalMapEntry,
 )
 
 from app.core.services.ai import AIService
@@ -45,7 +58,8 @@ from sqlmodel import select
 from app.books.models import Chapter, Book
 from app.core.auth import get_current_active_user
 from app.core.services.pipeline import PipelineManager, PipelineStep
-from app.core.services.deepseek_script import DeepSeekScriptService
+
+# from app.core.services.deepseek_script import DeepSeekScriptService
 from app.core.services.openrouter import OpenRouterService, ModelTier
 from app.api.services.subscription import SubscriptionManager
 
@@ -261,7 +275,11 @@ def get_available_script_styles() -> dict:
 
 
 async def enhance_with_plot_context(
-    session: AsyncSession, user_id: str, book_id: str, chapter_content: str
+    session: AsyncSession,
+    user_id: str,
+    book_id: str,
+    chapter_content: str,
+    custom_logline: Optional[str] = None,
 ) -> dict:
     """Enhanced plot context integration for script generation"""
     try:
@@ -270,36 +288,47 @@ async def enhance_with_plot_context(
             user_id=user_id, book_id=book_id
         )
 
-        if not plot_overview:
+        if not plot_overview and not custom_logline:
             return {"enhanced_content": None, "plot_info": None}
 
-        # Get characters for this plot
-        character_service = CharacterService(session)
-        characters = await character_service.get_characters_by_plot(
-            plot_overview.id, user_id
-        )
+        # Get characters for this plot if plot exists
+        characters = []
+        if plot_overview:
+            character_service = CharacterService(session)
+            characters = await character_service.get_characters_by_plot(
+                plot_overview.id, user_id
+            )
 
         # Build comprehensive plot context
         plot_context_parts = []
 
         # Plot overview section
         plot_context_parts.append("PLOT OVERVIEW:")
-        if plot_overview.logline:
-            plot_context_parts.append(f"Logline: {plot_overview.logline}")
-        if plot_overview.themes:
-            plot_context_parts.append(f"Themes: {', '.join(plot_overview.themes)}")
-        if plot_overview.story_type:
-            plot_context_parts.append(f"Story Type: {plot_overview.story_type}")
-        if plot_overview.genre:
-            plot_context_parts.append(f"Genre: {plot_overview.genre}")
-        if plot_overview.tone:
-            plot_context_parts.append(f"Tone: {plot_overview.tone}")
-        if plot_overview.setting:
-            plot_context_parts.append(f"Setting: {plot_overview.setting}")
-        if plot_overview.target_audience:
+
+        # Use custom logline if provided, otherwise fallback to DB
+        if custom_logline:
+            plot_context_parts.append(f"Logline: {custom_logline}")
             plot_context_parts.append(
-                f"Target Audience: {plot_overview.target_audience}"
+                f"(NOTE: This logline overrides original plot logline)"
             )
+        elif plot_overview and plot_overview.logline:
+            plot_context_parts.append(f"Logline: {plot_overview.logline}")
+
+        if plot_overview:
+            if plot_overview.themes:
+                plot_context_parts.append(f"Themes: {', '.join(plot_overview.themes)}")
+            if plot_overview.story_type:
+                plot_context_parts.append(f"Story Type: {plot_overview.story_type}")
+            if plot_overview.genre:
+                plot_context_parts.append(f"Genre: {plot_overview.genre}")
+            if plot_overview.tone:
+                plot_context_parts.append(f"Tone: {plot_overview.tone}")
+            if plot_overview.setting:
+                plot_context_parts.append(f"Setting: {plot_overview.setting}")
+            if plot_overview.target_audience:
+                plot_context_parts.append(
+                    f"Target Audience: {plot_overview.target_audience}"
+                )
 
         # Characters section
         if characters:
@@ -313,7 +342,7 @@ async def enhance_with_plot_context(
                 plot_context_parts.append(char_info)
 
         # Conflict and stakes
-        if plot_overview.conflict_type or plot_overview.stakes:
+        if plot_overview and (plot_overview.conflict_type or plot_overview.stakes):
             plot_context_parts.append("\nSTORY ELEMENTS:")
             if plot_overview.conflict_type:
                 plot_context_parts.append(
@@ -328,13 +357,18 @@ async def enhance_with_plot_context(
 
         return {
             "enhanced_content": enhanced_content,
-            "plot_info": {
-                "plot_id": plot_overview.id,
-                "logline": plot_overview.logline,
-                "genre": plot_overview.genre,
-                "tone": plot_overview.tone,
-                "character_count": len(characters) if characters else 0,
-            },
+            "plot_info": (
+                {
+                    "plot_id": plot_overview.id if plot_overview else None,
+                    "logline": custom_logline
+                    or (plot_overview.logline if plot_overview else None),
+                    "genre": plot_overview.genre if plot_overview else None,
+                    "tone": plot_overview.tone if plot_overview else None,
+                    "character_count": len(characters) if characters else 0,
+                }
+                if plot_overview or custom_logline
+                else None
+            ),
         }
 
     except Exception as e:
@@ -391,6 +425,220 @@ async def generate_voice(
     return {"voice_url": result.get("audio_url")}
 
 
+@router.post("/generate-emotional-map", response_model=EmotionalMapResponse)
+async def generate_emotional_map(
+    request: EmotionalMapRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Generate cinematic emotional map for script dialogues"""
+    ai_service = AIService()
+    entries = await ai_service.generate_emotional_map(
+        request.script_content, request.characters
+    )
+
+    # Validation/Conversion to Schema model
+    validated_entries = []
+    for entry in entries:
+        # Generate a fake ID if missing (though service handles it, safety first)
+        if "line_id" not in entry:
+            entry["line_id"] = str(uuid.uuid4())
+
+        validated_entries.append(EmotionalMapEntry(**entry))
+
+    # Save to database if script_id provided
+    if request.script_id:
+        try:
+            statement = select(Script).where(Script.id == request.script_id)
+            result = await session.exec(statement)
+            script_record = result.first()
+
+            if script_record:
+                # Ensure we are saving a list of dicts (JSON serializable)
+                script_record.emotional_map = [
+                    entry.dict() for entry in validated_entries
+                ]
+                session.add(script_record)
+                await session.commit()
+            else:
+                print(
+                    f"Warning: Script {request.script_id} not found, could not save emotional map."
+                )
+        except Exception as e:
+            print(f"Error saving emotional map to DB: {e}")
+
+    return EmotionalMapResponse(entries=validated_entries)
+
+
+# Script expansion request/response models
+from pydantic import BaseModel
+
+
+class ScriptExpansionRequest(BaseModel):
+    """Request model for script expansion"""
+
+    content: str  # The original script/story content to expand
+    expansion_prompt: Optional[str] = None  # Optional user guidance for expansion
+    target_length_increase: Optional[float] = 1.5  # Target increase (1.5 = 50% longer)
+    focus_areas: Optional[List[str]] = (
+        None  # Areas to focus on: ["dialogue", "action", "description"]
+    )
+    artifact_id: Optional[str] = None  # If expanding an artifact, provide ID to save
+    script_id: Optional[str] = None  # If expanding a generated script, provide ID
+
+
+class ScriptExpansionResponse(BaseModel):
+    """Response model for script expansion"""
+
+    expanded_content: str
+    original_length: int
+    expanded_length: int
+    expansion_ratio: float
+    saved: bool = False
+    message: str
+
+
+@router.post("/expand-script", response_model=ScriptExpansionResponse)
+async def expand_script(
+    request: ScriptExpansionRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Expand script/story content using AI.
+
+    This endpoint takes existing script content and expands it with:
+    - Additional dialogue and character interactions
+    - Scene details and visual descriptions
+    - Action sequences and emotional beats
+
+    The expansion maintains consistency with the original tone and characters.
+    """
+    try:
+        # Build the expansion prompt
+        user_message_parts = []
+
+        # Add user's expansion guidance if provided
+        if request.expansion_prompt:
+            user_message_parts.append(f"EXPANSION GUIDANCE: {request.expansion_prompt}")
+
+        # Add focus areas if specified
+        if request.focus_areas:
+            user_message_parts.append(f"FOCUS ON: {', '.join(request.focus_areas)}")
+
+        # Add target length guidance
+        if request.target_length_increase:
+            increase_percent = int((request.target_length_increase - 1) * 100)
+            user_message_parts.append(
+                f"TARGET: Expand content by approximately {increase_percent}%"
+            )
+
+        # Add the original content
+        user_message_parts.append(f"\n\nORIGINAL CONTENT TO EXPAND:\n{request.content}")
+
+        user_message = "\n".join(user_message_parts)
+
+        # Determine user tier for model selection
+        tier = (
+            ModelTier.PREMIUM
+            if current_user.subscription_tier in ["premium", "pro", "enterprise"]
+            else ModelTier.FREE
+        )
+
+        # Call OpenRouter with script expansion prompt
+        openrouter = OpenRouterService()
+        response = await openrouter.analyze_content(
+            content=user_message,
+            user_tier=tier,
+            analysis_type="script_expansion",
+        )
+
+        if response.get("status") != "success":
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to expand content: {response.get('error', 'Unknown error')}",
+            )
+
+        expanded_content = response.get("content", {}).get("analysis", "")
+
+        if not expanded_content:
+            raise HTTPException(
+                status_code=500, detail="AI returned empty expansion result"
+            )
+
+        # Calculate expansion statistics
+        original_length = len(request.content)
+        expanded_length = len(expanded_content)
+        expansion_ratio = (
+            expanded_length / original_length if original_length > 0 else 1.0
+        )
+
+        # Save to artifact if artifact_id provided
+        saved = False
+        if request.artifact_id:
+            try:
+                from app.projects.models import Artifact
+
+                stmt = select(Artifact).where(
+                    Artifact.id == request.artifact_id,
+                    Artifact.project.has(user_id=current_user.id),
+                )
+                result = await session.exec(stmt)
+                artifact = result.first()
+
+                if artifact:
+                    # Update the artifact content
+                    if artifact.content:
+                        artifact.content["content"] = expanded_content
+                        artifact.content["expanded"] = True
+                        artifact.content["original_length"] = original_length
+                    else:
+                        artifact.content = {
+                            "content": expanded_content,
+                            "expanded": True,
+                            "original_length": original_length,
+                        }
+                    session.add(artifact)
+                    await session.commit()
+                    saved = True
+            except Exception as e:
+                print(f"Error saving expanded content to artifact: {e}")
+
+        # Save to script if script_id provided
+        if request.script_id and not saved:
+            try:
+                stmt = select(Script).where(
+                    Script.id == request.script_id, Script.user_id == current_user.id
+                )
+                result = await session.exec(stmt)
+                script_record = result.first()
+
+                if script_record:
+                    script_record.script = expanded_content
+                    session.add(script_record)
+                    await session.commit()
+                    saved = True
+            except Exception as e:
+                print(f"Error saving expanded content to script: {e}")
+
+        return ScriptExpansionResponse(
+            expanded_content=expanded_content,
+            original_length=original_length,
+            expanded_length=expanded_length,
+            expansion_ratio=round(expansion_ratio, 2),
+            saved=saved,
+            message="Content expanded successfully" + (" and saved" if saved else ""),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in expand_script: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Error expanding content: {str(e)}"
+        )
+
+
 # New RAG-based video generation endpoints
 @router.post("/generate-video-from-chapter")
 async def generate_video_from_chapter(
@@ -414,7 +662,7 @@ async def generate_video_from_chapter(
         chapter, book = chapter_book
 
         # Check access permissions
-        if book.status != "published" and str(book.user_id) != current_user.id:
+        if book.status != "published" and str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -458,7 +706,7 @@ async def generate_tutorial_video(
         chapter, book = chapter_book
 
         # Check access permissions
-        if book.status != "published" and str(book.user_id) != current_user.id:
+        if book.status != "published" and str(book.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
@@ -491,24 +739,19 @@ async def generate_entertainment_video(
 ):
     """Generate entertainment video using already saved script"""
     try:
+        script_id = request.script_id
         chapter_id = request.chapter_id
         quality_tier = request.quality_tier
         video_style = request.video_style
-        # Extract parameters from request body
-        # chapter_id = request.get('chapter_id')
-        # quality_tier = request.get('quality_tier', 'basic')
-        # video_style = request.get('video_style', 'realistic')  # This is for visual styling
 
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
+        if not script_id:
+            raise HTTPException(status_code=400, detail="script_id is required")
 
-        # Step 1: Get the most recent script for this chapter (regardless of style)
-        # Step 1: Get the most recent script for this chapter (regardless of style)
-        stmt = (
-            select(Script)
-            .where(Script.chapter_id == chapter_id, Script.user_id == current_user.id)
-            .order_by(col(Script.created_at).desc())
-            .limit(1)
+        # Step 1: Get the script by provided script_id
+        stmt = select(Script).where(
+            Script.id == script_id, Script.user_id == current_user.id
         )
         result = await session.exec(stmt)
         script_response = result.first()
@@ -516,15 +759,23 @@ async def generate_entertainment_video(
         if not script_response:
             raise HTTPException(
                 status_code=400,
-                detail="No script found for this chapter. Please generate script first using 'Generate Script & Scene'.",
+                detail="Script not found or you don't have access to it.",
             )
 
         script_data = script_response
 
         # Step 2: Create video generation record
+        selected_shot_ids = request.selected_shot_ids
         print(
-            f"[VIDEO GEN DEBUG] Creating video generation with chapter_id: {chapter_id}, script_id: {script_data['id']}, user_id: {current_user.id}"
+            f"[VIDEO GEN DEBUG] Creating video generation with chapter_id: {chapter_id}, script_id: {script_data.id}, user_id: {current_user.id}, shots: {selected_shot_ids}"
         )
+        # Build task_meta with shot and audio selections
+        task_meta = {}
+        if selected_shot_ids:
+            task_meta["selected_shot_ids"] = selected_shot_ids
+        if request.selected_audio_ids:
+            task_meta["selected_audio_ids"] = request.selected_audio_ids
+
         video_generation = VideoGeneration(
             chapter_id=chapter_id,
             script_id=script_data.id,
@@ -540,6 +791,7 @@ async def generate_entertainment_video(
                 "script_style": script_data.script_style,
                 "video_style": video_style,
             },
+            task_meta=task_meta if task_meta else None,
         )
         session.add(video_generation)
         await session.commit()
@@ -557,10 +809,21 @@ async def generate_entertainment_video(
             print(f"  generation_status: completed (using 'generation_status' column)")
 
             stmt = select(AudioGeneration).where(
-                AudioGeneration.chapter_id == chapter_id,
+                or_(
+                    AudioGeneration.chapter_id == chapter_id,
+                    AudioGeneration.script_id == script_data.id,
+                ),
                 AudioGeneration.user_id == current_user.id,
-                AudioGeneration.generation_status == "completed",
+                AudioGeneration.status == "completed",
             )
+
+            # Apply audio selection filter if provided
+            if request.selected_audio_ids and len(request.selected_audio_ids) > 0:
+                print(
+                    f"[AUDIO QUERY DEBUG] Filtering by {len(request.selected_audio_ids)} selected audio IDs"
+                )
+                stmt = stmt.where(AudioGeneration.id.in_(request.selected_audio_ids))
+
             result = await session.exec(stmt)
             audio_records = result.all()
 
@@ -568,10 +831,12 @@ async def generate_entertainment_video(
             if audio_records:
                 for idx, record in enumerate(audio_records):
                     print(
-                        f"[AUDIO QUERY DEBUG] Record {idx}: status={record.status}, generation_status={record.generation_status}"
+                        f"[AUDIO QUERY DEBUG] Record {idx}: status={record.status}, id={record.id}"
                     )
             else:
-                print("[AUDIO QUERY DEBUG] No records found.")
+                print(
+                    f"[AUDIO QUERY DEBUG] No records found. Checked chapter_id={chapter_id} and script_id={script_data.id}"
+                )
 
             existing_audio = []
             audio_by_type = {
@@ -584,104 +849,115 @@ async def generate_entertainment_video(
             if audio_records:
                 for audio_record in audio_records:
                     audio_type = audio_record.audio_type or "narrator"
-                    # Map database fields to expected format
+                    scene_number = audio_record.sequence_order or 0
+                    # Map database fields to format expected by find_scene_audio
+                    # find_scene_audio checks: audio.get("scene") and audio.get("audio_url")
                     audio_data = {
                         "id": str(audio_record.id),
                         "url": audio_record.audio_url,
                         "audio_url": audio_record.audio_url,
-                        "duration": audio_record.duration or 0,
+                        "duration": audio_record.duration_seconds or 0,
                         "file_name": audio_record.text_content or "",
-                        "scene_number": audio_record.sequence_order or 0,
+                        "scene_number": scene_number,
+                        "scene": scene_number,
                         "character_name": (
-                            audio_record.metadata.get("character_name")
-                            if audio_record.metadata
+                            audio_record.audio_metadata.get("character_name")
+                            if audio_record.audio_metadata
                             else None
                         ),
                         "volume": 1.0,
+                        "audio_type": audio_type,
                     }
 
-                    # Categorize by type
+                    # Categorize by type (match AudioType enum values: narrator, character, sound_effects, background_music)
                     if audio_type == "narrator":
                         audio_by_type["narrator"].append(audio_data)
                     elif audio_type == "character":
                         audio_by_type["characters"].append(audio_data)
-                    elif audio_type in ["sfx", "sound_effect"]:
+                    elif audio_type in ["sfx", "sound_effect", "sound_effects"]:
                         audio_by_type["sound_effects"].append(audio_data)
-                    elif audio_type == "music":
+                    elif audio_type in ["music", "background_music"]:
                         audio_by_type["background_music"].append(audio_data)
 
                     existing_audio.append(audio_data)
 
             print(f"📊 Found {len(existing_audio)} pre-generated audio files")
+            for atype, aitems in audio_by_type.items():
+                if aitems:
+                    print(
+                        f"  [{atype}] {len(aitems)} files, scenes: {[a.get('scene') for a in aitems]}"
+                    )
 
             if existing_audio:
                 # Use pre-generated audio - skip audio generation
                 print(f"✅ Using pre-generated audio, skipping audio generation step")
-
-                # Organize audio by type for storage
-                audio_by_type = {
-                    "narrator": [],
-                    "characters": [],
-                    "sound_effects": [],
-                    "background_music": [],
-                }
-
-                for audio_file in existing_audio:
-                    audio_type = audio_file.get("audio_type", "narrator")
-                    audio_by_type[audio_type].append(
-                        {
-                            "id": audio_file["id"],
-                            "url": audio_file["audio_url"],
-                            "duration": audio_file.get("duration", 0),
-                            "name": audio_file.get("file_name", ""),
-                            "scene_number": audio_file.get("scene_number", 0),
-                            "character": audio_file.get("character_name"),
-                            "volume": audio_file.get("volume", 1.0),
-                        }
-                    )
 
                 # Check for pre-generated images from image_generations table
                 existing_images = []
                 image_by_type = {"character_images": [], "scene_images": []}
 
                 # Query image_generations table for images associated with this chapter
-                stmt = select(ImageGeneration).where(
+                # Query image_generations table for images associated with this chapter AND script
+                img_stmt = select(ImageGeneration).where(
                     ImageGeneration.user_id == current_user.id,
+                    ImageGeneration.chapter_id == chapter_id,
+                    ImageGeneration.script_id == script_data.id,
                     ImageGeneration.status == "completed",
                 )
-                result = await session.exec(stmt)
+
+                # REDUNDANT FILTERING REMOVED:
+                # We pass all chapter images to the video task and let video_tasks.py handle the selection/mapping.
+                # This prevents issues where strict filtering in routes.py excludes images due to scene_number mismatches (e.g. 0 vs 1 based),
+                # leaving the task with no images to fallback on.
+
+                # Debug logging regarding selections (optional, can be kept for visibility)
+                if selected_shot_ids and len(selected_shot_ids) > 0:
+                    print(
+                        f"[IMAGE QUERY] Passing all images to task, letting task filter by selected_shot_ids: {selected_shot_ids}"
+                    )
+
+                result = await session.exec(img_stmt)
                 image_records = result.all()
+                print(
+                    f"[IMAGE QUERY] Found {len(image_records)} images for chapter_id={chapter_id}"
+                )
+
+                # Fallback: if 0 images found by chapter_id, try script_id
+                if not image_records and script_id:
+                    fallback_stmt = select(ImageGeneration).where(
+                        ImageGeneration.user_id == current_user.id,
+                        ImageGeneration.script_id == script_id,
+                        ImageGeneration.status == "completed",
+                        ImageGeneration.image_type == "scene",
+                    )
+                    fallback_result = await session.exec(fallback_stmt)
+                    image_records = fallback_result.all()
+                    print(
+                        f"[IMAGE QUERY FALLBACK] Found {len(image_records)} images by script_id={script_id}"
+                    )
 
                 if image_records:
                     for img in image_records:
-                        metadata = img.metadata or {}
-                        # Check if image is associated with this chapter
-                        if metadata.get("chapter_id") == chapter_id:
-                            image_type = metadata.get("image_type", "scene")
-                            image_data = {
-                                "id": str(img.id),
-                                "url": img.image_url,
-                                "image_url": img.image_url,
-                                "prompt": img.image_prompt or "",
-                                "created_at": (
-                                    img.created_at.isoformat()
-                                    if img.created_at
-                                    else None
-                                ),
-                            }
+                        image_type = img.image_type or "scene"
+                        image_data = {
+                            "id": str(img.id),
+                            "url": img.image_url,
+                            "image_url": img.image_url,
+                            "prompt": img.image_prompt or "",
+                            "created_at": (
+                                img.created_at.isoformat() if img.created_at else None
+                            ),
+                        }
 
-                            if image_type == "character":
-                                image_data["character_name"] = metadata.get(
-                                    "character_name", ""
-                                )
-                                image_by_type["character_images"].append(image_data)
-                            elif image_type == "scene":
-                                image_data["scene_number"] = metadata.get(
-                                    "scene_number", 0
-                                )
-                                image_by_type["scene_images"].append(image_data)
+                        if image_type == "character":
+                            image_data["character_name"] = img.character_name or ""
+                            image_by_type["character_images"].append(image_data)
+                        elif image_type == "scene":
+                            image_data["scene_number"] = img.scene_number or 0
+                            image_data["shot_index"] = img.shot_index or 0
+                            image_by_type["scene_images"].append(image_data)
 
-                            existing_images.append(image_data)
+                        existing_images.append(image_data)
 
                 print(f"📊 Found {len(existing_images)} pre-generated images")
 
@@ -700,13 +976,21 @@ async def generate_entertainment_video(
                         },
                     }
                     video_gen.generation_status = "images_completed"
-                    video_gen.task_metadata = {
-                        "audio_source": "pre_generated",
-                        "image_source": "pre_generated",
-                        "audio_files_count": len(existing_audio),
-                        "image_files_count": len(existing_images),
-                        "started_at": datetime.now().isoformat(),
-                    }
+                    # Merge into existing task_meta to preserve selected_shot_ids and selected_audio_ids
+                    existing_meta = video_gen.task_meta or {}
+                    existing_meta.update(
+                        {
+                            "audio_source": "pre_generated",
+                            "image_source": "pre_generated",
+                            "audio_files_count": len(existing_audio),
+                            "image_files_count": len(existing_images),
+                            "started_at": datetime.now().isoformat(),
+                        }
+                    )
+                    video_gen.task_meta = existing_meta
+                    print(
+                        f"[VIDEO GEN DEBUG] task_meta preserved: {list(existing_meta.keys())}"
+                    )
                     session.add(video_gen)
                     await session.commit()
 
@@ -748,7 +1032,12 @@ async def generate_entertainment_video(
             video_gen = result.first()
             if video_gen:
                 video_gen.generation_status = "failed"
-                video_gen.error_message = f"Failed to start audio generation: {str(e)}"
+                # Store error in task_meta since VideoGeneration has no error_message field
+                current_meta = video_gen.task_meta or {}
+                current_meta["error_message"] = (
+                    f"Failed to start audio generation: {str(e)}"
+                )
+                video_gen.task_meta = current_meta
                 session.add(video_gen)
                 await session.commit()
 
@@ -759,7 +1048,7 @@ async def generate_entertainment_video(
             audio_task_id = task.id
             task_status = task.state
             status = "queued"
-            message = "Video generation started using saved script"
+            message = "Video generation started using pre-generated audio and images"
         else:
             audio_task_id = None
             task_status = "completed"
@@ -768,17 +1057,28 @@ async def generate_entertainment_video(
 
         return VideoGenerationResponse(
             video_generation_id=video_gen_id,
-            script_id=script_data["id"],
+            script_id=str(script_data.id),
             status=status,
             audio_task_id=audio_task_id,
             task_status=task_status,
             message=message,
             script_info={
-                "script_style": script_data["script_style"],
-                "video_style": video_style,  # ✅ Now this works
-                "scenes": len(script_data.get("scene_descriptions", [])),
-                "characters": len(script_data.get("characters", [])),
-                "created_at": script_data["created_at"],
+                "script_style": script_data.script_style,
+                "video_style": video_style,
+                "selected_scenes": (
+                    len(selected_shot_ids)
+                    if selected_shot_ids
+                    else len(script_data.scene_descriptions or [])
+                ),
+                "selected_audio": (
+                    len(request.selected_audio_ids) if request.selected_audio_ids else 0
+                ),
+                "total_images": len(existing_images),
+                "created_at": (
+                    script_data.created_at.isoformat()
+                    if script_data.created_at
+                    else None
+                ),
             },
         )
 
@@ -820,10 +1120,14 @@ async def get_video_generation_status(
         if not data:
             raise HTTPException(status_code=404, detail="Video generation not found")
 
-        status = data.generation_status
+        # Convert to dict for mutability and standard access
+        data_dict = data.model_dump()
 
-        task_metadata = data.task_metadata or {}
-        audio_task_id = task_metadata.get("audio_task_id") or data.get("audio_task_id")
+        status = data_dict.get("generation_status")
+        task_meta = data_dict.get("task_meta") or {}
+
+        # Check both the top-level field and task_meta
+        audio_task_id = data_dict.get("audio_task_id") or task_meta.get("audio_task_id")
 
         if audio_task_id and status in ["generating_audio", "pending"]:
             try:
@@ -836,12 +1140,12 @@ async def get_video_generation_status(
                     status = "audio_completed"
                 elif task_result.state == "FAILURE":
                     status = "failed"
-                    data["error_message"] = str(task_result.result)
+                    data_dict["error_message"] = str(task_result.result)
                 elif task_result.state == "PENDING":
                     status = "generating_audio"
 
                 # Add task info to response
-                data["task_info"] = {
+                data_dict["task_info"] = {
                     "task_id": audio_task_id,
                     "task_state": task_result.state,
                     "task_result": (
@@ -855,16 +1159,19 @@ async def get_video_generation_status(
         result = {
             "status": status,
             "generation_status": status,
-            "quality_tier": data["quality_tier"],
-            "video_url": data.get("video_url"),
-            "created_at": data["created_at"],
-            "script_id": data.get("script_id"),
-            "error_message": data.get("error_message"),
+            "quality_tier": data_dict.get("quality_tier"),
+            "video_url": data_dict.get("video_url"),
+            "created_at": data_dict.get("created_at"),
+            "script_id": data_dict.get("script_id"),
+            "error_message": data_dict.get("error_message"),
+            "task_info": data_dict.get("task_info"),
+            "task_meta": data_dict.get("task_meta"),
         }
 
         # Add audio information if available
-        if data.get("audio_files"):
-            audio_data = data["audio_files"]
+        # Add audio information if available
+        if data_dict.get("audio_files"):
+            audio_data = data_dict["audio_files"]
             result["audio_progress"] = {
                 "narrator_files": len(audio_data.get("narrator", [])),
                 "character_files": len(audio_data.get("characters", [])),
@@ -873,12 +1180,13 @@ async def get_video_generation_status(
             }
 
         # Add task info if available
-        if "task_info" in data:
-            result["task_info"] = data["task_info"]
+        if "task_info" in data_dict:
+            result["task_info"] = data_dict["task_info"]
 
         # Add image information if available
-        if data.get("image_data"):
-            image_data = data["image_data"]
+        # Add image information if available
+        if data_dict.get("image_data"):
+            image_data = data_dict["image_data"]
             result["image_progress"] = image_data.get("statistics", {})
 
             # Include character images for frontend display
@@ -889,8 +1197,8 @@ async def get_video_generation_status(
                 ]
 
         #  Add video information if available
-        if data.get("video_data"):
-            video_data = data["video_data"]
+        if data_dict.get("video_data"):
+            video_data = data_dict["video_data"]
             result["video_progress"] = video_data.get("statistics", {})
 
             # Include scene videos for frontend display
@@ -901,8 +1209,8 @@ async def get_video_generation_status(
                 ]
 
         # Add merge information if available
-        if data.get("merge_data"):
-            merge_data = data["merge_data"]
+        if data_dict.get("merge_data"):
+            merge_data = data_dict["merge_data"]
             result["merge_progress"] = merge_data.get("merge_statistics", {})
 
             # Include final video information if completed
@@ -924,8 +1232,8 @@ async def get_video_generation_status(
                 }
 
         # ✅ NEW: Add lip sync information if available
-        if data.get("lipsync_data"):
-            lipsync_data = data["lipsync_data"]
+        if data_dict.get("lipsync_data"):
+            lipsync_data = data_dict["lipsync_data"]
             result["lipsync_progress"] = lipsync_data.get("statistics", {})
 
             # Include lip sync details if completed
@@ -1023,6 +1331,76 @@ async def get_chapter_video_generations(
         import traceback
 
         print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/video-generation/{video_gen_id}")
+async def delete_video_generation(
+    video_gen_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Delete a video generation and its associated video segments"""
+    try:
+        # Verify ownership
+        stmt = select(VideoGeneration).where(
+            VideoGeneration.id == video_gen_id,
+            VideoGeneration.user_id == current_user.id,
+        )
+        result = await session.exec(stmt)
+        video_gen = result.first()
+
+        if not video_gen:
+            raise HTTPException(status_code=404, detail="Video generation not found")
+
+        # Unlink audio records — audio is an independent asset, not owned by video generation
+        # Without this, the cascade="all, delete-orphan" on the relationship would delete audio files
+        unlink_audio_stmt = (
+            update(AudioGeneration)
+            .where(AudioGeneration.video_generation_id == uuid.UUID(video_gen_id))
+            .values(video_generation_id=None)
+        )
+        await session.exec(unlink_audio_stmt)
+
+        # Unlink image records — images are also independent assets
+        unlink_image_stmt = (
+            update(ImageGeneration)
+            .where(ImageGeneration.video_generation_id == uuid.UUID(video_gen_id))
+            .values(video_generation_id=None)
+        )
+        await session.exec(unlink_image_stmt)
+
+        # Delete associated video segments first
+        segment_stmt = delete(VideoSegment).where(
+            VideoSegment.video_generation_id == video_gen_id
+        )
+        await session.exec(segment_stmt)
+
+        # Delete associated pipeline steps
+        pipeline_stmt = delete(PipelineStepModel).where(
+            PipelineStepModel.video_generation_id == video_gen_id
+        )
+        await session.exec(pipeline_stmt)
+
+        # Expire the video_gen object to clear cached relationships
+        # This prevents SQLAlchemy from trying to cascade-delete the now-unlinked records
+        await session.refresh(video_gen)
+
+        # Delete the video generation record
+        await session.delete(video_gen)
+        await session.commit()
+
+        print(f"🗑️ Deleted video generation {video_gen_id} (audio/images preserved)")
+
+        return {
+            "message": "Video generation deleted successfully",
+            "video_generation_id": video_gen_id,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ ERROR deleting video generation {video_gen_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1378,9 +1756,57 @@ async def list_chapter_scripts(
         print(
             f"[DEBUG] list_chapter_scripts called for chapter_id: {chapter_id}, user_id: {current_user.id}"
         )
+
+        # Check if chapter_id is an Artifact and resolve to real Chapter ID if possible
+        search_ids = [chapter_id]
+        try:
+            from app.projects.models import Artifact, Project
+
+            # Check if it's an artifact
+            stmt = select(Artifact).where(Artifact.id == chapter_id)
+            artifact = (await session.exec(stmt)).first()
+
+            if artifact:
+                # Get project to check for book link
+                project = (
+                    await session.exec(
+                        select(Project).where(Project.id == artifact.project_id)
+                    )
+                ).first()
+                if project and project.book_id:
+                    # Try to find corresponding Chapter
+                    content_data = artifact.content or {}
+                    chapter_num = content_data.get("chapter_number")
+                    if chapter_num:
+                        chap_stmt = select(Chapter).where(
+                            Chapter.book_id == project.book_id,
+                            Chapter.chapter_number == chapter_num,
+                        )
+                        real_chapter = (await session.exec(chap_stmt)).first()
+                        if real_chapter:
+                            print(
+                                f"[ListScripts] Resolved Artifact {chapter_id} to Chapter {real_chapter.id}"
+                            )
+                            search_ids.append(str(real_chapter.id))
+        except Exception as resolve_err:
+            print(
+                f"[ListScripts] Warning: Error resolving artifact to chapter: {resolve_err}"
+            )
+
+        # Convert IDs to UUIDs for DB query
+        search_uuids = []
+        for sid in search_ids:
+            try:
+                search_uuids.append(uuid.UUID(str(sid)))
+            except ValueError:
+                pass
+
         stmt = (
             select(Script)
-            .where(Script.chapter_id == chapter_id, Script.user_id == current_user.id)
+            .where(
+                col(Script.chapter_id).in_(search_uuids),
+                Script.user_id == current_user.id,
+            )
             .order_by(col(Script.created_at).desc())
         )
         result = await session.exec(stmt)
@@ -1424,55 +1850,55 @@ async def get_script_details(
 
 
 # --- Script Evaluation Endpoint ---
-@router.post("/evaluate-script/{script_id}")
-async def evaluate_script(
-    script_id: str,
-    session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_active_user),
-):
-    """
-    Evaluate a script using DeepSeekScriptService (LLM) for coherence, storytelling, character consistency, video suitability.
-    Returns scores and feedback.
-    """
-    try:
-        # Fetch script and chapter context
-        stmt = select(Script).where(
-            Script.id == script_id, Script.user_id == current_user.id
-        )
-        result = await session.exec(stmt)
-        script_record = result.first()
-        if not script_record:
-            raise HTTPException(status_code=404, detail="Script not found")
-        script = script_record.script
-        chapter_id = script_record.chapter_id
-        plot_context = None
-        if chapter_id:
-            stmt = select(Chapter).where(Chapter.id == chapter_id)
-            result = await session.exec(stmt)
-            chapter = result.first()
-            plot_context = chapter.content if chapter else None
+# @router.post("/evaluate-script/{script_id}")
+# async def evaluate_script(
+#     script_id: str,
+#     session: AsyncSession = Depends(get_session),
+#     current_user: User = Depends(get_current_active_user),
+# ):
+#     """
+#     Evaluate a script using DeepSeekScriptService (LLM) for coherence, storytelling, character consistency, video suitability.
+#     Returns scores and feedback.
+#     """
+#     try:
+#         # Fetch script and chapter context
+#         stmt = select(Script).where(
+#             Script.id == script_id, Script.user_id == current_user.id
+#         )
+#         result = await session.exec(stmt)
+#         script_record = result.first()
+#         if not script_record:
+#             raise HTTPException(status_code=404, detail="Script not found")
+#         script = script_record.script
+#         chapter_id = script_record.chapter_id
+#         plot_context = None
+#         if chapter_id:
+#             stmt = select(Chapter).where(Chapter.id == chapter_id)
+#             result = await session.exec(stmt)
+#             chapter = result.first()
+#             plot_context = chapter.content if chapter else None
 
-        # Evaluate using DeepSeekScriptService
-        from app.core.services.deepseek_script import DeepSeekScriptService
+#         # Evaluate using DeepSeekScriptService
+#         from app.core.services.deepseek_script import DeepSeekScriptService
 
-        deepseek = DeepSeekScriptService()
-        result = await deepseek.evaluate_script(script, plot_context=plot_context)
+#         deepseek = DeepSeekScriptService()
+#         result = await deepseek.evaluate_script(script, plot_context=plot_context)
 
-        # Optionally update script status and store evaluation
-        if result.get("status") == "success" and result.get("scores"):
-            stmt = select(Script).where(Script.id == script_id)
-            exec_result = await session.exec(stmt)
-            script_record = exec_result.first()
-            if script_record:
-                script_record.evaluation = result["scores"]
-                script_record.status = "evaluated"
-                session.add(script_record)
-                await session.commit()
+#         # Optionally update script status and store evaluation
+#         if result.get("status") == "success" and result.get("scores"):
+#             stmt = select(Script).where(Script.id == script_id)
+#             exec_result = await session.exec(stmt)
+#             script_record = exec_result.first()
+#             if script_record:
+#                 script_record.evaluation = result["scores"]
+#                 script_record.status = "evaluated"
+#                 session.add(script_record)
+#                 await session.commit()
 
-        return result
-    except Exception as e:
-        print(f"Error evaluating script: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+#         return result
+#     except Exception as e:
+#         print(f"Error evaluating script: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- Script Status Management Endpoints ---
@@ -1635,6 +2061,46 @@ async def get_character_images(
             "total_characters": len(character_images),
         }
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/script/{script_id}/images")
+async def get_script_images(
+    script_id: str,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get all images (characters and scenes) associated with a specific script"""
+    try:
+        # Verify access
+        stmt = select(Script).where(Script.id == script_id)
+        result = await session.exec(stmt)
+        script = result.first()
+
+        if not script or script.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized or script not found"
+            )
+
+        # Get images linked to this script
+        # Note: Some older images might only have chapter_id, but newer ones have script_id
+        # We fetch images where script_id matches OR (chapter_id matches AND script_id is null - inferred context)
+        # For simplicity and correctness with new architecture, we prioritize script_id
+        stmt = (
+            select(ImageGeneration)
+            .where(
+                (ImageGeneration.script_id == script_id)
+                | (ImageGeneration.meta["script_id"].astext == script_id)
+            )
+            .order_by(desc(ImageGeneration.created_at))
+        )
+
+        result = await session.exec(stmt)
+        images = result.all()
+
+        return {"script_id": script_id, "images": images, "total_count": len(images)}
+    except Exception as e:
+        print(f"Error fetching script images: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1963,6 +2429,92 @@ async def generate_sound_effects(
 
     except Exception as e:
         print(f"Error generating sound effects: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-audio-for-script")
+async def generate_audio_for_script(
+    request: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Generate all audio assets (dialogue, narration, music, sfx) for a script.
+    Creates a VideoGeneration container and triggers the audio task.
+    """
+    try:
+        chapter_id = request.get("chapter_id")
+        script_id = request.get("script_id")
+        scene_numbers = request.get("scene_numbers")  # Optional list of integers
+
+        if not script_id:
+            raise HTTPException(status_code=400, detail="script_id is required")
+
+        print(
+            f"🎵 Initiating audio generation for Script: {script_id} (Chapter: {chapter_id or 'Auto-detect'})"
+        )
+        if scene_numbers:
+            print(f"🎵 Filtering for scenes: {scene_numbers}")
+
+        # Verify ownership/access
+        # (Simplified for brevity, assumes standard checks)
+
+        # 1. Ensure Script exists and get data
+        stmt = select(Script).where(Script.id == uuid.UUID(script_id))
+        result = await session.exec(stmt)
+        script_data = result.first()
+
+        if not script_data:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # If chapter_id was not provided, use the one from the script
+        final_chapter_id = (
+            uuid.UUID(chapter_id) if chapter_id else script_data.chapter_id
+        )
+
+        # 2. Create VideoGeneration container
+        # We reuse VideoGeneration as the container for all assets
+        video_gen = VideoGeneration(
+            chapter_id=final_chapter_id,
+            user_id=current_user.id,
+            script_id=uuid.UUID(script_id),
+            script_data={
+                "script": script_data.script,
+                "characters": script_data.characters,
+                "scene_descriptions": script_data.scene_descriptions,
+                "style": script_data.script_style,
+            },
+            generation_status="generating_audio",
+            quality_tier="standard",  # Default, will be updated by task
+            task_meta={
+                "pipeline_state": {"current_stage": "audio"},
+                "selected_scene_numbers": scene_numbers,  # Store for task to use
+            },
+        )
+        session.add(video_gen)
+        await session.commit()
+        await session.refresh(video_gen)
+
+        video_gen_id = str(video_gen.id)
+        print(f"✅ Created VideoGeneration container: {video_gen_id}")
+
+        # 3. Trigger Celery Task
+        from app.tasks.audio_tasks import generate_all_audio_for_video
+
+        task = generate_all_audio_for_video.delay(video_gen_id)
+
+        return {
+            "status": "processing",
+            "message": "Audio generation started",
+            "video_generation_id": video_gen_id,
+            "task_id": task.id,
+        }
+
+    except Exception as e:
+        print(f"❌ Error initiating audio generation: {e}")
+        import traceback
+
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -2613,20 +3165,19 @@ async def generate_script_and_scenes(
         chapter_id = request.get("chapter_id")
         script_style = validate_script_style(request.get("script_style", "cinematic"))
         script_name = request.get("script_name")  # Optional custom name for the script
-        plot_context = request.get(
-            "plot_context"
-        )  # Optional plot context for enhanced generation
+        plot_context = request.get("plot_context")  # Optional flag/context
+        custom_logline = request.get(
+            "custom_logline"
+        )  # User's specific instructions/logline
         script_story_type = request.get("scriptStoryType")  # Extract script story type
 
         print(f"[DEBUG] generate_script_and_scenes - received request: {request}")
-        print(
-            f"[DEBUG] generate_script_and_scenes - scriptStoryType: {script_story_type}"
-        )
+        print(f"[DEBUG] Custom Logline: {custom_logline}")
 
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
 
-        # Verify chapter access
+        # Try to find chapter in Chapter table first (Explorer mode)
         stmt = (
             select(Chapter)
             .options(selectinload(Chapter.book))
@@ -2635,26 +3186,92 @@ async def generate_script_and_scenes(
         result = await session.exec(stmt)
         chapter_data = result.first()
 
-        if not chapter_data:
-            raise HTTPException(status_code=404, detail="Chapter not found")
+        book_data = None
+        chapter_content = None
+        chapter_title = None
+        book_id = None
+        is_artifact = False
 
-        book_data = chapter_data.book
+        if chapter_data:
+            # Found in Chapter table (Explorer mode or Creator mode with linked book)
+            book_data = chapter_data.book
+            chapter_content = chapter_data.content
+            chapter_title = chapter_data.title
+            book_id = chapter_data.book_id
+        else:
+            # Not in Chapter table - check Artifacts (Creator mode)
+            from app.projects.models import Artifact, Project
 
-        # Check access permissions
-        if book_data.status != "published" and book_data.user_id != current_user.id:
-            raise HTTPException(
-                status_code=403, detail="Not authorized to access this chapter"
-            )
+            stmt = select(Artifact).where(Artifact.id == chapter_id)
+            result = await session.exec(stmt)
+            artifact_data = result.first()
 
-        # ✅ NEW: Check subscription tier and limits
+            if artifact_data:
+                is_artifact = True
+                # Extract content from artifact
+                content_data = artifact_data.content or {}
+                chapter_content = content_data.get("content", "")
+                chapter_title = content_data.get("title", "Chapter")
+
+                # Get project for access control
+                stmt = select(Project).where(Project.id == artifact_data.project_id)
+                result = await session.exec(stmt)
+                project = result.first()
+
+                if project:
+                    if project.user_id != current_user.id:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Not authorized to access this chapter",
+                        )
+                    book_id = project.id  # Default to project_id
+
+                    # Try to resolve to real Chapter for RAG (if project has linked book)
+                    if project.book_id:
+                        chapter_num = content_data.get("chapter_number")
+                        if chapter_num:
+                            stmt = select(Chapter).where(
+                                Chapter.book_id == project.book_id,
+                                Chapter.chapter_number == chapter_num,
+                            )
+                            real_chapter = (await session.exec(stmt)).first()
+                            if real_chapter:
+                                print(
+                                    f"[ScriptGen] Resolved Artifact {chapter_id} to Chapter {real_chapter.id}"
+                                )
+                                chapter_id = (
+                                    real_chapter.id
+                                )  # Switch to real Chapter ID
+                                is_artifact = False  # Treat as normal chapter for RAG
+                                book_id = project.book_id  # Use real book ID
+                                # Update content from real chapter to be safe
+                                chapter_content = real_chapter.content
+                                chapter_title = real_chapter.title
+                else:
+                    raise HTTPException(status_code=404, detail="Project not found")
+            else:
+                raise HTTPException(status_code=404, detail="Chapter not found")
+
+        # Check access permissions (for regular chapters with books)
+        if book_data:
+            if book_data.status != "published" and book_data.user_id != current_user.id:
+                raise HTTPException(
+                    status_code=403, detail="Not authorized to access this chapter"
+                )
+
+        # ✅ Check subscription tier and SCRIPT limits (not video)
         subscription_manager = SubscriptionManager(session)
         user_tier = await subscription_manager.get_user_tier(current_user.id)
-        tier_check = await subscription_manager.can_user_generate_video(current_user.id)
 
-        if not tier_check["can_generate"]:
+        # Check script generation limits
+        usage_check = await subscription_manager.check_usage_limits(
+            current_user.id, "script"
+        )
+
+        if not usage_check["can_generate"]:
             raise HTTPException(
                 status_code=402,
-                detail=f"Monthly limit reached. You have used {tier_check['videos_used']} out of {tier_check['videos_limit']} videos. Please upgrade your subscription.",
+                detail=f"Script generation limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
             )
 
         # Map subscription tier to model tier
@@ -2676,25 +3293,43 @@ async def generate_script_and_scenes(
 
         # Get chapter context for enhanced content
         rag_service = RAGService(session)
-        chapter_context = await rag_service.get_chapter_with_context(
-            chapter_id, include_adjacent=True
-        )
+        if not is_artifact:
+            # For regular chapters, use RAG to get context and adjacent chapters
+            chapter_context = await rag_service.get_chapter_with_context(
+                chapter_id, include_adjacent=True
+            )
+        else:
+            # For artifacts (Creator mode), use extracted content directly
+            # RAG/Embeddings might not be ready or applicable yet
+            chapter_context = {
+                "total_context": chapter_content,
+                "chapter": {"title": chapter_title, "content": chapter_content},
+            }
 
         # Prepare content for OpenRouter based on script style
-        content_for_script = chapter_context.get("total_context", chapter_data.content)
+        content_for_script = chapter_context.get("total_context", chapter_content)
 
-        # Enhance with plot context if provided
+        # Enhance with plot context (Always attempt if we have a book_id, or if custom_logline is provided)
         plot_enhanced = False
         plot_info = None
-        if plot_context:
+
+        # We should try to enhance if explicitly requested OR if we have custom logline OR by default?
+        # Let's say we always try to enhance if it's a book chapter to get better results.
+        # But previous logic used `if plot_context`. Let's assume frontend now sends plot_context=True usually,
+        # OR we trigger it if `custom_logline` is present.
+
+        should_enhance = plot_context or custom_logline
+
+        if should_enhance:
             try:
                 plot_info = await enhance_with_plot_context(
                     session,
                     current_user.id,
-                    chapter_data.book_id,
+                    book_id,
                     content_for_script,
+                    custom_logline=custom_logline,
                 )
-                if plot_info and plot_info["enhanced_content"]:
+                if plot_info and plot_info.get("enhanced_content"):
                     content_for_script = plot_info["enhanced_content"]
                     plot_enhanced = True
                     print(
@@ -2718,7 +3353,7 @@ async def generate_script_and_scenes(
 
         # ✅ Generate script using OpenRouter with tier-appropriate model
         script_result = await openrouter_service.generate_script(
-            content=chapter_data.content,  # Use original content, plot context is handled separately
+            content=chapter_content,  # Use chapter content (works for both Chapter and Artifact)
             user_tier=user_model_tier,
             script_type=script_style,
             target_duration=target_duration,
@@ -2738,6 +3373,7 @@ async def generate_script_and_scenes(
 
         # ✅ First, try to parse scenes directly from the script
         scene_descriptions = []
+        sub_scenes_metadata = []  # Track sub-scene breakdown for frontend
 
         # Parse scenes directly from script by looking for scene headers
         script_lines = script.split("\n")
@@ -2749,8 +3385,9 @@ async def generate_script_and_scenes(
             line_stripped = line.strip()
 
             # Check if this is an ACT-SCENE header (primary scene marker)
+            # Supports sub-scenes like SCENE 1.1, SCENE 1.2, etc.
             act_scene_match = re.match(
-                r"^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?",
+                r"^(?:(?:\*?\*?ACT\s+[IVX0-9]+\s*-?\s*SCENE\s+(\d+(?:\.\d+)?)\*?\*?)|(?:###\s*.*\[.*\]))",
                 line_stripped,
                 re.IGNORECASE,
             )
@@ -2767,15 +3404,30 @@ async def generate_script_and_scenes(
                 if current_scene and len(current_scene) > 20:
                     scene_descriptions.append(current_scene[:400])
 
-                # Start new scene
-                scene_number += 1
+                # Extract scene number (could be 1, 1.1, 1.2 etc from the capture group)
+                captured_num = (
+                    act_scene_match.group(1)
+                    if act_scene_match.lastindex and act_scene_match.group(1)
+                    else None
+                )
+                if captured_num and "." in captured_num:
+                    # Sub-scene detected (e.g., 1.2)
+                    scene_number = float(captured_num)
+                else:
+                    scene_number += 1
+
                 current_scene = line_stripped
                 pending_location = None  # Reset pending location
 
                 # Look ahead for location header on next line
+                location_text = None
                 if i + 1 < len(script_lines):
                     next_line = script_lines[i + 1].strip()
-                    if re.match(r"^(?:INT\.|EXT\.)", next_line, re.IGNORECASE):
+                    location_match_ahead = re.match(
+                        r"^(?:INT\.|EXT\.)\s+(.+)", next_line, re.IGNORECASE
+                    )
+                    if location_match_ahead:
+                        location_text = next_line
                         current_scene += " " + next_line
                         # Add context from lines after location
                         context_lines = []
@@ -2791,6 +3443,18 @@ async def generate_script_and_scenes(
                                 break
                         if context_lines:
                             current_scene += " " + " ".join(context_lines)
+
+                        # Add to sub_scenes_metadata for frontend
+                        sub_scenes_metadata.append(
+                            {
+                                "number": scene_number,
+                                "location": location_text,
+                                "description": (
+                                    " ".join(context_lines) if context_lines else ""
+                                ),
+                                "is_sub_scene": "." in str(scene_number),
+                            }
+                        )
                     else:
                         # No location header, just add context
                         context_lines = []
@@ -2856,6 +3520,89 @@ Script to analyze:
         scene_descriptions = scene_descriptions[:30]
         print(f"[DEBUG] Final scene count: {len(scene_descriptions)}")
 
+        # ✅ Extract dialogue moments for suggested shots in image carousel
+        dialogue_moments = []
+        current_dialogue_scene = 0
+        current_dialogue_character = None
+
+        for i, line in enumerate(script_lines):
+            line_stripped = line.strip()
+            if not line_stripped:
+                continue
+
+            # Track scene changes for dialogue moments
+            scene_match = re.match(
+                r"^(?:\*?\*?ACT\s+[IVX0-9]+\s*-?\s*SCENE\s+(\d+(?:\.\d+)?)\*?\*?)",
+                line_stripped,
+                re.IGNORECASE,
+            )
+            if scene_match:
+                captured = scene_match.group(1)
+                current_dialogue_scene = (
+                    float(captured) if captured else current_dialogue_scene + 1
+                )
+                current_dialogue_character = None
+                continue
+
+            # Detect character names (ALL CAPS, typically 1-3 words)
+            if (
+                line_stripped.isupper()
+                and len(line_stripped) <= 30
+                and not line_stripped.startswith(
+                    ("INT.", "EXT.", "SCENE", "ACT", "FADE", "CUT")
+                )
+            ):
+                current_dialogue_character = (
+                    line_stripped.replace("(CONT'D)", "").replace("(V.O.)", "").strip()
+                )
+                continue
+
+            # Capture action/parenthetical descriptions as shot suggestions
+            if (
+                current_dialogue_character
+                and line_stripped.startswith("(")
+                and line_stripped.endswith(")")
+            ):
+                action = line_stripped[1:-1].strip()  # Remove parentheses
+                if action and len(action) > 3:
+                    dialogue_moments.append(
+                        {
+                            "scene_number": current_dialogue_scene,
+                            "character": current_dialogue_character,
+                            "action": action,
+                            "shot_description": f"{current_dialogue_character} {action}",
+                            "moment_type": "action",
+                        }
+                    )
+
+            # Also capture the first line of dialogue as a "speaking" shot
+            elif current_dialogue_character and not line_stripped.startswith(
+                ("(", "*", "INT.", "EXT.")
+            ):
+                if len(line_stripped) > 10:  # Meaningful dialogue
+                    dialogue_moments.append(
+                        {
+                            "scene_number": current_dialogue_scene,
+                            "character": current_dialogue_character,
+                            "action": "speaking",
+                            "dialogue_preview": line_stripped[:50]
+                            + ("..." if len(line_stripped) > 50 else ""),
+                            "shot_description": f"{current_dialogue_character} speaking",
+                            "moment_type": "dialogue",
+                        }
+                    )
+                current_dialogue_character = None  # Reset after capturing dialogue
+
+        # Group dialogue moments by scene for easier frontend use
+        dialogue_moments_by_scene = {}
+        for moment in dialogue_moments:
+            scene_key = moment["scene_number"]
+            if scene_key not in dialogue_moments_by_scene:
+                dialogue_moments_by_scene[scene_key] = []
+            dialogue_moments_by_scene[scene_key].append(moment)
+
+        print(f"[DEBUG] Extracted {len(dialogue_moments)} dialogue moments from script")
+
         # ✅ Generate character analysis using OpenRouter
         character_analysis_result = await openrouter_service.analyze_content(
             content=f"Extract and describe all characters mentioned in this script. Format as 'Character Name: [brief description/role]':\n\n{script}",
@@ -2907,12 +3654,31 @@ Script to analyze:
 
         # Generate default script name if not provided
         if not script_name:
-            script_name = f"{script_style.title()} Script - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            try:
+                # Count existing scripts for this chapter
+                statement = select(func.count()).where(
+                    Script.chapter_id == uuid.UUID(chapter_id)
+                )
+                result = await session.exec(statement)
+                count = result.one()
+            except Exception as e:
+                print(f"Error counting scripts: {e}")
+                count = 0
+
+            style_display = script_style.replace("_", " ").title()
+            if "cinematic" in script_style.lower():
+                style_display = "Character Dialogue"
+            elif "narration" in script_style.lower():
+                style_display = "Voice-over Narration"
+
+            script_name = f"{style_display} {count + 1:03d}"
 
         # Enhanced script data with metadata
         script_data = {
             "script": script,
             "scene_descriptions": scene_descriptions,
+            "sub_scenes_metadata": sub_scenes_metadata,  # Sub-scene breakdown for images
+            "dialogue_moments": dialogue_moments_by_scene,  # Suggested shots per scene
             "characters": characters,
             "character_details": character_details,
             "script_style": script_style,
@@ -2921,6 +3687,8 @@ Script to analyze:
             "created_at": datetime.now().isoformat(),
             "metadata": {
                 "total_scenes": len(scene_descriptions),
+                "has_sub_scenes": any("." in str(s) for s in scene_descriptions if s),
+                "total_dialogue_moments": len(dialogue_moments),
                 "estimated_duration": len(script) * 0.01,  # Rough estimate
                 "has_characters": len(characters) > 0,
                 "script_length": len(script),
@@ -3040,6 +3808,18 @@ async def generate_script_and_scenes_with_gpt(
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this chapter"
             )
+
+        # ✅ Check script generation limits
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(
+            current_user.id, "script"
+        )
+        if not usage_check["can_generate"]:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Script generation limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
+            )
+
         # Generate script using RAGService
         rag_service = RAGService(session)
         chapter_context = await rag_service.get_chapter_with_context(
@@ -3128,6 +3908,16 @@ async def generate_script_and_scenes_with_gpt(
             await session.refresh(new_script)
             script_id = str(new_script.id)
 
+        # ✅ Record usage for billing/limits
+        await subscription_manager.record_usage(
+            user_id=current_user.id,
+            resource_type="script",
+            metadata={
+                "script_style": script_style,
+                "chapter_id": chapter_id,
+            },
+        )
+
         return {
             "chapter_id": chapter_id,
             "script_id": script_id,
@@ -3178,7 +3968,24 @@ async def save_script_and_scenes(
 
         # Generate default script name if not provided
         if not script_name:
-            script_name = f"{script_style.title()} Script - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            try:
+                # Count existing scripts for this chapter
+                statement = select(func.count()).where(
+                    Script.chapter_id == uuid.UUID(chapter_id)
+                )
+                result = await session.exec(statement)
+                count = result.one()
+            except Exception as e:
+                print(f"Error counting scripts: {e}")
+                count = 0
+
+            style_display = script_style.replace("_", " ").title()
+            if "cinematic" in script_style.lower():
+                style_display = "Character Dialogue"
+            elif "narration" in script_style.lower():
+                style_display = "Voice-over Narration"
+
+            script_name = f"{style_display} {count + 1:03d}"
 
         # Validate script style
         script_style = validate_script_style(script_style)
@@ -3266,33 +4073,108 @@ async def delete_script(
 ):
     """Delete a specific script by ID."""
     try:
+        print(f"[DEBUG] Deleting script {script_id} for user {current_user.id}")
+
+        try:
+            s_uuid = uuid.UUID(script_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid script ID format")
+
         # Verify script ownership
-        # Verify script ownership
-        stmt = select(Script).where(Script.id == script_id)
+        stmt = select(Script).where(Script.id == s_uuid)
         result = await session.exec(stmt)
         script_data = result.first()
 
         if not script_data:
+            print(f"[DEBUG] Script {script_id} not found in DB")
             raise HTTPException(status_code=404, detail="Script not found")
 
-        if str(script_data.user_id) != current_user.id:
+        if str(script_data.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to delete this script"
             )
 
-        # Delete the script
-        session.delete(script_data)
+        # Capture data before delete
+        style = script_data.script_style
+
+        # RAW DELETE
+        delete_stmt = delete(Script).where(Script.id == s_uuid)
+        await session.exec(delete_stmt)
         await session.commit()
+
+        # Verify deletion
+        verify_stmt = select(Script).where(Script.id == s_uuid)
+        verify_res = await session.exec(verify_stmt)
+        if verify_res.first():
+            print(f"[ERROR] Script {script_id} STILL EXISTS after delete commit!")
+            raise HTTPException(
+                status_code=500, detail="Database refused to delete script"
+            )
+
+        print(f"[DEBUG] Script {script_id} deleted and committed.")
 
         return {
             "message": "Script deleted successfully",
             "script_id": script_id,
-            "script_name": script_data.script_name or "Unnamed Script",
+            "script_style": style,
         }
     except HTTPException:
+        await session.rollback()
         raise
     except Exception as e:
         print(f"Error deleting script: {e}")
+        await session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ScriptUpdate(SQLModel):
+    script_name: Optional[str] = None
+    characters: Optional[List[str]] = None
+    character_ids: Optional[List[str]] = None  # UUIDs of linked plot characters
+    character_details: Optional[str] = None
+    status: Optional[str] = None
+
+
+@router.patch("/script/{script_id}")
+async def update_script(
+    script_id: str,
+    script_update: ScriptUpdate,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    try:
+        script = await session.get(Script, uuid.UUID(script_id))
+        if not script:
+            raise HTTPException(status_code=404, detail="Script not found")
+
+        # Check authorization
+        if str(script.user_id) != str(current_user.id):
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+        # Update all provided fields
+        if script_update.script_name is not None:
+            script.script_name = script_update.script_name
+
+        if script_update.characters is not None:
+            script.characters = script_update.characters
+
+        if script_update.character_ids is not None:
+            script.character_ids = script_update.character_ids
+
+        if script_update.character_details is not None:
+            script.character_details = script_update.character_details
+
+        if script_update.status is not None:
+            script.status = script_update.status
+
+        session.add(script)
+        await session.commit()
+        await session.refresh(script)
+
+        return script
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -3848,10 +4730,10 @@ async def get_video_generation_polling_status(
         result = await session.exec(stmt)
         pipeline_steps = [step.model_dump() for step in result.all()]
 
-        # Initialize step progress tracking
+        # Initialize step progress tracking — split workflow uses pre-generated images/audio
         step_progress = {
-            "image_generation": {"status": "pending", "progress": 0},
-            "audio_generation": {"status": "pending", "progress": 0},
+            "image_generation": {"status": "completed", "progress": 100},
+            "audio_generation": {"status": "completed", "progress": 100},
             "video_generation": {"status": "pending", "progress": 0},
             "audio_video_merge": {"status": "pending", "progress": 0},
         }
@@ -3861,41 +4743,40 @@ async def get_video_generation_polling_status(
             step_name = step.get("step_name", "").lower()
             step_status = step.get("status", "pending")
 
-            if "image" in step_name:
-                step_progress["image_generation"]["status"] = step_status
-                step_progress["image_generation"]["progress"] = (
-                    100 if step_status == "completed" else 50
-                )
-            elif "audio" in step_name:
-                step_progress["audio_generation"]["status"] = step_status
-                step_progress["audio_generation"]["progress"] = (
-                    100 if step_status == "completed" else 50
-                )
-            elif "video" in step_name and "merge" not in step_name:
+            if "video" in step_name:
                 step_progress["video_generation"]["status"] = step_status
                 step_progress["video_generation"]["progress"] = (
-                    100 if step_status == "completed" else 50
-                )
-            elif "merge" in step_name:
-                step_progress["audio_video_merge"]["status"] = step_status
-                step_progress["audio_video_merge"]["progress"] = (
                     100 if step_status == "completed" else 50
                 )
 
         # Determine current step based on overall status
         current_step = "pending"
-        if overall_status == "generating_audio":
-            current_step = "audio_generation"
-        elif overall_status == "generating_images":
-            current_step = "image_generation"
-        elif overall_status == "generating_video":
+        if overall_status in (
+            "generating_audio",
+            "audio_completed",
+            "generating_images",
+            "images_completed",
+            "generating_video",
+        ):
             current_step = "video_generation"
-        elif overall_status == "merging_audio":
-            current_step = "audio_video_merge"
-        elif overall_status == "completed":
+            # Force status to processing for split workflow
+            current_step = "video_generation"
+            overall_status = "processing"
+            step_progress["video_generation"]["status"] = "processing"
+            step_progress["video_generation"]["progress"] = 50
+        elif overall_status in ("video_completed", "completed", "lipsync_completed"):
             current_step = "completed"
-        elif overall_status == "failed":
+            overall_status = "completed"
+            step_progress["video_generation"]["status"] = "completed"
+            step_progress["video_generation"]["progress"] = 100
+        elif overall_status in ("failed", "lipsync_failed"):
             current_step = "failed"
+            overall_status = "failed"
+            step_progress["video_generation"]["status"] = "failed"
+
+        # Normalize overall_status to simplified status for frontend
+        if overall_status not in ("pending", "processing", "completed", "failed"):
+            overall_status = "processing"
 
         # Calculate overall progress percentage
         completed_steps = sum(
@@ -3909,13 +4790,18 @@ async def get_video_generation_polling_status(
         # Check for active Celery tasks
         celery_task_info = await get_celery_task_status(video_data, session)
 
+        # Ensure we have an error message if status is failed
+        error_msg = video_data.get("error_message")
+        if overall_status in ("failed", "lipsync_failed") and not error_msg:
+            error_msg = "Video generation failed. Please check the generation status."
+
         # Build comprehensive response
         response_data = {
             "status": overall_status,
             "current_step": current_step,
             "progress_percentage": progress_percentage,
             "steps": step_progress,
-            "error": video_data.get("error_message"),
+            "error": error_msg,
             "video_url": video_data.get("video_url"),
             "created_at": video_data.get("created_at"),
             "updated_at": video_data.get("updated_at"),
@@ -3937,13 +4823,13 @@ async def get_celery_task_status(video_data: dict, session: AsyncSession) -> dic
         task_info = {"task_id": None, "task_state": None, "eta": None, "result": None}
 
         # Check for task IDs in metadata or direct fields
-        task_metadata = video_data.get("task_metadata", {})
-        audio_task_id = task_metadata.get("audio_task_id") or video_data.get(
+        task_meta = video_data.get("task_meta", {})
+        audio_task_id = task_meta.get("audio_task_id") or video_data.get(
             "audio_task_id"
         )
-        image_task_id = task_metadata.get("image_task_id")
-        video_task_id = task_metadata.get("video_task_id")
-        merge_task_id = task_metadata.get("merge_task_id")
+        image_task_id = task_meta.get("image_task_id")
+        video_task_id = task_meta.get("video_task_id")
+        merge_task_id = task_meta.get("merge_task_id")
 
         # Use the most relevant task ID based on current status
         current_status = video_data.get("generation_status", "pending")
@@ -4035,9 +4921,9 @@ async def retry_video_retrieval(
 
         # Get video URL from request or task data
         if not video_url:
-            # Try to get video URL from task metadata
-            task_metadata = task_data.get("task_metadata", {})
-            video_url = task_metadata.get("future_links_url") or task_metadata.get(
+            # Try to get video URL from task meta
+            task_meta_data = task_data.get("task_meta", {})
+            video_url = task_meta_data.get("future_links_url") or task_meta_data.get(
                 "video_url"
             )
 
@@ -4061,7 +4947,6 @@ async def retry_video_retrieval(
             # Update retry count and status
             new_retry_count = retry_count + 1
             task_response.retry_count = new_retry_count
-            task_response.last_retry_at = datetime.now()
             task_response.generation_status = (
                 "retrieval_failed" if new_retry_count < max_retries else "failed"
             )
@@ -4085,12 +4970,11 @@ async def retry_video_retrieval(
         task_response.generation_status = "completed"
         task_response.video_url = video_url
         task_response.retry_count = retry_count + 1
-        task_response.last_retry_at = datetime.now()
         task_response.error_message = None
         task_response.can_resume = False
 
         # Update metadata
-        metadata = task_data.get("task_metadata", {})
+        metadata = task_data.get("task_meta", {})
         metadata.update(
             {
                 "retry_success": True,
@@ -4123,3 +5007,350 @@ async def retry_video_retrieval(
 
         print(f"🔍 Full traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# ============================================================================
+# SCENE PROMPT ENHANCEMENT ENDPOINT
+# ============================================================================
+
+from app.ai.schemas import EnhanceScenePromptRequest, EnhanceScenePromptResponse
+
+
+@router.post("/enhance-scene-prompt", response_model=EnhanceScenePromptResponse)
+async def enhance_scene_prompt(
+    request: EnhanceScenePromptRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Enhance a scene description to be more suitable for image generation.
+
+    This endpoint uses AI to:
+    1. Expand brief descriptions into detailed visual prompts
+    2. Add cinematographic framing instructions
+    3. Suggest appropriate shot types
+    4. Include style-appropriate details
+
+    Usage limits apply based on user subscription tier.
+    """
+    try:
+        user_id = current_user.id
+
+        # Check usage limits
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(
+            user_id, "ai_assist"
+        )
+
+        if not usage_check.get("can_generate", True):
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "AI assist limit reached for your subscription tier",
+                    "tier": usage_check.get("tier", "free"),
+                    "limit": usage_check.get("limits", {}).get(
+                        "ai_assists_per_month", 0
+                    ),
+                    "used": usage_check.get("current_usage", {}).get("ai_assist", 0),
+                },
+            )
+
+        # Detect shot type from description
+        detected_shot = None
+        shot_patterns = {
+            "close-up": r"\b(extreme\s+)?close[-\s]?up\b",
+            "medium shot": r"\bmedium\s+(close[-\s]?up|shot)\b",
+            "wide shot": r"\b(wide|full|establishing)\s+shot\b",
+            "over-the-shoulder": r"\bover[-\s]?the[-\s]?shoulder\b",
+            "two-shot": r"\btwo[-\s]?shot\b",
+            "POV": r"\bPOV\b|point[-\s]?of[-\s]?view",
+        }
+
+        for shot_name, pattern in shot_patterns.items():
+            if re.search(pattern, request.scene_description, re.IGNORECASE):
+                detected_shot = shot_name
+                break
+
+        # Build the enhancement prompt
+        system_prompt = """You are a cinematography and visual storytelling expert. Your task is to enhance scene descriptions for AI image generation.
+
+Guidelines:
+1. PRESERVE the original intent and content of the description
+2. ADD visual details: lighting, colors, atmosphere, composition
+3. SPECIFY camera framing clearly (close-up = camera position, NOT enlarged subject)
+4. INCLUDE character actions and expressions where relevant
+5. AVOID dialogue or text that might appear in the image
+6. Use CINEMATIC language appropriate for film stills
+7. Keep the enhanced description under 200 words
+8. DO NOT include any formatting, just the enhanced description text
+
+IMPORTANT for close-ups and framing:
+- "Close-up" means the camera is positioned closer, showing head and shoulders
+- Characters should ALWAYS be at natural human proportions
+- Never describe enlarged or oversized body parts
+- Frame descriptions should be about camera position, not subject size"""
+
+        user_prompt = f"""Enhance this scene description for AI image generation:
+
+Original: {request.scene_description}
+
+{f"Scene context: {request.scene_context}" if request.scene_context else ""}
+{f"Characters present: {', '.join(request.characters_in_scene)}" if request.characters_in_scene else ""}
+{f"Requested shot type: {request.shot_type}" if request.shot_type else ""}
+Style: {request.style}
+
+Provide ONLY the enhanced description, no explanations or formatting."""
+
+        # Use OpenRouter for the enhancement - use analyze_content with custom analysis
+        openrouter = OpenRouterService()
+
+        # Combine system prompt and user prompt for analyze_content
+        combined_prompt = f"""{system_prompt}
+
+---
+
+{user_prompt}"""
+
+        # Map user's subscription tier to ModelTier enum
+        user_tier_str = usage_check.get("tier", "free").lower()
+        model_tier_mapping = {
+            "free": ModelTier.FREE,
+            "basic": ModelTier.BASIC,
+            "standard": ModelTier.STANDARD,
+            "premium": ModelTier.PREMIUM,
+            "professional": ModelTier.PROFESSIONAL,
+            "enterprise": ModelTier.ENTERPRISE,
+        }
+        user_model_tier = model_tier_mapping.get(user_tier_str, ModelTier.FREE)
+
+        # Use user's subscription tier for model selection
+        # FREE -> DeepSeek, BASIC -> Qwen, STANDARD -> Gemini 2.5 Pro, etc.
+        result = await openrouter.analyze_content(
+            content=combined_prompt,
+            user_tier=user_model_tier,
+            analysis_type="enhancement",  # Custom type for scene enhancement
+        )
+
+        # Extract enhanced text from result - OpenRouter returns 'result' key
+        enhanced_text = result.get(
+            "result",
+            result.get("analysis", result.get("summary", request.scene_description)),
+        )
+
+        # Clean up the response
+        if isinstance(enhanced_text, str):
+            enhanced_text = enhanced_text.strip()
+            # Remove any markdown formatting if present
+            enhanced_text = re.sub(r"^[*#]+\s*", "", enhanced_text)
+            enhanced_text = re.sub(r"\s*[*#]+$", "", enhanced_text)
+            # Remove any leading labels like "Enhanced description:" or similar
+            enhanced_text = re.sub(
+                r"^(Enhanced description|Result|Output):\s*",
+                "",
+                enhanced_text,
+                flags=re.IGNORECASE,
+            )
+        else:
+            enhanced_text = request.scene_description  # Fallback to original
+
+        # Suggest shot types based on the scene
+        suggested_shots = []
+        if (
+            "character" in request.scene_description.lower()
+            or request.characters_in_scene
+        ):
+            suggested_shots = ["close-up", "medium shot", "over-the-shoulder"]
+        elif (
+            "environment" in request.scene_description.lower()
+            or "room" in request.scene_description.lower()
+        ):
+            suggested_shots = ["wide shot", "establishing shot"]
+        else:
+            suggested_shots = ["wide shot", "medium shot", "close-up"]
+
+        # Track usage
+        await subscription_manager.record_usage(
+            user_id,
+            "ai_assist",
+            cost_usd=0.001,  # Small cost for tracking
+            metadata={"scene_number": None, "enhanced": True},
+        )
+
+        return EnhanceScenePromptResponse(
+            original_description=request.scene_description,
+            enhanced_description=enhanced_text,
+            detected_shot_type=detected_shot,
+            suggested_shot_types=suggested_shots,
+            enhancement_notes="Enhanced for better image generation. Shot type instructions added for proper framing.",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error enhancing scene prompt: {e}")
+        import traceback
+
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to enhance scene prompt: {str(e)}"
+        )
+
+
+# ==================== CONSULTATION ENDPOINTS ====================
+
+
+class ConsultationAnalyzeRequest(SQLModel):
+    """Request for initial consultation analysis"""
+
+    prompt: Optional[str] = ""
+
+
+class ConsultationChatRequest(SQLModel):
+    """Request for follow-up conversation"""
+
+    message: str
+    context: Dict = {}
+
+
+@router.post("/consultation/analyze")
+async def analyze_for_consultation(
+    files: List[UploadFile] = File(...),
+    prompt: str = Form(""),
+    current_user: User = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Analyze uploaded files and return AI consultation response with app-specific options.
+    This is used BEFORE project creation to help users decide what to create.
+    """
+    from app.api.services.consultation import ConsultationService
+    import io
+
+    async def extract_text_from_file(content: bytes, filename: str) -> str:
+        """Extract text from uploaded file based on file type."""
+        ext = filename.split(".")[-1].lower() if "." in filename else ""
+
+        try:
+            if ext == "txt":
+                return content.decode("utf-8", errors="ignore")
+
+            elif ext == "docx":
+                try:
+                    from docx import Document
+
+                    doc = Document(io.BytesIO(content))
+                    return "\n".join([para.text for para in doc.paragraphs])
+                except ImportError:
+                    return content.decode("utf-8", errors="ignore")
+
+            elif ext == "pdf":
+                try:
+                    import fitz  # PyMuPDF
+
+                    pdf = fitz.open(stream=content, filetype="pdf")
+                    text = ""
+                    for page in pdf:
+                        text += page.get_text()
+                    pdf.close()
+                    return text
+                except ImportError:
+                    return f"[PDF file: {filename} - install PyMuPDF to extract text]"
+
+            else:
+                # Try to decode as text
+                return content.decode("utf-8", errors="ignore")
+
+        except Exception as e:
+            return f"[Could not extract text: {str(e)}]"
+
+    try:
+        # Extract text from each uploaded file
+        file_contents = []
+        for file in files:
+            try:
+                content = await file.read()
+                await file.seek(0)
+
+                # Parse the document to extract text
+                text_content = await extract_text_from_file(
+                    content, file.filename or "unknown"
+                )
+
+                file_contents.append(
+                    {
+                        "filename": file.filename or "unknown",
+                        "content": text_content[:10000],  # Limit to first 10k chars
+                    }
+                )
+            except Exception as e:
+                print(f"⚠️ Error parsing file {file.filename}: {e}")
+                file_contents.append(
+                    {
+                        "filename": file.filename or "unknown",
+                        "content": f"[Could not parse file: {str(e)}]",
+                    }
+                )
+
+        if not file_contents:
+            raise HTTPException(status_code=400, detail="No files provided")
+
+        # Get user tier
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(current_user.id)
+        user_tier = usage_check.get("tier", "free")
+
+        # Call consultation service
+        consultation_service = ConsultationService(session)
+        result = await consultation_service.generate_guided_analysis(
+            file_contents=file_contents,
+            user_prompt=prompt,
+            user_tier=user_tier,
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in consultation analysis: {e}")
+        import traceback
+
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to analyze for consultation: {str(e)}"
+        )
+
+
+@router.post("/consultation/chat")
+async def consultation_chat(
+    request: ConsultationChatRequest,
+    current_user: User = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Continue the consultation conversation with a follow-up message.
+    """
+    from app.api.services.consultation import ConsultationService
+
+    try:
+        # Get user tier
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(current_user.id)
+        user_tier = usage_check.get("tier", "free")
+
+        consultation_service = ConsultationService(session)
+        result = await consultation_service.continue_conversation(
+            message=request.message,
+            context=request.context,
+            user_tier=user_tier,
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in consultation chat: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Consultation chat failed: {str(e)}"
+        )

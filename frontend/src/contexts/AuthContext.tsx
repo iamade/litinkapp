@@ -16,6 +16,7 @@ interface User {
   role?: "author" | "explorer" | "creator" | "superadmin";
   preferred_mode?: "explorer" | "creator";
   onboarding_completed: boolean;
+  subscription_tier?: string; // User subscription tier (free, basic, standard, premium, professional, enterprise)
 }
 
 export const hasRole = (user: User | null, role: "author" | "explorer" | "creator" | "superadmin"): boolean => {

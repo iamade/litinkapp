@@ -44,34 +44,38 @@ echo >&2 'PostgreSQL is ready to accept connections'
 
 alembic upgrade head
 
-exec "$@"
+# If called with an explicit command (e.g., /start.sh), run it
+# Otherwise, use environment detection to start the appropriate mode
+if [ $# -gt 0 ]; then
+    exec "$@"
+fi
 
 # Debug output
 echo "=== ENVIRONMENT DEBUG ==="
-echo "DEBUG variable: '$DEBUG'"
-echo "ENVIRONMENT variable: '$ENVIRONMENT'"
+echo "DEBUG variable: '${DEBUG:-not set}'"
+echo "ENVIRONMENT variable: '${ENVIRONMENT:-not set}'"
 echo "=========================="
 
-# Your desired logic:
+# Environment-based startup logic:
 # 1. If DEBUG=true AND ENVIRONMENT=development -> Development WITH debugger
 # 2. If DEBUG=false AND ENVIRONMENT=development -> Development WITHOUT debugger  
-# 3. If DEBUG=false AND ENVIRONMENT=production -> Production mode
+# 3. If ENVIRONMENT=production -> Production mode (ignore DEBUG)
 
-if [ "$DEBUG" = "true" ] && [ "$ENVIRONMENT" = "development" ]; then
-    echo "🐛 Starting in DEVELOPMENT mode WITH debugger..."
-    exec python -Xfrozen_modules=off -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-elif [ "$DEBUG" = "false" ] && [ "$ENVIRONMENT" = "development" ]; then
-    echo "🔄 Starting in DEVELOPMENT mode WITHOUT debugger..."
-    exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-elif [ "$DEBUG" = "false" ] && [ "$ENVIRONMENT" = "production" ]; then
+if [ "${ENVIRONMENT:-development}" = "production" ]; then
     echo "🚀 Starting in PRODUCTION mode..."
     exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+elif [ "${DEBUG:-false}" = "true" ] && [ "${ENVIRONMENT:-development}" = "development" ]; then
+    echo "🐛 Starting in DEVELOPMENT mode WITH debugger..."
+    exec python -Xfrozen_modules=off -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+elif [ "${DEBUG:-false}" = "false" ] && [ "${ENVIRONMENT:-development}" = "development" ]; then
+    echo "🔄 Starting in DEVELOPMENT mode WITHOUT debugger..."
+    exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 else
-    echo "❌ Invalid configuration: DEBUG='$DEBUG', ENVIRONMENT='$ENVIRONMENT'"
+    echo "❌ Invalid configuration: DEBUG='${DEBUG:-not set}', ENVIRONMENT='${ENVIRONMENT:-not set}'"
     echo "Valid combinations:"
     echo "  DEBUG=true, ENVIRONMENT=development -> Development with debugger"
     echo "  DEBUG=false, ENVIRONMENT=development -> Development without debugger"
-    echo "  DEBUG=false, ENVIRONMENT=production -> Production"
+    echo "  ENVIRONMENT=production -> Production"
     exit 1
 fi
 

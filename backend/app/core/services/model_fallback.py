@@ -21,9 +21,7 @@ class CircuitBreaker:
         self.failures[model_name].append(now)
 
         cutoff = now - timedelta(seconds=self.timeout_seconds)
-        self.failures[model_name] = [
-            f for f in self.failures[model_name] if f > cutoff
-        ]
+        self.failures[model_name] = [f for f in self.failures[model_name] if f > cutoff]
 
     def is_open(self, model_name: str) -> bool:
         if model_name not in self.failures:
@@ -72,9 +70,7 @@ class ModelFallbackManager:
 
         for i, model in enumerate(models_to_try):
             if self.circuit_breaker.is_open(model):
-                logger.warning(
-                    f"[FALLBACK] Circuit breaker open for {model}, skipping"
-                )
+                logger.warning(f"[FALLBACK] Circuit breaker open for {model}, skipping")
                 attempted_models.append(
                     {"model": model, "status": "skipped", "reason": "circuit_breaker"}
                 )
@@ -114,7 +110,9 @@ class ModelFallbackManager:
 
                     return result
                 else:
-                    error_msg = result.get("error", "Unknown error") if result else "No result"
+                    error_msg = (
+                        result.get("error", "Unknown error") if result else "No result"
+                    )
                     raise Exception(f"Generation failed: {error_msg}")
 
             except Exception as e:
@@ -134,6 +132,41 @@ class ModelFallbackManager:
                     }
                 )
                 last_error = e
+
+                # Check for rate limit or timeout errors - don't try other models
+                # Rate limits: switching models won't help with account-wide limits
+                # Timeouts: the image is likely still processing on ModelsLab's side
+                stop_fallback_indicators = [
+                    # Rate limit indicators
+                    "rate limit",
+                    "rate_limit",
+                    "ratelimit",
+                    "quota exceeded",
+                    "too many requests",
+                    "429",
+                    # Timeout indicators - image is likely still processing
+                    "timed out",
+                    "timeout",
+                    "time out",
+                    "exceeded",  # e.g., "max wait time exceeded"
+                ]
+                error_lower = error_msg.lower()
+                if any(
+                    indicator in error_lower for indicator in stop_fallback_indicators
+                ):
+                    # Determine the type of error for better logging
+                    is_timeout = any(
+                        t in error_lower for t in ["timed out", "timeout", "time out"]
+                    )
+                    if is_timeout:
+                        logger.warning(
+                            f"[FALLBACK] ⏱️ Timeout detected - stopping fallback (image may still be processing on provider)"
+                        )
+                    else:
+                        logger.warning(
+                            f"[FALLBACK] ⚠️ Rate limit detected - stopping fallback to preserve quota"
+                        )
+                    break
 
                 if i < len(models_to_try) - 1:
                     backoff_time = 2**i
@@ -167,9 +200,7 @@ class ModelFallbackManager:
 
         for i, model in enumerate(models):
             if self.circuit_breaker.is_open(model):
-                logger.warning(
-                    f"[FALLBACK] Circuit breaker open for {model}, skipping"
-                )
+                logger.warning(f"[FALLBACK] Circuit breaker open for {model}, skipping")
                 attempted_models.append(
                     {"model": model, "status": "skipped", "reason": "circuit_breaker"}
                 )
@@ -203,7 +234,9 @@ class ModelFallbackManager:
 
                     return result
                 else:
-                    error_msg = result.get("error", "Unknown error") if result else "No result"
+                    error_msg = (
+                        result.get("error", "Unknown error") if result else "No result"
+                    )
                     raise Exception(f"Generation failed: {error_msg}")
 
             except Exception as e:
@@ -223,6 +256,40 @@ class ModelFallbackManager:
                     }
                 )
                 last_error = e
+
+                # Check for rate limit or timeout errors - don't try other models
+                # Rate limits: switching models won't help with account-wide limits
+                # Timeouts: the image is likely still processing on ModelsLab's side
+                stop_fallback_indicators = [
+                    # Rate limit indicators
+                    "rate limit",
+                    "rate_limit",
+                    "ratelimit",
+                    "quota exceeded",
+                    "too many requests",
+                    "429",
+                    # Timeout indicators - image is likely still processing
+                    "timed out",
+                    "timeout",
+                    "time out",
+                    "exceeded",
+                ]
+                error_lower = error_msg.lower()
+                if any(
+                    indicator in error_lower for indicator in stop_fallback_indicators
+                ):
+                    is_timeout = any(
+                        t in error_lower for t in ["timed out", "timeout", "time out"]
+                    )
+                    if is_timeout:
+                        logger.warning(
+                            f"[FALLBACK] ⏱️ Timeout detected - stopping fallback (image may still be processing on provider)"
+                        )
+                    else:
+                        logger.warning(
+                            f"[FALLBACK] ⚠️ Rate limit detected - stopping fallback to preserve quota"
+                        )
+                    break
 
                 if i < len(models) - 1:
                     backoff_time = 2**i

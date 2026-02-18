@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
 
+
 class VideoGenerationStatus(str, Enum):
     PENDING = "pending"
     GENERATING_AUDIO = "generating_audio"
@@ -17,6 +18,8 @@ class VideoGenerationStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     RETRYING = "retrying"
+    RETRIEVAL_FAILED = "retrieval_failed"
+
 
 class VideoQualityTier(str, Enum):
     FREE = "free"
@@ -26,16 +29,26 @@ class VideoQualityTier(str, Enum):
     PRO = "pro"
     MASTER = "master"
 
+
 class AudioType(str, Enum):
     NARRATOR = "narrator"
     CHARACTER = "character"
     SOUND_EFFECTS = "sound_effects"
     BACKGROUND_MUSIC = "background_music"
 
+
 class VideoGenerationRequest(BaseModel):
+    script_id: str  # Required: the script to use for video generation
     chapter_id: str
     quality_tier: VideoQualityTier = VideoQualityTier.FREE
     video_style: str = "realistic"
+    selected_shot_ids: Optional[List[str]] = (
+        None  # Optional: only generate for these specific shots
+    )
+    selected_audio_ids: Optional[List[str]] = (
+        None  # Optional: only use these specific audio files
+    )
+
 
 class VideoGenerationResponse(BaseModel):
     video_generation_id: str
@@ -45,6 +58,7 @@ class VideoGenerationResponse(BaseModel):
     task_status: Optional[str] = None
     message: str
     script_info: Dict[str, Any]
+
 
 class AudioGeneration(BaseModel):
     id: str
@@ -59,6 +73,7 @@ class AudioGeneration(BaseModel):
     status: str = "pending"
     created_at: datetime
 
+
 # ✅ Updated ImageGeneration schema to match actual database structure
 class ImageGeneration(BaseModel):
     id: str
@@ -69,8 +84,8 @@ class ImageGeneration(BaseModel):
     shot_index: Optional[int] = 0
     scene_description: Optional[str] = None
     image_prompt: Optional[str] = None  # This exists in DB
-    text_prompt: Optional[str] = None   # This is the new column we're adding
-    style: Optional[str] = None         # This is the new column we're adding
+    text_prompt: Optional[str] = None  # This is the new column we're adding
+    style: Optional[str] = None  # This is the new column we're adding
     image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     width: Optional[int] = None
@@ -83,6 +98,7 @@ class ImageGeneration(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
 
+
 class VideoGeneration(BaseModel):
     id: str
     chapter_id: str
@@ -92,7 +108,8 @@ class VideoGeneration(BaseModel):
     quality_tier: VideoQualityTier
     video_url: Optional[str] = None
     audio_task_id: Optional[str] = None
-    task_metadata: Optional[Dict[str, Any]] = None
+    task_meta: Optional[Dict[str, Any]] = None
+    error_message: Optional[str] = None
     # Add the data fields that are used in the code
     script_data: Optional[Dict[str, Any]] = None
     audio_files: Optional[Dict[str, Any]] = None
@@ -102,3 +119,8 @@ class VideoGeneration(BaseModel):
     lipsync_data: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
+
+
+class SceneUpdateRequest(BaseModel):
+    scene_description: str
+    character_ids: Optional[List[str]] = None

@@ -251,7 +251,6 @@ Set breakpoints at these critical points: -->
 
 ## Quick Start Workflow
 
-<<<<<<< HEAD
 make supabase-start - Start database (once)
 Update .envs/.env.local with the keys from output
 make dev - Start your application
@@ -260,7 +259,6 @@ make supabase-stop - Stop database when completely done
 Use make help to see all available commands!
 
 ALL test users (superadmin, admin, creator, user, premium accounts)
-=======
 **First Time Setup:**
 1. `make supabase-start` - Start local Supabase (database, auth, storage)
 2. `./scripts/update-env-keys.sh` - Automatically update .env.local with local keys
@@ -296,4 +294,6 @@ Stripe payment processing is fully integrated. Ensure you have:
 - `STRIPE_SECRET_KEY` in your `.env.local`
 - `STRIPE_PUBLISHABLE_KEY` for frontend
 - `STRIPE_WEBHOOK_SECRET` for webhook handling
->>>>>>> 6dfa896d66876e109dc1a4daac823c22a14a5fde
+
+### make makemigrations name="add_character_ids_to_scripts"
+stripe listen --forward-to http://localhost:8000/api/v1/subscriptions/webhook

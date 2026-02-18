@@ -21,6 +21,7 @@ class VideoGenerationStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     RETRYING = "retrying"
+    RETRIEVAL_FAILED = "retrieval_failed"
 
 
 class VideoQualityTier(str, Enum):
@@ -62,14 +63,14 @@ class VideoGeneration(SQLModel, table=True):
 
     generation_status: VideoGenerationStatus = Field(
         sa_column=Column(
-            pg.ENUM(VideoGenerationStatus, name="video_generation_status"),
+            pg.ENUM(VideoGenerationStatus, name="video_generation_status", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
             default=VideoGenerationStatus.PENDING,
         )
     )
     quality_tier: VideoQualityTier = Field(
         sa_column=Column(
-            pg.ENUM(VideoQualityTier, name="video_quality_tier"),
+            pg.ENUM(VideoQualityTier, name="video_quality_tier", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
             default=VideoQualityTier.FREE,
         )
@@ -80,6 +81,7 @@ class VideoGeneration(SQLModel, table=True):
 
     can_resume: bool = Field(default=False)
     retry_count: int = Field(default=0)
+    error_message: Optional[str] = Field(default=None)
 
     # JSON fields
     task_meta: Dict[str, Any] = Field(
@@ -170,7 +172,7 @@ class AudioGeneration(SQLModel, table=True):
     )
 
     audio_type: AudioType = Field(
-        sa_column=Column(pg.ENUM(AudioType, name="audio_type"), nullable=False)
+        sa_column=Column(pg.ENUM(AudioType, name="audio_type", values_callable=lambda e: [m.value for m in e]), nullable=False)
     )
 
     scene_id: Optional[str] = Field(default=None)
@@ -257,7 +259,7 @@ class ImageGeneration(SQLModel, table=True):
     chapter_id: Optional[uuid.UUID] = Field(
         default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
     )
-    scene_number: Optional[int] = Field(default=None)
+    scene_number: Optional[float] = Field(default=None)
     progress: int = Field(default=0)
 
     meta: Dict[str, Any] = Field(
@@ -272,6 +274,18 @@ class ImageGeneration(SQLModel, table=True):
             server_default=text("CURRENT_TIMESTAMP"),
         ),
     )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+    # Model field for tracking (also in DB)
+    model_id: Optional[str] = Field(default=None)
 
     # Relationships
     video_generation: VideoGeneration = Relationship(back_populates="image_generations")
@@ -296,6 +310,7 @@ class Script(SQLModel, table=True):
     )
 
     script_style: str = Field(nullable=False)
+    script_name: Optional[str] = Field(default=None)
     script: str = Field(nullable=False)
     video_style: str = Field(nullable=False)
     status: str = Field(default="draft")
@@ -304,12 +319,32 @@ class Script(SQLModel, table=True):
     characters: List[str] = Field(
         default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
     )
+    # Character IDs linking to Plot Overview characters (UUIDs as strings)
+    character_ids: List[str] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    # Editable scene descriptions
+    scene_descriptions: List[str] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    # Scene order for storyboard
+    scene_order: List[int] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    # Storyboard configuration: key_scene_images, deselected_images, image_order
+    storyboard_config: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
     character_details: Optional[str] = Field(
         default=None
     )  # The code treats it as string sometimes? "character_details": character_details (string from _generate_character_details)
 
     evaluation: Dict[str, Any] = Field(
         default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+
+    emotional_map: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
     )
 
     created_at: datetime = Field(

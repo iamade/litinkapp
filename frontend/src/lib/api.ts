@@ -56,6 +56,10 @@ export const apiClient = {
     return withLoading(() => this.request<T>(endpoint, "PUT", body));
   },
 
+  async patch<T>(endpoint: string, body: unknown): Promise<T> {
+    return withLoading(() => this.request<T>(endpoint, "PATCH", body));
+  },
+
   async delete<T>(endpoint: string, body?: unknown): Promise<T> {
     return withLoading(() => this.request<T>(endpoint, "DELETE", body));
   },
@@ -138,6 +142,7 @@ export const apiClient = {
     });
   },
 
+
   async request<T>(
     endpoint: string,
     method: string,
@@ -212,3 +217,23 @@ export const apiClient = {
     return response.json();
   },
 };
+
+export async function generateScriptAudio(chapterId: string | null, scriptId: string, sceneNumbers?: number[]) {
+  return apiClient.post<{ 
+    status: string; 
+    video_generation_id: string; 
+    task_id: string 
+  }>("/ai/generate-audio-for-script", {
+    chapter_id: chapterId,
+    script_id: scriptId,
+    scene_numbers: sceneNumbers
+  });
+}
+
+export async function deleteAudio(chapterId: string, audioId: string) {
+  return apiClient.delete<{ 
+    success: boolean; 
+    message: string;
+    audio_id: string;
+  }>(`/chapters/${chapterId}/audio/${audioId}`);
+}

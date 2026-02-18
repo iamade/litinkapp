@@ -24,6 +24,10 @@ class PlotOverview(SQLModel, table=True):
         sa_column=Column(pg.UUID(as_uuid=True), nullable=False, index=True)
     )
     logline: Optional[str] = Field(default=None)
+    original_prompt: Optional[str] = Field(default=None)
+    creative_directive: Optional[str] = Field(
+        default=None
+    )  # Combined prompt + logline for AI operations
 
     # JSON fields
     themes: List[str] = Field(
@@ -36,6 +40,15 @@ class PlotOverview(SQLModel, table=True):
     tone: Optional[str] = Field(default=None)
     audience: Optional[str] = Field(default=None)
     setting: Optional[str] = Field(default=None)
+
+    # New categorization fields
+    medium: Optional[str] = Field(
+        default=None
+    )  # Animation, Live Action, Hybrid, Puppetry, Stop-Motion
+    format: Optional[str] = Field(
+        default=None
+    )  # Film, TV Series, Limited Series, Short Film, etc.
+    vibe_style: Optional[str] = Field(default=None)  # Satire, Cinematic, Sitcom, etc.
 
     generation_method: Optional[str] = Field(default=None)
     model_used: Optional[str] = Field(default=None)
@@ -103,6 +116,9 @@ class Character(SQLModel, table=True):
     physical_description: Optional[str] = Field(default=None)
     personality: Optional[str] = Field(default=None)
 
+    # New field for distinguishing characters from objects
+    entity_type: str = Field(default="character")  # 'character' or 'object'
+
     # JSON fields
     archetypes: List[str] = Field(
         default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
@@ -113,8 +129,22 @@ class Character(SQLModel, table=True):
     lie: Optional[str] = Field(default=None)
     ghost: Optional[str] = Field(default=None)
 
+    # Voice/Accent fields for video generation prompts
+    # Accent options: neutral, nigerian, british, american, indian, australian, jamaican, french, german
+    accent: str = Field(default="neutral")
+    # Voice characteristics: "deep and authoritative", "warm and friendly", "sharp and commanding", etc.
+    voice_characteristics: Optional[str] = Field(default=None)
+    # Voice gender: male, female, auto (inferred from character profile)
+    voice_gender: str = Field(default="auto")
+
     image_url: Optional[str] = Field(default=None)
     image_generation_prompt: Optional[str] = Field(default=None)
+    image_generation_status: Optional[str] = Field(
+        default=None
+    )  # pending, generating, completed, failed
+    image_generation_task_id: Optional[str] = Field(default=None)  # Celery task ID
+    generation_method: Optional[str] = Field(default=None)  # async_celery, sync, etc.
+    model_used: Optional[str] = Field(default=None)  # AI model used for generation
 
     image_metadata: Dict[str, Any] = Field(
         default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))

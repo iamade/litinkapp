@@ -29,6 +29,7 @@ import AudioPanel from '../components/Audio/AudioPanel';
 import { useImageGeneration } from '../hooks/useImageGeneration';
 import { useAudioGeneration } from '../hooks/useAudioGeneration';
 import VideoProductionPanel from '../components/Video/VideoProductionPanel';
+import { useUserMode } from '../hooks/useUserMode';
 
 interface Chapter {
   id: string;
@@ -87,6 +88,9 @@ export default function BookViewForEntertainment() {
 
   // Wire selectChapter and selectedScriptId from ScriptSelectionContext
   const { selectChapter, selectedScriptId } = useScriptSelection();
+  
+  // Get user mode for conditional rendering (explorer vs creator)
+  const { mode: userMode } = useUserMode();
 
   // State declarations - all hooks at the top level
   const [book, setBook] = useState<Book | null>(null);
@@ -510,12 +514,14 @@ export default function BookViewForEntertainment() {
             setTaskStatus(data.task_metadata.audio_task_state);
           }
 
-          // Handle completion
-          if (data.generation_status === "completed" && data.video_url && mountedRef.current) {
-            setVideoUrls((prev) => ({
-              ...prev,
-              [selectedChapter!.id]: data.video_url!,
-            }));
+          // Handle completion (video_completed or completed)
+          if (["completed", "video_completed"].includes(data.generation_status) && mountedRef.current) {
+            if (data.video_url) {
+              setVideoUrls((prev) => ({
+                ...prev,
+                [selectedChapter!.id]: data.video_url!,
+              }));
+            }
             updateProgress("video", "completed");
             toast.success("Video generation completed!");
             setShowPipelineStatus(false);
@@ -547,7 +553,6 @@ export default function BookViewForEntertainment() {
             "generating_images",
             "images_completed",
             "generating_video",
-            "video_completed",
             "combining",
             "merging_audio",
             "applying_lipsync",
@@ -574,30 +579,48 @@ export default function BookViewForEntertainment() {
     return status.replace(/_/g, " ");
   };
 
-  const handleGenerateScript = async () => {
+  // Wrapper to handle saving plot logline before generating script
+  const handleGenerateScriptWithSave = async (
+    scriptStyle: string,
+    options: any
+  ) => {
     if (!selectedChapter) return;
-    setLoadingScript(true);
-    updateProgress("script", "generating");
 
-    try {
-      const result = await userService.generateScriptAndScenes(
-        selectedChapter.id,
-        scriptStyle
-      );
-
-      setAiScriptResults((prev) => ({
-        ...prev,
-        [selectedChapter.id]: result,
-      }));
-
-      updateProgress("script", "completed");
-      toast.success("AI Script & Scene Descriptions generated!");
-    } catch (error) {
-      toast.error("Failed to generate script/scene descriptions");
-      updateProgress("script", "error");
-    } finally {
-      setLoadingScript(false);
+    // Save logline if changed
+    if (
+      plotOverview && 
+      plotOverview.id && 
+      options.customLogline && 
+      options.customLogline !== plotOverview.logline
+    ) {
+      try {
+        await userService.updatePlotOverview(plotOverview.id, {
+          logline: options.customLogline
+        });
+        toast.success("Plot Logline updated");
+        // Reload plot to keep in sync
+        loadPlot(); 
+      } catch (error) {
+        console.error("Failed to update plot logline:", error);
+        toast.error("Failed to save logline changes, but proceeding with generation");
+      }
     }
+
+    // Call original generate function
+    generateScript(scriptStyle, options);
+  };
+
+  const handleGenerateScript = async () => {
+     // This seems to be an old handler, possibly unused or for a different button? 
+     // Keep generic implementation or remove if verified unused.
+     // For now I'm leaving it but the Panel uses the prop below.
+     if (!selectedChapter) return;
+     generateScript(scriptStyle, { 
+       includeCharacterProfiles: true, 
+       focusAreas: [],
+       targetDuration: 'auto',
+       customLogline: plotOverview?.logline
+     }); 
   };
 
   // Add the retry handler function after your existing functions
@@ -765,6 +788,7 @@ export default function BookViewForEntertainment() {
           <PlotOverviewPanel
             bookId={book!.id}
             onCharacterChange={refreshPlotOverview}
+            mode={userMode}
           />
         );
 
@@ -787,11 +811,18 @@ if (!selectedChapter) {
             selectedScript={selectedScript}
             isLoading={isLoadingScripts}
             isGeneratingScript={isGeneratingScript}
-            onGenerateScript={generateScript}
+            onGenerateScript={handleGenerateScriptWithSave}
             onSelectScript={selectScript}
             onUpdateScript={updateScript}
             onDeleteScript={deleteScript}
             plotOverview={plotOverview}
+            onCreatePlotCharacter={async (name: string) => {
+              if (!id) throw new Error('No book ID');
+              const result = await userService.createPlotCharacter(id, name);
+              // Refresh plot overview to get updated characters list
+              await loadPlot();
+              return result;
+            }}
           />
         );
      

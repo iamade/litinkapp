@@ -3,7 +3,10 @@ import { userService } from '../services/userService';
 import { toast } from 'react-hot-toast';
 
 interface PlotOverview {
+  id: string;
+  book_id: string;
   logline: string;
+  original_prompt?: string;
   themes: string[];
   story_type: string;
   genre: string;
@@ -12,9 +15,14 @@ interface PlotOverview {
   setting: string;
   characters: Character[];
   script_story_type: string;
+  // New categorization fields
+  medium?: string;      // Animation, Live Action, Hybrid, etc.
+  format?: string;      // Film, TV Series, Short Film, etc.
+  vibe_style?: string;  // Satire, Cinematic, Sitcom, etc.
 }
 
 interface Character {
+  id: string;  // Added for character linking
   name: string;
   role: string;
   character_arc: string;
@@ -42,6 +50,7 @@ export const usePlotGeneration = (
   const [plotOverview, setPlotOverview] = useState<PlotOverview | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const generatePlot = async (refinementPrompt?: string) => {
     if (!bookOrProjectId) return;
@@ -59,12 +68,10 @@ export const usePlotGeneration = (
           }
         );
       } else {
-        // Use book-specific plot generation (also supports refinement for projects passed as bookId)
-        result = await userService.generateProjectPlotOverview(
+        // Use book-specific plot generation (with refinement support)
+        result = await userService.generatePlotOverview(
           bookOrProjectId,
-          inputPrompt || '',
           { 
-            projectType,
             refinementPrompt,
           }
         );
@@ -134,12 +141,38 @@ export const usePlotGeneration = (
     }
   };
 
+  // Update plot overview fields (for inline editing)
+  const updatePlot = async (updates: Partial<PlotOverview>) => {
+    if (!plotOverview?.id) {
+      toast.error('No plot to update');
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      await userService.updatePlotOverview(plotOverview.id, updates);
+      
+      // Optimistically update local state
+      setPlotOverview(prev => prev ? { ...prev, ...updates } : null);
+      
+      toast.success('Plot updated successfully');
+    } catch (error) {
+      toast.error('Failed to update plot');
+      // Reload to get correct state
+      await loadPlot();
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   return {
     plotOverview,
     isGenerating,
     isLoading,
+    isUpdating,
     generatePlot,
     loadPlot,
-    deleteCharacter
+    deleteCharacter,
+    updatePlot
   };
 };

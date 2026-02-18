@@ -26,6 +26,20 @@ class Book(SQLModel, table=True):
     description: Optional[str] = Field(default=None)
     cover_image_url: Optional[str] = Field(default=None)
     book_type: str = Field(nullable=False)
+
+    # Mode flag: "explorer" (default) or "creator"
+    source_mode: str = Field(default="explorer")
+
+    # Optional link to Project (when uploaded via Creator mode)
+    project_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("projects.id", ondelete="SET NULL"),
+            index=True,
+        ),
+    )
+
     status: str = Field(default="draft")
     total_chapters: int = Field(default=0)
     estimated_duration: Optional[int] = Field(default=None)

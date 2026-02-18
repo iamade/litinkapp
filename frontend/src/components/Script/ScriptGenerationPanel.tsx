@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Edit2, Trash2, Clock, Camera, ChevronDown, ChevronRight } from 'lucide-react';
+import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User, Activity, Mic, Play, Smile, Wand2, Upload } from 'lucide-react';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
+import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
+import { apiClient } from '../../lib/api';
+import ExpandScriptModal from './ExpandScriptModal';
 
 interface SceneDescription {
   scene_number: number;
@@ -22,13 +25,15 @@ interface ChapterScript {
   script: string;
   scene_descriptions: SceneDescription[];
   characters: string[];
+  character_ids?: string[];  // UUIDs of linked plot characters
   character_details: string;
   acts: Act[];
   beats: Beat[];
   scenes: Scene[];
   created_at: string;
   status: 'draft' | 'ready' | 'approved';
-  scriptStoryType?: string; // Added property for story type
+  scriptStoryType?: string;
+  emotional_map?: any[];
 }
 
 interface Act {
@@ -74,10 +79,15 @@ interface ScriptGenerationPanelProps {
   onUpdateScript: (scriptId: string, updates: Partial<ChapterScript>) => void;
   onDeleteScript: (scriptId: string) => void;
   plotOverview?: {
+    id?: string;
     script_story_type?: string;
     story_type?: string;
     genre?: string;
+    characters?: PlotCharacter[];  // Plot characters for linking
+    logline?: string;
+    original_prompt?: string;
   } | null;
+  onCreatePlotCharacter?: (name: string, entityType?: 'character' | 'object' | 'location') => Promise<PlotCharacter>;  // Create placeholder in plot
 }
 
 interface ScriptGenerationOptions {
@@ -86,6 +96,7 @@ interface ScriptGenerationOptions {
   sceneCount?: number;
   focusAreas: string[];
   scriptStoryType?: string; // Added property for script story type
+  customLogline?: string;
 }
 
 const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
@@ -97,13 +108,59 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   onGenerateScript,
   onUpdateScript,
   onDeleteScript,
-  plotOverview
+  plotOverview,
+  onCreatePlotCharacter
 }) => {
   const {
     selectedScriptId,
     isSwitching,
     selectScript,
   } = useScriptSelection();
+
+  const [scriptToDelete, setScriptToDelete] = useState<string | null>(null);
+  const [isGeneratingMap, setIsGeneratingMap] = useState<Record<string, boolean>>({});
+  const [showExpandModal, setShowExpandModal] = useState(false);
+  const [expandingScriptId, setExpandingScriptId] = useState<string | null>(null);
+  // In-place script editing state
+  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
+  const [editedContent, setEditedContent] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const generateEmotionalMap = async (scriptId: string, currentScript: ChapterScript) => {
+    setIsGeneratingMap(prev => ({...prev, [scriptId]: true}));
+    try {
+        // Construct payload
+        const payload = {
+            script_content: currentScript.script,
+            characters: currentScript.characters || [],
+            script_id: scriptId
+        };
+
+        // Call API using apiClient which includes authentication
+        const response = await apiClient.post<{ entries: any[] }>('/ai/generate-emotional-map', payload);
+
+        if (response && response.entries) {
+            // Update script with new map
+            onUpdateScript(scriptId, { emotional_map: response.entries });
+        }
+    } catch (error) {
+        console.error("Failed to generate emotional map:", error);
+        // You might want to show a toast here
+    } finally {
+        setIsGeneratingMap(prev => ({...prev, [scriptId]: false}));
+    }
+  };
+  
+  // Character editing state
+  const [editingCharacterIdx, setEditingCharacterIdx] = useState<number | null>(null);
+  const [editingCharacterName, setEditingCharacterName] = useState('');
+
+  const confirmDelete = () => {
+    if (scriptToDelete) {
+      onDeleteScript(scriptToDelete);
+      setScriptToDelete(null);
+    }
+  };
 
   // Derive selected script from context
   const selectedScript = generatedScripts.find(script => script.id === selectedScriptId) || null;
@@ -126,13 +183,29 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [scriptStoryType, setScriptStoryType] = useState<string>(
     plotOverview?.script_story_type || plotOverview?.story_type || "hero's journey"
   );
+  const [logline, setLogline] = useState<string>((plotOverview as any)?.creative_directive || plotOverview?.logline || plotOverview?.original_prompt || "");
   const [generationOptions, setGenerationOptions] = useState<ScriptGenerationOptions>({
     includeCharacterProfiles: true,
     targetDuration: "auto",
     sceneCount: 5,
     focusAreas: [],
-    scriptStoryType: plotOverview?.script_story_type || plotOverview?.story_type || "hero's journey"
+    scriptStoryType: plotOverview?.script_story_type || plotOverview?.story_type || "hero's journey",
+    customLogline: plotOverview?.logline || ""
   });
+
+  // Update state when plotOverview changes
+  useEffect(() => {
+    if (plotOverview) {
+      const initialLogline = plotOverview.original_prompt || plotOverview.logline;
+      if (initialLogline && !logline) {
+        setLogline(initialLogline);
+        setGenerationOptions(prev => ({
+          ...prev,
+          customLogline: initialLogline
+        }));
+      }
+    }
+  }, [plotOverview]);
 
   // Update scriptStoryType when plotOverview changes
   useEffect(() => {
@@ -145,26 +218,16 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       }));
     }
   }, [plotOverview?.script_story_type, plotOverview?.story_type]);
-  const [activeView, setActiveView] = useState<'overview' | 'acts' | 'scenes' | 'dialogue'>('overview');
-  const [expandedScenes, setExpandedScenes] = useState<Set<number>>(new Set());
+  const [activeView, setActiveView] = useState<'overview' | 'acts' | 'scenes' | 'dialogue' | 'performance'>('overview');
   const [showFullScript, setShowFullScript] = useState(false);
+  const [isAddingCharacter, setIsAddingCharacter] = useState(false);
+  const [newCharacterName, setNewCharacterName] = useState('');
 
   const handleGenerateScript = () => {
     onGenerateScript(scriptStyle, {
       ...generationOptions,
-      scriptStoryType: scriptStoryType
-    });
-  };
-
-  const toggleSceneExpansion = (sceneNumber: number) => {
-    setExpandedScenes(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(sceneNumber)) {
-        newSet.delete(sceneNumber);
-      } else {
-        newSet.add(sceneNumber);
-      }
-      return newSet;
+      scriptStoryType: scriptStoryType,
+      customLogline: logline
     });
   };
 
@@ -222,6 +285,50 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               : 'Narrative voice-over storytelling'}
           </p>
         </div>
+        {/* Original User Prompt - Reference (read-only) */}
+        {plotOverview?.original_prompt && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Original User Prompt <span className="text-xs text-gray-500">(Reference)</span>
+            </label>
+            <div className="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
+              {plotOverview.original_prompt}
+            </div>
+          </div>
+        )}
+
+        {/* Story Logline - Reference (read-only) */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Story Logline <span className="text-xs text-gray-500">(Reference)</span>
+          </label>
+          <div className="bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-700 dark:text-gray-300">
+            {plotOverview?.logline || 'Not yet generated'}
+          </div>
+        </div>
+
+ {/* Creative Directive / Style Guide - Editable */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Creative Directive / Style Guide
+            <span className="text-xs text-blue-600 dark:text-blue-400 ml-2">(Used for script generation)</span>
+          </label>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            This combines your prompt and logline. Edit to customize the creative direction for this script.
+          </p>
+          <textarea
+            value={logline}
+            onChange={(e) => {
+              setLogline(e.target.value);
+              setGenerationOptions(prev => ({
+                ...prev,
+                customLogline: e.target.value
+              }));
+            }}
+            placeholder="Combined creative direction for this script..."
+            className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent min-h-[100px] resize-y"
+          />
+        </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Script Story Type
@@ -274,6 +381,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           </p>
         </div>
       </div>
+
 
       {/* Advanced Options */}
       {showAdvancedOptions && (
@@ -361,7 +469,16 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
   const renderScriptsList = () => (
     <div className="space-y-4">
-      <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Generated Scripts</h4>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Generated Scripts</h4>
+          {generatedScripts.length > 0 && (
+            <span className="px-2 py-0.5 text-xs font-medium bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300 rounded-full">
+              {generatedScripts.length}
+            </span>
+          )}
+        </div>
+      </div>
       
       {isLoading ? (
         <div className="flex items-center justify-center py-8">
@@ -375,18 +492,27 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           <p className="text-sm">Generate your first script using the form above</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4">
-          {generatedScripts.map((script) => (
-            <ScriptCard
-              key={script.id}
-              script={script}
-              isSelected={selectedScriptId === script.id}
-              isSwitching={isSwitching}
-              onSelect={() => onChooseScript(script.id)}
-              onUpdate={(updates) => onUpdateScript(script.id, updates)}
-              onDelete={() => onDeleteScript(script.id)}
-            />
-          ))}
+        <div className="space-y-4">
+          {/* Horizontal Script Cards */}
+          <div className="flex gap-4 overflow-x-auto pb-3 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
+            {generatedScripts.map((script) => {
+              const isSelected = selectedScriptId === script.id;
+              
+              return (
+                <ScriptCard
+                  key={script.id}
+                  script={script}
+                  isSelected={isSelected}
+                  isSwitching={isGeneratingScript || isSwitching}
+                  onSelect={() => onChooseScript(script.id)}
+                  onDelete={() => setScriptToDelete(script.id)}
+                  onUpdate={(updates) => onUpdateScript(script.id, updates)}
+                  className="flex-shrink-0 min-w-[280px] max-w-[320px]"
+                  showPreview={false}
+                />
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -429,7 +555,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
           {/* Script Navigation */}
           <div className="flex space-x-4">
-            {['overview', 'acts', 'scenes', 'dialogue'].map((view) => (
+            {['overview', 'acts', 'scenes', 'dialogue', 'performance'].map((view) => (
               <button
                 key={view}
                 onClick={() => setActiveView(view as typeof activeView)}
@@ -439,7 +565,14 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                     : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
                 }`}
               >
-                {view.charAt(0).toUpperCase() + view.slice(1)}
+                {view === 'performance' ? (
+                  <div className="flex items-center space-x-1">
+                    <Activity className="w-3 h-3" />
+                    <span>Map</span>
+                  </div>
+                ) : (
+                  view.charAt(0).toUpperCase() + view.slice(1)
+                )}
               </button>
             ))}
           </div>
@@ -451,6 +584,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           {activeView === 'acts' && renderActsBreakdown(selectedScript)}
           {activeView === 'scenes' && renderScenesDetail(selectedScript)}
           {activeView === 'dialogue' && renderDialogueView(selectedScript)}
+          {activeView === 'performance' && renderPerformanceMap(selectedScript)}
         </div>
       </div>
     );
@@ -473,18 +607,32 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   // Helper function to count scenes from script text
   const countScenesFromScript = (script: ChapterScript): number => {
     if (script.scenes && script.scenes.length > 0) return script.scenes.length;
-    // Count SCENE headers from script text (more reliable than scene_descriptions which may have duplicates)
+    
     const scriptText = script.script || '';
-    const sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?/gi);
-    if (sceneMatches) {
+    
+    // Pattern 1: Combined ACT-SCENE format (e.g., "ACT I - SCENE 1")
+    let sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*[-–—]\s*SCENE\s+\d+\*?\*?/gi);
+    if (sceneMatches && sceneMatches.length > 0) {
       return sceneMatches.length;
     }
-    // Fallback to scene_descriptions if no matches in script text
+    
+    // Pattern 2: Standalone SCENE format (e.g., "#### **SCENE 1**" or "SCENE 1")
+    sceneMatches = scriptText.match(/(?:^|\n)(?:#{1,4}\s*)?\*?\*?\s*SCENE\s+\d+\s*\*?\*?/gim);
+    if (sceneMatches && sceneMatches.length > 0) {
+      return sceneMatches.length;
+    }
+    
+    // Pattern 3: INT./EXT. location headers as scene markers
+    sceneMatches = scriptText.match(/(?:^|\n)\*?\*?(?:INT\.|EXT\.)[^\n]+/gim);
+    if (sceneMatches && sceneMatches.length > 0) {
+      return sceneMatches.length;
+    }
+    
+    // Fallback to scene_descriptions
     if (script.scene_descriptions && script.scene_descriptions.length > 0) {
-      // Filter out duplicates - only count entries that start with ACT header
       const actScenes = script.scene_descriptions.filter((desc: any) => {
         const text = typeof desc === 'string' ? desc : desc?.visual_description || '';
-        return text.match(/^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE/i);
+        return text.match(/^\*?\*?ACT\s+[IVX]+\s*[-–—]?\s*SCENE/i) || text.match(/SCENE\s+\d+/i);
       });
       return actScenes.length > 0 ? actScenes.length : Math.ceil(script.scene_descriptions.length / 2);
     }
@@ -520,21 +668,234 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       </div>
 
       {/* Characters */}
-      {script.characters && script.characters.length > 0 && (
-        <div>
-          <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Characters</h4>
-          <div className="flex flex-wrap gap-2">
-            {script.characters.map((character, idx) => (
-              <span
-                key={idx}
-                className="px-3 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-300 rounded-full text-sm font-medium"
-              >
-                {character}
-              </span>
-            ))}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Characters</h4>
+            <span className="text-xs px-2 py-0.5 bg-gray-200 dark:bg-gray-700 rounded-full text-gray-600 dark:text-gray-400">
+              {script.characters?.length || 0}
+            </span>
           </div>
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            Click to link with Plot Overview • ✓ = linked • ⚠ = not linked
+          </span>
         </div>
-      )}
+
+        
+        {(() => {
+           // Helper to process entities with their original checks
+           const entities = (script.characters || []).map((name, idx) => {
+             const linkedCharacterId = script.character_ids?.[idx];
+             const linkedPlotChar = linkedCharacterId 
+                 ? plotOverview?.characters?.find(c => c.id === linkedCharacterId)
+                 : null;
+             return { name, idx, linkedPlotChar, linkedCharacterId };
+           });
+
+           const objectsLocations = entities.filter(e => e.linkedPlotChar && (e.linkedPlotChar.entity_type === 'object' || e.linkedPlotChar.entity_type === 'location'));
+           // Everything else goes to characters (unlinked ones are assumed characters until linked otherwise)
+           const characters = entities.filter(e => !e.linkedPlotChar || (e.linkedPlotChar.entity_type !== 'object' && e.linkedPlotChar.entity_type !== 'location'));
+
+           const renderEntityPill = (entity: typeof entities[0]) => {
+              const { name, idx, linkedPlotChar, linkedCharacterId } = entity;
+              const isLinked = !!linkedPlotChar;
+              
+              return editingCharacterIdx === idx ? (
+                  <CharacterDropdown
+                    key={idx}
+                    value={editingCharacterName}
+                    plotCharacters={plotOverview?.characters || []}
+                    linkedCharacterId={linkedCharacterId}
+                    onSelect={(plotChar) => {
+                      if (selectedScript) {
+                        const newCharacters = [...script.characters];
+                        newCharacters[idx] = plotChar.name;
+                        
+                        const newCharacterIds = [...(script.character_ids || [])];
+                        while (newCharacterIds.length <= idx) newCharacterIds.push('');
+                        newCharacterIds[idx] = plotChar.id;
+                        
+                        onUpdateScript(selectedScript.id, { 
+                          characters: newCharacters,
+                          character_ids: newCharacterIds
+                        });
+                      }
+                      setEditingCharacterIdx(null);
+                      setEditingCharacterName('');
+                    }}
+                    onCreateNew={async (name, entityType = 'character') => {
+                      if (onCreatePlotCharacter && selectedScript) {
+                          try {
+                            const newChar = await onCreatePlotCharacter(name, entityType);
+                            const newCharacters = [...script.characters];
+                            newCharacters[idx] = newChar.name;
+                            
+                            const newCharacterIds = [...(script.character_ids || [])];
+                            while (newCharacterIds.length <= idx) newCharacterIds.push('');
+                            newCharacterIds[idx] = newChar.id;
+                            
+                            onUpdateScript(selectedScript.id, { 
+                              characters: newCharacters,
+                              character_ids: newCharacterIds
+                            });
+                          } catch (error) {
+                            console.error('Failed to create character:', error);
+                          }
+                      }
+                      setEditingCharacterIdx(null);
+                      setEditingCharacterName('');
+                    }}
+                    onCancel={() => {
+                      setEditingCharacterIdx(null);
+                      setEditingCharacterName('');
+                    }}
+                  />
+                ) : (
+                  <span
+                    key={idx}
+                    className={`group inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+                      isLinked 
+                        ? 'bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300'
+                        : 'bg-yellow-100 dark:bg-yellow-900/50 text-yellow-800 dark:text-yellow-300'
+                    }`}
+                  >
+                    <span className="text-xs mr-1">
+                      {isLinked ? '✓' : '⚠'}
+                    </span>
+                    
+                    <span
+                      onClick={() => {
+                        setEditingCharacterIdx(idx);
+                        setEditingCharacterName(name);
+                      }}
+                      title={isLinked ? `Linked to: ${linkedPlotChar?.name}` : 'Click to link with Plot Overview'}
+                      className="cursor-pointer hover:underline flex items-center gap-1"
+                    >
+                      {/* Icon based on type if linked */}
+                      {linkedPlotChar?.entity_type === 'location' && <MapPin className="w-3 h-3" />}
+                      {linkedPlotChar?.entity_type === 'object' && <Box className="w-3 h-3" />}
+                      {!linkedPlotChar?.entity_type && <User className="w-3 h-3 opacity-50" />}
+                      {name}
+                    </span>
+                    
+                    {linkedPlotChar?.image_url && (
+                      <img 
+                        src={linkedPlotChar.image_url} 
+                        alt={linkedPlotChar.name}
+                        className="w-5 h-5 rounded-full object-cover ml-1"
+                      />
+                    )}
+                    
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (selectedScript) {
+                          const newCharacters = script.characters.filter((_, i) => i !== idx);
+                          const newCharacterIds = (script.character_ids || []).filter((_, i) => i !== idx);
+                          onUpdateScript(selectedScript.id, {
+                            characters: newCharacters,
+                            character_ids: newCharacterIds
+                          });
+                        }
+                      }}
+                      className="ml-1 p-0.5 rounded-full hover:bg-red-200 dark:hover:bg-red-800/50 text-gray-500 hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove from script"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </span>
+                );
+           };
+
+           return (
+             <div className="space-y-4">
+               {/* Character List */}
+               <div className="flex flex-wrap gap-2">
+                 {characters.map(renderEntityPill)}
+               </div>
+
+               {/* Object/Location List */}
+               {objectsLocations.length > 0 && (
+                 <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                       <Box className="w-4 h-4" /> Objects & Locations
+                    </h5>
+                    <div className="flex flex-wrap gap-2">
+                       {objectsLocations.map(renderEntityPill)}
+                    </div>
+                 </div>
+               )}
+             </div>
+           );
+        })()}
+          
+          {/* Add Character Button/Input - Keeps existing logic but visually separated */}
+          
+          {/* Add Character Button/Input */}
+          {isAddingCharacter ? (
+            <div className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/50 rounded-full">
+              <input
+                type="text"
+                value={newCharacterName}
+                onChange={(e) => setNewCharacterName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newCharacterName.trim() && selectedScript) {
+                    const newCharacters = [...(script.characters || []), newCharacterName.trim()];
+                    onUpdateScript(selectedScript.id, { characters: newCharacters });
+                    setNewCharacterName('');
+                    setIsAddingCharacter(false);
+                  } else if (e.key === 'Escape') {
+                    setNewCharacterName('');
+                    setIsAddingCharacter(false);
+                  }
+                }}
+                placeholder="Character name..."
+                className="w-32 px-2 py-0.5 text-sm bg-transparent border-none focus:outline-none text-blue-800 dark:text-blue-300 placeholder-blue-400 dark:placeholder-blue-500"
+                autoFocus
+              />
+              <button
+                onClick={() => {
+                  if (newCharacterName.trim() && selectedScript) {
+                    const newCharacters = [...(script.characters || []), newCharacterName.trim()];
+                    onUpdateScript(selectedScript.id, { characters: newCharacters });
+                    setNewCharacterName('');
+                    setIsAddingCharacter(false);
+                  }
+                }}
+                disabled={!newCharacterName.trim()}
+                className="p-0.5 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 disabled:opacity-50"
+                title="Add character"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+              <button
+                onClick={() => {
+                  setNewCharacterName('');
+                  setIsAddingCharacter(false);
+                }}
+                className="p-0.5 text-gray-500 hover:text-red-600 dark:hover:text-red-400"
+                title="Cancel"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsAddingCharacter(true)}
+              className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              title="Add a character manually"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Add
+            </button>
+          )}
+      </div>
 
       {/* Script Preview */}
       <div>
@@ -647,18 +1008,32 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       const scriptText = script.script || '';
       const scenes: { scene_number: number; header: string; location: string; content: string }[] = [];
       
-      // Find all ACT-SCENE headers
-      const scenePattern = /(\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?)/gi;
-      const matches = [...scriptText.matchAll(scenePattern)];
+      // Try multiple patterns to find scenes
+      // Pattern 1: Combined ACT-SCENE format (e.g., "ACT I - SCENE 1")
+      let scenePattern = /(\*?\*?ACT\s+[IVX]+\s*[-–—]\s*SCENE\s+\d+\*?\*?)/gi;
+      let matches = [...scriptText.matchAll(scenePattern)];
+      
+      // Pattern 2: Standalone SCENE format (e.g., "#### **SCENE 1**" or "SCENE 1")
+      if (matches.length === 0) {
+        scenePattern = /(?:^|\n)(?:#{1,4}\s*)?\*?\*?\s*SCENE\s+(\d+)\s*\*?\*?/gim;
+        matches = [...scriptText.matchAll(scenePattern)];
+      }
+      
+      // Pattern 3: INT./EXT. location headers as scene markers
+      if (matches.length === 0) {
+        scenePattern = /(?:^|\n)\*?\*?(?:INT\.|EXT\.)[^\n]+/gim;
+        matches = [...scriptText.matchAll(scenePattern)];
+      }
       
       if (matches.length === 0) {
         // Fallback to scene_descriptions if available
         if (script.scene_descriptions && script.scene_descriptions.length > 0) {
           return script.scene_descriptions
             .filter((desc: any, idx: number) => {
-              // Only include non-duplicate entries (filter out location-only entries)
               const text = typeof desc === 'string' ? desc : '';
-              return text.match(/^\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE/i) || idx % 2 === 0;
+              return text.match(/^\*?\*?ACT\s+[IVX]+\s*[-–—]?\s*SCENE/i) || 
+                     text.match(/SCENE\s+\d+/i) ||
+                     idx % 2 === 0;
             })
             .map((desc: any, idx: number) => ({
               scene_number: idx + 1,
@@ -727,27 +1102,277 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   );
   };
 
-  const renderDialogueView = (script: ChapterScript) => (
-    <div className="space-y-4">
-      <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Full Script</h4>
+  const renderDialogueView = (script: ChapterScript) => {
+    const isEditing = editingScriptId === script.id;
+    
+    const handleStartEdit = () => {
+      setEditingScriptId(script.id);
+      setEditedContent(script.script || '');
+    };
+    
+    const handleCancelEdit = () => {
+      setEditingScriptId(null);
+      setEditedContent('');
+    };
+    
+    const handleSaveEdit = async () => {
+      if (!editedContent.trim()) return;
+      setIsSavingEdit(true);
+      try {
+        await onUpdateScript(script.id, { script: editedContent });
+        setEditingScriptId(null);
+        setEditedContent('');
+      } catch (error) {
+        console.error('Failed to save script edit:', error);
+      } finally {
+        setIsSavingEdit(false);
+      }
+    };
+    
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Full Script</h4>
+          <div className="flex items-center gap-2">
+            {script.script && script.script.trim() && !isEditing && (
+              <>
+                <button
+                  onClick={handleStartEdit}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                >
+                  <Edit2 className="h-4 w-4" />
+                  Edit
+                </button>
+                <label className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors cursor-pointer">
+                  <Upload className="h-4 w-4" />
+                  Replace
+                  <input
+                    type="file"
+                    accept=".txt,.pdf,.docx,.doc,.fountain"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const text = await file.text();
+                        await onUpdateScript(script.id, { script: text });
+                      } catch (error) {
+                        console.error('Failed to read file:', error);
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                <button
+                  onClick={() => {
+                    setExpandingScriptId(script.id);
+                    setShowExpandModal(true);
+                  }}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 rounded-lg transition-colors"
+                >
+                  <Wand2 className="h-4 w-4" />
+                  Expand Story
+                </button>
+              </>
+            )}
+            {isEditing && (
+              <>
+                <button
+                  onClick={handleCancelEdit}
+                  disabled={isSavingEdit}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveEdit}
+                  disabled={isSavingEdit || !editedContent.trim()}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-green-400 rounded-lg transition-colors"
+                >
+                  <Check className="h-4 w-4" />
+                  {isSavingEdit ? 'Saving...' : 'Save'}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
 
-      <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
-        <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg max-h-96 overflow-y-auto">
-          {script.script && script.script.trim() ? (
-            <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-mono leading-relaxed">
-              {script.script}
-            </pre>
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6">
+          {isEditing ? (
+            <textarea
+              value={editedContent}
+              onChange={(e) => setEditedContent(e.target.value)}
+              className="w-full min-h-96 p-4 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300 font-mono leading-relaxed focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y"
+              placeholder="Enter script content..."
+            />
           ) : (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
-              <p className="text-sm">No script content available</p>
-              <p className="text-xs mt-1">The script may still be generating or encountered an error.</p>
+            <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg max-h-96 overflow-y-auto">
+              {script.script && script.script.trim() ? (
+                <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-mono leading-relaxed">
+                  {script.script}
+                </pre>
+              ) : (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  <FileText className="mx-auto h-8 w-8 mb-2 opacity-50" />
+                  <p className="text-sm">No script content available</p>
+                  <p className="text-xs mt-1">The script may still be generating or encountered an error.</p>
+                  <button
+                    onClick={handleStartEdit}
+                    className="mt-4 px-4 py-2 text-sm font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
+                  >
+                    Add Script Content
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  const renderPerformanceMap = (script: ChapterScript) => {
+    const hasMap = script.emotional_map && script.emotional_map.length > 0;
+    const isGenerating = isGeneratingMap[script.id];
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <div>
+                   <h4 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                      <Activity className="w-5 h-5 text-purple-500" />
+                      Cinematic Emotional Map
+                   </h4>
+                   <p className="text-sm text-gray-600 dark:text-gray-400">
+                     {hasMap 
+                       ? `AI-generated acting notes for ${script.emotional_map?.length} dialogue lines.` 
+                       : "Generate detailed emotional cues, vocal direction, and subtext for each line."}
+                   </p>
+                </div>
+                {!hasMap && (
+                    <button
+                        onClick={() => generateEmotionalMap(script.id, script)}
+                        disabled={isGenerating}
+                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                    >
+                        {isGenerating ? (
+                            <>
+                                <span className="animate-spin">⏳</span> Analyzing...
+                            </>
+                        ) : (
+                            <>
+                                <Smile className="w-4 h-4" /> Generate Emotional Map
+                            </>
+                        )}
+                    </button>
+                )}
+            </div>
+
+            {hasMap ? (
+                <div className="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div className="overflow-x-auto">
+                        <div className="max-h-[600px] overflow-y-auto">
+                            <table className="w-full text-sm text-left" style={{ minWidth: '1000px' }}>
+                                <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400 sticky top-0 z-10">
+                                    <tr>
+                                        <th className="px-3 py-3 whitespace-nowrap">Scene</th>
+                                        <th className="px-3 py-3 whitespace-nowrap">Character</th>
+                                        <th className="px-3 py-3 whitespace-nowrap">Emotion</th>
+                                        <th className="px-3 py-3">Vocal Direction</th>
+                                        <th className="px-3 py-3">Subtext</th>
+                                        <th className="px-3 py-3">Sound Effects</th>
+                                        <th className="px-3 py-3">Music</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                                    {script.emotional_map!.map((entry, idx) => (
+                                        <tr key={idx} className="bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                                            <td className="px-3 py-3 text-gray-500 dark:text-gray-400 text-center">
+                                                {entry.scene || '-'}
+                                            </td>
+                                            <td className="px-3 py-3 font-medium text-gray-900 dark:text-white">
+                                                <div className="max-w-[120px] truncate" title={entry.character}>
+                                                    {entry.character}
+                                                </div>
+                                                <div className="text-xs text-gray-400 font-normal mt-1 truncate max-w-[120px]" title={entry.dialogue}>
+                                                    "{entry.dialogue}"
+                                                </div>
+                                            </td>
+                                            <td className="px-3 py-3">
+                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                                    entry.emotional_intensity >= 7 ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' :
+                                                    entry.emotional_intensity <= 3 ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' :
+                                                    'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                                                }`}>
+                                                    {entry.emotional_state}
+                                                    <span className="ml-1 opacity-70">({entry.emotional_intensity})</span>
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-3 text-gray-600 dark:text-gray-300 max-w-[180px]">
+                                                <div className="truncate" title={entry.vocal_direction}>{entry.vocal_direction}</div>
+                                                {entry.body_language && (
+                                                    <div className="text-xs text-gray-500 mt-1 truncate" title={entry.body_language}>
+                                                        Body: {entry.body_language}
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-3 text-gray-600 dark:text-gray-400 italic max-w-[200px]">
+                                                <div className="truncate" title={entry.subtext}>"{entry.subtext}"</div>
+                                            </td>
+                                            <td className="px-3 py-3 text-gray-600 dark:text-gray-400 max-w-[150px]">
+                                                {entry.sound_effects && Array.isArray(entry.sound_effects) && entry.sound_effects.length > 0 ? (
+                                                    <div className="flex flex-wrap gap-1">
+                                                        {entry.sound_effects.slice(0, 2).map((sfx: string, i: number) => (
+                                                            <span key={i} className="inline-flex px-1.5 py-0.5 rounded text-xs bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300">
+                                                                {sfx.length > 15 ? sfx.substring(0, 15) + '...' : sfx}
+                                                            </span>
+                                                        ))}
+                                                        {entry.sound_effects.length > 2 && (
+                                                            <span className="text-xs text-gray-400">+{entry.sound_effects.length - 2}</span>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-gray-400 text-xs">-</span>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-3 text-gray-600 dark:text-gray-400 max-w-[150px]">
+                                                {entry.background_music ? (
+                                                    <div className="truncate text-xs" title={entry.background_music}>
+                                                        🎵 {entry.background_music}
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-gray-400 text-xs">-</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div className="text-center py-12 bg-gray-50 dark:bg-gray-900 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
+                    <Activity className="mx-auto h-12 w-12 mb-4 text-gray-400" />
+                    <h5 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Ready to Direct</h5>
+                    <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-6">
+                        Generate an emotional map to add depth to your characters. This data will guide the text-to-speech engine for more realistic performances.
+                    </p>
+                    <button
+                        onClick={() => generateEmotionalMap(script.id, script)}
+                        disabled={isGenerating}
+                        className="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors shadow-sm"
+                    >
+                         {isGenerating ? <span className="animate-spin">⏳</span> : <Smile className="w-5 h-5" />}
+                         Generate Emotional Map
+                    </button>
+                    {/* Keep preview of old heuristic chart if needed or just remove it. Removing for cleaner UI unless requested. */}
+                </div>
+            )}
+        </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -775,6 +1400,60 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
       {/* Selected Script Viewer */}
       {selectedScript && renderScriptViewer()}
+
+      {/* Delete Confirmation Modal */}
+      {scriptToDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-700 transform transition-all scale-100">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="p-3 bg-red-100 dark:bg-red-900/30 rounded-full">
+                <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Delete Script?</h3>
+            </div>
+            
+            <p className="text-gray-600 dark:text-gray-300 mb-6 leading-relaxed">
+              Are you sure you want to delete this script? This action cannot be undone.
+            </p>
+            
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setScriptToDelete(null)}
+                className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2"
+              >
+                <Trash2 size={18} />
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Expand Script Modal */}
+      {showExpandModal && expandingScriptId && (
+        <ExpandScriptModal
+          isOpen={showExpandModal}
+          onClose={() => {
+            setShowExpandModal(false);
+            setExpandingScriptId(null);
+          }}
+          content={generatedScripts.find(s => s.id === expandingScriptId)?.script || ''}
+          scriptId={expandingScriptId}
+          onExpansionAccepted={(expandedContent) => {
+            if (expandingScriptId) {
+              onUpdateScript(expandingScriptId, { script: expandedContent });
+            }
+            setShowExpandModal(false);
+            setExpandingScriptId(null);
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -782,41 +1461,106 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 // Script Card Component
 interface ScriptCardProps {
   script: ChapterScript;
-  isSelected: boolean;
-  isSwitching: boolean;
-  onSelect: () => void;
+  isSelected?: boolean;
+  isSwitching?: boolean;
+  onSelect?: () => void;
   onUpdate: (updates: Partial<ChapterScript>) => void;
   onDelete: () => void;
+  className?: string;
+  showPreview?: boolean;
 }
 
-const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching, onSelect, onDelete }) => {
+const ScriptCard: React.FC<ScriptCardProps> = ({ 
+  script, 
+  isSelected, 
+  isSwitching, 
+  onSelect, 
+  onDelete, 
+  onUpdate,
+  className = '',
+  showPreview = true
+}) => {
   const [showActions, setShowActions] = useState(false);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState(script.script_name || "");
 
-  // Count scenes from script text
+  useEffect(() => {
+    // Sync tempName with prop and handle defaults
+    const defaultName = script.script_style?.includes('cinematic') ? 'Character Dialogue' : 'Voice-over Narration';
+    setTempName(script.script_name || defaultName);
+  }, [script.script_name, script.script_style]);
+
+  const handleSaveName = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
+    if (tempName.trim()) {
+      onUpdate({ script_name: tempName });
+      setIsEditingName(false);
+    }
+  };
+
+  // Count scenes from script text - use robust matching patterns
   const getSceneCount = (): number => {
+    // First check structured scenes array
+    if (script.scenes && script.scenes.length > 0) return script.scenes.length;
+    
     const scriptText = script.script || '';
-    const sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+\d+\*?\*?/gi);
+    
+    // Pattern 1: Combined ACT-SCENE format (e.g., "ACT I - SCENE 1")
+    let sceneMatches = scriptText.match(/\*?\*?ACT\s+[IVX]+\s*[-–—]\s*SCENE\s+\d+\*?\*?/gi);
     if (sceneMatches && sceneMatches.length > 0) {
       return sceneMatches.length;
     }
-    // Fallback
-    return script.scene_descriptions ? Math.ceil(script.scene_descriptions.length / 2) : 0;
+    
+    // Pattern 2: Standalone SCENE format (e.g., "#### **SCENE 1**" or "SCENE 1")
+    sceneMatches = scriptText.match(/(?:^|\n)(?:#{1,4}\s*)?\*?\*?\s*SCENE\s+\d+\s*\*?\*?/gim);
+    if (sceneMatches && sceneMatches.length > 0) {
+      return sceneMatches.length;
+    }
+    
+    // Pattern 3: INT./EXT. location headers as scene markers
+    sceneMatches = scriptText.match(/(?:^|\n)\*?\*?(?:INT\.|EXT\.)[^\n]+/gim);
+    if (sceneMatches && sceneMatches.length > 0) {
+      return sceneMatches.length;
+    }
+    
+    // Fallback to scene_descriptions
+    if (script.scene_descriptions && script.scene_descriptions.length > 0) {
+      return Math.ceil(script.scene_descriptions.length / 2);
+    }
+    
+    return 0;
   };
 
   return (
     <div
-      className={`border rounded-lg p-4 transition-all hover:shadow-md ${
-        isSelected ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-      } ${isSwitching ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+      className={`relative border rounded-lg p-4 transition-all hover:shadow-md ${
+        isSelected ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+      } ${isSwitching ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${className}`}
       onClick={!isSwitching ? onSelect : undefined}
       onMouseEnter={() => !isSwitching && setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1">
-          <h4 className="font-semibold text-gray-900 dark:text-white">
-            {script.script_name || (script.script_style === 'cinematic' ||script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration')}
-          </h4>
+          {isEditingName ? (
+            <form onSubmit={handleSaveName} onClick={e => e.stopPropagation()} className="flex items-center gap-1 mb-1">
+              <input
+                type="text"
+                value={tempName}
+                onChange={e => setTempName(e.target.value)}
+                className="flex-1 min-w-[200px] border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                autoFocus
+                onKeyDown={e => { if(e.key === 'Escape') { setIsEditingName(false); e.stopPropagation(); } }}
+              />
+              <button type="submit" className="p-1 hover:bg-green-100 rounded text-green-600 dark:hover:bg-green-900/30"><Check size={16}/></button>
+              <button type="button" onClick={() => setIsEditingName(false)} className="p-1 hover:bg-red-100 rounded text-red-600 dark:hover:bg-red-900/30"><X size={16}/></button>
+            </form>
+          ) : (
+            <h4 className="font-semibold text-gray-900 dark:text-white group flex items-center gap-2">
+              {script.script_name || (script.script_style?.includes('cinematic') ? 'Character Dialogue' : 'Voice-over Narration')}
+            </h4>
+          )}
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {script.script_style === 'cinematic' || script.script_style === 'cinematic_movie' ? 'Character Dialogue' : 'Voice-over Narration'} • Story Type: {(script as any).script_story_type || 'N/A'} • Created: {new Date(script.created_at).toLocaleDateString()}
           </p>
@@ -830,10 +1574,12 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
           {showActions && (
             <div className="flex space-x-1">
               <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Edit functionality
-                }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const defaultName = script.script_style?.includes('cinematic') ? 'Character Dialogue' : 'Voice-over Narration';
+                    setTempName(script.script_name || defaultName);
+                    setIsEditingName(true);
+                  }}
                 className="p-1 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400"
               >
                 <Edit2 className="w-4 h-4" />
@@ -864,7 +1610,9 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
         </div>
       </div>
 
-      {script.script && script.script.trim() ? (
+
+
+      {showPreview && (script.script && script.script.trim() ? (
         <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded text-sm">
           <p className="text-gray-700 dark:text-gray-300 line-clamp-3">
             {script.script.substring(0, 200)}...
@@ -874,7 +1622,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
         <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded text-sm text-center text-gray-500 dark:text-gray-400">
           <p className="text-xs">No preview available</p>
         </div>
-      )}
+      ))}
 
       <div className="mt-3 flex items-center justify-between">
         <span className={`text-xs px-2 py-1 rounded-full font-medium ${
@@ -888,7 +1636,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (!isSwitching) onSelect();
+            if (!isSwitching) onSelect?.();
           }}
           className={`text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 text-sm font-medium ${
             isSwitching ? 'cursor-not-allowed opacity-50' : ''
@@ -902,78 +1650,5 @@ const ScriptCard: React.FC<ScriptCardProps> = ({ script, isSelected, isSwitching
   );
 };
 
-// Scene Detail Card Component
-interface SceneDetailCardProps {
-  scene: SceneDescription;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
-}
-
-const SceneDetailCard: React.FC<SceneDetailCardProps> = ({
-  scene,
-  isExpanded,
-  onToggleExpand,
-}) => {
-  return (
-    <div className="border rounded-lg p-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={onToggleExpand}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            {isExpanded ? <ChevronDown className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-          </button>
-          <h5 className="font-medium text-gray-900">
-            Scene {scene.scene_number}: {scene.location}
-          </h5>
-        </div>
-        <div className="flex items-center space-x-4 text-sm text-gray-600">
-          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full">
-            {scene.time_of_day}
-          </span>
-          <div className="flex items-center space-x-1">
-            <Clock className="w-4 h-4" />
-            <span>{scene.estimated_duration}s</span>
-          </div>
-        </div>
-      </div>
-
-      <p className="text-sm text-gray-700 mb-3">{scene.visual_description}</p>
-
-      {isExpanded && (
-        <div className="space-y-3 pt-3 border-t">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Key Actions</label>
-              <p className="text-sm text-gray-700">{scene.key_actions}</p>
-            </div>
-            
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Audio Requirements</label>
-              <p className="text-sm text-gray-700">{scene.audio_requirements}</p>
-            </div>
-          </div>
-
-          {scene.characters && scene.characters.length > 0 && (
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Characters</label>
-              <div className="flex flex-wrap gap-1">
-                {scene.characters.map((character, idx) => (
-                  <span
-                    key={idx}
-                    className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-xs"
-                  >
-                    {character}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
-
+// Scene Detail Card Component removed as it was unused
 export default ScriptGenerationPanel;

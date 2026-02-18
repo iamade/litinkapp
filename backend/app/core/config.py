@@ -1,15 +1,22 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional, ClassVar, Dict, Literal
 import os
+from pathlib import Path
 import json
 from pydantic import field_validator
+
+# Calculate absolute path to .env.local from this file's location
+# config.py is in backend/app/core/, .env.local is in backend/.envs/
+_CONFIG_DIR = Path(__file__).parent  # backend/app/core/
+_BACKEND_ROOT = _CONFIG_DIR.parent.parent  # backend/
+_ENV_FILE = _BACKEND_ROOT / ".envs" / ".env.local"
 
 
 class Settings(BaseSettings):
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
 
     model_config = SettingsConfigDict(
-        env_file="../../.envs/.env.local", env_ignore_empty=True, extra="ignore"
+        env_file=str(_ENV_FILE), env_ignore_empty=True, extra="ignore"
     )
 
     # Basic settings
@@ -132,10 +139,13 @@ class Settings(BaseSettings):
     MAILGUN_API_KEY: Optional[str] = None
     MAILGUN_DOMAIN: Optional[str] = None
     MAILGUN_SENDER_EMAIL: str = "noreply@litinkai.com"
-    MAILGUN_SENDER_NAME: str = "Litink"
-    MAILGUN_SENDER_EMAIL: str = "noreply@litink.com"
+    MAILGUN_SENDER_NAME: str = "Litink AI"
 
-    FRONTEND_URL: str = "http://localhost:3000"
+    # Mailgun SMTP Configuration (Production)
+    MAILGUN_SMTP_SERVER: str = "smtp.mailgun.org"
+    MAILGUN_SMTP_PORT: int = 587
+    MAILGUN_SMTP_USERNAME: str = ""
+    MAILGUN_SMTP_PASSWORD: str = ""
 
     # Stripe Configuration
     STRIPE_SECRET_KEY: Optional[str] = None
@@ -199,12 +209,24 @@ class Settings(BaseSettings):
 
     # ModelsLab
     MODELSLAB_API_KEY: str = os.getenv("MODELSLAB_API_KEY", "")
-    # MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
+
     MODELSLAB_BASE_URL: str = "https://modelslab.com/api/v7"  # Updated to v7
+    MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
 
     # Gemini
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_BASE_URL: str = "https://gemini.google.com/api/v1"
+    # GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    # GEMINI_BASE_URL: str = "https://gemini.google.com/api/v1"
+
+    # Google AI Studio (Veo 3 Direct API)
+    # Get your API key from: https://aistudio.google.com/app/apikey
+    GOOGLE_AI_STUDIO_API_KEY: str = os.getenv("GOOGLE_AI_STUDIO_API_KEY", "")
+    GOOGLE_AI_STUDIO_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+
+    # xAI Grok Video (prepared for future use)
+    # Get your API key from: https://console.x.ai/
+    GROK_API_KEY: str = os.getenv("GROK_API_KEY", "")
+    GROK_BASE_URL: str = "https://api.x.ai/v1"
+    GROK_ENABLED: bool = False  # Set to True when API keys are available
 
     # OTP_EXPIRATION_MINUTES: int = 2 if ENVIRONMENT == "development" else 5
     LOGIN_ATTEMPTS: int = 3

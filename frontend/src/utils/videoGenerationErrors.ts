@@ -12,7 +12,17 @@ export interface VideoGenerationError {
  * Maps backend error messages to user-friendly messages
  */
 export const getErrorMessage = (error: VideoGenerationError): string => {
-  const errorMessage = error.error || error.message || 'Unknown error occurred';
+  // Log the full error object for debugging
+  console.error('[VideoGenerationError] Processing error:', error);
+
+  let errorMessage = error.error || error.message;
+
+  // Fallback for failed status with missing message
+  if (!errorMessage && ['failed', 'lipsync_failed'].includes(error.status)) {
+      errorMessage = "Video generation failed. Please try again.";
+  }
+
+  errorMessage = errorMessage || 'Unknown error occurred';
   
   // Handle polling-specific error patterns
   if (errorMessage.includes('generation_failed') || errorMessage.includes('failed to generate')) {

@@ -1,7 +1,14 @@
+# Environment files
 .envs/*
 !.envs/.env.example
-.env.prod
-# Logs
+.envs/.env.prodreal
+backend/.envs/.env.production
+backend/.envs/.env.production.template
+frontend/.env.production
+
+# Celerybeat schedule files
+celerybeat-schedule*
+
 logs
 *.log
 npm-debug.log*

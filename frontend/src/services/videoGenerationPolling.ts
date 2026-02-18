@@ -1,4 +1,4 @@
-import { videoGenerationAPI, VideoGeneration, GenerationStatus } from '../lib/videoGenerationApi';
+import { videoGenerationAPI, VideoGeneration, GenerationStatus, normalizeGenerationStatus } from '../lib/videoGenerationApi';
 import { handleVideoGenerationStatusError, showVideoGenerationSuccess } from '../utils/videoGenerationErrors';
 
 export interface PollingConfig {
@@ -124,17 +124,20 @@ export function startVideoGenerationPolling(params: VideoGenPollingParams): () =
 
 // Helper functions for the new polling system
 function isCompleteStatus(status: string): boolean {
-  return ['completed', 'failed'].includes(status);
+  const normalized = normalizeGenerationStatus(status);
+  return ['completed', 'video_completed', 'lipsync_completed', 'failed'].includes(normalized);
 }
 
 function getPollingInterval(status: string): number {
-  switch (status) {
-    case 'pending':
+  const normalized = normalizeGenerationStatus(status);
+  switch (normalized) {
+    case 'generating_audio':
       return 3000;
-    case 'processing':
+    case 'generating_video':
       return 2000;
     case 'completed':
-      return 0;
+    case 'video_completed':
+    case 'lipsync_completed':
     case 'failed':
       return 0;
     default:
@@ -169,7 +172,7 @@ function convertStatusResponse(
       total_scenes: 0,
       scenes_completed: 0,
       total_images_generated: 0,
-      success_rate: statusResponse.steps.image_generation.progress
+      success_rate: statusResponse.steps.image_generation?.progress || 0
     },
     video_progress: {
       total_scenes: 0,
@@ -177,7 +180,7 @@ function convertStatusResponse(
       total_videos_generated: 0,
       successful_videos: 0,
       failed_videos: 0,
-      success_rate: statusResponse.steps.video_generation.progress
+      success_rate: statusResponse.steps.video_generation?.progress || 0
     },
     merge_progress: {
       total_scenes_merged: 0,
@@ -198,18 +201,7 @@ function convertStatusResponse(
 }
 
 function mapStatusToGenerationStatus(status: string): GenerationStatus {
-  switch (status) {
-    case 'pending':
-      return 'generating_audio';
-    case 'processing':
-      return 'generating_video';
-    case 'completed':
-      return 'completed';
-    case 'failed':
-      return 'failed';
-    default:
-      return 'generating_audio';
-  }
+  return normalizeGenerationStatus(status);
 }
 
 // Legacy polling class (kept for backward compatibility)
@@ -221,23 +213,26 @@ class VideoGenerationPolling {
   private pollingStartTimes: Map<string, number> = new Map();
   
   private getPollingInterval(status: string): number {
+    const normalized = normalizeGenerationStatus(status);
     // Smart polling - adjust interval based on generation phase
-    switch (status) {
-      case 'pending':
-        return 3000; // 3 seconds - initial state
-      case 'processing':
-        return 2000; // 2 seconds - active processing
+    switch (normalized) {
+      case 'generating_audio':
+        return 3000;
+      case 'generating_video':
+        return 2000;
       case 'completed':
-        return 0; // Stop polling
+      case 'video_completed':
+      case 'lipsync_completed':
       case 'failed':
         return 0; // Stop polling
       default:
-        return 2500; // 2.5 seconds default
+        return 2500;
     }
   }
 
   private isCompleteStatus(status: string): boolean {
-    return ['completed', 'failed'].includes(status);
+    const normalized = normalizeGenerationStatus(status);
+    return ['completed', 'video_completed', 'lipsync_completed', 'failed'].includes(normalized);
   }
 
   // Helper method to convert new status response to existing VideoGeneration format
@@ -270,7 +265,7 @@ class VideoGenerationPolling {
         total_scenes: 0,
         scenes_completed: 0,
         total_images_generated: 0,
-        success_rate: statusResponse.steps.image_generation.progress
+        success_rate: statusResponse.steps.image_generation?.progress ?? 0
       },
       video_progress: {
         total_scenes: 0,
@@ -278,7 +273,7 @@ class VideoGenerationPolling {
         total_videos_generated: 0,
         successful_videos: 0,
         failed_videos: 0,
-        success_rate: statusResponse.steps.video_generation.progress
+        success_rate: statusResponse.steps.video_generation?.progress ?? 0
       },
       merge_progress: {
         total_scenes_merged: 0,
@@ -299,18 +294,7 @@ class VideoGenerationPolling {
   }
 
   private mapStatusToGenerationStatus(status: string): GenerationStatus {
-    switch (status) {
-      case 'pending':
-        return 'generating_audio';
-      case 'processing':
-        return 'generating_video';
-      case 'completed':
-        return 'completed';
-      case 'failed':
-        return 'failed';
-      default:
-        return 'generating_audio';
-    }
+    return normalizeGenerationStatus(status);
   }
 
   async startPolling(

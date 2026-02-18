@@ -84,7 +84,7 @@ services:
       - litinkai_local_nw
 
   rabbitmq:
-    image: docker.io/rabbitmq:latest
+    image: docker.io/rabbitmq:management
     ports:
       - "15672:15672"
       - "5672:5672"

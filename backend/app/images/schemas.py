@@ -5,15 +5,21 @@ from pydantic import BaseModel
 
 class SceneImageRequest(BaseModel):
     """Request model for generating scene images"""
+
     scene_description: str
     style: str = "cinematic"
     aspect_ratio: str = "16:9"
     custom_prompt: Optional[str] = None
     script_id: Optional[str] = None
+    character_ids: Optional[List[str]] = None
+    character_image_urls: Optional[List[str]] = None
+    is_suggested_shot: bool = False  # For suggested shot special handling
+    shot_index: Optional[int] = None  # 0 = Key Scene, 1+ = Suggested Shots
 
 
 class CharacterImageRequest(BaseModel):
     """Request model for generating character images"""
+
     character_name: str
     character_description: str
     style: str = "realistic"
@@ -24,11 +30,13 @@ class CharacterImageRequest(BaseModel):
 
 class BatchImageRequest(BaseModel):
     """Request model for batch image generation"""
+
     images: List[Dict[str, Any]]
 
 
 class ImageGenerationResponse(BaseModel):
     """Response model for single image generation"""
+
     record_id: str
     image_url: str
     prompt_used: str
@@ -39,6 +47,7 @@ class ImageGenerationResponse(BaseModel):
 
 class ImageGenerationQueuedResponse(BaseModel):
     """Response model for queued image generation"""
+
     task_id: str
     status: str
     message: str
@@ -51,6 +60,7 @@ class ImageGenerationQueuedResponse(BaseModel):
 
 class BatchImageResponse(BaseModel):
     """Response model for batch image generation"""
+
     results: List[Dict[str, Any]]
     successful_count: int
     total_count: int
@@ -58,6 +68,7 @@ class BatchImageResponse(BaseModel):
 
 class ImageRecord(BaseModel):
     """Model for image generation record"""
+
     id: str
     user_id: str
     image_type: str
@@ -70,6 +81,7 @@ class ImageRecord(BaseModel):
     # Scene-related fields for async tracking
     chapter_id: Optional[UUID] = None
     scene_number: Optional[int] = None
+    shot_index: int = 0
     retry_count: int = 0
     status: str
     generation_time_seconds: Optional[float] = None
@@ -83,6 +95,7 @@ class ImageRecord(BaseModel):
 
 class ChapterImagesResponse(BaseModel):
     """Response model for listing chapter images"""
+
     chapter_id: str
     images: List[ImageRecord]
     total_count: int
@@ -90,6 +103,7 @@ class ChapterImagesResponse(BaseModel):
 
 class BatchStatusResponse(BaseModel):
     """Response model for batch generation status"""
+
     batch_id: str
     status: str
     completed_count: int
@@ -100,6 +114,7 @@ class BatchStatusResponse(BaseModel):
 
 class DeleteImageResponse(BaseModel):
     """Response model for image deletion"""
+
     success: bool
     message: str
     record_id: Optional[str] = None
@@ -107,6 +122,7 @@ class DeleteImageResponse(BaseModel):
 
 class ImageStatusResponse(BaseModel):
     """Response model for checking image generation status"""
+
     record_id: str
     status: str  # 'pending', 'processing', 'completed', 'failed'
     image_url: Optional[str] = None
@@ -119,3 +135,53 @@ class ImageStatusResponse(BaseModel):
     generation_time_seconds: Optional[float] = None
     created_at: str
     updated_at: Optional[str] = None
+
+
+class ImageUpscaleRequest(BaseModel):
+    """Request model for image upscaling"""
+
+    image_url: str
+    model_id: str = "realesr-general-x4v3"  # Default: 4x general upscaling
+    scale: int = 4  # 2, 3, or 4
+    face_enhance: bool = False
+
+
+class ImageUpscaleResponse(BaseModel):
+    """Response model for image upscaling"""
+
+    status: str
+    upscaled_url: Optional[str] = None
+    original_url: str
+    model_used: str
+    scale: int
+    generation_time: Optional[float] = None
+    message: str
+
+
+class ImageExpandRequest(BaseModel):
+    """Request model for image expansion/outpainting"""
+
+    image_url: str
+    target_aspect_ratio: str = (
+        "16:9"  # Target aspect ratio (e.g., "16:9", "21:9", "4:3")
+    )
+    prompt: Optional[str] = None  # Optional prompt to guide background generation
+    wait_for_completion: bool = True  # Whether to wait for async processing
+
+
+class ImageExpandResponse(BaseModel):
+    """Response model for image expansion/outpainting"""
+
+    status: str
+    expanded_url: Optional[str] = None
+    original_url: str
+    target_aspect_ratio: str
+    expansion_params: Optional[Dict[str, float]] = (
+        None  # left, right, top, bottom ratios
+    )
+    generation_time: Optional[float] = None
+    message: str
+    # For async processing
+    request_id: Optional[str] = None
+    fetch_url: Optional[str] = None
+    eta: Optional[int] = None

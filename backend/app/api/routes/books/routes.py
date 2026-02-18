@@ -368,7 +368,11 @@ async def get_books(
     current_user: User = Depends(get_current_user),
 ):
     """Get books uploaded by the current user, optionally filtered by book_type"""
-    stmt = select(BookModel).where(BookModel.user_id == current_user.id)
+    # Only show Explorer mode books (hide Creator mode books)
+    stmt = select(BookModel).where(
+        BookModel.user_id == current_user.id,
+        BookModel.source_mode == "explorer",  # Filter: only Explorer books
+    )
 
     # Filter by book_type if provided
     if book_type:
@@ -386,7 +390,11 @@ async def get_my_books(
 ):
     """Get books by current user"""
     try:
-        stmt = select(BookModel).where(BookModel.user_id == current_user.id)
+        # Only show Explorer mode books (hide Creator mode books)
+        stmt = select(BookModel).where(
+            BookModel.user_id == current_user.id,
+            BookModel.source_mode == "explorer",  # Filter: only Explorer books
+        )
         result = await session.exec(stmt)
         books = result.all()
         return [book.model_dump(mode="json") for book in books]

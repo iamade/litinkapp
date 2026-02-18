@@ -41,7 +41,9 @@ export const AudioGenerationModal: React.FC<AudioGenerationModalProps> = ({
         {/* Content */}
         <div className="p-6">
           <p className="text-gray-700 text-center">
-            Generate audio for all {sceneCount} scenes? This may take several minutes.
+            {sceneCount === 1 
+              ? "Generate audio for this scene? This may take a moment."
+              : `Generate audio for all ${sceneCount} scenes? This may take several minutes.`}
           </p>
         </div>
 

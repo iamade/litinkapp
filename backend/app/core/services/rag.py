@@ -164,6 +164,11 @@ class RAGService:
             script_story_type = plot_overview.get("script_story_type", None)
             genre = plot_overview.get("genre", None)
 
+            # Extract creative_directive for enhanced creative direction
+            creative_directive = plot_overview.get(
+                "creative_directive"
+            ) or plot_overview.get("logline")
+
             # Generate fictional personas for non-fiction content
             personas = None
             if script_story_type in [
@@ -188,6 +193,7 @@ class RAGService:
                 script_style,
                 script_story_type=script_story_type,
                 genre=genre,
+                creative_directive=creative_directive,
                 personas=(
                     [persona["name"] for persona in personas] if personas else None
                 ),
@@ -272,22 +278,31 @@ class RAGService:
         script_style: str = "cinematic_movie",
         script_story_type: Optional[str] = None,
         genre: Optional[str] = None,
+        creative_directive: Optional[str] = None,
         personas: Optional[List[str]] = None,
     ) -> str:
         """
         Construct a prompt based on the full RAG-enhanced context, video_style, script_style,
         and conditional adaptation for fiction/non-fiction content.
+        Includes creative_directive to blend user's creative vision with source material.
         """
         # Determine story type and genre
         story_type = script_story_type or "fiction"
         genre = genre or "general"
+
+        # Prepare creative directive text
+        directive_text = (
+            f"\n\nCREATIVE DIRECTIVE:\n{creative_directive}\n"
+            if creative_directive
+            else ""
+        )
 
         # Fiction: traditional character-driven narrative
         if story_type == "fiction":
             if script_style == "cinematic_movie":
                 return f"""
 Given the following book and chapter context, generate a cinematic screenplay-style script for a {video_style} video adaptation.
-
+{directive_text}
 The script should include:
 1. Character names in CAPS
 2. Dialogue in quotes
@@ -296,6 +311,7 @@ The script should include:
 5. Dramatic and engaging storytelling
 6. Suitable for a movie or animated story
 7. A balanced, racially diverse cast of characters (not just white/Caucasian; include characters of different races and backgrounds)
+{"8. Blend the source material with the creative direction to create a unique adaptation" if creative_directive else ""}
 
 Use the context below:
 
@@ -311,8 +327,8 @@ Return only the screenplay script.
 """
             else:  # cinematic_narration
                 return f"""
-Given the following book and chapter context, generate a cinematic narration-style script for a {video_style} video adaptation.
-
+Given the following book and chapter content, generate a cinematic narration-style script for a {video_style} video adaptation.
+{directive_text}
 The script should include:
 1. Engaging storytelling and descriptive narration
 2. Scene descriptions and visual details
@@ -320,6 +336,7 @@ The script should include:
 4. Dramatic and immersive language
 5. Suitable for a narrated story video
 6. A balanced, racially diverse cast of characters (not just white/Caucasian; include characters of different races and backgrounds)
+{"7. Interpret the source material through the lens of the creative direction" if creative_directive else ""}
 
 Use the context below:
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { projectService, Project } from "../services/projectService";
-import { useAuth } from "../contexts/AuthContext";
+import { userService } from "../services/userService";
 import { toast } from "react-hot-toast";
 import { 
   ArrowLeft, 
@@ -16,7 +16,10 @@ import {
   Music,
   Video,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Edit2,
+  Check,
+  X
 } from "lucide-react";
 
 // Import generation panels
@@ -26,6 +29,7 @@ import ScriptGenerationPanel from '../components/Script/ScriptGenerationPanel';
 import ImagesPanel from '../components/Images/ImagesPanel';
 import AudioPanel from '../components/Audio/AudioPanel';
 import VideoProductionPanel from '../components/Video/VideoProductionPanel';
+import ConsultationPanel from '../components/Consultation/ConsultationPanel';
 
 // Import hooks
 import { usePlotGeneration } from '../hooks/usePlotGeneration';
@@ -33,6 +37,10 @@ import { useScriptGeneration } from '../hooks/useScriptGeneration';
 import { useImageGeneration } from '../hooks/useImageGeneration';
 import { useAudioGeneration } from '../hooks/useAudioGeneration';
 import { useScriptSelection } from '../contexts/ScriptSelectionContext';
+import { useStoryboardOptional } from '../contexts/StoryboardContext';
+import { useAuth } from '../contexts/AuthContext';
+import { videoGenerationAPI } from '../lib/videoGenerationApi';
+import { useVideoGenerationStatus } from '../hooks/useVideoGenerationStatus';
 
 // Types
 interface ChapterArtifact {
@@ -43,12 +51,47 @@ interface ChapterArtifact {
     content: string;
     chapter_number: number;
     summary?: string;
+    chapter_id?: string;  // Actual chapter ID from books.chapters table
   };
   version: number;
   project_id: string;
+  // Cinematic Universe fields
+  content_type_label?: string;  // Film, Episode, Part, etc.
+  script_order?: number;        // Order in the cinematic universe sequence
+  is_script?: boolean;          // True if this is an uploaded script
 }
 
+// Helper to get dynamic label for chapters/scripts
+const getDynamicLabel = (artifact: ChapterArtifact, index: number): { label: string; plural: string } => {
+  const label = artifact.content_type_label || 'Chapter';
+  const number = artifact.script_order || artifact.content.chapter_number || index + 1;
+  
+  // Map labels to plurals
+  const pluralMap: Record<string, string> = {
+    'Film': 'Films',
+    'Episode': 'Episodes', 
+    'Part': 'Parts',
+    'Chapter': 'Chapters',
+    'Script': 'Scripts',
+  };
+  
+  return {
+    label: `${label} ${number}`,
+    plural: pluralMap[label] || `${label}s`
+  };
+};
+
+// Helper to get the actual chapter ID for API calls
+// For uploaded books, content.chapter_id contains the real chapter table ID
+// For prompt-only projects, we use the artifact/project ID
+const getActualChapterId = (chapter: ChapterArtifact | null): string => {
+  if (!chapter) return '';
+  // Prefer content.chapter_id (actual Chapter table ID) if available
+  return chapter.content?.chapter_id || chapter.id;
+};
+
 interface WorkflowProgress {
+  consultation?: "idle" | "generating" | "completed" | "error";
   plot: "idle" | "generating" | "completed" | "error";
   script: "idle" | "generating" | "completed" | "error";
   images: "idle" | "generating" | "completed" | "error";
@@ -56,7 +99,52 @@ interface WorkflowProgress {
   video: "idle" | "generating" | "completed" | "error";
 }
 
-type WorkflowTab = "plot" | "script" | "images" | "audio" | "video";
+type WorkflowTab = "consultation" | "plot" | "script" | "images" | "audio" | "video";
+
+interface ChapterContentModalProps {
+  chapter: ChapterArtifact | null;
+  onClose: () => void;
+}
+
+const ChapterContentModal: React.FC<ChapterContentModalProps> = ({ chapter, onClose }) => {
+  if (!chapter) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col border border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+          <div>
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+              Chapter {chapter.content.chapter_number}
+            </span>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+              {chapter.content.title}
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors text-gray-500 dark:text-gray-400"
+          >
+            <X size={24} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="prose dark:prose-invert max-w-none text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+            {chapter.content.content}
+          </div>
+        </div>
+        <div className="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 rounded-b-2xl flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-6 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-white font-medium rounded-xl hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors shadow-sm"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const ProjectView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -73,6 +161,31 @@ const ProjectView: React.FC = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [workflowProgress, setWorkflowProgress] = useState<Record<string, WorkflowProgress>>({});
   const [videoStatus, setVideoStatus] = useState<string | null>("idle");
+  // isLimitModalOpen states removed as unused
+  
+  // Terminology settings modal
+  const [showTerminologyModal, setShowTerminologyModal] = useState(false);
+  const [selectedTerminology, setSelectedTerminology] = useState<string>('Chapter');
+  const [isSavingTerminology, setIsSavingTerminology] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+
+  const [editedTitle, setEditedTitle] = useState("");
+  const [viewChapter, setViewChapter] = useState<ChapterArtifact | null>(null);
+
+  // Video generation polling
+  const [generatingShotIds, setGeneratingShotIds] = useState<Set<string>>(new Set());
+  const [latestVideoUrl, setLatestVideoUrl] = useState<string | null>(null);
+  const [videoGenerations, setVideoGenerations] = useState<any[]>([]);
+  const safetyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const {
+    startPolling,
+    stopPolling,
+    isComplete,
+    isFailed,
+    isGenerating: isVideoGenerating,
+    generation,
+    progress: generationProgress,
+  } = useVideoGenerationStatus();
 
   // Context hooks
   const { selectChapter, selectedScriptId } = useScriptSelection();
@@ -82,8 +195,50 @@ const ProjectView: React.FC = () => {
   useEffect(() => {
     return () => {
       mountedRef.current = false;
+      stopPolling();
     };
   }, []);
+
+  // Load latest video generation for selected chapter (for Preview tab on page load)
+  useEffect(() => {
+    if (!selectedChapter) {
+      setLatestVideoUrl(null);
+      return;
+    }
+
+    const chapterId = getActualChapterId(selectedChapter);
+    if (!chapterId) return;
+
+    let cancelled = false;
+    const loadLatestVideoGen = async () => {
+      try {
+        const result = await videoGenerationAPI.getChapterVideoGenerations(chapterId);
+        if (cancelled) return;
+        if (result.generations && result.generations.length > 0) {
+          // Store all generations for the carousel
+          setVideoGenerations(result.generations);
+          // Latest generation is first (sorted by created_at desc)
+          const latest = result.generations[0];
+          if (latest.video_url) {
+            setLatestVideoUrl(latest.video_url);
+          } else {
+            setLatestVideoUrl(null);
+          }
+        } else {
+          setVideoGenerations([]);
+          setLatestVideoUrl(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to load video generations:', error);
+          setLatestVideoUrl(null);
+        }
+      }
+    };
+
+    loadLatestVideoGen();
+    return () => { cancelled = true; };
+  }, [selectedChapter]);
 
   useEffect(() => {
     if (id) {
@@ -153,8 +308,6 @@ const ProjectView: React.FC = () => {
   // Plot generation hook - use project ID with isProject flag
   const {
     plotOverview,
-    isGenerating: isGeneratingPlot,
-    generatePlot,
     loadPlot
   } = usePlotGeneration(id || '', {
     isProject: true,
@@ -181,10 +334,9 @@ const ProjectView: React.FC = () => {
     isGeneratingScript,
     loadScripts,
     generateScript,
-    selectScript,
     updateScript,
     deleteScript
-  } = useScriptGeneration(selectedChapter?.id || '');
+  } = useScriptGeneration(getActualChapterId(selectedChapter));
 
   // Derive selectedScript
   const selectedScript = React.useMemo(() => {
@@ -194,17 +346,14 @@ const ProjectView: React.FC = () => {
   // Image and audio generation hooks
   const {
     sceneImages,
-    characterImages,
-    isLoading: isLoadingImages,
     loadImages,
-  } = useImageGeneration(selectedChapter?.id || '', selectedScriptId || null);
+  } = useImageGeneration(getActualChapterId(selectedChapter), selectedScriptId || null);
 
   const {
     files,
-    isLoading: isLoadingAudio,
     loadAudio,
   } = useAudioGeneration({
-    chapterId: selectedChapter?.id || '',
+    chapterId: getActualChapterId(selectedChapter),
     scriptId: selectedScript?.id,
   });
 
@@ -225,7 +374,11 @@ const ProjectView: React.FC = () => {
 
   useEffect(() => {
     const imageUrls = Object.values(sceneImages)
-      .filter((img: any) => img.imageUrl)
+      .flat()
+      .filter((img: any) => {
+        const normalizedScriptId = img.script_id || img.scriptId;
+        return img.imageUrl && (!selectedScriptId || normalizedScriptId === selectedScriptId);
+      })
       .sort((a: any, b: any) => a.sceneNumber - b.sceneNumber)
       .map((img: any) => img.imageUrl);
     setGeneratedImageUrls(imageUrls);
@@ -243,8 +396,18 @@ const ProjectView: React.FC = () => {
     setGeneratedAudioFiles(audioUrls);
   }, [files]);
 
-  // Workflow tabs configuration
+  // Detect if this is a multi-script project (needs consultation)
+  const isMultiScriptProject = project?.pipeline_steps?.includes('consultation');
+
+  // Filter video generations by selected script at the top level
+  const filteredVideoGenerations = React.useMemo(() => {
+    if (!selectedScriptId || !videoGenerations) return videoGenerations;
+    return videoGenerations.filter(gen => gen.script_id === selectedScriptId);
+  }, [videoGenerations, selectedScriptId]);
+  
+  // Workflow tabs configuration - conditionally include consultation
   const workflowTabs = [
+    ...(isMultiScriptProject ? [{ id: "consultation" as WorkflowTab, label: "Cinematic\nuniverse setup", icon: BookOpen, description: "AI-guided creative setup" }] : []),
     { id: "plot" as WorkflowTab, label: "Plot", icon: BookOpen, description: "Story overview & characters" },
     { id: "script" as WorkflowTab, label: "Script", icon: FileText, description: "Chapter scripts & scenes" },
     { id: "images" as WorkflowTab, label: "Images", icon: Image, description: "Scene & character images" },
@@ -311,12 +474,114 @@ const ProjectView: React.FC = () => {
   };
 
   // Handle video generation
-  const handleGenerateVideo = async () => {
+  const storyboardContext = useStoryboardOptional();
+  const handleGenerateVideo = async (selectedShotIds?: string[], overrideAudioIds?: string[]) => {
     if (!selectedChapter) return;
+
+    // selectedScriptId is already available from useScriptSelection() hook at component level
+    if (!selectedScriptId) {
+      toast.error('Please select a script first');
+      return;
+    }
+
     updateProgress("video", "generating");
     setVideoStatus("starting");
-    // TODO: Integrate with video generation API
-    toast.success("Video generation started!");
+
+    // Track which shots are being generated
+    if (selectedShotIds && selectedShotIds.length > 0) {
+      setGeneratingShotIds(new Set(selectedShotIds));
+    } else {
+      setGeneratingShotIds(new Set(['__all__']));
+    }
+
+    // Get selected audio IDs: preferably from override (e.g. specific scene generation) or fallback to context
+    const selectedAudioIds = overrideAudioIds || (storyboardContext?.selectedAudioIds
+      ? Array.from(storyboardContext.selectedAudioIds)
+      : undefined);
+
+    // Debug logging to verify selections reach the API
+    console.log('[handleGenerateVideo] selectedShotIds:', selectedShotIds);
+    console.log('[handleGenerateVideo] selectedAudioIds:', selectedAudioIds);
+    console.log('[handleGenerateVideo] overrideAudioIds:', overrideAudioIds);
+
+    try {
+      const response = await videoGenerationAPI.startVideoGeneration(
+        selectedScriptId,
+        getActualChapterId(selectedChapter),
+        'free',
+        selectedShotIds,
+        selectedAudioIds
+      );
+
+      if (response.video_generation_id) {
+        // Start polling for generation status
+        startPolling(response.video_generation_id);
+        setVideoStatus("processing");
+
+        // Safety timeout to clear generating spinner if polling never resolves
+        if (safetyTimeoutRef.current) {
+          clearTimeout(safetyTimeoutRef.current);
+        }
+        safetyTimeoutRef.current = setTimeout(() => {
+          setGeneratingShotIds(prev => {
+            if (prev.size > 0) {
+              console.warn('[SAFETY] Clearing stale generatingShotIds after 5min timeout');
+              setVideoStatus("idle");
+              return new Set();
+            }
+            return prev;
+          });
+        }, 5 * 60 * 1000); // 5 minutes max
+
+        const shotMsg = selectedShotIds?.length
+          ? `for ${selectedShotIds.length} selected shot${selectedShotIds.length > 1 ? 's' : ''}`
+          : 'for all shots';
+        toast.success(`Video generation started ${shotMsg}!`);
+      }
+    } catch (error) {
+      console.error('Failed to start video generation:', error);
+      toast.error('Failed to start video generation');
+      setVideoStatus("ready");
+      setGeneratingShotIds(new Set());
+      updateProgress("video", "idle");
+    }
+  };
+
+  // React to video generation polling status changes
+  useEffect(() => {
+    if (isComplete) {
+      if (safetyTimeoutRef.current) {
+        clearTimeout(safetyTimeoutRef.current);
+        safetyTimeoutRef.current = null;
+      }
+      setVideoStatus("completed");
+      setGeneratingShotIds(new Set());
+      updateProgress("video", "completed");
+      // Update latestVideoUrl from polling data so Preview tab shows the video immediately
+      if (generation?.video_url) {
+        setLatestVideoUrl(generation.video_url);
+      }
+      toast.success('Video generation completed!');
+    } else if (isFailed) {
+      if (safetyTimeoutRef.current) {
+        clearTimeout(safetyTimeoutRef.current);
+        safetyTimeoutRef.current = null;
+      }
+      setVideoStatus("failed");
+      setGeneratingShotIds(new Set());
+      updateProgress("video", "error");
+      stopPolling();
+      toast.error(generation?.error_message || 'Video generation failed. Please try again.');
+    } else if (isVideoGenerating) {
+      setVideoStatus("processing");
+    }
+  }, [isComplete, isFailed, isVideoGenerating, stopPolling]);
+
+  // Handle video generation deletion
+  const handleDeleteVideoGeneration = async (genId: string) => {
+    await videoGenerationAPI.deleteGeneration(genId);
+    setVideoGenerations(prev => prev.filter(g => g.id !== genId));
+    toast.success('Generation deleted successfully');
   };
 
   // Render tab content
@@ -324,6 +589,30 @@ const ProjectView: React.FC = () => {
     if (!project) return null;
 
     switch (activeTab) {
+      case "consultation":
+        return (
+          <ConsultationPanel
+            projectId={project.id}
+            inputPrompt={project.input_prompt}
+            onConsultationComplete={() => {
+              // Move to plot tab after consultation is accepted
+              setActiveTab("plot");
+              // Reload project to get updated structure
+              loadProject(project.id);
+            }}
+            onSkip={() => setActiveTab("plot")}
+            onNavigateToScript={(artifactId) => {
+              // Find the chapter matching this artifact and switch to script tab
+              const chapter = chapters.find((c) => c.id === artifactId);
+              if (chapter) {
+                setSelectedChapter(chapter);
+                selectChapter(chapter.id, { reason: 'user' });
+              }
+              setActiveTab("script");
+            }}
+          />
+        );
+        
       case "plot":
         // Use ProjectPlotPanel for prompt-only projects, PlotOverviewPanel for book-based
         if (isPromptOnlyProject && project.input_prompt) {
@@ -358,7 +647,7 @@ const ProjectView: React.FC = () => {
         }
         return (
           <ScriptGenerationPanel
-            chapterId={selectedChapter.id}
+            chapterId={getActualChapterId(selectedChapter)}
             chapterTitle={selectedChapter.content.title}
             chapterContent={selectedChapter.content.content}
             generatedScripts={generatedScripts}
@@ -368,6 +657,13 @@ const ProjectView: React.FC = () => {
             onUpdateScript={updateScript}
             onDeleteScript={deleteScript}
             plotOverview={plotOverview}
+            onCreatePlotCharacter={async (name: string, entityType: 'character' | 'object' | 'location' = 'character') => {
+              if (!id) throw new Error('No project ID');
+              const result = await userService.createProjectCharacter(id, name, entityType);
+              // Refresh plot overview to get updated characters list
+              await loadPlot();
+              return { ...result, entity_type: result.entity_type as 'character' | 'object' | 'location' };
+            }}
           />
         );
 
@@ -382,10 +678,12 @@ const ProjectView: React.FC = () => {
         }
         return (
           <ImagesPanel
+            chapterId={getActualChapterId(selectedChapter)}
             chapterTitle={selectedChapter.content.title}
             selectedScript={selectedScript}
             plotOverview={plotOverview}
             onRefreshPlotOverview={refreshPlotOverview}
+            userTier={user?.subscription_tier || 'free'}
           />
         );
 
@@ -400,7 +698,7 @@ const ProjectView: React.FC = () => {
         }
         return (
           <AudioPanel
-            chapterId={selectedChapter.id}
+            chapterId={getActualChapterId(selectedChapter)}
             chapterTitle={selectedChapter.content.title}
             selectedScript={selectedScript}
             plotOverview={plotOverview}
@@ -418,7 +716,7 @@ const ProjectView: React.FC = () => {
         }
         return (
           <VideoProductionPanel
-            chapterId={selectedChapter.id}
+            chapterId={getActualChapterId(selectedChapter)}
             chapterTitle={selectedChapter.content.title}
             imageUrls={generatedImageUrls}
             audioFiles={generatedAudioFiles}
@@ -426,12 +724,47 @@ const ProjectView: React.FC = () => {
             videoStatus={videoStatus}
             canGenerateVideo={!!selectedChapter && videoStatus !== "processing" && videoStatus !== "starting"}
             selectedScript={selectedScript}
+            generatingShotIds={generatingShotIds}
+            generationProgress={generationProgress}
+            videoUrl={generation?.video_url || latestVideoUrl || undefined}
+            videoGenerations={filteredVideoGenerations}
+            onDeleteGeneration={handleDeleteVideoGeneration}
           />
         );
 
       default:
         return <div>Tab content not implemented</div>;
     }
+  };
+
+
+
+  const handleStartRename = () => {
+    setEditedTitle(project?.title || "");
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveRename = async () => {
+    if (!project || !editedTitle.trim()) {
+      setIsEditingTitle(false);
+      return;
+    }
+
+    try {
+      const updatedProject = await projectService.updateProject(project.id, {
+        title: editedTitle.trim()
+      });
+      setProject(updatedProject);
+      toast.success("Project renamed successfully");
+      setIsEditingTitle(false);
+    } catch (error) {
+      console.error("Failed to rename project:", error);
+      toast.error("Failed to rename project");
+    }
+  };
+
+  const handleCancelRename = () => {
+    setIsEditingTitle(false);
   };
 
   if (loading) {
@@ -467,7 +800,7 @@ const ProjectView: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4">
                 <button 
-                  onClick={() => setIsWorkflowMode(false)}
+                  onClick={() => navigate("/creator")}
                   className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 >
                   <ArrowLeft size={20} />
@@ -475,7 +808,9 @@ const ProjectView: React.FC = () => {
                 <div>
                   <h1 className="text-xl font-bold text-gray-900 dark:text-white">{project.title}</h1>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Creator Mode • {chapters.length} Chapters
+                    Creator Mode • {chapters.length} {chapters.length > 0 && chapters[0].content_type_label 
+                      ? getDynamicLabel(chapters[0], 0).plural 
+                      : 'Chapters'}
                   </p>
                 </div>
               </div>
@@ -494,8 +829,8 @@ const ProjectView: React.FC = () => {
 
         <div className="flex min-h-screen">
           {/* Main Content Area */}
-          <div className={`flex-1 transition-all duration-300 ${sidebarCollapsed ? "mr-16" : "mr-80"}`}>
-            <div className="p-6">
+          <div className={`flex-1 min-w-0 overflow-hidden transition-all duration-300 ${sidebarCollapsed ? "mr-16" : "mr-80"}`}>
+            <div className="p-6 overflow-x-auto">
               {/* Workflow Tabs */}
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
                 <div className="border-b border-gray-200 dark:border-gray-700">
@@ -557,10 +892,14 @@ const ProjectView: React.FC = () => {
                 {!sidebarCollapsed ? (
                   <>
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-                      Chapters
+                      {chapters.length > 0 && chapters[0].content_type_label 
+                        ? getDynamicLabel(chapters[0], 0).plural 
+                        : 'Chapters'}
                     </h2>
                     <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {chapters.length} chapters total
+                      {chapters.length} {chapters.length > 0 && chapters[0].content_type_label 
+                        ? getDynamicLabel(chapters[0], 0).plural.toLowerCase() 
+                        : 'chapters'} total
                     </p>
                   </>
                 ) : (
@@ -600,7 +939,7 @@ const ProjectView: React.FC = () => {
                                 {chapter.content.title}
                               </p>
                               <p className="text-sm text-gray-500 dark:text-gray-400">
-                                Chapter {chapter.content.chapter_number || index + 1}
+                                {getDynamicLabel(chapter, index).label}
                               </p>
                             </div>
                           </div>
@@ -622,7 +961,7 @@ const ProjectView: React.FC = () => {
                       ) : (
                         <div className="flex flex-col items-center">
                           <span className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                            {chapter.content.chapter_number || index + 1}
+                            {chapter.script_order || chapter.content.chapter_number || index + 1}
                           </span>
                           <div className="w-8 bg-gray-200 dark:bg-gray-600 rounded-full h-1">
                             <div
@@ -658,16 +997,52 @@ const ProjectView: React.FC = () => {
                 <ArrowLeft size={20} />
               </button>
               <div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  {project.title}
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                    project.status === 'completed' ? 'bg-green-100 text-green-700 border-green-200' :
-                    project.status === 'published' ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                    'bg-gray-100 text-gray-600 border-gray-200'
-                  }`}>
-                    {project.status.replace('_', ' ')}
-                  </span>
-                </h1>
+                {isEditingTitle ? (
+                  <div className="flex items-center gap-2 mb-1">
+                    <input
+                      type="text"
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      className="text-xl font-bold text-gray-900 dark:text-white bg-transparent border-b-2 border-purple-500 focus:outline-none min-w-[200px]"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveRename();
+                        if (e.key === 'Escape') handleCancelRename();
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleSaveRename(); }}
+                      className="p-1 hover:bg-green-100 dark:hover:bg-green-900 rounded-full text-green-600 dark:text-green-400"
+                    >
+                      <Check size={18} />
+                    </button>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); handleCancelRename(); }}
+                      className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded-full text-red-600 dark:text-red-400"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                ) : (
+                  <div 
+                    className="flex items-center gap-3 mb-1 group cursor-pointer -ml-2 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    onClick={handleStartRename}
+                    title="Click to rename project"
+                  >
+                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+                      {project.title}
+                    </h1>
+                    <Edit2 size={16} className="text-gray-400 group-hover:text-purple-600 transition-colors" />
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                      project.status === 'completed' ? 'bg-green-100 text-green-700 border-green-200' :
+                      project.status === 'published' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                      'bg-gray-100 text-gray-600 border-gray-200'
+                    }`}>
+                      {project.status.replace('_', ' ')}
+                    </span>
+                  </div>
+                )}
                 <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-4">
                   <span className="flex items-center gap-1">
                     <Clock size={12} />
@@ -675,14 +1050,23 @@ const ProjectView: React.FC = () => {
                   </span>
                   <span className="flex items-center gap-1">
                     <BookOpen size={12} />
-                    {chapters.length} Chapters
+                    {chapters.length} {chapters.length > 0 && chapters[0].content_type_label 
+                      ? getDynamicLabel(chapters[0], 0).plural 
+                      : 'Chapters'}
                   </span>
                 </p>
               </div>
             </div>
             
             <div className="flex items-center gap-3">
-              <button className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+              <button 
+                onClick={() => {
+                  setSelectedTerminology(project?.content_terminology || 'Chapter');
+                  setShowTerminologyModal(true);
+                }}
+                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                title="Project Settings"
+              >
                 <Settings size={20} />
               </button>
               <button className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
@@ -699,7 +1083,11 @@ const ProjectView: React.FC = () => {
           {/* Main Content: Chapters */}
           <div className="lg:col-span-2 space-y-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Chapters</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {chapters.length > 0 && chapters[0].content_type_label 
+                  ? getDynamicLabel(chapters[0], 0).plural 
+                  : 'Chapters'}
+              </h2>
               <button className="px-4 py-2 text-sm font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors">
                 Regenerate All
               </button>
@@ -708,7 +1096,7 @@ const ProjectView: React.FC = () => {
             {chapters.length === 0 ? (
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
                 <FileText size={48} className="mx-auto text-gray-300 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No Chapters Yet</h3>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No Content Yet</h3>
                 <p className="text-gray-500 dark:text-gray-400 max-w-sm mx-auto">
                   Upload a book or source material to extract chapters, or generate them from a prompt.
                 </p>
@@ -734,7 +1122,14 @@ const ProjectView: React.FC = () => {
                           {chapter.content.content}
                         </p>
                       </div>
-                      <button className="p-2 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewChapter(chapter);
+                        }}
+                        className="p-2 text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="View full chapter content"
+                      >
                         <ExternalLink size={18} />
                       </button>
                     </div>
@@ -760,9 +1155,7 @@ const ProjectView: React.FC = () => {
                   <Play size={18} />
                   Start Generation
                 </button>
-                <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg transition-colors">
-                  View Source Material
-                </button>
+
               </div>
             </div>
 
@@ -791,6 +1184,91 @@ const ProjectView: React.FC = () => {
           </div>
         </div>
       </div>
+      
+      {/* Chapter View Modal */}
+      <ChapterContentModal 
+        chapter={viewChapter} 
+        onClose={() => setViewChapter(null)} 
+      />
+
+      {/* Terminology Settings Modal */}
+      {showTerminologyModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Content Terminology</h3>
+              <button
+                onClick={() => setShowTerminologyModal(false)}
+                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Choose how content units are labeled throughout this project.
+            </p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Content Type
+                </label>
+                <select
+                  value={selectedTerminology}
+                  onChange={(e) => setSelectedTerminology(e.target.value)}
+                  className="w-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg px-4 py-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                >
+                  <option value="Film">Film (Film 1, Film 2...)</option>
+                  <option value="Episode">Episode (Episode 1, Episode 2...)</option>
+                  <option value="Part">Part (Part 1, Part 2...)</option>
+                  <option value="Chapter">Chapter (Chapter 1, Chapter 2...)</option>
+                  <option value="Script">Script (Script 1, Script 2...)</option>
+                </select>
+              </div>
+              
+              <div className="pt-2 text-xs text-gray-500 dark:text-gray-400">
+                This will update how content is labeled in the sidebar and headers.
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowTerminologyModal(false)}
+                className="px-4 py-2 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!project) return;
+                  setIsSavingTerminology(true);
+                  try {
+                    await projectService.updateProject(project.id, { 
+                      content_terminology: selectedTerminology 
+                    });
+                    // Update local project state
+                    setProject({ ...project, content_terminology: selectedTerminology });
+                    // Update all artifacts' content_type_label
+                    setArtifacts((prevArtifacts: any[]) => 
+                      prevArtifacts.map((a: any) => ({ ...a, content_type_label: selectedTerminology }))
+                    );
+                    setShowTerminologyModal(false);
+                  } catch (error) {
+                    console.error('Failed to save terminology:', error);
+                  } finally {
+                    setIsSavingTerminology(false);
+                  }
+                }}
+                disabled={isSavingTerminology}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white rounded-lg font-medium shadow-sm transition-colors flex items-center gap-2"
+              >
+                {isSavingTerminology ? 'Saving...' : 'Apply to Project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

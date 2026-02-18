@@ -29,7 +29,9 @@ interface VideoGenerationContextType {
   startGeneration: (
     scriptId: string,
     chapterId: string,
-    qualityTier: "free" | "premium" | "professional"
+    qualityTier: "free" | "premium" | "professional",
+    selectedShotIds?: string[],
+    selectedAudioIds?: string[]
   ) => Promise<string>;
   stopPolling: () => void;
   resetGeneration: () => void;
@@ -132,7 +134,9 @@ export const VideoGenerationProvider: React.FC<{
     async (
       scriptId: string,
       chapterId: string,
-      qualityTier: "free" | "premium" | "professional"
+      qualityTier: "free" | "premium" | "professional",
+      selectedShotIds?: string[],
+      selectedAudioIds?: string[]
     ): Promise<string> => {
       try {
         setState((prev) => ({ ...prev, error: null }));
@@ -140,7 +144,9 @@ export const VideoGenerationProvider: React.FC<{
         const response = await videoGenerationAPI.startVideoGeneration(
           scriptId,
           chapterId,
-          qualityTier
+          qualityTier,
+          selectedShotIds,
+          selectedAudioIds
         );
 
         setState((prev) => ({
@@ -275,26 +281,16 @@ export const useGenerationProgress = () => {
 
   if (!generation) return null;
 
-  // Calculate overall progress based on status
+  // Calculate overall progress based on status (split workflow: video generation only)
   const calculateProgress = (status: GenerationStatus): number => {
     switch (status) {
       case "generating_audio":
-        return 15;
       case "audio_completed":
-        return 25;
       case "generating_images":
-        return 25 + (generation.image_progress?.success_rate || 0) * 0.25;
       case "images_completed":
-        return 50;
       case "generating_video":
-        return 50 + (generation.video_progress?.success_rate || 0) * 0.25;
+        return 50;
       case "video_completed":
-        return 75;
-      case "merging_audio":
-        return 85;
-      case "applying_lipsync":
-        return 95;
-      case "lipsync_completed":
       case "completed":
         return 100;
       case "failed":

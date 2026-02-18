@@ -21,6 +21,7 @@ interface ChapterScript {
   script: string;
   scene_descriptions: SceneDescription[];
   characters: string[];
+  character_ids?: string[];  // UUIDs of linked plot characters
   character_details: string;
   acts: Act[];
   beats: Beat[];
@@ -28,6 +29,7 @@ interface ChapterScript {
   created_at: string;
   status: 'draft' | 'ready' | 'approved';
   script_story_type?: string;
+  emotional_map?: any[];
 }
 
 interface Act {
@@ -99,13 +101,15 @@ export const useScriptGeneration = (chapterId: string) => {
           script: script.script,
           scene_descriptions: (script.scene_descriptions || []) as unknown as SceneDescription[],
           characters: script.characters || [],
+          character_ids: script.character_ids || [],  // Load linked character IDs
           character_details: script.character_details || '',
           acts: script.acts || [],
           beats: script.beats || [],
           scenes: script.scenes || [],
           created_at: script.created_at,
           status: script.status || 'draft',
-          scriptStoryType: script.scriptStoryType || script.script_story_type // Handle both camelCase and snake_case
+          scriptStoryType: script.scriptStoryType || script.script_story_type,
+          emotional_map: script.emotional_map || []  // Load emotional map from backend
         };
       });
 
@@ -136,7 +140,8 @@ export const useScriptGeneration = (chapterId: string) => {
           includeCharacterProfiles: options.includeCharacterProfiles,
           sceneCount: options.sceneCount,
           focusAreas: options.focusAreas,
-          scriptStoryType: options.scriptStoryType
+          scriptStoryType: options.scriptStoryType,
+          customLogline: options.customLogline
         }
       );
       
@@ -166,8 +171,12 @@ export const useScriptGeneration = (chapterId: string) => {
 
       // Reload in background to sync with server (don't await to show immediately)
       loadScripts().catch(() => {});
-    } catch (error) {
-      toast.error('Failed to generate script');
+    } catch (error: any) {
+      // Extract error message from API response
+      const errorMessage = error?.response?.data?.detail || 
+                          error?.message || 
+                          'Failed to generate script';
+      toast.error(errorMessage);
     } finally {
       setIsGeneratingScript(false);
     }
@@ -191,8 +200,8 @@ export const useScriptGeneration = (chapterId: string) => {
         setSelectedScript(prev => prev ? { ...prev, ...updates } : null);
       }
 
-      // TODO: Send update to backend
-      // await userService.updateScript(scriptId, updates);
+      // Send update to backend
+      await userService.updateScript(scriptId, updates as any);
       
       toast.success('Script updated successfully!');
     } catch (error) {
@@ -203,7 +212,7 @@ export const useScriptGeneration = (chapterId: string) => {
   };
 
   const deleteScript = async (scriptId: string) => {
-    if (!confirm('Are you sure you want to delete this script?')) return;
+    // Confirmation handled by UI component now
 
     try {
       // Remove locally first

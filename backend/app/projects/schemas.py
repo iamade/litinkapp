@@ -35,6 +35,7 @@ class ProjectUpdate(BaseModel):
     status: Optional[ProjectStatus] = None
     current_step: Optional[str] = None
     pipeline_steps: Optional[List[str]] = None
+    content_terminology: Optional[str] = None  # Film, Episode, Part, Chapter, or custom
 
 
 class ProjectRead(ProjectBase):
@@ -43,6 +44,7 @@ class ProjectRead(ProjectBase):
     status: ProjectStatus
     current_step: Optional[str]
     pipeline_steps: List[str]
+    content_terminology: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     artifacts: List[ArtifactSchema] = []

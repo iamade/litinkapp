@@ -36,6 +36,7 @@ async def generate_plot_overview(
 
     - **book_id**: ID of the book to generate plot for
     - **request**: Plot generation parameters including custom prompt, genre, tone, audience
+    - **request.refinement_prompt**: Optional prompt to refine existing plot (e.g., 'add more characters')
     """
     try:
         # Validate book ownership
@@ -51,6 +52,40 @@ async def generate_plot_overview(
                 status_code=403, detail="Not authorized to access this book"
             )
 
+        # Validate refinement prompt for safety (only allow plot-related operations)
+        if request.refinement_prompt:
+            refinement_lower = request.refinement_prompt.lower().strip()
+
+            # Block potentially harmful prompts
+            blocked_patterns = [
+                "ignore previous",
+                "ignore all",
+                "forget",
+                "disregard",
+                "system prompt",
+                "jailbreak",
+                "bypass",
+                "override",
+                "pretend you are",
+                "act as if",
+                "role play as",
+                "execute",
+                "code:",
+                "script:",
+                "```",
+                "delete",
+                "drop",
+                "truncate",
+                "sql",
+            ]
+
+            for pattern in blocked_patterns:
+                if pattern in refinement_lower:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid refinement prompt. Please use prompts related to plot and character development only.",
+                    )
+
         # Check subscription limits
         subscription_manager = SubscriptionManager(session)
         usage_check = await subscription_manager.check_usage_limits(
@@ -63,10 +98,64 @@ async def generate_plot_overview(
                 detail=f"Plot generation limit exceeded. You have used {usage_check['plots_used']} out of {usage_check['plots_limit']} plots. Please upgrade your subscription.",
             )
 
-        # Generate plot overview
         plot_service = PlotService(session)
+
+        # If refinement is requested, fetch existing plot for context
+        existing_plot = None
+        existing_characters = []
+        if request.refinement_prompt:
+            existing_plot_data = await plot_service.get_plot_overview(
+                user_id=current_user.id, book_id=book_id
+            )
+            if existing_plot_data:
+                existing_plot = {
+                    "logline": existing_plot_data.logline,
+                    "story_type": existing_plot_data.story_type,
+                    "genre": existing_plot_data.genre,
+                    "tone": existing_plot_data.tone,
+                    "audience": existing_plot_data.audience,
+                    "setting": existing_plot_data.setting,
+                    "themes": existing_plot_data.themes,
+                }
+                # Preserve existing characters for additive generation
+                if (
+                    hasattr(existing_plot_data, "characters")
+                    and existing_plot_data.characters
+                ):
+                    existing_characters = [
+                        {
+                            "name": char.name,
+                            "role": char.role,
+                            "physical_description": char.physical_description,
+                            "personality": char.personality,
+                            "character_arc": char.character_arc or "",
+                            "want": char.want or "",
+                            "need": char.need or "",
+                            "lie": char.lie or "",
+                            "ghost": char.ghost or "",
+                            "archetypes": char.archetypes or [],
+                        }
+                        for char in existing_plot_data.characters
+                    ]
+
+        # Generate plot overview with refinement support
         result = await plot_service.generate_plot_overview(
-            user_id=current_user.id, book_id=book_id, plot_data=request
+            user_id=current_user.id,
+            book_id=book_id,
+            plot_data=request,
+            refinement_prompt=request.refinement_prompt,
+            existing_plot=existing_plot,
+            existing_characters=existing_characters,
+        )
+
+        # ✅ Record usage for billing/limits
+        await subscription_manager.record_usage(
+            user_id=current_user.id,
+            resource_type="plot",
+            metadata={
+                "book_id": str(book_id),
+                "is_refinement": bool(request.refinement_prompt),
+            },
         )
 
         return result
@@ -137,6 +226,175 @@ async def get_plot_overview_overview(
     - **book_id**: ID of the book
     """
     return await get_plot_overview(book_id, session, current_user)
+
+
+@router.post("/books/{book_id}/auto-add-characters")
+async def auto_add_characters(
+    book_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Automatically generate and add more characters to an existing plot.
+
+    This endpoint ADDS new characters to the existing plot without removing
+    or replacing existing characters.
+
+    - **book_id**: ID of the book to add characters to
+    """
+    try:
+        # Validate book ownership
+        statement = select(Book).where(Book.id == book_id)
+        result = await session.exec(statement)
+        book = result.first()
+
+        if not book:
+            raise HTTPException(status_code=404, detail="Book not found")
+
+        if book.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to access this book"
+            )
+
+        # Check subscription limits
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(
+            current_user.id, "plot"
+        )
+
+        if not usage_check["can_generate"]:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Character generation limit exceeded. Please upgrade your subscription.",
+            )
+
+        plot_service = PlotService(session)
+
+        # Get existing plot
+        existing_plot_data = await plot_service.get_plot_overview(
+            user_id=current_user.id, book_id=book_id
+        )
+
+        if not existing_plot_data:
+            raise HTTPException(
+                status_code=404,
+                detail="No plot overview found. Please generate a plot first.",
+            )
+
+        # Add characters to existing plot
+        result = await plot_service.add_characters_to_plot(
+            user_id=current_user.id,
+            book_id=book_id,
+            plot_overview_id=existing_plot_data.id,
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to add characters: {str(e)}"
+        )
+
+
+@router.post("/books/{book_id}/characters")
+async def create_character_placeholder(
+    book_id: uuid.UUID,
+    character_name: str,
+    entity_type: Optional[str] = "character",
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Create a placeholder character in the plot overview.
+
+    This is used when linking script characters to plot characters,
+    and the character doesn't exist in the plot yet.
+
+    - **book_id**: ID of the book
+    - **character_name**: Name of the character to create
+    - **entity_type**: Type of entity ('character', 'object', 'location')
+    """
+    try:
+        # Validate book ownership
+        statement = select(Book).where(Book.id == book_id)
+        result = await session.exec(statement)
+        book = result.first()
+
+        if not book:
+            raise HTTPException(status_code=404, detail="Book not found")
+
+        if book.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to access this book"
+            )
+
+        # Get plot overview
+        statement = select(PlotOverview).where(
+            PlotOverview.book_id == book_id, PlotOverview.user_id == current_user.id
+        )
+        result = await session.exec(statement)
+        plot_overview = result.first()
+
+        if not plot_overview:
+            raise HTTPException(
+                status_code=404,
+                detail="No plot overview found. Please generate a plot first.",
+            )
+
+        # Check if character already exists
+        statement = select(Character).where(
+            Character.plot_overview_id == plot_overview.id,
+            Character.name == character_name,
+        )
+        result = await session.exec(statement)
+        existing_char = result.first()
+
+        if existing_char:
+            # Return existing character instead of creating new one
+            return {
+                "id": str(existing_char.id),
+                "name": existing_char.name,
+                "role": existing_char.role,
+                "physical_description": existing_char.physical_description,
+                "personality": existing_char.personality,
+                "entity_type": existing_char.entity_type,
+                "image_url": existing_char.image_url,
+                "message": "Character already exists",
+            }
+
+        # Create placeholder character
+        new_character = Character(
+            plot_overview_id=plot_overview.id,
+            name=character_name,
+            entity_type=entity_type,
+            role="supporting" if entity_type == "character" else "object",
+            physical_description="",
+            personality="",
+        )
+
+        session.add(new_character)
+        await session.commit()
+        await session.refresh(new_character)
+
+        return {
+            "id": str(new_character.id),
+            "name": new_character.name,
+            "role": new_character.role,
+            "entity_type": new_character.entity_type,
+            "physical_description": new_character.physical_description,
+            "personality": new_character.personality,
+            "image_url": new_character.image_url,
+            "message": "Character placeholder created successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create character: {str(e)}"
+        )
 
 
 @router.put("/{plot_id}", response_model=PlotOverviewResponse)
@@ -290,6 +548,7 @@ async def generate_project_plot_overview(
                 }
 
         # Generate plot from project prompt (or refine existing)
+        # Pass book_id to enable character extraction from book content
         plot_service = PlotService(session)
         result = await plot_service.generate_plot_from_prompt(
             user_id=current_user.id,
@@ -302,6 +561,17 @@ async def generate_project_plot_overview(
             audience=request.audience,
             refinement_prompt=request.refinement_prompt,
             existing_plot=existing_plot,
+            book_id=project.book_id,  # Use linked book for character extraction
+        )
+
+        # ✅ Record usage for billing/limits
+        await subscription_manager.record_usage(
+            user_id=current_user.id,
+            resource_type="plot",
+            metadata={
+                "project_id": str(project_id),
+                "is_refinement": bool(request.refinement_prompt),
+            },
         )
 
         return result
@@ -357,4 +627,179 @@ async def get_project_plot_overview(
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Failed to retrieve plot overview: {str(e)}"
+        )
+
+
+@router.post("/projects/{project_id}/auto-add-characters")
+async def auto_add_project_characters(
+    project_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Automatically generate and add more characters to an existing project plot.
+
+    This endpoint ADDS new characters to the existing plot without removing
+    or replacing existing characters.
+
+    - **project_id**: ID of the project to add characters to
+    """
+    try:
+        # Validate project ownership
+        statement = select(Project).where(Project.id == project_id)
+        result = await session.exec(statement)
+        project = result.first()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if project.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to access this project"
+            )
+
+        # Check subscription limits
+        subscription_manager = SubscriptionManager(session)
+        usage_check = await subscription_manager.check_usage_limits(
+            current_user.id, "plot"
+        )
+
+        if not usage_check["can_generate"]:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Character generation limit exceeded. Please upgrade your subscription.",
+            )
+
+        plot_service = PlotService(session)
+
+        # Get existing plot (project_id is stored in book_id field)
+        existing_plot_data = await plot_service.get_plot_overview(
+            user_id=current_user.id, book_id=project_id
+        )
+
+        if not existing_plot_data:
+            raise HTTPException(
+                status_code=404,
+                detail="No plot overview found. Please generate a plot first.",
+            )
+
+        # Add characters to existing plot
+        # If project has a linked book, use book content for extraction
+        result = await plot_service.add_characters_to_project(
+            user_id=current_user.id,
+            project_id=project_id,
+            plot_overview_id=existing_plot_data.id,
+            input_prompt=project.input_prompt,
+            book_id=project.book_id,  # Use book content if available
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to add characters: {str(e)}"
+        )
+
+
+@router.post("/projects/{project_id}/characters")
+async def create_project_character_placeholder(
+    project_id: uuid.UUID,
+    character_name: str,
+    entity_type: Optional[str] = "character",
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Create a placeholder character in the project's plot overview.
+
+    This is used when linking script characters to plot characters in Creator mode,
+    and the character doesn't exist in the plot yet.
+
+    - **project_id**: ID of the project
+    - **character_name**: Name of the character to create
+    - **entity_type**: Type of entity ('character', 'object', 'location')
+    """
+    try:
+        # Validate project ownership
+        statement = select(Project).where(Project.id == project_id)
+        result = await session.exec(statement)
+        project = result.first()
+
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if project.user_id != current_user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to access this project"
+            )
+
+        # Get plot overview (project_id is stored in book_id field)
+        statement = select(PlotOverview).where(
+            PlotOverview.book_id == project_id, PlotOverview.user_id == current_user.id
+        )
+        result = await session.exec(statement)
+        plot_overview = result.first()
+
+        if not plot_overview:
+            raise HTTPException(
+                status_code=404,
+                detail="No plot overview found. Please generate a plot first.",
+            )
+
+        # Check if character already exists
+        statement = select(Character).where(
+            Character.plot_overview_id == plot_overview.id,
+            Character.name == character_name,
+        )
+        result = await session.exec(statement)
+        existing_char = result.first()
+
+        if existing_char:
+            # Return existing character instead of creating new one
+            return {
+                "id": str(existing_char.id),
+                "name": existing_char.name,
+                "role": existing_char.role,
+                "physical_description": existing_char.physical_description,
+                "personality": existing_char.personality,
+                "entity_type": existing_char.entity_type,
+                "image_url": existing_char.image_url,
+                "message": "Character already exists",
+            }
+
+        # Create placeholder character
+        # For projects, we use project_id as book_id since Character requires it
+        new_character = Character(
+            plot_overview_id=plot_overview.id,
+            book_id=project_id,  # Use project_id to satisfy NOT NULL constraint
+            user_id=current_user.id,  # Required field
+            name=character_name,
+            entity_type=entity_type,
+            role="supporting" if entity_type == "character" else "object",
+            physical_description="",
+            personality="",
+        )
+
+        session.add(new_character)
+        await session.commit()
+        await session.refresh(new_character)
+
+        return {
+            "id": str(new_character.id),
+            "name": new_character.name,
+            "role": new_character.role,
+            "entity_type": new_character.entity_type,
+            "physical_description": new_character.physical_description,
+            "personality": new_character.personality,
+            "image_url": new_character.image_url,
+            "message": "Character placeholder created successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create character: {str(e)}"
         )

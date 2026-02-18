@@ -151,7 +151,7 @@ async def get_usage_stats(
         usage_stats = await manager.check_usage_limits(current_user.id)
 
         return {
-            "current_period_videos": usage_stats["current_usage"]["videos"],
+            "current_period_videos": usage_stats["current_usage"]["video"],
             "period_limit": usage_stats["limits"]["videos_per_month"],
             "remaining_videos": (
                 usage_stats["videos_remaining"]

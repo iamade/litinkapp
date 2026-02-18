@@ -17,6 +17,7 @@ from app.plots.schemas import (
     CharacterResponse,
 )
 from app.books.models import Book, Chapter
+from app.videos.models import ImageGeneration
 from app.plots.models import PlotOverview, Character, ChapterScript
 
 logger = logging.getLogger(__name__)
@@ -38,10 +39,19 @@ class PlotService:
         self.rag_service = RAGService(session)
 
     async def generate_plot_overview(
-        self, user_id: uuid.UUID, book_id: uuid.UUID, plot_data: PlotOverviewCreate
+        self,
+        user_id: uuid.UUID,
+        book_id: uuid.UUID,
+        plot_data: PlotOverviewCreate,
+        refinement_prompt: Optional[str] = None,
+        existing_plot: Optional[Dict[str, Any]] = None,
+        existing_characters: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Generate a plot overview based on book content and user input.
+
+        If refinement_prompt is provided with existing_plot/existing_characters,
+        performs additive generation (adds new characters without removing existing ones).
         """
         try:
             # 1. Check subscription limits
@@ -64,15 +74,47 @@ class PlotService:
                     )
                 )
 
-            # Generate plot overview
-            generated_plot = await self._generate_plot_content(
-                book_context, plot_data.model_dump(), model_tier
-            )
+            # If refinement is requested, use existing plot as base
+            if refinement_prompt and existing_plot:
+                # Use existing plot data as base
+                generated_plot = existing_plot.copy()
 
-            # 4. Generate characters
-            generated_characters = await self._generate_characters(
-                book_context, generated_plot, model_tier
-            )
+                # Generate additional characters based on refinement prompt
+                additional_characters = await self._generate_characters_from_refinement(
+                    book_context=book_context,
+                    existing_plot=existing_plot,
+                    existing_characters=existing_characters or [],
+                    refinement_prompt=refinement_prompt,
+                    model_tier=model_tier,
+                )
+
+                # Combine existing + new characters
+                generated_characters = (
+                    existing_characters or []
+                ) + additional_characters
+            else:
+                # Generate plot overview from scratch
+                generated_plot = await self._generate_plot_content(
+                    book_context, plot_data.model_dump(), model_tier
+                )
+
+                # CRITICAL FIX: Inject original_prompt back into generated_plot
+                # so it's available for _store_plot_overview to create creative_directive
+                if plot_data.original_prompt:
+                    generated_plot["original_prompt"] = plot_data.original_prompt
+                    # Also pre-construct creative_directive so _generate_characters can use it immediately
+                    logline = generated_plot.get("logline", "")
+                    if logline:
+                        generated_plot["creative_directive"] = (
+                            f"{plot_data.original_prompt}\n\nStory Summary: {logline}"
+                        )
+                    else:
+                        generated_plot["creative_directive"] = plot_data.original_prompt
+
+                # 4. Generate characters
+                generated_characters = await self._generate_characters(
+                    book_context, generated_plot, model_tier
+                )
 
             # 5. Store results
             result = await self._store_plot_overview(
@@ -101,9 +143,15 @@ class PlotService:
         audience: Optional[str] = None,
         refinement_prompt: Optional[str] = None,
         existing_plot: Optional[Dict[str, Any]] = None,
+        book_id: Optional[
+            uuid.UUID
+        ] = None,  # Optional linked book for character extraction
     ) -> Dict[str, Any]:
         """
-        Generate a plot overview from a user prompt (for projects without books).
+        Generate a plot overview from a user prompt (for projects).
+
+        If book_id is provided, characters are extracted from book content.
+        Otherwise, characters are generated from the prompt.
 
         If refinement_prompt is provided along with existing_plot, the AI will
         refine the existing plot based on the user's instructions.
@@ -113,7 +161,16 @@ class PlotService:
             user_tier = await self.subscription_manager.get_user_tier(user_id)
             model_tier = self._map_subscription_to_model_tier(user_tier)
 
-            # 2. Create a prompt-based context (no book/chapters)
+            # 2. Check if we have a linked book for content extraction
+            book_context = None
+            if book_id:
+                book_context = await self._get_book_context_for_plot(book_id)
+                if book_context:
+                    logger.info(
+                        f"[PlotService] Using book context for project {project_id}"
+                    )
+
+            # 3. Create a prompt-based context
             prompt_context = {
                 "prompt": input_prompt,
                 "project_type": project_type or "entertainment",
@@ -122,31 +179,73 @@ class PlotService:
                 "existing_plot": existing_plot,
             }
 
-            # 3. Generate plot content from prompt (or refine existing)
-            generated_plot = await self._generate_plot_from_prompt_content(
-                prompt_context=prompt_context,
-                story_type=story_type,
-                genre=genre,
-                tone=tone,
-                audience=audience,
-                model_tier=model_tier,
-            )
+            # 4. Generate plot content from prompt (or refine existing)
+            if book_context:
+                # Use book content for detailed generation (like Explorer mode)
+                logger.info(
+                    "[PlotService] Using book content for detailed plot generation"
+                )
+                generated_plot = await self._generate_plot_content(
+                    book_context=book_context,
+                    plot_data={
+                        "logline": prompt_context.get("prompt"),
+                        "original_prompt": prompt_context.get("prompt"),
+                        "project_type": prompt_context.get("project_type"),
+                        "story_type": story_type,
+                        "genre": genre,
+                        "tone": tone,
+                        "audience": audience,
+                    },
+                    model_tier=model_tier,
+                )
+            else:
+                # Prompt-only: use simpler generation
+                generated_plot = await self._generate_plot_from_prompt_content(
+                    prompt_context=prompt_context,
+                    story_type=story_type,
+                    genre=genre,
+                    tone=tone,
+                    audience=audience,
+                    model_tier=model_tier,
+                )
 
-            # 4. Generate characters from the prompt
-            generated_characters = await self._generate_characters_from_prompt(
-                prompt_context=prompt_context,
-                plot_data=generated_plot,
-                model_tier=model_tier,
-            )
+            # Fix: Inject original_prompt and creative_directive
+            if input_prompt:
+                generated_plot["original_prompt"] = input_prompt
+                logline = generated_plot.get("logline", "")
+                if logline:
+                    generated_plot["creative_directive"] = (
+                        f"{input_prompt}\n\nStory Summary: {logline}"
+                    )
+                else:
+                    generated_plot["creative_directive"] = input_prompt
 
-            # 5. Store results (using project_id as a pseudo book_id for now)
-            # Note: We're storing with project_id in the book_id field - may need to update model later
+            # 5. Generate characters - use book content if available, otherwise use prompt
+            if book_context:
+                # Use book content for character extraction (like Explorer mode)
+                logger.info("[PlotService] Extracting characters from book content")
+                generated_characters = await self._generate_characters(
+                    book_context=book_context,
+                    plot_data=generated_plot,
+                    model_tier=model_tier,
+                )
+            else:
+                # No book - generate characters from prompt (AI invents)
+                logger.info("[PlotService] Generating characters from prompt")
+                generated_characters = await self._generate_characters_from_prompt(
+                    prompt_context=prompt_context,
+                    plot_data=generated_plot,
+                    model_tier=model_tier,
+                )
+
+            # 6. Store results (using project_id as a pseudo book_id for now)
             result = await self._store_plot_overview(
                 generated_plot,
                 generated_characters,
                 user_id,
                 project_id,  # Using project_id where book_id would go
-                {
+                book_context
+                or {
                     "book": {
                         "title": input_prompt[:100],
                         "genre": genre or "entertainment",
@@ -195,13 +294,20 @@ Tone: {existing_plot.get('tone', 'N/A')}
 Audience: {existing_plot.get('audience', 'N/A')}
 Setting: {existing_plot.get('setting', 'N/A')}
 Themes: {', '.join(existing_plot.get('themes', [])) if existing_plot.get('themes') else 'N/A'}
+Medium: {existing_plot.get('medium', 'N/A')}
+Format: {existing_plot.get('format', 'N/A')}
+Vibe/Style: {existing_plot.get('vibe_style', 'N/A')}
 
 USER'S REFINEMENT REQUEST:
 {refinement_prompt}
 
 TASK:
 Refine the plot overview based on the user's feedback. Keep the core story intact but apply the requested changes.
-For example, if they ask for "Boondocks style animation", update the tone, setting, and logline to reflect that aesthetic.
+For example, if they ask for "Boondocks style animation", update the tone, setting, medium, and vibe_style to reflect that aesthetic.
+
+MEDIUM OPTIONS: Animation, Live Action, Hybrid / Mixed Media, Puppetry / Animatronics, Stop-Motion
+FORMAT OPTIONS: Film, TV Series, Limited Series / Miniseries, Anthology Series, Short Film, Special, Featurette
+VIBE/STYLE OPTIONS: Satire / Social Commentary, Cinematic / Fantasy, Sitcom / Comedy, Sitcom / Rom-Com, Cinematic / Crime Thriller, Documentary Style, Action / Adventure, Horror / Thriller, etc.
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON object with the refined plot:
@@ -214,6 +320,9 @@ Return ONLY a valid JSON object with the refined plot:
     "tone": "...",
     "audience": "...",
     "setting": "...",
+    "medium": "...",
+    "format": "...",
+    "vibe_style": "...",
     "status": "completed"
 }}
 """
@@ -237,18 +346,28 @@ Generate a comprehensive plot overview for this creative project including:
 2. Themes (list of 3-5 major themes)
 3. Setting Description
 4. Story Arc Summary
+5. Medium (production method)
+6. Format (content structure)
+7. Vibe/Style (creative aesthetic)
+
+MEDIUM OPTIONS: Animation, Live Action, Hybrid / Mixed Media, Puppetry / Animatronics, Stop-Motion
+FORMAT OPTIONS: Film, TV Series, Limited Series / Miniseries, Anthology Series, Short Film, Special, Featurette
+VIBE/STYLE OPTIONS: Satire / Social Commentary, Cinematic / Fantasy, Sitcom / Comedy, Sitcom / Rom-Com, Cinematic / Crime Thriller, Documentary Style, Action / Adventure, Horror / Thriller, etc.
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON object:
 {{
     "logline": "...",
     "themes": ["theme1", "theme2", ...],
-    "story_type": "{story_type or 'engaging narrative'}",
+    "story_type": "Identified story structure",
     "script_story_type": "{project_type}",
-    "genre": "{genre or 'general'}",
-    "tone": "{tone or 'professional'}",
-    "audience": "{audience or 'general'}",
+    "genre": "Primary genre identified from prompt",
+    "tone": "Overall tone of the project",
+    "audience": "Primary target audience",
     "setting": "...",
+    "medium": "...",
+    "format": "...",
+    "vibe_style": "...",
     "status": "completed"
 }}
 """
@@ -303,6 +422,15 @@ Based on this creative project, identify and profile any key characters or perso
 PROJECT PROMPT: {user_prompt}
 PROJECT TYPE: {project_type}
 LOGLINE: {plot_data.get('logline', '')}
+MEDIUM: {plot_data.get('medium', 'Not specified')}
+VIBE/STYLE: {plot_data.get('vibe_style', 'Not specified')}
+
+CREATIVE DIRECTION:
+Design characters that fit the specified medium and vibe/style. For example:
+- Animation: Consider exaggerated features, expressive designs
+- Live Action: Focus on realistic, grounded character traits
+- Satire/Comedy: Include comedic flaws, ironic traits
+- Crime Thriller: Add moral complexity, hidden motivations
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON array of character objects:
@@ -311,8 +439,8 @@ Return ONLY a valid JSON array of character objects:
         "name": "Character/Persona Name",
         "role": "protagonist",
         "character_arc": "Brief description",
-        "physical_description": "Appearance if relevant",
-        "personality": "Key traits",
+        "physical_description": "Appearance if relevant (consider the medium)",
+        "personality": "Key traits (consider the vibe/style)",
         "want": "Goal",
         "need": "Internal need",
         "lie": "False belief",
@@ -332,6 +460,440 @@ If no specific characters are needed (e.g., for a product ad), return an empty a
         else:
             logger.warning("[PlotService] Character generation from prompt failed")
             return []
+
+    async def _generate_characters_from_refinement(
+        self,
+        book_context: Dict[str, Any],
+        existing_plot: Dict[str, Any],
+        existing_characters: List[Dict[str, Any]],
+        refinement_prompt: str,
+        model_tier: ModelTier,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate additional characters based on a refinement prompt.
+        This method generates NEW characters to ADD to the existing ones.
+        """
+        book = book_context.get("book", {})
+        chapters_summary = book_context.get("chapters_summary", "")[:2000]
+
+        # Format existing characters for the prompt
+        existing_char_names = [c.get("name", "") for c in existing_characters]
+        existing_char_summary = "\n".join(
+            [
+                f"- {c.get('name', 'Unknown')}: {c.get('role', 'character')} - {c.get('personality', '')[:100]}"
+                for c in existing_characters
+            ]
+        )
+
+        prompt = f"""
+You are helping refine a plot by generating ADDITIONAL characters based on user feedback.
+
+BOOK: {book.get('title', 'Unknown')}
+PLOT LOGLINE: {existing_plot.get('logline', '')}
+MEDIUM: {existing_plot.get('medium', 'Not specified')}
+VIBE/STYLE: {existing_plot.get('vibe_style', 'Not specified')}
+
+CONTENT SUMMARY:
+{chapters_summary}
+
+EXISTING CHARACTERS (DO NOT REGENERATE THESE):
+{existing_char_summary}
+
+USER'S REFINEMENT REQUEST:
+{refinement_prompt}
+
+CREATIVE DIRECTION:
+Design characters that fit the specified medium and vibe/style:
+- For Animation: exaggerated features, distinctive visual designs
+- For Live Action: realistic, grounded traits
+- For Satire/Comedy: comedic flaws, ironic personality traits
+- For Thriller/Drama: moral complexity, hidden motivations
+
+TASK:
+Based on the user's request, generate ADDITIONAL characters that are NOT already listed above.
+If the user asks to "generate more characters", analyze the book content and identify characters that were missed.
+Focus on characters who actually appear in the story, not locations or objects.
+
+IMPORTANT:
+- Do NOT include characters whose names are: {', '.join(existing_char_names)}
+- Only generate NEW characters not already in the list
+- Match characters to the medium and vibe/style
+- If no new characters can be identified, return an empty array: []
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON array of NEW character objects:
+[
+    {{
+        "name": "Character Name",
+        "role": "protagonist/antagonist/supporting/minor",
+        "character_arc": "Description of development",
+        "physical_description": "Appearance details (suited to the medium)",
+        "personality": "Personality traits (suited to the vibe/style)",
+        "want": "External goal",
+        "need": "Internal need",
+        "lie": "False belief",
+        "ghost": "Past trauma"
+    }}
+]
+"""
+
+        response = await self.openrouter.analyze_content(
+            content=prompt, user_tier=model_tier, analysis_type="character_generation"
+        )
+
+        if response.get("status") == "success":
+            result = response.get("result", "")
+            if result:
+                new_characters = self._parse_character_generation_response(result)
+                # Filter out any characters that somehow still match existing names
+                filtered_chars = [
+                    c
+                    for c in new_characters
+                    if c.get("name", "").lower()
+                    not in [n.lower() for n in existing_char_names]
+                ]
+                logger.info(
+                    f"[PlotService] Generated {len(filtered_chars)} new characters from refinement"
+                )
+                return filtered_chars
+            else:
+                logger.warning(
+                    "[PlotService] Character refinement returned empty result"
+                )
+                return []
+        else:
+            error_msg = response.get("error", "Unknown error")
+            logger.warning(f"[PlotService] Character refinement failed: {error_msg}")
+            return []
+
+    async def add_characters_to_plot(
+        self,
+        user_id: uuid.UUID,
+        book_id: uuid.UUID,
+        plot_overview_id: uuid.UUID,
+    ) -> Dict[str, Any]:
+        """
+        Generate and add new characters to an existing plot.
+
+        This method ADDS characters to the existing PlotOverview without
+        replacing or removing existing characters.
+        """
+        try:
+            # Get subscription tier for model selection
+            user_tier = await self.subscription_manager.get_user_tier(user_id)
+            model_tier = self._map_subscription_to_model_tier(user_tier)
+
+            # Get book context
+            book_context = await self._get_book_context_for_plot(book_id)
+            if not book_context:
+                raise ValueError(f"Book {book_id} not found")
+
+            # Get existing plot and characters
+            existing_plot = await self.get_plot_overview(
+                user_id=user_id, book_id=book_id
+            )
+            if not existing_plot:
+                raise ValueError("No existing plot found")
+
+            existing_characters = []
+            if hasattr(existing_plot, "characters") and existing_plot.characters:
+                existing_characters = [
+                    {
+                        "name": char.name,
+                        "role": char.role,
+                        "physical_description": char.physical_description or "",
+                        "personality": char.personality or "",
+                    }
+                    for char in existing_plot.characters
+                ]
+
+            # Generate additional characters
+            new_characters = await self._generate_characters_from_refinement(
+                book_context=book_context,
+                existing_plot={
+                    "logline": existing_plot.logline,
+                    "story_type": existing_plot.story_type,
+                    "genre": existing_plot.genre,
+                    "tone": existing_plot.tone,
+                    "setting": existing_plot.setting,
+                },
+                existing_characters=existing_characters,
+                refinement_prompt="Generate more characters from the book content. Find additional characters that were not included in the initial generation.",
+                model_tier=model_tier,
+            )
+
+            if not new_characters:
+                return {
+                    "message": "No additional characters could be identified from the book content.",
+                    "characters_added": 0,
+                    "total_characters": len(existing_characters),
+                }
+
+            # Store new characters (add to existing plot, not replace)
+            stored_characters = []
+            for char_data in new_characters:
+                character = Character(
+                    plot_overview_id=plot_overview_id,
+                    book_id=book_id,
+                    user_id=user_id,
+                    name=char_data.get("name", "Unknown"),
+                    role=char_data.get("role", "supporting"),
+                    character_arc=char_data.get("character_arc", ""),
+                    physical_description=char_data.get("physical_description", ""),
+                    personality=char_data.get("personality", ""),
+                    archetypes=char_data.get("archetypes", []),
+                    want=char_data.get("want", ""),
+                    need=char_data.get("need", ""),
+                    lie=char_data.get("lie", ""),
+                    ghost=char_data.get("ghost", ""),
+                )
+
+                self.session.add(character)
+                await self.session.commit()
+                await self.session.refresh(character)
+
+                stored_characters.append(
+                    {
+                        "id": str(character.id),
+                        "name": character.name,
+                        "role": character.role,
+                        "physical_description": character.physical_description,
+                        "personality": character.personality,
+                    }
+                )
+
+            logger.info(
+                f"[PlotService] Added {len(stored_characters)} new characters to plot {plot_overview_id}"
+            )
+
+            return {
+                "message": f"Successfully added {len(stored_characters)} new character(s).",
+                "characters_added": len(stored_characters),
+                "total_characters": len(existing_characters) + len(stored_characters),
+                "new_characters": stored_characters,
+            }
+
+        except Exception as e:
+            logger.error(f"[PlotService] Error adding characters to plot: {str(e)}")
+            raise PlotGenerationError(f"Failed to add characters: {str(e)}")
+
+    async def add_characters_to_project(
+        self,
+        user_id: uuid.UUID,
+        project_id: uuid.UUID,
+        plot_overview_id: uuid.UUID,
+        input_prompt: str,
+        book_id: Optional[uuid.UUID] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate and add new characters to an existing project plot.
+
+        This method ADDS characters to the existing PlotOverview without
+        replacing or removing existing characters.
+
+        If book_id is provided, uses actual book content for character extraction.
+        Otherwise, uses the project's input_prompt (AI invents characters).
+        """
+        try:
+            # Get subscription tier for model selection
+            user_tier = await self.subscription_manager.get_user_tier(user_id)
+            model_tier = self._map_subscription_to_model_tier(user_tier)
+
+            # Get existing plot and characters
+            existing_plot = await self.get_plot_overview(
+                user_id=user_id, book_id=project_id
+            )
+            if not existing_plot:
+                raise ValueError("No existing plot found")
+
+            existing_characters = []
+            if hasattr(existing_plot, "characters") and existing_plot.characters:
+                existing_characters = [
+                    {
+                        "name": char.name,
+                        "role": char.role,
+                        "physical_description": char.physical_description or "",
+                        "personality": char.personality or "",
+                    }
+                    for char in existing_plot.characters
+                ]
+
+            # Check if we have book content to use
+            book_context = None
+            if book_id:
+                book_context = await self._get_book_context_for_plot(book_id)
+                if book_context:
+                    logger.info(
+                        f"[PlotService] Using book context for project {project_id}"
+                    )
+
+            # Format existing characters for the prompt
+            existing_char_names = [c.get("name", "") for c in existing_characters]
+            existing_char_summary = "\n".join(
+                [
+                    f"- {c.get('name', 'Unknown')}: {c.get('role', 'character')} - {c.get('personality', '')[:100]}"
+                    for c in existing_characters
+                ]
+            )
+
+            # Build prompt based on whether we have book content or just input prompt
+            if book_context:
+                # BOOK-BASED EXTRACTION: Use actual book content
+                book = book_context.get("book", {})
+                chapters_summary = book_context.get("chapters_summary", "")[:2000]
+
+                prompt = f"""
+You are extracting ADDITIONAL characters from book content.
+
+BOOK TITLE: {book.get('title', 'Unknown')}
+PLOT LOGLINE: {existing_plot.logline}
+
+BOOK CONTENT SUMMARY:
+{chapters_summary}
+
+EXISTING CHARACTERS (DO NOT REGENERATE THESE):
+{existing_char_summary}
+
+TASK:
+Analyze the book content and extract ADDITIONAL characters that are mentioned or appear in the story.
+Focus on characters who actually appear in the text, not invented ones.
+
+IMPORTANT:
+- Do NOT include characters whose names are: {', '.join(existing_char_names)}
+- Only extract NEW characters from the book content
+- Focus on characters who actually appear in the story
+- Aim for 2-5 new characters
+- If no more characters can be found, return an empty array: []
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON array of NEW character objects:
+[
+    {{
+        "name": "Character Name",
+        "role": "protagonist/antagonist/supporting/minor",
+        "character_arc": "Description of development",
+        "physical_description": "Appearance details",
+        "personality": "Personality traits",
+        "want": "External goal",
+        "need": "Internal need",
+        "lie": "False belief",
+        "ghost": "Past trauma"
+    }}
+]
+"""
+            else:
+                # PROMPT-BASED GENERATION: AI invents characters
+                prompt = f"""
+You are helping refine a creative project by generating ADDITIONAL characters based on the original prompt.
+
+ORIGINAL PROJECT PROMPT:
+{input_prompt}
+
+PLOT LOGLINE: {existing_plot.logline}
+
+EXISTING CHARACTERS (DO NOT REGENERATE THESE):
+{existing_char_summary}
+
+TASK:
+Based on the project prompt, generate ADDITIONAL characters that would enhance the story.
+These should be NEW characters that complement or add conflict to the existing cast.
+
+IMPORTANT:
+- Do NOT include characters whose names are: {', '.join(existing_char_names)}
+- Only generate NEW characters not already in the list
+- Aim for 2-5 new characters
+- If the story seems complete, return an empty array: []
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON array of NEW character objects:
+[
+    {{
+        "name": "Character Name",
+        "role": "protagonist/antagonist/supporting/minor",
+        "character_arc": "Description of development",
+        "physical_description": "Appearance details",
+        "personality": "Personality traits",
+        "want": "External goal",
+        "need": "Internal need",
+        "lie": "False belief",
+        "ghost": "Past trauma"
+    }}
+]
+"""
+
+            response = await self.openrouter.analyze_content(
+                content=prompt,
+                user_tier=model_tier,
+                analysis_type="character_generation",
+            )
+
+            new_characters = []
+            if response.get("status") == "success":
+                result = response.get("result", "")
+                if result:
+                    new_characters = self._parse_character_generation_response(result)
+                    # Filter out any characters that somehow still match existing names
+                    new_characters = [
+                        c
+                        for c in new_characters
+                        if c.get("name", "").lower()
+                        not in [n.lower() for n in existing_char_names]
+                    ]
+
+            if not new_characters:
+                return {
+                    "message": "No additional characters could be identified for this project.",
+                    "characters_added": 0,
+                    "total_characters": len(existing_characters),
+                }
+
+            # Store new characters (add to existing plot, not replace)
+            stored_characters = []
+            for char_data in new_characters:
+                character = Character(
+                    plot_overview_id=plot_overview_id,
+                    book_id=project_id,  # project_id stored in book_id field
+                    user_id=user_id,
+                    name=char_data.get("name", "Unknown"),
+                    role=char_data.get("role", "supporting"),
+                    character_arc=char_data.get("character_arc", ""),
+                    physical_description=char_data.get("physical_description", ""),
+                    personality=char_data.get("personality", ""),
+                    archetypes=char_data.get("archetypes", []),
+                    want=char_data.get("want", ""),
+                    need=char_data.get("need", ""),
+                    lie=char_data.get("lie", ""),
+                    ghost=char_data.get("ghost", ""),
+                )
+
+                self.session.add(character)
+                await self.session.commit()
+                await self.session.refresh(character)
+
+                stored_characters.append(
+                    {
+                        "id": str(character.id),
+                        "name": character.name,
+                        "role": character.role,
+                        "physical_description": character.physical_description,
+                        "personality": character.personality,
+                    }
+                )
+
+            logger.info(
+                f"[PlotService] Added {len(stored_characters)} new characters to project {project_id}"
+            )
+
+            return {
+                "message": f"Successfully added {len(stored_characters)} new character(s).",
+                "characters_added": len(stored_characters),
+                "total_characters": len(existing_characters) + len(stored_characters),
+                "new_characters": stored_characters,
+            }
+
+        except Exception as e:
+            logger.error(f"[PlotService] Error adding characters to project: {str(e)}")
+            raise PlotGenerationError(f"Failed to add characters: {str(e)}")
 
     async def _get_book_context_for_plot(self, book_id: uuid.UUID) -> Dict[str, Any]:
         """
@@ -398,27 +960,60 @@ Target Audience: {plot_data.get('audience', 'General')}
 CONTENT SUMMARY:
 {chapters_summary}
 
-USER NOTES:
-{plot_data.get('logline', '')}
+ADAPTATION INSTRUCTIONS (IMPORTANT - ADAPT STORY TO THIS FORMAT):
+{plot_data.get('original_prompt') or plot_data.get('logline', '')}
 
 TASK:
-Generate a structured plot overview including:
-1. Logline (1-2 sentences)
-2. Themes (list of 3-5 major themes)
-3. Story Arc Summary (3 paragraphs: Setup, Confrontation, Resolution)
-4. Setting Description
+Generate a structured plot overview with intelligent field deduction.
+
+**CRITICAL: DEDUCE MEDIUM, FORMAT, AND VIBE/STYLE FROM ADAPTATION INSTRUCTIONS**
+
+Analyze the ADAPTATION INSTRUCTIONS above to intelligently determine:
+
+**MEDIUM** - Production format detection:
+- Keywords: "animation", "animated", "cartoon", "Boondocks style" → "Animation"
+- Keywords: "live action", "film", "movie", "realistic" → "Live Action"
+- Keywords: "anime" → "Anime"
+- Keywords: "hybrid", "mixed media" → "Hybrid / Mixed Media"
+- DEFAULT if unclear: "Live Action"
+
+**FORMAT** - Content structure detection:
+- Keywords: "series", "episodes", "show", "TV" → "Series"
+- Keywords: "movie", "film", "feature" → "Film"
+- Keywords: "short", "short film" → "Short"
+- Keywords: "miniseries", "limited series" → "Miniseries"
+- DEFAULT if unclear: "Film"
+
+**VIBE/STYLE** - Creative aesthetic detection:
+- Keywords: "Boondocks", "satire", "satirical" → "Satirical / Comedy"  
+- Keywords: "dark", "noir", "gritty" → "Dark / Gritty"
+- Keywords: "fantasy", "magical" → "Fantasy / Magical"
+- Keywords: "thriller", "suspense" → "Thriller / Suspense"
+- Keywords: "cinematic", "epic" → "Cinematic / Epic"
+- Keywords: "comedy", "funny" → "Comedy / Humorous"
+- DEFAULT: Combine genre + tone (e.g., "{plot_data.get('genre', 'Fiction')} / {plot_data.get('tone', 'Engaging')}")
+
+**DEDUCTION RULES:**
+1. ALWAYS analyze adaptation instructions FIRST for keywords
+2. Be creative and specific - use exact phrasing from user when possible
+3. Support custom values beyond predefined options
+4. If instructions mention a specific style, reflect it in ALL fields
+5. Combine multiple vibes with " / " if applicable
 
 RESPONSE FORMAT:
-Return ONLY a valid JSON object with the following keys:
+Return ONLY a valid JSON object:
 {{
-    "logline": "...",
+    "logline": "1-2 detailed sentences with protagonist, conflict, stakes",
     "themes": ["theme1", "theme2", ...],
-    "story_type": "{plot_data.get('story_type', 'Hero\'s Journey')}",
+    "story_type": "Identified story structure (e.g. Hero's Journey, 3-Act Structure)",
     "script_story_type": "fiction",
-    "genre": "{plot_data.get('genre') or book.get('genre', 'General')}",
-    "tone": "{plot_data.get('tone', 'Engaging')}",
-    "audience": "{plot_data.get('audience', 'General')}",
-    "setting": "...",
+    "genre": "Primary genre identified from content/instructions",
+    "tone": "Overall tone of the story",
+    "audience": "Primary target audience",
+    "setting": "Detailed setting description...",
+    "medium": "Recommended production medium...",
+    "format": "Recommended format...",
+    "vibe_style": "Creative aesthetic...",
     "status": "completed"
 }}
 """
@@ -484,18 +1079,45 @@ Return ONLY a valid JSON object with the following keys:
     ) -> List[Dict[str, Any]]:
         """
         Generate character profiles based on the book and plot.
+        Uses creative_directive to blend user's creative vision with source material.
         """
         book = book_context.get("book", {})
         chapters_summary = book_context.get("chapters_summary", "")[:2000]
 
+        # Use creative_directive if available, fallback to logline
+        creative_direction = plot_data.get("creative_directive") or plot_data.get(
+            "logline", ""
+        )
+
         prompt = f"""
-Based on the book content and plot overview, identify and profile the key characters.
+Based on the book content and creative direction, design character profiles that blend the source material with the creative vision.
 
 BOOK: {book.get('title', '')}
-PLOT LOGLINE: {plot_data.get('logline', '')}
+CREATIVE DIRECTION: {creative_direction}
+MEDIUM: {plot_data.get('medium', 'Not specified')}
+VIBE/STYLE: {plot_data.get('vibe_style', 'Not specified')}
 
 CONTENT SUMMARY:
 {chapters_summary}
+
+TASK:
+Design character profiles that harmoniously blend:
+1. The source material's characters and themes
+2. The creative direction's style and tone
+3. The specified medium's requirements
+
+CREATIVE DIRECTION GUIDANCE:
+- Reinterpret characters through the lens of the creative direction
+- If the direction specifies a style (e.g., "Boondocks-style animation"), adapt character traits accordingly
+- Balance faithfulness to source with creative transformation
+- Consider how the medium and vibe/style affect character design
+
+MEDIUM-SPECIFIC DESIGN:
+- Animation: Exaggerated features, distinctive visual designs, expressive personalities
+- Live Action: Realistic, grounded traits, natural descriptions
+- Satire/Comedy: Comedic flaws, ironic traits, witty dialogue potential
+- Crime Thriller: Moral complexity, hidden motivations, psychological depth
+- Fantasy: Fantastical elements, unique abilities or traits
 
 RESPONSE FORMAT:
 Return ONLY a valid JSON array of character objects:
@@ -504,8 +1126,8 @@ Return ONLY a valid JSON array of character objects:
         "name": "Character Name",
         "role": "protagonist",
         "character_arc": "Description of development",
-        "physical_description": "Appearance details",
-        "personality": "Personality traits",
+        "physical_description": "Appearance details (designed for the medium)",
+        "personality": "Personality traits (matching the vibe/style)",
         "want": "External goal",
         "need": "Internal need",
         "lie": "False belief",
@@ -513,7 +1135,7 @@ Return ONLY a valid JSON array of character objects:
     }}
 ]
 
-Extract main and important supporting characters (aim for 5-10 key characters).
+Extract 5-10 key characters who fit both the source material AND the creative direction.
 Focus on characters who actually appear in the story, not locations or objects.
 """
 
@@ -827,11 +1449,32 @@ Return a JSON object with:
                 f"[PlotService] Storing themes - type: {type(themes_value)}, value: {themes_value}"
             )
 
+            # Auto-generate creative_directive by combining prompt + logline
+            original_prompt = plot_data.get("original_prompt")
+            logline = (
+                plot_data.get("logline")
+                or f"A compelling {plot_data.get('genre', 'fiction')} story about personal growth and discovery."
+            )
+
+            if original_prompt and logline:
+                creative_directive = f"{original_prompt}\n\nStory Summary: {logline}"
+            elif original_prompt:
+                creative_directive = original_prompt
+            elif logline:
+                creative_directive = logline
+            else:
+                creative_directive = None
+
+            logger.info(
+                f"[PlotService] Generated creative_directive: {creative_directive[:100] if creative_directive else 'None'}..."
+            )
+
             plot_overview = PlotOverview(
                 book_id=book_id,
                 user_id=user_id,
-                logline=plot_data.get("logline")
-                or f"A compelling {plot_data.get('genre', 'fiction')} story about personal growth and discovery.",
+                logline=logline,
+                original_prompt=original_prompt,
+                creative_directive=creative_directive,  # NEW: Store combined directive
                 themes=themes_value,
                 story_type=plot_data.get("story_type") or "hero's journey",
                 script_story_type=plot_data.get("script_story_type")
@@ -842,6 +1485,9 @@ Return a JSON object with:
                 tone=plot_data.get("tone") or "hopeful",
                 audience=plot_data.get("audience") or "adult",
                 setting=plot_data.get("setting") or "Contemporary world",
+                medium=plot_data.get("medium"),
+                format=plot_data.get("format"),
+                vibe_style=plot_data.get("vibe_style"),
                 generation_method=plot_data.get("generation_method", "openrouter"),
                 model_used=plot_data.get("model_used"),
                 status=plot_data.get("status", "completed"),
@@ -861,16 +1507,16 @@ Return a JSON object with:
                     plot_overview_id=plot_id,
                     book_id=book_id,
                     user_id=user_id,
-                    name=char_data["name"],
-                    role=char_data["role"],
-                    character_arc=char_data["character_arc"],
-                    physical_description=char_data["physical_description"],
-                    personality=char_data["personality"],
+                    name=char_data.get("name", "Unknown"),
+                    role=char_data.get("role", "supporting"),
+                    character_arc=char_data.get("character_arc", ""),
+                    physical_description=char_data.get("physical_description", ""),
+                    personality=char_data.get("personality", ""),
                     archetypes=char_data.get("archetypes", []),
-                    want=char_data["want"],
-                    need=char_data["need"],
-                    lie=char_data["lie"],
-                    ghost=char_data["ghost"],
+                    want=char_data.get("want", ""),
+                    need=char_data.get("need", ""),
+                    lie=char_data.get("lie", ""),
+                    ghost=char_data.get("ghost", ""),
                 )
 
                 # Insert character
@@ -917,6 +1563,8 @@ Return a JSON object with:
                 book_id=str(plot_overview.book_id),
                 user_id=str(plot_overview.user_id),
                 logline=plot_overview.logline,
+                original_prompt=plot_overview.original_prompt,
+                creative_directive=plot_overview.creative_directive,  # NEW: Include in response
                 themes=plot_overview.themes,
                 story_type=plot_overview.story_type,
                 script_story_type=plot_overview.script_story_type,
@@ -924,6 +1572,9 @@ Return a JSON object with:
                 tone=plot_overview.tone,
                 audience=plot_overview.audience,
                 setting=plot_overview.setting,
+                medium=plot_overview.medium,  # Added missing field
+                format=plot_overview.format,  # Added missing field
+                vibe_style=plot_overview.vibe_style,  # Added missing field
                 generation_method=plot_overview.generation_method,
                 model_used=plot_overview.model_used,
                 generation_cost=0.0,  # Not stored in model currently
@@ -1134,6 +1785,10 @@ Return the enhanced script.
         Retrieve existing plot overview for a book.
         """
         try:
+            logger.info(
+                f"[PlotService.get_plot_overview] Looking for plot with book_id={book_id}, user_id={user_id}"
+            )
+
             # Get plot overview
             statement = (
                 select(PlotOverview)
@@ -1146,7 +1801,28 @@ Return the enhanced script.
             plot_data = result.first()
 
             if not plot_data:
+                # Debug: Check if plot exists with different user_id
+                debug_statement = (
+                    select(PlotOverview)
+                    .where(PlotOverview.book_id == book_id)
+                    .limit(1)
+                )
+                debug_result = await self.session.exec(debug_statement)
+                debug_plot = debug_result.first()
+                if debug_plot:
+                    logger.warning(
+                        f"[PlotService.get_plot_overview] Plot exists but user_id mismatch! "
+                        f"Requested user_id={user_id}, Plot user_id={debug_plot.user_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"[PlotService.get_plot_overview] No plot found with book_id={book_id}"
+                    )
                 return None
+
+            logger.info(
+                f"[PlotService.get_plot_overview] Found plot: id={plot_data.id}, version={plot_data.version}"
+            )
 
             # Get associated characters (ordered by creation time for consistent display)
             statement = (
@@ -1157,8 +1833,28 @@ Return the enhanced script.
             result = await self.session.exec(statement)
             characters_data = result.all()
 
+            # Fetch images for all characters
+            char_ids = [str(c.id) for c in characters_data]
+            images_by_char = {}
+            if char_ids:
+                stmt_images = (
+                    select(ImageGeneration)
+                    .where(ImageGeneration.character_id.in_(char_ids))
+                    .order_by(ImageGeneration.created_at.desc())
+                )
+                images_result = await self.session.exec(stmt_images)
+                all_images = images_result.all()
+
+                for img in all_images:
+                    if img.character_id not in images_by_char:
+                        images_by_char[img.character_id] = []
+                    images_by_char[img.character_id].append(img)
+
             characters = []
             for char_data in characters_data:
+                # Get images for this character
+                char_images = images_by_char.get(str(char_data.id), [])
+
                 char_response = CharacterResponse(
                     id=str(char_data.id),
                     plot_overview_id=str(char_data.plot_overview_id),
@@ -1166,6 +1862,7 @@ Return the enhanced script.
                     user_id=str(char_data.user_id),
                     name=char_data.name,
                     role=char_data.role,
+                    entity_type=char_data.entity_type,  # Ensure entity_type is passed
                     character_arc=char_data.character_arc,
                     physical_description=char_data.physical_description,
                     personality=char_data.personality,
@@ -1174,10 +1871,24 @@ Return the enhanced script.
                     need=char_data.need,
                     lie=char_data.lie,
                     ghost=char_data.ghost,
-                    generation_method="openrouter",
-                    model_used=plot_data.model_used,
+                    image_url=char_data.image_url,
+                    image_generation_prompt=char_data.image_generation_prompt,
+                    image_metadata=char_data.image_metadata,
+                    generation_method=char_data.generation_method or "openrouter",
+                    model_used=char_data.model_used or plot_data.model_used,
                     created_at=char_data.created_at,
                     updated_at=char_data.updated_at,
+                    images=[
+                        {
+                            "id": str(img.id),
+                            "image_url": img.image_url,
+                            "status": img.status,
+                            "created_at": img.created_at,
+                            "model_used": getattr(img, "model_id", None),
+                            "generation_method": "async",
+                        }
+                        for img in char_images
+                    ],
                 )
                 characters.append(char_response)
 
@@ -1187,6 +1898,8 @@ Return the enhanced script.
                 book_id=str(plot_data.book_id),
                 user_id=str(plot_data.user_id),
                 logline=plot_data.logline,
+                original_prompt=plot_data.original_prompt,
+                creative_directive=plot_data.creative_directive,  # NEW: Include creative_directive
                 themes=plot_data.themes,
                 story_type=plot_data.story_type,
                 script_story_type=plot_data.script_story_type,
@@ -1194,6 +1907,9 @@ Return the enhanced script.
                 tone=plot_data.tone,
                 audience=plot_data.audience,
                 setting=plot_data.setting,
+                medium=plot_data.medium,  # Added missing field
+                format=plot_data.format,  # Added missing field
+                vibe_style=plot_data.vibe_style,  # Added missing field
                 generation_method=plot_data.generation_method,
                 model_used=plot_data.model_used,
                 generation_cost=0.0,
@@ -1242,6 +1958,10 @@ Return the enhanced script.
                 "model_used",
                 "status",
                 "version",
+                "medium",
+                "format",
+                "vibe_style",
+                "original_prompt",
             ]:
                 if hasattr(updates, field) and getattr(updates, field) is not None:
                     setattr(current_data, field, getattr(updates, field))
@@ -1252,8 +1972,28 @@ Return the enhanced script.
             result = await self.session.exec(statement)
             characters_data = result.all()
 
+            # Fetch images for all characters
+            char_ids = [str(c.id) for c in characters_data]
+            images_by_char = {}
+            if char_ids:
+                stmt_images = (
+                    select(ImageGeneration)
+                    .where(ImageGeneration.character_id.in_(char_ids))
+                    .order_by(ImageGeneration.created_at.desc())
+                )
+                images_result = await self.session.exec(stmt_images)
+                all_images = images_result.all()
+
+                for img in all_images:
+                    if img.character_id not in images_by_char:
+                        images_by_char[img.character_id] = []
+                    images_by_char[img.character_id].append(img)
+
             characters = []
             for char_data in characters_data:
+                # Get images for this character
+                char_images = images_by_char.get(str(char_data.id), [])
+
                 char_response = CharacterResponse(
                     id=char_data.id,
                     plot_overview_id=char_data.plot_overview_id,
@@ -1261,6 +2001,7 @@ Return the enhanced script.
                     user_id=char_data.user_id,
                     name=char_data.name,
                     role=char_data.role,
+                    entity_type=char_data.entity_type,
                     character_arc=char_data.character_arc,
                     physical_description=char_data.physical_description,
                     personality=char_data.personality,
@@ -1269,10 +2010,24 @@ Return the enhanced script.
                     need=char_data.need,
                     lie=char_data.lie,
                     ghost=char_data.ghost,
+                    image_url=char_data.image_url,
+                    image_generation_prompt=char_data.image_generation_prompt,
+                    image_metadata=char_data.image_metadata,
                     generation_method="openrouter",
                     model_used=current_data.model_used,
                     created_at=char_data.created_at,
                     updated_at=char_data.updated_at,
+                    images=[
+                        {
+                            "id": str(img.id),
+                            "image_url": img.image_url,
+                            "status": img.status,
+                            "created_at": img.created_at,
+                            "model_used": getattr(img, "model_id", None),
+                            "generation_method": "async",
+                        }
+                        for img in char_images
+                    ],
                 )
                 characters.append(char_response)
 

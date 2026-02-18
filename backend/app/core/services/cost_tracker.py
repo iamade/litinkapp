@@ -111,6 +111,8 @@ class CostTrackerService:
         "kling-2.5-turbo-1080p": 0.07,  # Kling-2.5-Turbo-1080p
         "kling-2.6-pro": 0.10,  # Kling-2.6-Pro
         "wan2.5-i2v-preview": 0.12,  # Wan2.5-I2V-Preview
+        "wan2.5-i2v": 0.10,  # Wan2.5-I2V (720p) with audio support
+        "wan2.6-i2v": 0.05,  # Wan2.6-I2V (480p) with audio support
         # ===== AUDIO GENERATION MODELS (per minute) =====
         "eleven_multilingual_v2": 0.30,
         "eleven_turbo_v2": 0.20,
