@@ -150,3 +150,4 @@ yarl==1.20.1
 pgvector==0.2.4
 boto3==1.42.1
 google-genai
+gunicorn==23.0.0

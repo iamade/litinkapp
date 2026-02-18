@@ -8,14 +8,16 @@ services:
     runtime: docker
     repo: https://github.com/iamade/litinkapp
     branch: main
-    dockerfilePath: ./backend/docker/local/fastapi/Dockerfile
+    dockerfilePath: ./backend/docker/production/fastapi/Dockerfile
     dockerContext: ./backend
+    dockerCommand: /start.sh
     healthCheckPath: /health
+    preDeployCommand: cd /backend && alembic upgrade head
     envVars:
       - key: ENVIRONMENT
         value: production
       - key: DEBUG
-        value: false
+        value: "false"
       # Database (Supabase)
       - key: DATABASE_URL
         sync: false
@@ -28,36 +30,44 @@ services:
       - key: POSTGRES_HOST
         sync: false
       - key: POSTGRES_PORT
-        value: "5432"
-      # Redis (from Render add-on or external)
+        value: "6543"
+      # Redis (from Render Redis service)
       - key: REDIS_URL
-        fromService:
-          name: litinkapp-redis
-          type: redis
-          property: connectionString
+        sync: false
       - key: REDIS_HOST
         sync: false
       - key: REDIS_PORT
         value: "6379"
-      # Celery (using Redis)
+      # Celery - RabbitMQ broker, Redis result backend
       - key: CELERY_BROKER_URL
-        fromService:
-          name: litinkapp-redis
-          type: redis
-          property: connectionString
+        sync: false
       - key: CELERY_RESULT_BACKEND
-        fromService:
-          name: litinkapp-redis
-          type: redis
-          property: connectionString
+        sync: false
+      - key: CELERY_FLOWER_USER
+        value: admin
+      - key: CELERY_FLOWER_PASSWORD
+        sync: false
+      # RabbitMQ
+      - key: RABBITMQ_DEFAULT_USER
+        sync: false
+      - key: RABBITMQ_DEFAULT_PASS
+        sync: false
       # Email
       - key: MAIL_SERVICE
         value: mailgun
+      - key: MAIL_FROM
+        value: "noreply@mail.litinkai.com"
+      - key: MAIL_FROM_NAME
+        value: "LitInk AI"
       - key: MAILGUN_API_KEY
         sync: false
       - key: MAILGUN_DOMAIN
         sync: false
-      # Storage (AWS S3)
+      - key: MAILGUN_SMTP_USERNAME
+        sync: false
+      - key: MAILGUN_SMTP_PASSWORD
+        sync: false
+      # Storage
       - key: USE_MINIO
         value: "false"
       - key: S3_ACCESS_KEY
@@ -72,18 +82,34 @@ services:
       - key: FRONTEND_URL
         value: https://litinkapp.netlify.app
       - key: ALLOWED_HOSTS
-        value: '["https://litinkapp.netlify.app","https://www.litinkai.com"]'
+        value: '["https://litinkapp.netlify.app","https://www.litinkai.com","https://litinkai.com","https://litinkapp.onrender.com"]'
       # OAuth
       - key: OAUTH_REDIRECT_BASE_URL
         value: https://litinkapp.onrender.com/api/v1
+      - key: API_BASE_URL
+        value: https://litinkapp.onrender.com
       # API Keys (sync: false means set manually in dashboard)
       - key: JWT_SECRET_KEY
         sync: false
+      - key: SIGNING_KEY
+        sync: false
       - key: OPENAI_API_KEY
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: KLINGAI_ACCESS_KEY_ID
+        sync: false
+      - key: KLINGAI_ACCESS_KEY_SECRET
+        sync: false
+      - key: MODELSLAB_API_KEY
         sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
         sync: false
 
   # Celery Background Worker
@@ -92,19 +118,15 @@ services:
     runtime: docker
     repo: https://github.com/iamade/litinkapp
     branch: main
-    dockerfilePath: ./backend/docker/local/fastapi/Dockerfile
+    dockerfilePath: ./backend/docker/production/fastapi/Dockerfile
     dockerContext: ./backend
-    dockerCommand: celery -A app.tasks.celery_app worker -l INFO --concurrency=2
+    dockerCommand: /start-celeryworker.sh
     envVars:
       - key: ENVIRONMENT
         value: production
+      - key: DEBUG
+        value: "false"
       - fromGroup: litinkapp-shared
-
-# Redis Cache/Broker
-databases:
-  - name: litinkapp-redis
-    plan: free
-    ipAllowList: []
 
 # Environment variable groups for sharing between services
 envVarGroups:
@@ -120,5 +142,23 @@ envVarGroups:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: KLINGAI_ACCESS_KEY_ID
+        sync: false
+      - key: KLINGAI_ACCESS_KEY_SECRET
+        sync: false
+      - key: MODELSLAB_API_KEY
+        sync: false
       - key: MAILGUN_API_KEY
+        sync: false
+      - key: MAILGUN_DOMAIN
+        sync: false
+      - key: MAILGUN_SMTP_USERNAME
+        sync: false
+      - key: MAILGUN_SMTP_PASSWORD
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
         sync: false

@@ -141,6 +141,12 @@ class Settings(BaseSettings):
     MAILGUN_SENDER_EMAIL: str = "noreply@litinkai.com"
     MAILGUN_SENDER_NAME: str = "Litink AI"
 
+    # Mailgun SMTP Configuration (Production)
+    MAILGUN_SMTP_SERVER: str = "smtp.mailgun.org"
+    MAILGUN_SMTP_PORT: int = 587
+    MAILGUN_SMTP_USERNAME: str = ""
+    MAILGUN_SMTP_PASSWORD: str = ""
+
     # Stripe Configuration
     STRIPE_SECRET_KEY: Optional[str] = None
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
@@ -203,7 +209,7 @@ class Settings(BaseSettings):
 
     # ModelsLab
     MODELSLAB_API_KEY: str = os.getenv("MODELSLAB_API_KEY", "")
-    
+
     MODELSLAB_BASE_URL: str = "https://modelslab.com/api/v7"  # Updated to v7
     MODELSLAB_V6_BASE_URL: str = "https://modelslab.com/api/v6"
 
