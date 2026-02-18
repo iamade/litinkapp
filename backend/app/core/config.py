@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     # Mailgun Configuration (Production)
     MAILGUN_API_KEY: Optional[str] = None
     MAILGUN_DOMAIN: Optional[str] = None
-    MAILGUN_SENDER_EMAIL: str = "noreply@litinkai.com"
+    MAILGUN_SENDER_EMAIL: str = ""
     MAILGUN_SENDER_NAME: str = "Litink AI"
 
     # Mailgun SMTP Configuration (Production)
