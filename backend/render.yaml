@@ -162,3 +162,9 @@ envVarGroups:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
+      - key: MAIL_FROM
+        value: "noreply@mail.litinkai.com"
+      - key: MAIL_FROM_NAME
+        value: "LitInk AI"
+      - key: MAIL_SERVICE
+        value: mailgun
