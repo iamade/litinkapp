@@ -32,11 +32,6 @@ export default function SubscriptionPage() {
       return; // Still loading auth, don't redirect yet
     }
 
-    if (!user) {
-      navigate("/auth");
-      return;
-    }
-
     loadData();
 
     // Check for payment success/cancel from URL params
@@ -54,11 +49,21 @@ export default function SubscriptionPage() {
   const loadData = async () => {
     try {
       setLoadingData(true);
-      const [tiersData, subscriptionData, usageData] = await Promise.all([
-        subscriptionService.getSubscriptionTiers(),
-        subscriptionService.getCurrentSubscription().catch(() => null), // Handle free tier gracefully
-        subscriptionService.getUsageStats().catch(() => null),
-      ]);
+      const tiersPromise = subscriptionService.getSubscriptionTiers();
+      
+      let subscriptionData = null;
+      let usageData = null;
+
+      if (user) {
+        const [sub, usage] = await Promise.all([
+          subscriptionService.getCurrentSubscription().catch(() => null),
+          subscriptionService.getUsageStats().catch(() => null),
+        ]);
+        subscriptionData = sub;
+        usageData = usage;
+      }
+
+      const tiersData = await tiersPromise;
 
       setTiers(tiersData);
       setCurrentSubscription(subscriptionData);
@@ -71,6 +76,11 @@ export default function SubscriptionPage() {
   };
 
   const handleUpgrade = async (tier: SubscriptionTier, billingPeriod: 'monthly' | 'annual') => {
+    if (!user) {
+      navigate('/auth?mode=register');
+      return;
+    }
+
     if (tier.tier === currentSubscription?.tier) return;
 
     try {
@@ -120,15 +130,7 @@ export default function SubscriptionPage() {
     }
   };
 
-  if (!user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#0F0F23]">
-        <div className="text-center">
-          <p className="text-xl text-gray-600 dark:text-gray-400 mb-4">Sign in required</p>
-        </div>
-      </div>
-    );
-  }
+
 
   if (loading || loadingData) {
     return (

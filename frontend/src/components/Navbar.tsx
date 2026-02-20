@@ -45,10 +45,10 @@ export default function Navbar() {
       showWhenLoggedIn: false,
       onClick: handleExploreClick,
     },
+    { path: "/subscription", label: "Subscription", showWhenLoggedIn: false },
     ...(user && hasRole(user, "author")
       ? [{ path: "/author", label: "Create", showWhenLoggedIn: true }]
       : []),
-    { path: "/subscription", label: "Subscription", showWhenLoggedIn: true },
     ...(user && (hasRole(user, "superadmin") || user.email === "support@litinkai.com")
       ? [{ path: "/admin", label: "Admin", showWhenLoggedIn: true }]
       : []),
