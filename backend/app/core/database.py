@@ -7,24 +7,36 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from app.core.db_model_registry import load_models
 from sqlalchemy import text
 
-from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 
 
 logger = get_logger()
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    poolclass=AsyncAdaptedQueuePool,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-    pool_timeout=30,
-    pool_recycle=1800,
-    connect_args={
-        "statement_cache_size": 0,
-        "prepared_statement_cache_size": 0,
-    },
-)
+# Use NullPool in production (pgbouncer handles pooling)
+# Use AsyncAdaptedQueuePool in development (direct PostgreSQL connection)
+if settings.ENVIRONMENT == "production":
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        poolclass=NullPool,
+        connect_args={
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+        },
+    )
+else:
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        poolclass=AsyncAdaptedQueuePool,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=1800,
+        connect_args={
+            "statement_cache_size": 0,
+            "prepared_statement_cache_size": 0,
+        },
+    )
 
 async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
