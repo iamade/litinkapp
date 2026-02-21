@@ -64,8 +64,10 @@ async def lifespan(app: FastAPI):
         await health_checker.add_service("redis", health_checker.check_redis)
 
         if not await startup_health_check():
-            raise RuntimeError("Critical services failed to start")
-        logger.info("All service initialized and healthy")
+            logger.warning(
+                "Some services failed health check during startup - continuing in degraded mode"
+            )
+        logger.info("Application startup complete")
         yield
     except Exception as e:
         logger.error(f"Application startup failed: {e}")
