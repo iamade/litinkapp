@@ -12,16 +12,12 @@ from sqlalchemy.pool import NullPool, AsyncAdaptedQueuePool
 
 logger = get_logger()
 
-# Use NullPool in production (pgbouncer handles pooling)
+# Use NullPool in production (Supabase session mode pooler handles pooling)
 # Use AsyncAdaptedQueuePool in development (direct PostgreSQL connection)
 if settings.ENVIRONMENT == "production":
     engine = create_async_engine(
         settings.DATABASE_URL,
         poolclass=NullPool,
-        connect_args={
-            "statement_cache_size": 0,
-            "prepared_statement_cache_size": 0,
-        },
     )
 else:
     engine = create_async_engine(
@@ -32,10 +28,6 @@ else:
         max_overflow=10,
         pool_timeout=30,
         pool_recycle=1800,
-        connect_args={
-            "statement_cache_size": 0,
-            "prepared_statement_cache_size": 0,
-        },
     )
 
 async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
