@@ -13,22 +13,23 @@ from sqlalchemy.pool import AsyncAdaptedQueuePool
 logger = get_logger()
 
 engine = create_async_engine(
-    settings.DATABASE_URL, 
-    poolclass=AsyncAdaptedQueuePool, 
+    settings.DATABASE_URL,
+    poolclass=AsyncAdaptedQueuePool,
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,
     pool_timeout=30,
     pool_recycle=1800,
-    )
-
-async_session = async_sessionmaker(
-    engine,
-    expire_on_commit=False,
-    class_=AsyncSession
+    connect_args={
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+    },
 )
 
-async def get_session() -> AsyncGenerator[AsyncSession,None]:
+async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
     session = async_session()
     try:
         yield session
@@ -48,15 +49,16 @@ async def get_session() -> AsyncGenerator[AsyncSession,None]:
                 logger.debug("Database session closed successfully")
             except Exception as close_error:
                 logger.error(f"Error closing database session: {close_error}")
-                
+
+
 async def init_db() -> None:
     try:
         load_models()
         logger.info("Models loaded successfully")
-        
+
         max_retries = 3
         retry_delay = 2
-        
+
         for attempt in range(max_retries):
             try:
                 async with engine.begin() as conn:
@@ -71,8 +73,7 @@ async def init_db() -> None:
                     raise
                 logger.warning(f"Database connection attempt {attempt + 1}")
                 await asyncio.sleep(retry_delay * (attempt + 1))
-                
+
     except Exception as e:
         logger.error(f"Database initializtion failed: {e}")
         raise
-    
