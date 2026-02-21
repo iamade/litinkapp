@@ -76,9 +76,7 @@ def upgrade() -> None:
         ),
         sa.Column("book_id", sa.UUID(), nullable=False),
         sa.Column("content_chunk", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column(
-            "embedding", pgvector.sqlalchemy.vector.VECTOR(dim=1536), nullable=True
-        ),
+        sa.Column("embedding", pgvector.sqlalchemy.Vector(dim=1536), nullable=True),
         sa.Column("chunk_index", sa.Integer(), nullable=False),
         sa.Column("chunk_size", sa.Integer(), nullable=False),
         sa.Column("chunk_type", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
@@ -103,9 +101,7 @@ def upgrade() -> None:
         sa.Column("chapter_id", sa.UUID(), nullable=False),
         sa.Column("book_id", sa.UUID(), nullable=False),
         sa.Column("content_chunk", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column(
-            "embedding", pgvector.sqlalchemy.vector.VECTOR(dim=1536), nullable=True
-        ),
+        sa.Column("embedding", pgvector.sqlalchemy.Vector(dim=1536), nullable=True),
         sa.Column("chunk_index", sa.Integer(), nullable=False),
         sa.Column("chunk_size", sa.Integer(), nullable=False),
         sa.Column("meta", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
