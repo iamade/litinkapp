@@ -36,23 +36,15 @@ class S3StorageService:
             )
             self.bucket_name = settings.MINIO_BUCKET_NAME
         else:
-            # Supabase Storage or AWS S3 for production
+            # S3-compatible storage for production (AWS S3 or Supabase Storage S3)
             self.client = boto3.client(
                 "s3",
-                endpoint_url=(
-                    settings.SUPABASE_STORAGE_ENDPOINT
-                    if settings.USE_SUPABASE_STORAGE
-                    else None
-                ),
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_REGION,
+                endpoint_url=settings.S3_ENDPOINT if settings.S3_ENDPOINT else None,
+                aws_access_key_id=settings.S3_ACCESS_KEY,
+                aws_secret_access_key=settings.S3_SECRET_KEY,
+                region_name=settings.S3_REGION,
             )
-            self.bucket_name = (
-                settings.SUPABASE_BUCKET_NAME
-                if settings.USE_SUPABASE_STORAGE
-                else settings.AWS_BUCKET_NAME
-            )
+            self.bucket_name = settings.S3_BUCKET_NAME
 
         # Ensure bucket exists (for MinIO)
         if self.use_minio:
@@ -90,7 +82,7 @@ class S3StorageService:
             if self.use_minio:
                 return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
             else:
-                # For Supabase/AWS, generate presigned URL or use CDN
+                # For S3/Supabase, generate presigned URL or use CDN
                 return self.get_public_url(path)
 
         except Exception as e:
@@ -136,12 +128,12 @@ class S3StorageService:
         """Get public URL for a file"""
         if self.use_minio:
             return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
-        elif settings.USE_SUPABASE_STORAGE:
-            # Supabase storage public URL format
-            return f"{settings.SUPABASE_URL}/storage/v1/object/public/{self.bucket_name}/{path}"
+        elif settings.S3_ENDPOINT:
+            # Supabase Storage or other S3-compatible with custom endpoint
+            return f"{settings.S3_ENDPOINT}/{self.bucket_name}/{path}"
         else:
             # AWS S3 public URL
-            return f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{path}"
+            return f"https://{self.bucket_name}.s3.{settings.S3_REGION}.amazonaws.com/{path}"
 
     async def delete(self, path: str) -> bool:
         """Delete file from storage"""
@@ -207,5 +199,28 @@ class S3StorageService:
             return False
 
 
-# Singleton instance
-storage_service = S3StorageService()
+# Lazy singleton — only instantiated on first access
+_storage_service: Optional[S3StorageService] = None
+
+
+def get_storage_service() -> S3StorageService:
+    """Get the storage service singleton, initializing it on first call."""
+    global _storage_service
+    if _storage_service is None:
+        _storage_service = S3StorageService()
+    return _storage_service
+
+
+# For backward compatibility — lazy property
+class _LazyStorageService:
+    """Proxy that delays S3StorageService initialization until first use."""
+
+    _instance: Optional[S3StorageService] = None
+
+    def __getattr__(self, name):
+        if _LazyStorageService._instance is None:
+            _LazyStorageService._instance = S3StorageService()
+        return getattr(_LazyStorageService._instance, name)
+
+
+storage_service = _LazyStorageService()
