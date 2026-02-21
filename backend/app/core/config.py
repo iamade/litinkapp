@@ -20,22 +20,24 @@ class Settings(BaseSettings):
     )
 
     # Basic settings
-    API_V1_STR: str = ""
-    PROJECT_NAME: str = ""
-    PROJECT_DESCRIPTION: str = ""
-    SITE_NAME: str = ""
-    VERSION: str = ""
+    API_V1_STR: str = "/api/v1"
+    PROJECT_NAME: str = "LitInk-Ai"
+    PROJECT_DESCRIPTION: str = (
+        "Welcome to the next generation of learning and entertainment"
+    )
+    SITE_NAME: str = "Lit-Ink Ai"
+    VERSION: str = "1.0.0"
     # ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
     # CORS PRODUCTION
     ALLOWED_HOSTS: List[str] = [
-        # "http://localhost:3000", 
-        # "http://localhost:5173", 
+        # "http://localhost:3000",
+        # "http://localhost:5173",
         # "https://localhost:5173",
-          "https://litinkai.com",
-          "https://www.litinkai.com",
-          "https://www.litinkai.org"
+        "https://litinkai.com",
+        "https://www.litinkai.com",
+        "https://www.litinkai.org",
     ]
 
     @field_validator("ALLOWED_HOSTS", mode="before")
