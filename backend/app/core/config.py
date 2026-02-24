@@ -60,12 +60,8 @@ class Settings(BaseSettings):
         """Get allowed hosts from environment or use defaults"""
         return self.ALLOWED_HOSTS
 
-    # Frontend URL for redirects
-    FRONTEND_URL: str = (
-        "http://localhost:5173"
-        if ENVIRONMENT == "development"
-        else "https://www.litinkai.com"
-    )
+    # Frontend URL for redirects (set via FRONTEND_URL env var)
+    FRONTEND_URL: str = "http://localhost:5173"
 
     # Postgres Configuration
     DATABASE_URL: str = ""

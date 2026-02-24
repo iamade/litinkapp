@@ -6,15 +6,29 @@
 <h2> Welcome to {{site_name}} </h2>
 <p>Thank you for registering with us. Please click the button below to activate your account:</p>
 
-<a href="{{ activation_url }}" style="background-color: #4CAF50; color: white; padding: 14px 20px; text-decoration: none; border-radius: 4px;">
-    Activate Account
-</a>
+<!--[if mso]>
+<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ activation_url }}" style="height:45px;v-text-anchor:middle;width:200px;" arcsize="9%" strokecolor="#43a047" fillcolor="#4CAF50">
+<w:anchorlock/>
+<center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">Activate Account</center>
+</v:roundrect>
+<![endif]-->
+<!--[if !mso]><!-->
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="margin: 20px auto;">
+  <tr>
+    <td style="border-radius: 4px; background-color: #4CAF50;">
+      <a href="{{ activation_url }}" target="_blank" rel="noopener" style="display: inline-block; padding: 14px 30px; font-family: Arial, sans-serif; font-size: 16px; font-weight: bold; color: #ffffff; text-decoration: none; border-radius: 4px; background-color: #4CAF50; border: 1px solid #43a047;">
+        Activate Account
+      </a>
+    </td>
+  </tr>
+</table>
+<!--<![endif]-->
 
 <p>If the button does not work, copy and paste the following link into your browser:</p>
 <div style="word-break: break-all; background-color: #f5f5f5; padding: 10px; border-radius: 4px; margin: 10px 0; font-family: monospace;">
-{{ activation_url }}
+<a href="{{ activation_url }}" target="_blank" rel="noopener" style="color: #4CAF50; text-decoration: underline;">{{ activation_url }}</a>
 </div>
 <p>This link will expire in {{ expiry_time }} minutes.</p>
-
+<p style="color: #999; font-size: 12px;">If you did not create an account, you can safely ignore this email.</p>
 
 {% endblock %}
