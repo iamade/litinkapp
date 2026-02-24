@@ -236,7 +236,7 @@ async def callback(
                 avatar_url=avatar_url,
                 is_active=True,
                 account_status=AccountStatusSchema.ACTIVE,
-                roles=[RoleChoicesSchema.EXPLORER],  # Default role
+                roles=[RoleChoicesSchema.CREATOR],  # Default role
                 hashed_password="",  # No password for OAuth users initially
                 onboarding_completed=False,
             )

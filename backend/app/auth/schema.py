@@ -69,7 +69,7 @@ class UserBaseSchema(SQLModel):
     middle_name: str | None = Field(max_length=30, default=None)
     last_name: str | None = Field(default=None, max_length=30, nullable=True)
     roles: List[RoleChoicesSchema] = Field(
-        default=[RoleChoicesSchema.EXPLORER], sa_column=Column(JSON)
+        default=[RoleChoicesSchema.CREATOR], sa_column=Column(JSON)
     )
     is_active: bool = False
     is_superuser: bool = False

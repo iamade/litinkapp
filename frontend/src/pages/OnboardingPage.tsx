@@ -70,14 +70,15 @@ const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }
        <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Profile Type</label>
         <div className="mt-2 flex gap-4">
-             <button
-                type="button"
-                onClick={() => updateData({ primaryRole: "explorer" })}
-                className={`flex-1 py-3 px-4 rounded-xl border-2 transition-all ${data.primaryRole === 'explorer' ? 'border-purple-600 bg-purple-50 dark:bg-purple-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'}`}
-            >    
+             <div
+                className="flex-1 py-3 px-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 opacity-60 cursor-not-allowed relative overflow-hidden"
+            >
+                <div className="absolute top-1 right-1 bg-purple-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  Coming Soon
+                </div>
                 <div className="font-semibold dark:text-white">Explorer</div>
                 <div className="text-xs text-gray-500">I want to discover and watch content</div>
-            </button>
+             </div>
              <button
                 type="button"
                 onClick={() => updateData({ primaryRole: "creator" })}
@@ -200,7 +201,7 @@ export default function OnboardingPage() {
       username: "",
       securityQuestion: "",
       securityAnswer: "",
-      primaryRole: "explorer", // Default
+      primaryRole: "creator", // Default
       professionalRole: "",
       teamSize: "",
       discoverySource: "",

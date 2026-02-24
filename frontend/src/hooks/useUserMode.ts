@@ -6,13 +6,13 @@ export type UserMode = 'explorer' | 'creator';
 
 export const useUserMode = () => {
   const { user } = useAuth();
-  const [mode, setMode] = useState<UserMode>('explorer');
+  const [mode, setMode] = useState<UserMode>('creator');
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const loadUserMode = async () => {
       if (!user) {
-        setMode('explorer');
+        setMode('creator');
         setIsLoading(false);
         return;
       }
@@ -35,10 +35,10 @@ export const useUserMode = () => {
 
       try {
         const profile = await apiClient.get<{ preferred_mode: UserMode }>('/users/me');
-        setMode(profile.preferred_mode || 'explorer');
+        setMode(profile.preferred_mode || 'creator');
       } catch (error) {
         console.error('Failed to load user mode:', error);
-        setMode('explorer');
+        setMode('creator');
       } finally {
         setIsLoading(false);
       }

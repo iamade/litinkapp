@@ -46,7 +46,7 @@ interface AuthContextType {
     lastName?: string,
     securityQuestion?: string,
     securityAnswer?: string,
-    roles?: ("author" | "explorer")[]
+    roles?: ("author" | "explorer" | "creator")[]
   ) => Promise<void>;
   logout: () => void;
   loading: boolean;
@@ -116,7 +116,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     lastName?: string,
     securityQuestion?: string,
     securityAnswer?: string,
-    roles: ("author" | "explorer")[] = ["explorer"]
+    roles: ("author" | "explorer" | "creator")[] = ["creator"]
   ) => {
     await apiClient.post("/auth/register", {
       display_name: username,

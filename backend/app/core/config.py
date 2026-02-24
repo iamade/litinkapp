@@ -141,7 +141,7 @@ class Settings(BaseSettings):
     MAILGUN_SENDER_NAME: str = "Litink AI"
 
     # Mailgun SMTP Configuration (Production)
-    MAILGUN_SMTP_SERVER: str = "smtp.mailgun.org"
+    MAILGUN_SMTP_SERVER: str = ""
     MAILGUN_SMTP_PORT: int = 587
     MAILGUN_SMTP_USERNAME: str = ""
     MAILGUN_SMTP_PASSWORD: str = ""

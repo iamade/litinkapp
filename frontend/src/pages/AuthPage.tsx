@@ -81,6 +81,11 @@ export default function AuthPage() {
       
       try {
         const user = await apiClient.get<any>("/users/me");
+        if (user.onboarding_completed === false) {
+            navigate('/onboarding');
+            return;
+        }
+
         const hasCreator = user.roles?.includes('creator');
         const hasExplorer = user.roles?.includes('explorer');
         
