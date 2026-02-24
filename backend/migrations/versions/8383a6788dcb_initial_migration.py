@@ -36,13 +36,13 @@ def upgrade() -> None:
         sa.Column("avatar_url", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
         sa.Column("bio", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
         sa.Column(
-            "first_name", sqlmodel.sql.sqltypes.AutoString(length=30), nullable=False
+            "first_name", sqlmodel.sql.sqltypes.AutoString(length=30), nullable=True
         ),
         sa.Column(
             "middle_name", sqlmodel.sql.sqltypes.AutoString(length=30), nullable=True
         ),
         sa.Column(
-            "last_name", sqlmodel.sql.sqltypes.AutoString(length=30), nullable=False
+            "last_name", sqlmodel.sql.sqltypes.AutoString(length=30), nullable=True
         ),
         sa.Column("roles", sa.JSON(), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False),
