@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from enum import Enum
 import uuid
 import re
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, JSON, String
 
 
 def validate_email_flexible(v: str) -> str:
@@ -73,11 +73,16 @@ class UserBaseSchema(SQLModel):
     )
     is_active: bool = False
     is_superuser: bool = False
-    security_question: SecurityQuestionsSchema | None = Field(
-        default=None, max_length=30, nullable=True
+    security_question: Optional[str] = Field(
+        default=None, sa_column=Column(String(30), nullable=True)
     )
     security_answer: str | None = Field(default=None, max_length=30, nullable=True)
-    account_status: AccountStatusSchema = Field(default=AccountStatusSchema.INACTIVE)
+    account_status: str = Field(
+        default=AccountStatusSchema.INACTIVE.value,
+        sa_column=Column(
+            String, nullable=False, default=AccountStatusSchema.INACTIVE.value
+        ),
+    )
     preferred_mode: str = Field(default="explorer")
     onboarding_completed: bool = Field(default=False)
 
