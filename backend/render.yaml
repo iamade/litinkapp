@@ -80,9 +80,9 @@ services:
         value: us-east-1
       # Frontend
       - key: FRONTEND_URL
-        value: https://litinkapp.netlify.app
+        value: https://www.litinkai.com
       - key: ALLOWED_HOSTS
-        value: '["https://litinkapp.netlify.app","https://www.litinkai.com","https://litinkai.com","https://litinkapp.onrender.com"]'
+        value: '["https://www.litinkai.com","https://litinkai.com","https://litinkapp.onrender.com"]'
       # OAuth
       - key: OAUTH_REDIRECT_BASE_URL
         value: https://litinkapp.onrender.com/api/v1
