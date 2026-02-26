@@ -236,13 +236,13 @@ class Settings(BaseSettings):
         30 if ENVIRONMENT == "development" else 15
     )
     JWT_REFRESH_TOKEN_EXPIRATION_DAYS: int = 1
-    COOKIE_SECURE: bool = False if ENVIRONMENT == "development" else True
+    COOKIE_SECURE: bool = False  # Set to True in production via env var
     COOKIE_ACCESS_NAME: str = "access_token"
     COOKIE_REFRESH_NAME: str = "refresh_token"
     COOKIE_LOGGED_IN_NAME: str = "logged_in"
 
     COOKIE_HTTP_ONLY: bool = True
-    COOKIE_SAMESITE: str = "lax"
+    COOKIE_SAMESITE: str = "lax"  # Set to 'none' in production for cross-origin cookies
     COOKIE_DOMAIN: Optional[str] = None
     COOKIE_PATH: str = "/"
     SIGNING_KEY: str = ""

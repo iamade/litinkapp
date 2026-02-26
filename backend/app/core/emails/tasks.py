@@ -25,7 +25,6 @@ def send_email_task(
         headers = {
             "X-Mailer": f"{settings.SITE_NAME}",
             "X-Priority": "3",  # Normal priority
-            "Precedence": "bulk",
             "MIME-Version": "1.0",
         }
         # Add List-Unsubscribe if support email is configured (required by Gmail/Yahoo)
