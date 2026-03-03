@@ -176,6 +176,12 @@ class ProjectService:
             remote_path = f"users/{user_id}/projects/{project_uuid}/{file.filename}"
             file_url = await file_service.upload_file(temp_path, remote_path)
 
+            if not file_url:
+                raise ValueError(
+                    f"Failed to upload file '{file.filename}' to storage. "
+                    "Please check your storage configuration (S3 bucket, credentials, etc.)."
+                )
+
             # 3. Extract text based on file type
             text_content = ""
             if suffix.lower() == ".pdf":
