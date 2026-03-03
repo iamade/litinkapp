@@ -1,6 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { X, ChevronLeft, ChevronRight, Check } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { X, Check, Volume2, Loader2 } from 'lucide-react';
 import { SceneImage } from '../Images/types';
+
+interface DialogueLine {
+  character: string;
+  text: string;
+}
 
 interface SceneGalleryModalProps {
   isOpen: boolean;
@@ -10,7 +15,11 @@ interface SceneGalleryModalProps {
   images: SceneImage[];
   selectedImageUrl?: string;
   initialIndex?: number;
+  clickedImageUrl?: string; // URL of the specific image the user clicked
   onSelectImage: (url: string) => void;
+  dialogue?: DialogueLine[];
+  onGenerateAudio?: () => void;
+  isGeneratingAudio?: boolean;
 }
 
 const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
@@ -21,19 +30,31 @@ const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
   images,
   selectedImageUrl,
   initialIndex = 0,
-  onSelectImage
+  clickedImageUrl,
+  onSelectImage,
+  dialogue,
+  onGenerateAudio,
+  isGeneratingAudio = false,
 }) => {
-  const [currentIndex, setCurrentIndex] = useState(initialIndex);
-
   // Filter valid images
-  const validImages = React.useMemo(() => 
+  const validImages = React.useMemo(() =>
     images.filter(img => img.imageUrl && img.generationStatus === 'completed'),
     [images]
   );
 
+  // Show the clicked image if provided, otherwise fall back to initialIndex
+  const displayImage = React.useMemo(() => {
+    if (clickedImageUrl) {
+      const found = validImages.find(img => img.imageUrl === clickedImageUrl);
+      if (found) return found;
+    }
+    return validImages[initialIndex] || validImages[0];
+  }, [clickedImageUrl, validImages, initialIndex]);
+  const isSelected = displayImage?.imageUrl === selectedImageUrl;
+
+
   useEffect(() => {
     if (isOpen) {
-      setCurrentIndex(initialIndex);
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -41,142 +62,143 @@ const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [isOpen, initialIndex]);
+  }, [isOpen]);
 
   useEffect(() => {
-      // Handle keyboard navigation
-      const handleKeyDown = (e: KeyboardEvent) => {
-          if (!isOpen) return;
-          if (e.key === 'ArrowLeft') handlePrev();
-          if (e.key === 'ArrowRight') handleNext();
-          if (e.key === 'Escape') onClose();
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, validImages.length]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isOpen) return;
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  const currentImage = validImages[currentIndex];
-  const isSelected = currentImage?.imageUrl === selectedImageUrl;
-
-  const handlePrev = () => {
-    setCurrentIndex((prev) => (prev > 0 ? prev - 1 : validImages.length - 1));
-  };
-
-  const handleNext = () => {
-    setCurrentIndex((prev) => (prev < validImages.length - 1 ? prev + 1 : 0));
-  };
-
-  const handleSelect = () => {
-      if (currentImage?.imageUrl) {
-          if (isSelected) {
-              // Deselect - pass empty string to clear selection
-              onSelectImage('');
-          } else {
-              onSelectImage(currentImage.imageUrl);
-          }
-      }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-6xl h-full max-h-[90vh] flex flex-col">
+      <div className="relative w-full max-w-5xl max-h-[92vh] flex flex-col bg-gray-900 rounded-2xl shadow-2xl border border-white/10 overflow-hidden">
+        
         {/* Header */}
-        <div className="flex justify-between items-start mb-4 text-white">
+        <div className="flex justify-between items-start px-6 py-4 border-b border-white/10">
           <div>
-            <h3 className="text-xl font-semibold flex items-center gap-3">
-               <span className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-sm font-bold">
-                 {sceneNumber}
-               </span>
-               Scene {sceneNumber} Gallery
+            <h3 className="text-lg font-semibold text-white flex items-center gap-3">
+              <span className="w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-sm font-bold shrink-0">
+                {sceneNumber}
+              </span>
+              Scene {sceneNumber} — View Details
             </h3>
-            <p className="text-sm text-gray-300 mt-1 max-w-3xl line-clamp-2">
-                {description}
-            </p>
           </div>
-          <button 
+          <button
             onClick={onClose}
-            className="p-2 hover:bg-white/10 rounded-full transition-colors"
+            className="p-2 hover:bg-white/10 rounded-full transition-colors ml-4 shrink-0"
           >
-            <X className="w-6 h-6" />
+            <X className="w-5 h-5 text-gray-300" />
           </button>
         </div>
 
-        {/* Main Content */}
-        <div className="flex-1 flex items-center justify-center relative min-h-0">
-          {validImages.length > 0 ? (
-              <>
-                <img 
-                    src={currentImage?.imageUrl} 
-                    alt={`Scene ${sceneNumber} - Version ${currentIndex + 1}`}
-                    className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
-                />
+        {/* Body: image + info side by side */}
+        <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-                {/* Navigation Buttons */}
-                {validImages.length > 1 && (
-                    <>
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); handlePrev(); }}
-                            className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-black/50 hover:bg-black/70 text-white rounded-full transition-all hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <ChevronLeft className="w-8 h-8" />
-                        </button>
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); handleNext(); }}
-                            className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-black/50 hover:bg-black/70 text-white rounded-full transition-all hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <ChevronRight className="w-8 h-8" />
-                        </button>
-                    </>
-                )}
-              </>
-          ) : (
-              <div className="text-gray-400">No images available for this scene</div>
-          )}
-        </div>
+          {/* Left: Image */}
+          <div className="flex-1 bg-black flex items-center justify-center p-4 min-h-[260px]">
+            {displayImage ? (
+              <img
+                src={displayImage.imageUrl}
+                alt={`Scene ${sceneNumber}`}
+                className="max-w-full max-h-[55vh] object-contain rounded-lg shadow-2xl"
+              />
+            ) : (
+              <div className="text-gray-500 text-sm">No image available for this scene</div>
+            )}
+          </div>
 
-        {/* Footer / Controls */}
-        <div className="mt-4 flex flex-col items-center gap-4">
-            {/* Indicators */}
-            {validImages.length > 1 && (
-                <div className="flex gap-2 p-2 bg-black/40 rounded-full backdrop-blur-md">
-                    {validImages.map((_, idx) => (
-                        <button
-                            key={idx}
-                            onClick={() => setCurrentIndex(idx)}
-                            className={`w-2.5 h-2.5 rounded-full transition-all ${
-                                idx === currentIndex ? 'bg-blue-500 scale-125' : 'bg-white/30 hover:bg-white/50'
-                            }`}
-                        />
-                    ))}
+          {/* Right: Info panel */}
+          <div className="w-full md:w-80 flex flex-col border-l border-white/10 bg-gray-900/80 overflow-y-auto">
+            
+            {/* Scene Description */}
+            <div className="p-5 border-b border-white/10">
+              <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Scene Description</h4>
+              <p className="text-sm text-gray-200 leading-relaxed">{description || 'No description available.'}</p>
+            </div>
+
+            {/* Dialogue */}
+            {dialogue && dialogue.length > 0 && (
+              <div className="p-5 border-b border-white/10">
+                <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">Dialogue</h4>
+                <div className="space-y-3">
+                  {dialogue.map((line, idx) => (
+                    <div key={idx} className="text-sm">
+                      <span className="text-blue-400 font-semibold uppercase text-xs tracking-wide block mb-0.5">
+                        {line.character}
+                      </span>
+                      <span className="text-gray-300 italic">"{line.text}"</span>
+                    </div>
+                  ))}
                 </div>
+              </div>
             )}
 
-            {/* Action Bar */}
-            <div className="flex items-center gap-4 bg-gray-900/80 p-3 rounded-xl border border-white/10 backdrop-blur-md shadow-xl">
-                 <div className="text-sm text-gray-300 px-2 border-r border-white/10 pr-4">
-                     Version {currentIndex + 1} of {validImages.length}
-                 </div>
-                 
-                 {isSelected ? (
-                     <button
-                        onClick={handleSelect}
-                        className="flex items-center gap-2 px-6 py-2 bg-emerald-600/20 text-emerald-400 rounded-lg border border-emerald-500/30 hover:bg-red-600/20 hover:text-red-400 hover:border-red-500/30 transition-all cursor-pointer"
-                        title="Click to deselect"
-                     >
-                         <Check className="w-5 h-5" />
-                         <span className="font-semibold">Selected for Audio</span>
-                     </button>
-                 ) : (
-                     <button
-                        onClick={handleSelect}
-                        className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-all shadow-lg hover:shadow-blue-500/20 transform hover:-translate-y-0.5 active:translate-y-0"
-                     >
-                         Select for Audio
-                     </button>
-                 )}
+            {/* No dialogue notice */}
+            {(!dialogue || dialogue.length === 0) && (
+              <div className="p-5 border-b border-white/10">
+                <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Dialogue</h4>
+                <p className="text-xs text-gray-500 italic">No dialogue in this scene</p>
+              </div>
+            )}
+
+            {/* Spacer */}
+            <div className="flex-1" />
+
+            {/* Actions */}
+            <div className="p-5 flex flex-col gap-3 border-t border-white/10">
+              {/* Generate Audio button */}
+              {onGenerateAudio && (
+                <button
+                  onClick={onGenerateAudio}
+                  disabled={isGeneratingAudio}
+                  className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-lg ${
+                    isGeneratingAudio
+                      ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white hover:shadow-purple-500/20 transform hover:-translate-y-0.5 active:translate-y-0'
+                  }`}
+                >
+                  {isGeneratingAudio ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Generating Audio...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 className="w-4 h-4" />
+                      <span>Generate Audio</span>
+                    </>
+                  )}
+                </button>
+              )}
+
+              {/* Select / Deselect image for audio */}
+              {displayImage && (
+                isSelected ? (
+                  <button
+                    onClick={() => onSelectImage('')}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600/20 text-emerald-400 rounded-xl border border-emerald-500/30 hover:bg-red-600/20 hover:text-red-400 hover:border-red-500/30 transition-all cursor-pointer font-medium text-sm"
+                    title="Click to deselect"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Selected</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => onSelectImage(displayImage.imageUrl)}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 rounded-xl border border-blue-500/30 transition-all font-medium text-sm"
+                  >
+                    Select Image
+                  </button>
+                )
+              )}
             </div>
+          </div>
         </div>
       </div>
     </div>

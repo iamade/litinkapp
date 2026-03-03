@@ -21,7 +21,6 @@ import {
 import type { VideoScene, Transition } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
-import { SceneAudioManager } from './SceneAudioManager';
 import { SceneDetailModal } from './SceneDetailModal';
 
 // Define ChapterScript interface locally to avoid import issues
@@ -75,11 +74,10 @@ const SceneCard: React.FC<{
   scriptScene?: SceneDescription;
   sceneCharacters?: string[];
   storyboardAudioCount?: number;
-  onManageAudio: () => void;
   isSelectedForGeneration?: boolean;  // Whether this scene is selected for video generation
   onToggleSelection?: () => void;     // Toggle selection for video generation
   isGenerating?: boolean;             // Whether this scene is currently being generated
-}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters, storyboardAudioCount, onManageAudio, isSelectedForGeneration, onToggleSelection, isGenerating }) => {
+}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters, storyboardAudioCount, isSelectedForGeneration, onToggleSelection, isGenerating }) => {
   const {
     attributes,
     listeners,
@@ -135,16 +133,6 @@ const SceneCard: React.FC<{
           )}
         </div>
         <div className="flex items-center space-x-1">
-          <button
-            onClick={(e) => {
-               e.stopPropagation();
-               onManageAudio();
-            }}
-            className="p-1.5 hover:bg-blue-100 bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 rounded-md border border-blue-200 dark:border-blue-800"
-            title="Manage Scene Audio"
-          >
-            <Music className="w-4 h-4" />
-          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -304,7 +292,6 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
     subscribe,
   } = useScriptSelection();
   
-  const [managingAudioSceneNum, setManagingAudioSceneNum] = useState<number | null>(null);
   const [viewingScene, setViewingScene] = useState<VideoScene | null>(null);
 
   // Recompute markers on selection changes
@@ -436,7 +423,6 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
                   scriptScene={scriptScene}
                   sceneCharacters={sceneCharacters}
                   storyboardAudioCount={storyboardContext?.getAudioForShot(scene.sceneNumber, scene.shotIndex)?.length ?? 0}
-                  onManageAudio={() => setManagingAudioSceneNum(scene.sceneNumber)}
                   isSelectedForGeneration={selectedShotIds.includes(scene.id)}
                   onToggleSelection={() => onToggleShotSelection?.(scene.id)}
                   isGenerating={generatingShotIds.has(scene.id) || generatingShotIds.has('__all__')}
@@ -447,14 +433,6 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
         </SortableContext>
       </DndContext>
       
-      {managingAudioSceneNum !== null && (
-        <SceneAudioManager
-          sceneNumber={managingAudioSceneNum}
-          availableShots={scenes.filter(s => s.sceneNumber === managingAudioSceneNum)}
-          onClose={() => setManagingAudioSceneNum(null)}
-        />
-      )}
-
       {viewingScene && (
         <SceneDetailModal 
           scene={viewingScene}
@@ -467,6 +445,7 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
              }
           }}
           isGenerating={generatingShotIds.has(viewingScene.id)}
+          selectedScript={selectedScript}
         />
       )}
 

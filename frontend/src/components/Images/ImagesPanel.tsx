@@ -173,7 +173,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const [sceneDescription, setSceneDescription] = useState('');
   const [activeTab, setActiveTab] = useState<'scenes' | 'characters' | 'storyboard'>('characters');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [selectedImage, setSelectedImage] = useState<{
+    url: string;
+    description?: string;
+    sceneNumber?: number;
+    dialogue?: Array<{character: string; text: string}>;
+  } | null>(null);
   
   const [showSceneGenerationModal, setShowSceneGenerationModal] = useState(false);
   const [selectedSceneForGeneration, setSelectedSceneForGeneration] = useState<{
@@ -1344,7 +1349,16 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 const sceneNumber = scene.scene_number || idx + 1;
                 const images = sceneImages[Number(sceneNumber)] || [];
                 // Use header (e.g. "ACT I - SCENE 1") as key, normalized to uppercase
-                const headerKey = (scene.header || '').replace(/\*/g, '').trim().toUpperCase();
+                // If scene.header is missing, search dialogueMoments keys by scene number
+                let headerKey = (scene.header || '').replace(/\*/g, '').trim().toUpperCase();
+                if (!headerKey) {
+                  // Fallback: find the key that contains this scene number
+                  const matchingKey = Object.keys(dialogueMoments).find(key => {
+                    const match = key.match(/SCENE\s+(\d+)/i);
+                    return match && parseInt(match[1], 10) === sceneNumber;
+                  });
+                  headerKey = matchingKey || '';
+                }
                 const sceneMoments = dialogueMoments[headerKey] || [];
                 
                 return (
@@ -1379,7 +1393,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       scene.visual_description
                     )}
                     onDelete={(imageId) => deleteImage('scene', sceneNumber, imageId)}
-                    onView={(url) => setSelectedImage(url)}
+                    onView={(url) => {
+                      // Extract dialogue from sceneMoments - use dialogue_preview field (not 'text')
+                      const dialogue: Array<{character: string; text: string}> = sceneMoments
+                        .filter((m: any) => m.character && m.dialogue_preview)
+                        .map((m: any) => ({ character: String(m.character), text: String(m.dialogue_preview) }));
+                      setSelectedImage({
+                        url,
+                        sceneNumber: scene.scene_number || idx + 1,
+                        description: scene.visual_description || scene.description,
+                        dialogue: dialogue.length > 0 ? dialogue : undefined,
+                      });
+                    }}
                     onSetKeyScene={(imageId) => setKeySceneImage(sceneNumber, imageId)}
                     onGenerateMoment={(shotDescription, parentSceneImageUrl) => {
                       // Calculate next shot_index: count existing images for this scene with shot_index >= 1
@@ -1552,7 +1577,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       }
                     }}
                     onDelete={() => deleteImage('character', characterKey)}
-                    onView={() => setSelectedImage(characterImage?.imageUrl || null)}
+                    onView={() => setSelectedImage({ url: characterImage?.imageUrl || '' })}
                     onUnlink={characterImage?.imageUrl ? async () => {
                       // Clear the local character image mapping by setting an empty CharacterImage
                       // This removes the visual link without deleting from database
@@ -1645,7 +1670,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                         }
                       }}
                       onDelete={() => deleteImage('character', itemKey)}
-                      onView={() => setSelectedImage(finalImage?.imageUrl || null)}
+                      onView={() => setSelectedImage({ url: finalImage?.imageUrl || '' })}
                       onUnlink={finalImage?.imageUrl ? async () => {
                         setCharacterImage(itemKey, {
                           name: itemKey,
@@ -1795,7 +1820,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     images={images}
                     selectedImageUrl={selectedSceneImages[sceneNum]}
                     onSelect={(url: string | null) => setSelectedSceneImage(sceneNum, url)}
-                    onView={(url: string) => setSelectedImage(url)}
+                    onView={(url: string) => {
+                      const sceneIdx = sceneNum - 1;
+                      const sd = scenes[sceneIdx];
+                      const sdesc = typeof sd === 'string' ? sd : (sd?.visual_description || sd?.description || `Scene ${sceneNum}`);
+                      setSelectedImage({ url, sceneNumber: sceneNum, description: sdesc });
+                    }}
                     onDelete={(imgId: string) => deleteImage('scene', sceneNum, imgId)}
                     onReorder={(newImages: SceneImage[]) => {
                         // Update local state for immediate feedback
@@ -1841,8 +1871,11 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       {/* Image Viewer Modal */}
       {selectedImage && (
         <ImageViewerModal
-          imageUrl={selectedImage}
+          imageUrl={selectedImage.url}
           onClose={() => setSelectedImage(null)}
+          description={selectedImage.description}
+          sceneNumber={selectedImage.sceneNumber}
+          dialogue={selectedImage.dialogue}
         />
       )}
 
@@ -2639,43 +2672,86 @@ const ImageActions: React.FC<ImageActionsProps> = ({
 interface ImageViewerModalProps {
   imageUrl: string;
   onClose: () => void;
+  description?: string;
+  sceneNumber?: number;
+  dialogue?: Array<{character: string; text: string}>;
 }
 
-const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose }) => {
+const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose, description, sceneNumber, dialogue }) => {
+  if (!imageUrl) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75">
-      <div className="bg-white rounded-lg p-4 max-w-4xl max-h-[90vh] w-full mx-4">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">Image Preview</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
-          >
-            ×
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-5xl max-h-[92vh] bg-gray-900 rounded-2xl shadow-2xl border border-white/10 overflow-hidden flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex justify-between items-center px-5 py-3 border-b border-white/10">
+          <h3 className="text-sm font-semibold text-white">
+            {sceneNumber ? `Scene ${sceneNumber} — Image Preview` : 'Image Preview'}
+          </h3>
+          <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-full transition-colors">
+            <X className="w-5 h-5 text-gray-300" />
           </button>
         </div>
-        
-        <div className="flex justify-center">
-          <img
-            src={imageUrl}
-            alt="Generated image"
-            className="max-w-full max-h-[70vh] object-contain rounded"
-          />
+
+        {/* Body */}
+        <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+          {/* Image */}
+          <div className="flex-1 bg-black flex items-center justify-center p-4 min-h-[240px]">
+            <img
+              src={imageUrl}
+              alt={sceneNumber ? `Scene ${sceneNumber}` : 'Generated image'}
+              className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-2xl"
+            />
+          </div>
+
+          {/* Side panel: only show if description or dialogue */}
+          {(description || (dialogue && dialogue.length > 0)) && (
+            <div className="w-full md:w-72 border-t md:border-t-0 md:border-l border-white/10 bg-gray-900/80 flex flex-col overflow-y-auto">
+              {description && (
+                <div className="p-4 border-b border-white/10">
+                  <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Scene Description</h4>
+                  <p className="text-sm text-gray-200 leading-relaxed">{description}</p>
+                </div>
+              )}
+              {dialogue && dialogue.length > 0 && (
+                <div className="p-4">
+                  <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">Dialogue</h4>
+                  <div className="space-y-3">
+                    {dialogue.map((line, i) => (
+                      <div key={i}>
+                        <span className="text-blue-400 text-xs font-bold uppercase block mb-0.5">{line.character}</span>
+                        <span className="text-gray-300 text-sm italic">"{line.text}"</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(!dialogue || dialogue.length === 0) && description && (
+                <div className="p-4">
+                  <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Dialogue</h4>
+                  <p className="text-xs text-gray-500 italic">No dialogue in this scene</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-        
-        <div className="mt-4 flex justify-end space-x-2">
+
+        {/* Footer */}
+        <div className="px-5 py-3 border-t border-white/10 flex justify-end gap-2">
           <a
             href={imageUrl}
             download
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
           >
             <Download className="w-4 h-4" />
             <span>Download</span>
           </a>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
-          >
+          <button onClick={onClose} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg transition-colors">
             Close
           </button>
         </div>

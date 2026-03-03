@@ -181,15 +181,83 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     isOpen: boolean;
     sceneIndex: number;
     initialImageIndex: number;
+    clickedImageUrl?: string;
   }>({ isOpen: false, sceneIndex: -1, initialImageIndex: 0 });
 
-  const openGallery = (sceneIndex: number, imageIndex: number = 0) => {
-    setGalleryState({ isOpen: true, sceneIndex, initialImageIndex: imageIndex });
+  const openGallery = (sceneIndex: number, imageIndex: number = 0, clickedUrl?: string) => {
+    setGalleryState({ isOpen: true, sceneIndex, initialImageIndex: imageIndex, clickedImageUrl: clickedUrl });
   };
 
   const closeGallery = () => {
     setGalleryState(prev => ({ ...prev, isOpen: false }));
   };
+
+  // Parse dialogue moments from script text - mirrors ImagesPanel's parser
+  // Maps scene header keys (e.g. "ACT I - SCENE 1") to arrays of dialogue moments
+  const audioPanelDialogueMoments = React.useMemo(() => {
+    if (!selectedScript?.script) return {} as Record<string, Array<{character: string; dialogue_preview?: string; moment_type: string}>>;
+    
+    const lines = selectedScript.script.split('\n');
+    const moments: Record<string, Array<{character: string; dialogue_preview?: string; moment_type: string}>> = {};
+    
+    let currentSceneKey = '';
+    let currentCharacter: string | null = null;
+    
+    for (const rawLine of lines) {
+      const trimmed = rawLine.trim();
+      if (!trimmed) continue;
+      
+      const sceneMatch = trimmed.match(/^(\*?\*?ACT\s+[IVX0-9]+\s*-?\s*SCENE\s+\d+(?:\.\d+)?)\*?\*?/i);
+      if (sceneMatch) {
+        currentSceneKey = sceneMatch[1].replace(/\*/g, '').trim().toUpperCase();
+        currentCharacter = null;
+        continue;
+      }
+      
+      if (
+        trimmed === trimmed.toUpperCase() &&
+        trimmed.length <= 30 &&
+        trimmed.length > 1 &&
+        !trimmed.startsWith('INT.') &&
+        !trimmed.startsWith('EXT.') &&
+        !trimmed.startsWith('ACT') &&
+        !trimmed.startsWith('SCENE') &&
+        !trimmed.startsWith('FADE') &&
+        !trimmed.startsWith('CUT') &&
+        !trimmed.startsWith('(') &&
+        !trimmed.startsWith('*')
+      ) {
+        currentCharacter = trimmed.replace("(CONT'D)", '').replace('(V.O.)', '').trim();
+        continue;
+      }
+      
+      if (currentCharacter && currentSceneKey && !trimmed.startsWith('(') && !trimmed.startsWith('*') && trimmed.length > 10) {
+        if (!moments[currentSceneKey]) moments[currentSceneKey] = [];
+        moments[currentSceneKey].push({
+          character: currentCharacter,
+          dialogue_preview: trimmed.slice(0, 80) + (trimmed.length > 80 ? '...' : ''),
+          moment_type: 'dialogue',
+        });
+        currentCharacter = null;
+      }
+    }
+    
+    return moments;
+  }, [selectedScript]);
+
+  // Lookup dialogue for a specific scene number
+  const getSceneDialogue = (sceneNum: number): Array<{character: string; text: string}> => {
+    const matchingKey = Object.keys(audioPanelDialogueMoments).find(key => {
+      const match = key.match(/SCENE\s+(\d+)/i);
+      return match && parseInt(match[1], 10) === sceneNum;
+    });
+    if (!matchingKey) return [];
+    
+    return (audioPanelDialogueMoments[matchingKey] || [])
+      .filter(m => m.character && m.dialogue_preview)
+      .map(m => ({ character: m.character, text: m.dialogue_preview! }));
+  };
+
 
   // Helper function to compute seek start time
   const computeSeekStart = (): number => {
@@ -832,7 +900,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                                 isGeneratingAudio={generatingScenesAudio.has(sceneNum)}
                                 hasAudio={sceneHasAudio(sceneNum)}
                                 onGenerateAudio={() => handleGenerateSceneAudio(sceneNum)}
-                                onView={(_url) => openGallery(idx)}
+                                onView={(url) => openGallery(idx, 0, url)}
                             />
                         );
                     })}
@@ -852,6 +920,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                     const includedGalleryImages = rawGalleryImages.filter((img: any) =>
                         !img.id || !deselectedImages.has(img.id)
                     );
+                    const sceneDialogue = getSceneDialogue(sceneNum);
                     return (
                         <SceneGalleryModal
                             isOpen={galleryState.isOpen}
@@ -863,7 +932,11 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                             images={includedGalleryImages}
                             selectedImageUrl={selectedSceneImages[sceneNum]}
                             initialIndex={galleryState.initialImageIndex}
+                            clickedImageUrl={galleryState.clickedImageUrl}
                             onSelectImage={(url) => setSelectedSceneImage(sceneNum, url || null)}
+                            dialogue={sceneDialogue}
+                            onGenerateAudio={() => handleGenerateSceneAudio(sceneNum)}
+                            isGeneratingAudio={generatingScenesAudio.has(sceneNum)}
                         />
                     );
                 })()}
