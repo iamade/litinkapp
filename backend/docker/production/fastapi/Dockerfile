@@ -50,6 +50,10 @@ RUN mkdir -p ${APP_HOME}/app/logs && \
     chown -R ${APP_USER}:${APP_GROUP} ${APP_HOME}/app/logs && \
     chmod 775 ${APP_HOME}/app/logs
 
+RUN mkdir -p ${APP_HOME}/uploads && \
+    chown -R ${APP_USER}:${APP_GROUP} ${APP_HOME}/uploads && \
+    chmod 775 ${APP_HOME}/uploads
+
 # Setup /tmp for celerybeat schedule file
 RUN mkdir -p /tmp && chmod 777 /tmp && chown -R ${APP_USER}:${APP_GROUP} /tmp
 

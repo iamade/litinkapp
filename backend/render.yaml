@@ -74,10 +74,12 @@ services:
         sync: false
       - key: S3_SECRET_KEY
         sync: false
+      - key: S3_ENDPOINT
+        sync: false
       - key: S3_BUCKET_NAME
         value: litink-books-prod
       - key: S3_REGION
-        value: us-east-1
+        value: ca-central-1
       # Frontend
       - key: FRONTEND_URL
         value: https://www.litinkai.com

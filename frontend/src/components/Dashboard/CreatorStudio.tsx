@@ -246,7 +246,7 @@ export default function CreatorStudio() {
             Creator Studio
           </h2>
           <p className="text-gray-600 dark:text-gray-400 mb-8">
-            The professional workspace for your media projects. Start by describing your vision.
+            Upload a book or describe your vision — we'll generate scripts, images, audio, and video for you.
           </p>
 
           {/* Hidden File Input */}
@@ -268,7 +268,13 @@ export default function CreatorStudio() {
                    setPrompt(e.target.value);
                    if (analysis) setAnalysis(null); 
                 }}
-                placeholder="Describe your project in detail. E.g. 'I want to create a training video series about cybersecurity for new employees, using our existing PDF manual...'"
+                placeholder={`Try something like:
+• "Turn my uploaded novel into a cinematic script with scenes and dialogue"
+• "Create an original sci-fi short film about time travel"
+• "Generate a training video series on workplace safety from our PDF manual"
+• "Write a children's story about a brave little fox and generate illustrations"
+
+You can also just upload a book and we'll handle the rest!`}
                 className="w-full h-40 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none text-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-colors"
               />
               

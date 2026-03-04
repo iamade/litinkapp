@@ -241,6 +241,7 @@ export default function AuthPage() {
                         {loading ? "Processing..." : (isLogin ? "Login" : "Register")}
                     </button>
 
+                    {/* Social login buttons temporarily disabled
                     <div className="relative my-6">
                         <div className="absolute inset-0 flex items-center">
                             <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
@@ -258,7 +259,6 @@ export default function AuthPage() {
                         >
                             <GoogleIcon />
                         </button>
-                        {/* Apple Sign In hidden - not implemented yet */}
                         <button 
                             type="button" 
                             onClick={() => window.location.href = `${API_BASE_URL}/auth/login/microsoft`}
@@ -267,6 +267,7 @@ export default function AuthPage() {
                             <MicrosoftIcon />
                         </button>
                     </div>
+                    */}
 
                     <div className="text-center mt-6">
                          <button

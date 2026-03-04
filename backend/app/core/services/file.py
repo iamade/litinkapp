@@ -5704,7 +5704,7 @@ Chapters:
 
         except Exception as e:
             print(f"[FILE UPLOAD ERROR] {str(e)}")
-            return None
+            raise  # Re-raise so the caller gets the actual error
 
     async def download_file(self, url: str, local_path: str) -> bool:
         """Download file from URL to local path"""

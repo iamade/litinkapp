@@ -174,7 +174,18 @@ class ProjectService:
 
             # 2. Upload to storage using FileService
             remote_path = f"users/{user_id}/projects/{project_uuid}/{file.filename}"
-            file_url = await file_service.upload_file(temp_path, remote_path)
+            try:
+                file_url = await file_service.upload_file(temp_path, remote_path)
+            except Exception as upload_err:
+                raise ValueError(
+                    f"Failed to upload file '{file.filename}' to storage: {upload_err}"
+                ) from upload_err
+
+            if not file_url:
+                raise ValueError(
+                    f"Failed to upload file '{file.filename}' to storage. "
+                    "Upload returned no URL."
+                )
 
             # 3. Extract text based on file type
             text_content = ""
