@@ -24,13 +24,20 @@ class S3StorageService:
     def __init__(self):
         self.use_minio = settings.USE_MINIO  # Set in config based on environment
 
-        logger.info(
-            f"[STORAGE INIT] USE_MINIO={self.use_minio} (type={type(self.use_minio)})"
+        import os as _os
+
+        print(
+            f"[STORAGE INIT] USE_MINIO={self.use_minio} (type={type(self.use_minio).__name__})"
         )
+        print(
+            f"[STORAGE INIT] Raw env S3_BUCKET_NAME={_os.environ.get('S3_BUCKET_NAME', 'NOT SET')}"
+        )
+        print(f"[STORAGE INIT] Settings S3_BUCKET_NAME={settings.S3_BUCKET_NAME}")
+        print(f"[STORAGE INIT] Settings MINIO_BUCKET_NAME={settings.MINIO_BUCKET_NAME}")
 
         if self.use_minio:
             # MinIO configuration for local development
-            logger.info(
+            print(
                 f"[STORAGE INIT] Using MinIO - endpoint={settings.MINIO_ENDPOINT}, bucket={settings.MINIO_BUCKET_NAME}"
             )
             self.client = boto3.client(
@@ -44,10 +51,10 @@ class S3StorageService:
             self.bucket_name = settings.MINIO_BUCKET_NAME
         else:
             # S3-compatible storage for production (AWS S3 or Supabase Storage S3)
-            logger.info(
+            print(
                 f"[STORAGE INIT] Using S3 - endpoint={settings.S3_ENDPOINT}, bucket={settings.S3_BUCKET_NAME}, region={settings.S3_REGION}"
             )
-            logger.info(
+            print(
                 f"[STORAGE INIT] S3 access key starts with: {settings.S3_ACCESS_KEY[:8] if settings.S3_ACCESS_KEY else 'NOT SET'}..."
             )
             self.client = boto3.client(
@@ -63,7 +70,7 @@ class S3StorageService:
             )
             self.bucket_name = settings.S3_BUCKET_NAME
 
-        logger.info(f"[STORAGE INIT] Final bucket_name={self.bucket_name}")
+        print(f"[STORAGE INIT] Final bucket_name={self.bucket_name}")
 
         # Ensure bucket exists (for MinIO)
         if self.use_minio:
