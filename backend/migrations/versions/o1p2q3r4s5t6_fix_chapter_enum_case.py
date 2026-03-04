@@ -18,48 +18,50 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Fix 'chapter' enum value to uppercase 'CHAPTER' to match other enum values."""
-    # The previous migration (a1b2c3d4e5f6) added lowercase 'chapter',
-    # but all other artifact_type values are UPPERCASE. PostgreSQL enums
-    # are case-sensitive, so 'chapter' != 'CHAPTER'.
-    op.execute(
-        """
-        DO $$
-        BEGIN
-            -- Rename lowercase 'chapter' to uppercase 'CHAPTER' if it exists
-            IF EXISTS (
-                SELECT 1 FROM pg_enum 
-                WHERE enumlabel = 'chapter' 
-                AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'artifact_type')
-            ) THEN
-                UPDATE pg_enum SET enumlabel = 'CHAPTER' 
-                WHERE enumlabel = 'chapter' 
-                AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'artifact_type');
-            END IF;
+    """Fix artifact_type enum: ensure CHAPTER exists in uppercase."""
+    # Supabase doesn't allow direct pg_enum modification, so we need to
+    # recreate the enum type with proper values.
 
-            -- If 'CHAPTER' doesn't exist at all (neither lowercase nor uppercase was added), add it
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_enum 
-                WHERE enumlabel = 'CHAPTER' 
-                AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'artifact_type')
-            ) THEN
-                -- We can't use ALTER TYPE ADD VALUE inside a transaction block with DO,
-                -- so we'll handle this case separately
-                NULL;
-            END IF;
-        END$$;
-    """
+    # Step 1: Change column to text temporarily
+    op.execute(
+        "ALTER TABLE artifacts ALTER COLUMN artifact_type TYPE text USING artifact_type::text"
     )
-    # This handles the case where CHAPTER doesn't exist at all
-    op.execute("ALTER TYPE artifact_type ADD VALUE IF NOT EXISTS 'CHAPTER'")
+
+    # Step 2: Normalize any lowercase 'chapter' values to uppercase 'CHAPTER'
+    op.execute(
+        "UPDATE artifacts SET artifact_type = 'CHAPTER' WHERE artifact_type = 'chapter'"
+    )
+
+    # Step 3: Drop the old enum type
+    op.execute("DROP TYPE IF EXISTS artifact_type")
+
+    # Step 4: Create the new enum with all correct uppercase values (including CHAPTER)
+    op.execute(
+        "CREATE TYPE artifact_type AS ENUM ("
+        "'PLOT', 'SCRIPT', 'STORYBOARD', 'IMAGE', 'AUDIO', 'VIDEO', "
+        "'CHAPTER', 'DOCUMENT_SUMMARY'"
+        ")"
+    )
+
+    # Step 5: Change column back to the enum type
+    op.execute(
+        "ALTER TABLE artifacts ALTER COLUMN artifact_type TYPE artifact_type USING artifact_type::artifact_type"
+    )
 
 
 def downgrade() -> None:
-    """Downgrade - revert CHAPTER back to lowercase chapter."""
+    """Downgrade - revert to enum without CHAPTER (original state)."""
     op.execute(
-        """
-        UPDATE pg_enum SET enumlabel = 'chapter' 
-        WHERE enumlabel = 'CHAPTER' 
-        AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'artifact_type');
-    """
+        "ALTER TABLE artifacts ALTER COLUMN artifact_type TYPE text USING artifact_type::text"
+    )
+    op.execute("DELETE FROM artifacts WHERE artifact_type = 'CHAPTER'")
+    op.execute("DROP TYPE IF EXISTS artifact_type")
+    op.execute(
+        "CREATE TYPE artifact_type AS ENUM ("
+        "'PLOT', 'SCRIPT', 'STORYBOARD', 'IMAGE', 'AUDIO', 'VIDEO', "
+        "'DOCUMENT_SUMMARY'"
+        ")"
+    )
+    op.execute(
+        "ALTER TABLE artifacts ALTER COLUMN artifact_type TYPE artifact_type USING artifact_type::artifact_type"
     )
