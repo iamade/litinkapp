@@ -20,11 +20,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Add 'chapter' value to artifact_type enum."""
+    """Add 'CHAPTER' value to artifact_type enum."""
     # PostgreSQL requires ALTER TYPE to add new enum values
-    # We need to add both lowercase 'chapter' (used by Python code)
-    # and optionally uppercase for consistency
-    op.execute("ALTER TYPE artifact_type ADD VALUE IF NOT EXISTS 'chapter'")
+    # Handle case where lowercase 'chapter' may have been added by a previous migration
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            -- Try to rename lowercase 'chapter' to 'CHAPTER' if it exists
+            IF EXISTS (
+                SELECT 1 FROM pg_enum 
+                WHERE enumlabel = 'chapter' 
+                AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'artifact_type')
+            ) THEN
+                UPDATE pg_enum SET enumlabel = 'CHAPTER' 
+                WHERE enumlabel = 'chapter' 
+                AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'artifact_type');
+            END IF;
+        END$$;
+    """
+    )
+    # Add CHAPTER if it doesn't exist at all
+    op.execute("ALTER TYPE artifact_type ADD VALUE IF NOT EXISTS 'CHAPTER'")
 
 
 def downgrade() -> None:
