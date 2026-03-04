@@ -325,8 +325,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         .then((config) => {
           loadStoryboardConfig(config);
         })
-        .catch((error) => {
-          console.log('[AudioPanel] No storyboard config found or error loading:', error);
+        .catch(() => {
           // This is expected for new scripts, just use empty config
         });
     }
@@ -547,7 +546,6 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     // Use isGenerating from useAudioGeneration to track active generation polling
     // isGenerating is properly managed by the hook and becomes false when polling completes
     const isGeneratingAudio = isGenerating;
-    console.log('[AudioPanel renderHeader] isGenerating:', isGenerating, 'generatingScenesAudio:', [...generatingScenesAudio]);
     return (
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -991,31 +989,25 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                     if (audioEl) audioEl.volume = volume;
                   }}
                   onDelete={async () => {
-                    console.log('[AudioPanel] Delete clicked for:', file.id, 'file.chapter_id:', (file as any).chapter_id, 'context chapterId:', stableSelectedChapterId);
-                    
                     // Get chapter ID - try from file first, then from context
                     const chapterId = (file as any).chapter_id || stableSelectedChapterId;
                     
                     if (!chapterId) {
-                      console.error('[AudioPanel] Cannot delete: chapter ID is missing from both file and context');
                       toast.error('Cannot delete: chapter ID not available');
                       return;
                     }
                     
                     if (!file.id) {
-                      console.error('[AudioPanel] Cannot delete: audio file ID is missing');
                       toast.error('Cannot delete: audio file ID not available');
                       return;
                     }
                     
                     try {
-                      console.log('[AudioPanel] Calling deleteAudio API...', chapterId, file.id);
                       await deleteAudio(chapterId, file.id);
                       toast.success('Audio deleted successfully');
                       // Reload audio to refresh the list
                       loadAudio();
                     } catch (error) {
-                      console.error('Failed to delete audio:', error);
                       toast.error('Failed to delete audio');
                     }
                     

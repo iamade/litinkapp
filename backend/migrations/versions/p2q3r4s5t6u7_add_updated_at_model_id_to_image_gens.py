@@ -20,19 +20,29 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Add missing updated_at and model_id columns to image_generations."""
-    op.add_column(
-        "image_generations",
-        sa.Column(
-            "updated_at",
-            postgresql.TIMESTAMP(timezone=True),
-            server_default=sa.text("CURRENT_TIMESTAMP"),
-            nullable=False,
-        ),
-    )
-    op.add_column(
-        "image_generations",
-        sa.Column("model_id", sa.String(), nullable=True),
+    """Add missing updated_at and model_id columns to image_generations (if they don't exist)."""
+    # Use raw SQL with IF NOT EXISTS to be safe for both local and production
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'image_generations' AND column_name = 'updated_at'
+            ) THEN
+                ALTER TABLE image_generations
+                ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP;
+            END IF;
+
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'image_generations' AND column_name = 'model_id'
+            ) THEN
+                ALTER TABLE image_generations
+                ADD COLUMN model_id VARCHAR;
+            END IF;
+        END$$;
+    """
     )
 
 

@@ -45,7 +45,7 @@ from app.books.models import Book, Chapter
 from app.videos.models import ImageGeneration, AudioGeneration, Script, AudioExport
 from app.api.services.subscription import SubscriptionManager
 from app.auth.models import User
-from app.projects.models import Project
+from app.projects.models import Project, Artifact
 
 router = APIRouter()
 
@@ -56,8 +56,10 @@ async def verify_chapter_access(
     """Verify user has access to the chapter and return chapter data.
 
     For prompt-only projects, the frontend uses the project ID as the "chapter ID".
-    This function first checks for a Chapter record, and if not found, falls back
-    to checking for a Project record to support prompt-only projects.
+    This function checks for:
+    1. A Chapter record (from books)
+    2. A Project record (for prompt-only projects)
+    3. An Artifact record of type CHAPTER (from uploaded books via project pipeline)
     """
     try:
         # Get chapter with book info
@@ -103,7 +105,47 @@ async def verify_chapter_access(
             }
             return virtual_chapter_data
 
-        # Neither chapter nor project found
+        # Check if this is a CHAPTER artifact (from uploaded books via project pipeline)
+        artifact_stmt = (
+            select(Artifact, Project)
+            .join(Project, Artifact.project_id == Project.id)
+            .where(Artifact.id == chapter_id)
+        )
+        artifact_result = await session.exec(artifact_stmt)
+        artifact_project = artifact_result.first()
+
+        if artifact_project:
+            artifact, parent_project = artifact_project
+
+            # Check access permissions via parent project
+            if str(parent_project.user_id) != str(user_id):
+                raise HTTPException(
+                    status_code=403, detail="Not authorized to access this chapter"
+                )
+
+            # Extract content from artifact
+            artifact_content = artifact.content or {}
+
+            # Return a virtual chapter-like dict for artifact chapters
+            virtual_chapter_data = {
+                "id": str(artifact.id),
+                "title": artifact_content.get(
+                    "title", f"Chapter {artifact_content.get('chapter_number', 1)}"
+                ),
+                "content": artifact_content.get("content", ""),
+                "chapter_number": artifact_content.get("chapter_number", 1),
+                "book_id": None,
+                "ai_generated_content": artifact_content.get(
+                    "ai_generated_content", {}
+                ),
+                "is_virtual": True,
+                "is_artifact": True,
+                "project_id": str(parent_project.id),
+                "artifact_id": str(artifact.id),
+            }
+            return virtual_chapter_data
+
+        # Neither chapter, project, nor artifact found
         raise HTTPException(status_code=404, detail="Chapter not found")
 
     except HTTPException:
