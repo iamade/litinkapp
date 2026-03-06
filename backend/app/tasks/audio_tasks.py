@@ -541,9 +541,11 @@ def generate_all_audio_for_video(self, video_generation_id: str):
             )
 
             # Update video generation with audio file references
+            # NOTE: The key names here must EXACTLY match what find_scene_audio looks for in video_tasks.py.
+            # find_scene_audio iterates: 'characters', 'narrator', 'sound_effects', 'background_music'
             audio_files_data = {
                 "narrator": narrator_results,
-                "character": character_results,
+                "characters": character_results,  # FIXED: was 'character', must be 'characters'
                 "sound_effects": sound_effect_results,
                 "background_music": background_music_results,
             }
@@ -791,6 +793,9 @@ async def generate_narrator_audio(
                     {
                         "id": str(audio_record.id),
                         "scene": segment.get("scene", 1),
+                        "scene_number": segment.get(
+                            "scene", 1
+                        ),  # Explicit scene_number for find_scene_audio
                         "audio_url": audio_url,
                         "duration": duration,
                         "text": segment["text"],
@@ -1305,6 +1310,9 @@ async def generate_character_audio(
                         "voice_name": voice_info["voice_name"],
                         "voice_id": voice_info["voice_id"],
                         "scene": dialogue.get("scene", 1),
+                        "scene_number": dialogue.get(
+                            "scene", 1
+                        ),  # Explicit scene_number for find_scene_audio
                         "audio_url": audio_url,
                         "duration": duration,
                         "text": dialogue["text"],

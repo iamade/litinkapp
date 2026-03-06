@@ -343,13 +343,19 @@ def find_scene_audio(
 
     # Priority 2: Exact scene match in narrator audio
     for audio in audio_files.get("narrator", []):
-        if audio.get("scene") == scene_number and audio.get("audio_url"):
+        if (
+            audio.get("scene") == scene_number
+            or audio.get("scene_number") == scene_number
+        ) and audio.get("audio_url"):
             print(f"[FIND AUDIO] Found narrator audio for {scene_id}")
             return audio
 
     # Priority 3: Exact scene match in any type
     for audio in all_audio:
-        if audio.get("scene") == scene_number and audio.get("audio_url"):
+        if (
+            audio.get("scene") == scene_number
+            or audio.get("scene_number") == scene_number
+        ) and audio.get("audio_url"):
             print(
                 f"[FIND AUDIO] Found audio (type={audio.get('audio_type')}) for {scene_id}"
             )
