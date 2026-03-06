@@ -1250,23 +1250,21 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                        : "Generate detailed emotional cues, vocal direction, and subtext for each line."}
                    </p>
                 </div>
-                {!hasMap && (
-                    <button
-                        onClick={() => generateEmotionalMap(script.id, script)}
-                        disabled={isGenerating}
-                        className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors"
-                    >
-                        {isGenerating ? (
-                            <>
-                                <span className="animate-spin">⏳</span> Analyzing...
-                            </>
-                        ) : (
-                            <>
-                                <Smile className="w-4 h-4" /> Generate Emotional Map
-                            </>
-                        )}
-                    </button>
-                )}
+                <button
+                    onClick={() => generateEmotionalMap(script.id, script)}
+                    disabled={isGenerating}
+                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                >
+                    {isGenerating ? (
+                        <>
+                            <span className="animate-spin">⏳</span> Analyzing...
+                        </>
+                    ) : (
+                        <>
+                            <Smile className="w-4 h-4" /> {hasMap ? "Regenerate Map" : "Generate Emotional Map"}
+                        </>
+                    )}
+                </button>
             </div>
 
             {hasMap ? (
@@ -1355,9 +1353,9 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
             ) : (
                 <div className="text-center py-12 bg-gray-50 dark:bg-gray-900 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
                     <Activity className="mx-auto h-12 w-12 mb-4 text-gray-400" />
-                    <h5 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Ready to Direct</h5>
+                    <h5 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Map Not Generated</h5>
                     <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-6">
-                        Generate an emotional map to add depth to your characters. This data will guide the text-to-speech engine for more realistic performances.
+                        An emotional map wasn't automatically generated for this script. Generate one to add depth to your characters and guide the text-to-speech engine.
                     </p>
                     <button
                         onClick={() => generateEmotionalMap(script.id, script)}

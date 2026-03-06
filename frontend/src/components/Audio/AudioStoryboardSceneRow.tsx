@@ -10,7 +10,7 @@ interface AudioStoryboardSceneRowProps {
   isGeneratingAudio?: boolean;
   hasAudio?: boolean;
   onGenerateAudio?: () => void;
-  onView?: (url: string) => void;
+  onView?: (url: string, description: string, shotIndex?: number) => void;
   // Storyboard configuration (read-only from Image tab)
   keySceneImageId?: string;
   deselectedImages?: Set<string>;
@@ -184,7 +184,7 @@ export const AudioStoryboardSceneRow: React.FC<AudioStoryboardSceneRowProps> = (
               isKeyScene={img.id === keySceneImageId}
               isExcluded={img.id ? deselectedImages?.has(img.id) : false}
               shotIndex={img.shot_index}
-              onView={onView ? () => onView(img.imageUrl) : undefined}
+              onView={onView ? () => onView(img.imageUrl, img.prompt || '', (img as any)?.shot_index) : undefined}
             />
           ))}
         </div>

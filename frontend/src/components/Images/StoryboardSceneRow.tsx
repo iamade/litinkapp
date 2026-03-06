@@ -26,7 +26,7 @@ interface StoryboardSceneRowProps {
   selectedImageUrl?: string | null;
   onSelect: (url: string | null) => void;
   onDelete: (imageId: string) => void;
-  onView: (url: string) => void;
+  onView: (url: string, description: string, shotIndex?: number) => void;
   dragHandleListeners?: any; // Listeners for the parent sortable (Scene drag)
   onReorder?: (newImages: SceneImage[]) => void; // Callback when images are reordered
   // NEW: Storyboard configuration props
@@ -302,7 +302,7 @@ export const StoryboardSceneRow: React.FC<StoryboardSceneRowProps> = ({
                                 image={img}
                                 isSelected={img.imageUrl === selectedImageUrl}
                                 onSelect={() => onSelect(img.imageUrl === selectedImageUrl ? null : img.imageUrl)}
-                                onView={() => onView(img.imageUrl)}
+                                onView={() => onView(img.imageUrl, img.prompt || '', (img as any)?.shot_index)}
                                 onDelete={() => img.id && onDelete(img.id)}
                                 // NEW: Storyboard configuration props
                                 isKeyScene={img.id === keySceneImageId}

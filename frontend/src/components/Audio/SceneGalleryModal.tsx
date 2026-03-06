@@ -1,10 +1,15 @@
 import React, { useEffect } from 'react';
-import { X, Check, Volume2, Loader2 } from 'lucide-react';
+import { X, Volume2, Loader2 } from 'lucide-react';
 import { SceneImage } from '../Images/types';
 
 interface DialogueLine {
   character: string;
   text: string;
+}
+
+interface ExpressionLine {
+  character: string;
+  action: string;
 }
 
 interface SceneGalleryModalProps {
@@ -18,6 +23,7 @@ interface SceneGalleryModalProps {
   clickedImageUrl?: string; // URL of the specific image the user clicked
   onSelectImage: (url: string) => void;
   dialogue?: DialogueLine[];
+  expression?: ExpressionLine[];
   onGenerateAudio?: () => void;
   isGeneratingAudio?: boolean;
 }
@@ -28,11 +34,12 @@ const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
   sceneNumber,
   description,
   images,
-  selectedImageUrl,
+  selectedImageUrl: _selectedImageUrl,
   initialIndex = 0,
   clickedImageUrl,
-  onSelectImage,
+  onSelectImage: _onSelectImage,
   dialogue,
+  expression,
   onGenerateAudio,
   isGeneratingAudio = false,
 }) => {
@@ -50,7 +57,7 @@ const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
     }
     return validImages[initialIndex] || validImages[0];
   }, [clickedImageUrl, validImages, initialIndex]);
-  const isSelected = displayImage?.imageUrl === selectedImageUrl;
+  // selectedImageUrl and onSelectImage kept in interface for callers but unused in this modal
 
 
   useEffect(() => {
@@ -122,6 +129,23 @@ const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
               <p className="text-sm text-gray-200 leading-relaxed">{description || 'No description available.'}</p>
             </div>
 
+            {/* Expression */}
+            {expression && expression.length > 0 && (
+              <div className="p-5 border-b border-white/10">
+                <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">Expression</h4>
+                <div className="space-y-2">
+                  {expression.map((exp, idx) => (
+                    <div key={idx} className="text-sm">
+                      <span className="text-purple-400 font-semibold uppercase text-xs tracking-wide block mb-0.5">
+                        {exp.character}
+                      </span>
+                      <span className="text-gray-300 italic">({exp.action})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Dialogue */}
             {dialogue && dialogue.length > 0 && (
               <div className="p-5 border-b border-white/10">
@@ -139,8 +163,8 @@ const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
               </div>
             )}
 
-            {/* No dialogue notice */}
-            {(!dialogue || dialogue.length === 0) && (
+            {/* No dialogue/expression notice */}
+            {(!dialogue || dialogue.length === 0) && (!expression || expression.length === 0) && (
               <div className="p-5 border-b border-white/10">
                 <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Dialogue</h4>
                 <p className="text-xs text-gray-500 italic">No dialogue in this scene</p>
@@ -177,26 +201,7 @@ const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
                 </button>
               )}
 
-              {/* Select / Deselect image for audio */}
-              {displayImage && (
-                isSelected ? (
-                  <button
-                    onClick={() => onSelectImage('')}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600/20 text-emerald-400 rounded-xl border border-emerald-500/30 hover:bg-red-600/20 hover:text-red-400 hover:border-red-500/30 transition-all cursor-pointer font-medium text-sm"
-                    title="Click to deselect"
-                  >
-                    <Check className="w-4 h-4" />
-                    <span>Selected</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => onSelectImage(displayImage.imageUrl)}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 rounded-xl border border-blue-500/30 transition-all font-medium text-sm"
-                  >
-                    Select Image
-                  </button>
-                )
-              )}
+
             </div>
           </div>
         </div>

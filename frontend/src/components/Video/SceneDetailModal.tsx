@@ -166,6 +166,19 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
   };
 
   const selectedCount = selectedAudioId ? 1 : 0;
+  
+  // Validation for selected audio
+  const selectedAudioItem = React.useMemo(() => 
+    allSceneAudio.find(a => a.id === selectedAudioId), 
+  [allSceneAudio, selectedAudioId]);
+
+  const [isValidDuration, durationWarning] = React.useMemo(() => {
+    if (!selectedAudioItem) return [true, '']; // No audio selected yet
+    const duration = selectedAudioItem.duration || 0;
+    if (duration < 5) return [false, `Audio is too short (${duration.toFixed(1)}s). ModelsLab I2V requires at least 5 seconds.`];
+    if (duration > 28) return [false, `Audio is too long (${duration.toFixed(1)}s). Maximum supported duration is 28 seconds.`];
+    return [true, ''];
+  }, [selectedAudioItem]);
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
@@ -366,7 +379,7 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
             <div className="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-900 shrink-0">
               <button
                 onClick={() => onGenerate(selectedAudioId || undefined)}
-                disabled={isGenerating || !selectedAudioId}
+                disabled={isGenerating || !selectedAudioId || !isValidDuration}
                 className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition-colors shadow-sm"
               >
                 {isGenerating ? (
@@ -381,9 +394,15 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
                   </>
                 )}
               </button>
+              
               {!selectedAudioId && !isGenerating && (
                 <p className="text-xs text-center text-amber-600 dark:text-amber-400 mt-2">
                   Select an audio track above to enable generation
+                </p>
+              )}
+              {selectedAudioId && !isValidDuration && !isGenerating && (
+                <p className="text-xs text-center text-red-600 dark:text-red-400 mt-2 font-medium bg-red-50 dark:bg-red-900/20 py-1.5 px-2 rounded">
+                  ⚠️ {durationWarning}
                 </p>
               )}
             </div>

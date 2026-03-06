@@ -324,14 +324,29 @@ class VideoService:
             for scene_num, dialogues in scene_dialogues.items():
                 scene_audio = []
                 for dialogue in dialogues:
-                    # Generate character voice audio
+                    # Generate character voice audio using enhanced speech
                     character_profile = character_profiles[dialogue["character"]]
-                    audio_url = await self.elevenlabs_service.generate_character_voice(
-                        text=dialogue["text"],
-                        character_name=dialogue["character"],
-                        character_traits=character_profile.get("personality", ""),
-                        user_id=user_id,
+
+                    # Optional: Basic mapping or fallback voice selection
+                    # ElevenLabs Rachel voice as fallback
+                    voice_id = "21m00Tcm4TlvDq8ikWAM"
+                    if character_profile.get("gender") == "male":
+                        voice_id = "29vD33N1CtxCmqQRPOHJ"  # Drew
+
+                    audio_result = (
+                        await self.elevenlabs_service.generate_enhanced_speech(
+                            text=dialogue["text"],
+                            voice_id=voice_id,
+                            user_id=user_id,
+                            emotion=character_profile.get("personality", "neutral"),
+                        )
                     )
+
+                    audio_url = None
+                    if audio_result and isinstance(audio_result, dict):
+                        audio_url = audio_result.get("audio_url")
+                    elif isinstance(audio_result, str):
+                        audio_url = audio_result
 
                     if audio_url:
                         scene_audio.append(

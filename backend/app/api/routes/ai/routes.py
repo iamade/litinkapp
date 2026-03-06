@@ -288,6 +288,9 @@ async def enhance_with_plot_context(
             user_id=user_id, book_id=book_id
         )
 
+        if not plot_overview:
+            print(f"[PlotService] No plot found with book_id={book_id}")
+
         if not plot_overview and not custom_logline:
             return {"enhanced_content": None, "plot_info": None}
 
@@ -3169,7 +3172,11 @@ async def generate_script_and_scenes(
         custom_logline = request.get(
             "custom_logline"
         )  # User's specific instructions/logline
-        script_story_type = request.get("scriptStoryType")  # Extract script story type
+
+        # Check both cases for script story type since frontend might use either
+        script_story_type = request.get("script_story_type") or request.get(
+            "scriptStoryType"
+        )
 
         print(f"[DEBUG] generate_script_and_scenes - received request: {request}")
         print(f"[DEBUG] Custom Logline: {custom_logline}")
@@ -3746,6 +3753,28 @@ Script to analyze:
             f"[OpenRouter] Successfully generated {script_style} script with {len(characters)} characters and {len(scene_descriptions)} scenes"
         )
 
+        # Auto-generate emotional map
+        try:
+            ai_service = AIService()
+            entries = await ai_service.generate_emotional_map(script, characters)
+
+            validated_entries = []
+            for entry in entries:
+                if "line_id" not in entry:
+                    entry["line_id"] = str(uuid.uuid4())
+                validated_entries.append(entry)
+
+            new_script.emotional_map = validated_entries
+            session.add(new_script)
+            await session.commit()
+            print(
+                f"[DEBUG] Auto-generated emotional map with {len(validated_entries)} entries"
+            )
+        except Exception as e:
+            print(f"Error auto-generating emotional map: {e}")
+            # Non-fatal error, continue returning the script
+            validated_entries = []
+
         return {
             "chapter_id": chapter_id,
             "script_id": script_id,
@@ -3760,6 +3789,7 @@ Script to analyze:
             "tier": user_tier.value,
             "plot_enhanced": plot_enhanced,
             "plot_info": plot_info["plot_info"] if plot_info else None,
+            "emotional_map": validated_entries,
             "usage_info": {
                 "tokens_used": usage.get("total_tokens", 0),
                 "estimated_cost": usage.get("estimated_cost", 0),
@@ -3785,6 +3815,9 @@ async def generate_script_and_scenes_with_gpt(
         # Extract from request body
         chapter_id = request.get("chapter_id")
         script_style = request.get("script_style", "cinematic_movie")
+        script_story_type = request.get("script_story_type") or request.get(
+            "scriptStoryType"
+        )
 
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required")
@@ -3880,6 +3913,7 @@ async def generate_script_and_scenes_with_gpt(
             "character_details": character_details,
             "metadata": script_data["metadata"],
             "status": "ready",
+            "script_story_type": script_story_type,  # Store the script story type
         }
 
         # Insert or update in scripts table
@@ -3918,6 +3952,28 @@ async def generate_script_and_scenes_with_gpt(
             },
         )
 
+        # Auto-generate emotional map
+        try:
+            ai_service = AIService()
+            entries = await ai_service.generate_emotional_map(script, characters)
+
+            validated_entries = []
+            for entry in entries:
+                if "line_id" not in entry:
+                    entry["line_id"] = str(uuid.uuid4())
+                validated_entries.append(entry)
+
+            script_record_to_update = existing_script if existing_script else new_script
+            script_record_to_update.emotional_map = validated_entries
+            session.add(script_record_to_update)
+            await session.commit()
+            print(
+                f"[DEBUG] Auto-generated emotional map with {len(validated_entries)} entries"
+            )
+        except Exception as e:
+            print(f"Error auto-generating emotional map: {e}")
+            validated_entries = []
+
         return {
             "chapter_id": chapter_id,
             "script_id": script_id,
@@ -3927,6 +3983,7 @@ async def generate_script_and_scenes_with_gpt(
             "character_details": character_details,
             "script_style": script_style,
             "metadata": script_data["metadata"],
+            "emotional_map": validated_entries,
         }
     except Exception as e:
         print(f"Error generating script and scenes: {e}")

@@ -86,6 +86,7 @@ interface ScriptResult {
   script_style: string;
   script_id: string;
   script_name: string;
+  emotional_map?: any[];
 }
 
 interface GeneratedScript {

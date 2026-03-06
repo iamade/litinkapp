@@ -779,6 +779,105 @@ class ScriptParser:
                 current_character = None  # Reset after dialogue
                 continue
 
+            # Check for expression/action parentheticals following a character name
+            # e.g., after "MR. DURSLEY" we might see "(humming)" or "(sighing)"
+            if current_character and line.startswith("(") and line.endswith(")"):
+                expression = line[1:-1].strip().lower()
+
+                # Audio-generatable expressions that ElevenLabs SFX can produce
+                AUDIO_EXPRESSIONS = [
+                    "humming",
+                    "hums",
+                    "hum",
+                    "sighing",
+                    "sighs",
+                    "sigh",
+                    "laughing",
+                    "laughs",
+                    "laugh",
+                    "chuckling",
+                    "chuckles",
+                    "crying",
+                    "cries",
+                    "cry",
+                    "sobbing",
+                    "sobs",
+                    "whispering",
+                    "whispers",
+                    "whisper",
+                    "gasping",
+                    "gasps",
+                    "gasp",
+                    "screaming",
+                    "screams",
+                    "scream",
+                    "shouting",
+                    "shouts",
+                    "snoring",
+                    "snores",
+                    "yawning",
+                    "yawns",
+                    "coughing",
+                    "coughs",
+                    "clapping",
+                    "claps",
+                    "whistling",
+                    "whistles",
+                    "groaning",
+                    "groans",
+                    "moaning",
+                    "moans",
+                    "giggling",
+                    "giggles",
+                    "singing",
+                    "sings",
+                    "muttering",
+                    "mutters",
+                    "stammering",
+                    "stammers",
+                    "stuttering",
+                    "stutters",
+                    "panting",
+                    "pants",
+                    "sniffling",
+                    "sniffles",
+                    "sniffs",
+                    "clearing throat",
+                    "clears throat",
+                    "breathing heavily",
+                    "heavy breathing",
+                ]
+
+                # Check if any audio expression keyword appears in the parenthetical
+                is_audio_expression = any(
+                    keyword in expression for keyword in AUDIO_EXPRESSIONS
+                )
+
+                if is_audio_expression:
+                    scene_info = get_scene_info()
+                    # Create a descriptive prompt for ElevenLabs SFX generation
+                    description = f"{current_character} {expression}"
+                    audio_components["sound_effects"].append(
+                        {
+                            "description": description,
+                            "scene": scene_info["scene"],
+                            "character": current_character,
+                            "expression": expression,
+                            "shot_type": scene_info["shot_type"],
+                            "shot_index": scene_info["shot_index"],
+                            "audio_type": "expression",
+                            "duration": 5.0,
+                            "line_number": i + 1,
+                        }
+                    )
+                    print(
+                        f"[SCRIPT PARSER] 🎵 Audio expression captured: {current_character} ({expression}) → sound_effect"
+                    )
+
+                # Don't reset current_character — dialogue may follow on next line
+                # Don't continue — let it fall through if needed
+                continue
+
             # Check for dialogue following character name (cinematic format)
             if current_character and (
                 line.startswith('"')

@@ -293,11 +293,14 @@ async def upscale_frame(
 
 
 def find_scene_audio(
-    scene_id: str, audio_files: Dict[str, Any], script_style: str = None
+    scene_id: str,
+    audio_files: Dict[str, Any],
+    script_style: str = None,
+    selected_audio_ids: List[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Find audio for a scene with progressive fallback.
 
-    Priority: exact scene match (character > narrator > any type) > any available audio.
+    Priority: explicit selection > exact scene match (character > narrator > any type) > any available audio.
     """
 
     scene_number = int(scene_id.split("_")[1]) if "_" in scene_id else 1
@@ -311,9 +314,30 @@ def find_scene_audio(
         f"[FIND AUDIO] Looking for audio for {scene_id} (scene_number={scene_number}), total audio files: {len(all_audio)}"
     )
 
+    # Priority 0: Explicitly selected audio
+    if selected_audio_ids:
+        for audio in all_audio:
+            if audio.get("id") in selected_audio_ids and audio.get("audio_url"):
+                # The explicit selection should be respected regardless of scene match,
+                # but if there are multiple selections across the storyboard, we try to match the scene.
+                if (
+                    audio.get("scene") == scene_number
+                    or audio.get("scene_number") == scene_number
+                ):
+                    print(
+                        f"[FIND AUDIO] Found EXPLICITLY selected audio for {scene_id}"
+                    )
+                    return audio
+                # If scene match fails but we have this selection, we might still use it
+                # if there's only one selection, or if we map selections specifically.
+                # Better to be safe: rely on scene match if multiple selections exist.
+
     # Priority 1: Exact scene match in character audio
     for audio in audio_files.get("characters", []):
-        if audio.get("scene") == scene_number and audio.get("audio_url"):
+        if (
+            audio.get("scene") == scene_number
+            or audio.get("scene_number") == scene_number
+        ) and audio.get("audio_url"):
             print(f"[FIND AUDIO] Found character audio for {scene_id}")
             return audio
 
@@ -718,6 +742,8 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             # Generate videos
             modelslab_service = ModelsLabV7VideoService()
 
+            selected_audio_ids = task_meta.get("selected_audio_ids", [])
+
             # Generate scene videos sequentially with key scene shots
             video_results = await generate_scene_videos(
                 modelslab_service,
@@ -731,6 +757,7 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
                 model_config=video_config,
                 session=session,
                 scene_numbers=target_scene_numbers,
+                selected_audio_ids=selected_audio_ids,
             )
 
             # Compile results
@@ -1103,6 +1130,7 @@ async def generate_scene_videos(
     model_config: Optional[ModelConfig] = None,
     session: AsyncSession = None,
     scene_numbers: List[int] = None,
+    selected_audio_ids: List[str] = None,
 ) -> List[Dict[str, Any]]:
     """Generate videos for each scene using V7 Veo 2 image-to-video with sequential processing and key scene shots"""
 
@@ -1210,7 +1238,9 @@ async def generate_scene_videos(
             min_audio = modelslab_service.get_min_audio_duration(current_model_id)
 
             # Find audio for lip sync / audio-reactive
-            scene_audio = find_scene_audio(scene_id, audio_files)
+            scene_audio = find_scene_audio(
+                scene_id, audio_files, selected_audio_ids=selected_audio_ids
+            )
             init_audio_url = None
 
             if scene_audio:

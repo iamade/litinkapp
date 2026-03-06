@@ -182,26 +182,49 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     sceneIndex: number;
     initialImageIndex: number;
     clickedImageUrl?: string;
+    description?: string;
+    dialogue?: Array<{character: string; text: string}>;
+    expression?: Array<{character: string; action: string}>;
   }>({ isOpen: false, sceneIndex: -1, initialImageIndex: 0 });
 
-  const openGallery = (sceneIndex: number, imageIndex: number = 0, clickedUrl?: string) => {
-    setGalleryState({ isOpen: true, sceneIndex, initialImageIndex: imageIndex, clickedImageUrl: clickedUrl });
+  const openGallery = (sceneIndex: number, imageIndex: number = 0, clickedUrl?: string, description?: string, dialogue?: Array<{character: string; text: string}>, expression?: Array<{character: string; action: string}>) => {
+    setGalleryState({ isOpen: true, sceneIndex, initialImageIndex: imageIndex, clickedImageUrl: clickedUrl, description, dialogue, expression });
   };
 
   const closeGallery = () => {
     setGalleryState(prev => ({ ...prev, isOpen: false }));
   };
 
-  // Parse dialogue moments from script text - mirrors ImagesPanel's parser
-  // Maps scene header keys (e.g. "ACT I - SCENE 1") to arrays of dialogue moments
+  // Get dialogue moments from API response or parse from script text
+  // API provides dialogue_moments keyed by scene number (1, 2, 3)
+  // Fallback parser produces header-string keys ("ACT I - SCENE 2")
   const audioPanelDialogueMoments = React.useMemo(() => {
-    if (!selectedScript?.script) return {} as Record<string, Array<{character: string; dialogue_preview?: string; moment_type: string}>>;
+    // First, check if API provides pre-computed dialogue_moments  
+    const apiDialogueMoments = (selectedScript as any)?.dialogue_moments;
+    if (apiDialogueMoments && typeof apiDialogueMoments === 'object' && Object.keys(apiDialogueMoments).length > 0) {
+      return apiDialogueMoments as Record<string, Array<{character: string; action?: string; dialogue_preview?: string; moment_type: string; shot_description?: string}>>;
+    }
+    
+    // Fallback: parse from script text - must match ImagesPanel's parser to support prompt-based matching
+    if (!selectedScript?.script) return {} as Record<string, Array<{character: string; action?: string; dialogue_preview?: string; moment_type: string; shot_description?: string}>>;
+    
+    // Action descriptors for dialogue moments (same as ImagesPanel)
+    const ACTIONS_FOR_DIALOGUE = [
+      'speaking with emotion',
+      'reacting expressively',
+      'leaning forward intently',
+      'gesturing while talking',
+      'with thoughtful expression',
+      'looking directly ahead',
+      'turning slightly'
+    ];
     
     const lines = selectedScript.script.split('\n');
-    const moments: Record<string, Array<{character: string; dialogue_preview?: string; moment_type: string}>> = {};
+    const moments: Record<string, Array<{character: string; action?: string; dialogue_preview?: string; moment_type: string; shot_description?: string}>> = {};
     
     let currentSceneKey = '';
     let currentCharacter: string | null = null;
+    let momentIndex = 0;
     
     for (const rawLine of lines) {
       const trimmed = rawLine.trim();
@@ -231,13 +254,32 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         continue;
       }
       
-      if (currentCharacter && currentSceneKey && !trimmed.startsWith('(') && !trimmed.startsWith('*') && trimmed.length > 10) {
+      // Capture action cues (parentheticals) - e.g., (humming), (gossiping)
+      if (currentCharacter && currentSceneKey && trimmed.startsWith('(') && trimmed.endsWith(')')) {
+        const action = trimmed.slice(1, -1).trim();
+        if (action && action.length > 3) {
+          if (!moments[currentSceneKey]) moments[currentSceneKey] = [];
+          moments[currentSceneKey].push({
+            character: currentCharacter,
+            action: action,
+            shot_description: `${currentCharacter} ${action}`,
+            moment_type: 'action',
+          });
+          momentIndex++;
+        }
+      }
+      // Capture dialogue lines
+      else if (currentCharacter && currentSceneKey && !trimmed.startsWith('(') && !trimmed.startsWith('*') && trimmed.length > 10) {
         if (!moments[currentSceneKey]) moments[currentSceneKey] = [];
+        const actionDesc = ACTIONS_FOR_DIALOGUE[momentIndex % ACTIONS_FOR_DIALOGUE.length];
         moments[currentSceneKey].push({
           character: currentCharacter,
+          action: actionDesc,
           dialogue_preview: trimmed.slice(0, 80) + (trimmed.length > 80 ? '...' : ''),
+          shot_description: `${currentCharacter} ${actionDesc}`,
           moment_type: 'dialogue',
         });
+        momentIndex++;
         currentCharacter = null;
       }
     }
@@ -246,14 +288,23 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   }, [selectedScript]);
 
   // Lookup dialogue for a specific scene number
+  // API provides numeric keys (1, 2, 3), fallback parser provides header keys ("ACT I - SCENE 2")
   const getSceneDialogue = (sceneNum: number): Array<{character: string; text: string}> => {
-    const matchingKey = Object.keys(audioPanelDialogueMoments).find(key => {
-      const match = key.match(/SCENE\s+(\d+)/i);
-      return match && parseInt(match[1], 10) === sceneNum;
-    });
-    if (!matchingKey) return [];
+    // Try numeric key first (API format)
+    let moments = audioPanelDialogueMoments[sceneNum] || audioPanelDialogueMoments[String(sceneNum)] || [];
     
-    return (audioPanelDialogueMoments[matchingKey] || [])
+    // Fallback: try header-string key matching
+    if (!moments || moments.length === 0) {
+      const matchingKey = Object.keys(audioPanelDialogueMoments).find(key => {
+        const match = key.match(/SCENE\s+(\d+)/i);
+        return match && parseInt(match[1], 10) === sceneNum;
+      });
+      if (matchingKey) moments = audioPanelDialogueMoments[matchingKey] || [];
+    }
+    
+    if (!moments || moments.length === 0) return [];
+    
+    return moments
       .filter(m => m.character && m.dialogue_preview)
       .map(m => ({ character: m.character, text: m.dialogue_preview! }));
   };
@@ -898,7 +949,54 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                                 isGeneratingAudio={generatingScenesAudio.has(sceneNum)}
                                 hasAudio={sceneHasAudio(sceneNum)}
                                 onGenerateAudio={() => handleGenerateSceneAudio(sceneNum)}
-                                onView={(url) => openGallery(idx, 0, url)}
+                                onView={(url, imgDescription) => {
+                                    const desc = imgDescription || (typeof scene === 'string' ? scene : (scene.visual_description || scene.description));
+                                    // Match by image prompt content
+                                    const imgPrompt = (imgDescription || '').toLowerCase();
+                                    let matchedDialogue: Array<{character: string; text: string}> | undefined;
+                                    let matchedExpression: Array<{character: string; action: string}> | undefined;
+                                    
+                                    // Get moments for this scene - try numeric key first (API format), then header key (fallback parser)
+                                    let sceneMoments = audioPanelDialogueMoments[sceneNum] || audioPanelDialogueMoments[String(sceneNum)] || [];
+                                    if (sceneMoments.length === 0) {
+                                      // Try header-string keys produced by fallback parser (e.g., "ACT I - SCENE 2")
+                                      const matchingKey = Object.keys(audioPanelDialogueMoments).find(key => {
+                                        const match = key.match(/SCENE\s+(\d+)/i);
+                                        return match && parseInt(match[1], 10) === sceneNum;
+                                      });
+                                      if (matchingKey) sceneMoments = audioPanelDialogueMoments[matchingKey] || [];
+                                    }
+                                    
+                                    if (imgPrompt && sceneMoments.length > 0) {
+                                      for (let mi = 0; mi < sceneMoments.length; mi++) {
+                                        const m = sceneMoments[mi] as any;
+                                        const charMatch = m.character && imgPrompt.includes(m.character.toLowerCase());
+                                        const actionMatch = m.action && imgPrompt.includes(m.action.toLowerCase());
+                                        if (charMatch && actionMatch) {
+                                          if (m.moment_type === 'action') {
+                                            matchedExpression = [{ character: String(m.character), action: String(m.action) }];
+                                            if (mi + 1 < sceneMoments.length) {
+                                              const next = sceneMoments[mi + 1] as any;
+                                              if (next.character === m.character && next.dialogue_preview) {
+                                                matchedDialogue = [{ character: String(next.character), text: String(next.dialogue_preview) }];
+                                              }
+                                            }
+                                          } else if (m.dialogue_preview) {
+                                            matchedDialogue = [{ character: String(m.character), text: String(m.dialogue_preview) }];
+                                            matchedExpression = [{ character: String(m.character), action: String(m.action) }];
+                                            if (mi - 1 >= 0) {
+                                              const prev = sceneMoments[mi - 1] as any;
+                                              if (prev.character === m.character && prev.moment_type === 'action') {
+                                                matchedExpression = [{ character: String(prev.character), action: String(prev.action) }];
+                                              }
+                                            }
+                                          }
+                                          break;
+                                        }
+                                      }
+                                    }
+                                    openGallery(idx, 0, url, desc, matchedDialogue, matchedExpression);
+                                }}
                             />
                         );
                     })}
@@ -918,21 +1016,21 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                     const includedGalleryImages = rawGalleryImages.filter((img: any) =>
                         !img.id || !deselectedImages.has(img.id)
                     );
-                    const sceneDialogue = getSceneDialogue(sceneNum);
                     return (
                         <SceneGalleryModal
                             isOpen={galleryState.isOpen}
                             onClose={closeGallery}
                             sceneNumber={sceneNum}
-                            description={typeof scenes[galleryState.sceneIndex] === 'string' 
+                            description={galleryState.description || (typeof scenes[galleryState.sceneIndex] === 'string' 
                                 ? scenes[galleryState.sceneIndex] 
-                                : (scenes[galleryState.sceneIndex].visual_description || scenes[galleryState.sceneIndex].description)}
+                                : (scenes[galleryState.sceneIndex].visual_description || scenes[galleryState.sceneIndex].description))}
                             images={includedGalleryImages}
                             selectedImageUrl={selectedSceneImages[sceneNum]}
                             initialIndex={galleryState.initialImageIndex}
                             clickedImageUrl={galleryState.clickedImageUrl}
                             onSelectImage={(url) => setSelectedSceneImage(sceneNum, url || null)}
-                            dialogue={sceneDialogue}
+                            dialogue={galleryState.dialogue}
+                            expression={galleryState.expression}
                             onGenerateAudio={() => handleGenerateSceneAudio(sceneNum)}
                             isGeneratingAudio={generatingScenesAudio.has(sceneNum)}
                         />

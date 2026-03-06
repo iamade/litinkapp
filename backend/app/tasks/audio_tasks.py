@@ -881,6 +881,7 @@ async def generate_character_audio(
                         "physical_description": char.physical_description or "",
                         "personality": char.personality or "",
                         "entity_type": char.entity_type or "character",
+                        "accent": char.accent or "neutral",
                     }
                     # Also store by last name only for better matching
                     name_parts = name_key.split()
@@ -1133,32 +1134,68 @@ async def generate_character_audio(
                 # Detect gender and select appropriate voice
                 gender = detect_character_gender(character_name)
 
-                if gender == "female" and female_voices:
-                    # Select from female voices
-                    voice_index = hash(character_name) % len(female_voices)
-                    voice_name, voice_id = female_voices[voice_index]
-                    print(
-                        f"[CHARACTER AUDIO] Detected FEMALE: {character_name} -> {voice_name}"
+                # Try getting accent from DB
+                char_key_for_desc = character_name.upper().strip()
+                accent = "neutral"
+                if char_key_for_desc in character_descriptions:
+                    accent = (
+                        character_descriptions[char_key_for_desc]
+                        .get("accent", "neutral")
+                        .lower()
                     )
-                elif gender == "male" and male_voices:
-                    # Select from male voices
-                    voice_index = hash(character_name) % len(male_voices)
-                    voice_name, voice_id = male_voices[voice_index]
+
+                # Predefined mapping for common accents to ElevenLabs voice IDs (v2 multilingual)
+                ACCENT_VOICE_MAP = {
+                    ("male", "british"): "bIHbv24MWmeRgasZH58o",  # Adam
+                    ("female", "british"): "EXAVITQu4vr4xnSDxMaL",  # Bella
+                    ("male", "american"): "29vD33N1CtxCmqQRPOHJ",  # Drew
+                    ("female", "american"): "21m00Tcm4TlvDq8ikWAM",  # Rachel
+                    ("male", "australian"): "D38z5RcWu1voky8IGSia",  # Callum
+                    ("female", "australian"): "piTKgcLEGmPE4e6mUC4i",  # Matilda
+                    (
+                        "male",
+                        "nigerian",
+                    ): "Yko7PKHZNXotIF8SEI7W",  # Generic fallback placeholder
+                    ("female", "nigerian"): "LcfcDJNUP1GQjivn0011",
+                }
+
+                voice_name = "Default Voice"
+                voice_id = None
+
+                if accent != "neutral" and (gender, accent) in ACCENT_VOICE_MAP:
+                    voice_id = ACCENT_VOICE_MAP[(gender, accent)]
+                    voice_name = f"{accent.capitalize()} {gender.capitalize()}"
                     print(
-                        f"[CHARACTER AUDIO] Detected MALE: {character_name} -> {voice_name}"
+                        f"[CHARACTER AUDIO] Found accent '{accent}' for {character_name}: Using mapped voice {voice_id}"
                     )
                 else:
-                    # Unknown gender - use hash-based selection from all voices
-                    voice_index = hash(character_name) % len(all_voices)
-                    voice_name, voice_id = all_voices[voice_index]
-                    print(
-                        f"[CHARACTER AUDIO] Unknown gender: {character_name} -> {voice_name}"
-                    )
+                    if gender == "female" and female_voices:
+                        # Select from female voices
+                        voice_index = hash(character_name) % len(female_voices)
+                        voice_name, voice_id = female_voices[voice_index]
+                        print(
+                            f"[CHARACTER AUDIO] Detected FEMALE: {character_name} -> {voice_name}"
+                        )
+                    elif gender == "male" and male_voices:
+                        # Select from male voices
+                        voice_index = hash(character_name) % len(male_voices)
+                        voice_name, voice_id = male_voices[voice_index]
+                        print(
+                            f"[CHARACTER AUDIO] Detected MALE: {character_name} -> {voice_name}"
+                        )
+                    else:
+                        # Unknown gender - use hash-based selection from all voices
+                        voice_index = hash(character_name) % len(all_voices)
+                        voice_name, voice_id = all_voices[voice_index]
+                        print(
+                            f"[CHARACTER AUDIO] Unknown gender: {character_name} -> {voice_name}"
+                        )
 
                 character_voice_mapping[character_name] = {
                     "voice_name": voice_name,
                     "voice_id": voice_id,
                     "detected_gender": gender,
+                    "accent": accent,
                 }
                 print(
                     f"[CHARACTER AUDIO] Assigned voice '{voice_name}' ({gender}) to {character_name}"
@@ -1246,6 +1283,7 @@ async def generate_character_audio(
                         "chapter_id": chapter_id,
                         "character_name": character_name,
                         "voice_name": voice_info["voice_name"],
+                        "character_accent": voice_info.get("accent", "neutral"),
                         "line_number": dialogue.get("line_number", i + 1),
                         "scene": scene_id,
                         "shot_type": shot_type,
@@ -1304,6 +1342,7 @@ async def generate_character_audio(
                         "chapter_id": chapter_id,
                         "character_name": character_name,
                         "voice_name": voice_info["voice_name"],
+                        "character_accent": voice_info.get("accent", "neutral"),
                         "line_number": dialogue.get("line_number", i + 1),
                         "scene": dialogue.get("scene", 1),
                         "service": "modelslab_v7",

@@ -160,7 +160,8 @@ export const useScriptGeneration = (chapterId: string) => {
         scenes: [],
         created_at: new Date().toISOString(),
         status: 'ready',
-        scriptStoryType: options.scriptStoryType || result.scriptStoryType
+        scriptStoryType: options.scriptStoryType || result.scriptStoryType,
+        emotional_map: result.emotional_map || []
       };
 
       // Add to the beginning of the list and select it immediately

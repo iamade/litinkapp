@@ -178,6 +178,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     description?: string;
     sceneNumber?: number;
     dialogue?: Array<{character: string; text: string}>;
+    expression?: Array<{character: string; action: string}>;
   } | null>(null);
   
   const [showSceneGenerationModal, setShowSceneGenerationModal] = useState(false);
@@ -1348,18 +1349,25 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
               {scenes.map((scene: any, idx: number) => {
                 const sceneNumber = scene.scene_number || idx + 1;
                 const images = sceneImages[Number(sceneNumber)] || [];
-                // Use header (e.g. "ACT I - SCENE 1") as key, normalized to uppercase
-                // If scene.header is missing, search dialogueMoments keys by scene number
-                let headerKey = (scene.header || '').replace(/\*/g, '').trim().toUpperCase();
-                if (!headerKey) {
-                  // Fallback: find the key that contains this scene number
-                  const matchingKey = Object.keys(dialogueMoments).find(key => {
-                    const match = key.match(/SCENE\s+(\d+)/i);
-                    return match && parseInt(match[1], 10) === sceneNumber;
-                  });
-                  headerKey = matchingKey || '';
+                // Look up dialogue moments for this scene
+                // API provides numeric keys (1, 2, 3), fallback parser provides header keys ("ACT I - SCENE 2")
+                // Try numeric key first (API format), then header key, then regex fallback
+                let sceneMoments = dialogueMoments[sceneNumber] || dialogueMoments[String(sceneNumber)] || [];
+                if (sceneMoments.length === 0) {
+                  // Try header-based lookup
+                  let headerKey = (scene.header || '').replace(/\*/g, '').trim().toUpperCase();
+                  if (headerKey) {
+                    sceneMoments = dialogueMoments[headerKey] || [];
+                  }
+                  if (sceneMoments.length === 0) {
+                    // Fallback: find the key that contains this scene number in the text
+                    const matchingKey = Object.keys(dialogueMoments).find(key => {
+                      const match = key.match(/SCENE\s+(\d+)/i);
+                      return match && parseInt(match[1], 10) === sceneNumber;
+                    });
+                    if (matchingKey) sceneMoments = dialogueMoments[matchingKey] || [];
+                  }
                 }
-                const sceneMoments = dialogueMoments[headerKey] || [];
                 
                 return (
                   <SceneImageCard
@@ -1393,16 +1401,52 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       scene.visual_description
                     )}
                     onDelete={(imageId) => deleteImage('scene', sceneNumber, imageId)}
-                    onView={(url) => {
-                      // Extract dialogue from sceneMoments - use dialogue_preview field (not 'text')
-                      const dialogue: Array<{character: string; text: string}> = sceneMoments
-                        .filter((m: any) => m.character && m.dialogue_preview)
-                        .map((m: any) => ({ character: String(m.character), text: String(m.dialogue_preview) }));
+                    onView={(url, imgDescription) => {
+                      // Match this specific image to its moment(s) by searching the prompt
+                      // Each moment has character + action that appears in the image prompt
+                      const imgPrompt = (imgDescription || '').toLowerCase();
+                      let matchedDialogue: Array<{character: string; text: string}> | undefined;
+                      let matchedExpression: Array<{character: string; action: string}> | undefined;
+                      
+                      if (imgPrompt && sceneMoments.length > 0) {
+                        for (let mi = 0; mi < sceneMoments.length; mi++) {
+                          const m = sceneMoments[mi];
+                          const charMatch = m.character && imgPrompt.includes(m.character.toLowerCase());
+                          const actionMatch = m.action && imgPrompt.includes(m.action.toLowerCase());
+                          if (charMatch && actionMatch) {
+                            // Found the matching moment
+                            if (m.moment_type === 'action') {
+                              matchedExpression = [{ character: String(m.character), action: String(m.action) }];
+                              // Check if next moment is dialogue from same character
+                              if (mi + 1 < sceneMoments.length) {
+                                const next = sceneMoments[mi + 1];
+                                if (next.character === m.character && next.dialogue_preview) {
+                                  matchedDialogue = [{ character: String(next.character), text: String(next.dialogue_preview) }];
+                                }
+                              }
+                            } else if (m.dialogue_preview) {
+                              // Dialogue moment matched directly
+                              matchedDialogue = [{ character: String(m.character), text: String(m.dialogue_preview) }];
+                              matchedExpression = [{ character: String(m.character), action: String(m.action) }];
+                              // Also check if previous moment is action from same character
+                              if (mi - 1 >= 0) {
+                                const prev = sceneMoments[mi - 1];
+                                if (prev.character === m.character && prev.moment_type === 'action') {
+                                  matchedExpression = [{ character: String(prev.character), action: String(prev.action) }];
+                                }
+                              }
+                            }
+                            break;
+                          }
+                        }
+                      }
+                      
                       setSelectedImage({
                         url,
                         sceneNumber: scene.scene_number || idx + 1,
-                        description: scene.visual_description || scene.description,
-                        dialogue: dialogue.length > 0 ? dialogue : undefined,
+                        description: imgDescription || scene.visual_description || scene.description,
+                        dialogue: matchedDialogue,
+                        expression: matchedExpression,
                       });
                     }}
                     onSetKeyScene={(imageId) => setKeySceneImage(sceneNumber, imageId)}
@@ -1820,11 +1864,61 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     images={images}
                     selectedImageUrl={selectedSceneImages[sceneNum]}
                     onSelect={(url: string | null) => setSelectedSceneImage(sceneNum, url)}
-                    onView={(url: string) => {
-                      const sceneIdx = sceneNum - 1;
-                      const sd = scenes[sceneIdx];
-                      const sdesc = typeof sd === 'string' ? sd : (sd?.visual_description || sd?.description || `Scene ${sceneNum}`);
-                      setSelectedImage({ url, sceneNumber: sceneNum, description: sdesc });
+                    onView={(url: string, imgDescription: string) => {
+                      // Find dialogue for this scene - try numeric key first (API format), then header key
+                      let sceneMoments = dialogueMoments[sceneNum] || dialogueMoments[String(sceneNum)] || [];
+                      if (sceneMoments.length === 0) {
+                        let headerKey = (sceneData?.header || '').replace(/\*/g, '').trim().toUpperCase();
+                        if (headerKey) sceneMoments = dialogueMoments[headerKey] || [];
+                        if (sceneMoments.length === 0) {
+                          const matchingKey = Object.keys(dialogueMoments).find(key => {
+                            const match = key.match(/SCENE\s+(\d+)/i);
+                            return match && parseInt(match[1], 10) === sceneNum;
+                          });
+                          if (matchingKey) sceneMoments = dialogueMoments[matchingKey] || [];
+                        }
+                      }
+                      // Match by image prompt content
+                      const imgPrompt = (imgDescription || '').toLowerCase();
+                      let matchedDialogue: Array<{character: string; text: string}> | undefined;
+                      let matchedExpression: Array<{character: string; action: string}> | undefined;
+                      
+                      if (imgPrompt && sceneMoments.length > 0) {
+                        for (let mi = 0; mi < sceneMoments.length; mi++) {
+                          const m = sceneMoments[mi];
+                          const charMatch = m.character && imgPrompt.includes(m.character.toLowerCase());
+                          const actionMatch = m.action && imgPrompt.includes(m.action.toLowerCase());
+                          if (charMatch && actionMatch) {
+                            if (m.moment_type === 'action') {
+                              matchedExpression = [{ character: String(m.character), action: String(m.action) }];
+                              if (mi + 1 < sceneMoments.length) {
+                                const next = sceneMoments[mi + 1];
+                                if (next.character === m.character && next.dialogue_preview) {
+                                  matchedDialogue = [{ character: String(next.character), text: String(next.dialogue_preview) }];
+                                }
+                              }
+                            } else if (m.dialogue_preview) {
+                              matchedDialogue = [{ character: String(m.character), text: String(m.dialogue_preview) }];
+                              matchedExpression = [{ character: String(m.character), action: String(m.action) }];
+                              if (mi - 1 >= 0) {
+                                const prev = sceneMoments[mi - 1];
+                                if (prev.character === m.character && prev.moment_type === 'action') {
+                                  matchedExpression = [{ character: String(prev.character), action: String(prev.action) }];
+                                }
+                              }
+                            }
+                            break;
+                          }
+                        }
+                      }
+
+                      setSelectedImage({
+                        url,
+                        sceneNumber: sceneNum,
+                        description: imgDescription || description,
+                        dialogue: matchedDialogue,
+                        expression: matchedExpression,
+                      });
                     }}
                     onDelete={(imgId: string) => deleteImage('scene', sceneNum, imgId)}
                     onReorder={(newImages: SceneImage[]) => {
@@ -1876,6 +1970,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           description={selectedImage.description}
           sceneNumber={selectedImage.sceneNumber}
           dialogue={selectedImage.dialogue}
+          expression={selectedImage.expression}
         />
       )}
 
@@ -2020,7 +2115,7 @@ interface SceneImageCardProps {
   onGenerate: () => void;
   onRegenerate: () => void;
   onDelete: (imageId: string) => void;
-  onView: (imageUrl: string) => void;
+  onView: (imageUrl: string, description: string, shotIndex?: number) => void;
   onGenerateMoment?: (shotDescription: string, parentSceneImageUrl?: string) => void;
   onSetKeyScene?: (imageId: string) => void; // Callback to set key scene
 }
@@ -2154,7 +2249,7 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
             onGenerate={onGenerate}
             onRegenerate={onRegenerate}
             onDelete={currentImage?.id ? () => onDelete(currentImage.id!) : undefined}
-            onView={() => currentImage?.imageUrl && onView(currentImage.imageUrl)}
+            onView={() => currentImage?.imageUrl && onView(currentImage.imageUrl, currentImage?.prompt || scene.visual_description || scene.description || '', (currentImage as any)?.shot_index)}
             compact
           />
         </div>
@@ -2675,9 +2770,10 @@ interface ImageViewerModalProps {
   description?: string;
   sceneNumber?: number;
   dialogue?: Array<{character: string; text: string}>;
+  expression?: Array<{character: string; action: string}>;
 }
 
-const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose, description, sceneNumber, dialogue }) => {
+const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose, description, sceneNumber, dialogue, expression }) => {
   if (!imageUrl) return null;
   return (
     <div
@@ -2718,6 +2814,19 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose, 
                   <p className="text-sm text-gray-200 leading-relaxed">{description}</p>
                 </div>
               )}
+              {expression && expression.length > 0 && (
+                <div className="p-4 border-b border-white/10">
+                  <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">Expression</h4>
+                  <div className="space-y-2">
+                    {expression.map((exp, i) => (
+                      <div key={i}>
+                        <span className="text-purple-400 text-xs font-bold uppercase block mb-0.5">{exp.character}</span>
+                        <span className="text-gray-300 text-sm italic">({exp.action})</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {dialogue && dialogue.length > 0 && (
                 <div className="p-4">
                   <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-3">Dialogue</h4>
@@ -2731,7 +2840,7 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose, 
                   </div>
                 </div>
               )}
-              {(!dialogue || dialogue.length === 0) && description && (
+              {(!dialogue || dialogue.length === 0) && (!expression || expression.length === 0) && description && (
                 <div className="p-4">
                   <h4 className="text-xs uppercase tracking-widest text-gray-400 font-semibold mb-2">Dialogue</h4>
                   <p className="text-xs text-gray-500 italic">No dialogue in this scene</p>
