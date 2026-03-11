@@ -199,6 +199,31 @@ const ProjectView: React.FC = () => {
     };
   }, []);
 
+  const reloadVideoGenerations = useCallback(async () => {
+    if (!selectedChapter) {
+      setVideoGenerations([]);
+      setLatestVideoUrl(null);
+      return;
+    }
+
+    const chapterId = getActualChapterId(selectedChapter);
+    if (!chapterId) return;
+
+    const result = await videoGenerationAPI.getChapterVideoGenerations(
+      chapterId,
+      selectedScriptId || undefined
+    );
+
+    if (result.generations && result.generations.length > 0) {
+      setVideoGenerations(result.generations);
+      setLatestVideoUrl(result.generations[0].video_url || null);
+      return;
+    }
+
+    setVideoGenerations([]);
+    setLatestVideoUrl(null);
+  }, [selectedChapter, selectedScriptId]);
+
   // Load latest video generation for selected chapter (for Preview tab on page load)
   useEffect(() => {
     if (!selectedChapter) {
@@ -212,7 +237,10 @@ const ProjectView: React.FC = () => {
     let cancelled = false;
     const loadLatestVideoGen = async () => {
       try {
-        const result = await videoGenerationAPI.getChapterVideoGenerations(chapterId);
+        const result = await videoGenerationAPI.getChapterVideoGenerations(
+          chapterId,
+          selectedScriptId || undefined
+        );
         if (cancelled) return;
         if (result.generations && result.generations.length > 0) {
           // Store all generations for the carousel
@@ -238,7 +266,7 @@ const ProjectView: React.FC = () => {
 
     loadLatestVideoGen();
     return () => { cancelled = true; };
-  }, [selectedChapter]);
+  }, [selectedChapter, selectedScriptId]);
 
   useEffect(() => {
     if (id) {
@@ -550,6 +578,9 @@ const ProjectView: React.FC = () => {
   // React to video generation polling status changes
   useEffect(() => {
     if (isComplete) {
+      reloadVideoGenerations().catch((error) => {
+        console.error('Failed to refresh video generations after completion:', error);
+      });
       if (safetyTimeoutRef.current) {
         clearTimeout(safetyTimeoutRef.current);
         safetyTimeoutRef.current = null;
@@ -563,6 +594,9 @@ const ProjectView: React.FC = () => {
       }
       toast.success('Video generation completed!');
     } else if (isFailed) {
+      reloadVideoGenerations().catch((error) => {
+        console.error('Failed to refresh video generations after failure:', error);
+      });
       if (safetyTimeoutRef.current) {
         clearTimeout(safetyTimeoutRef.current);
         safetyTimeoutRef.current = null;
@@ -575,7 +609,7 @@ const ProjectView: React.FC = () => {
     } else if (isVideoGenerating) {
       setVideoStatus("processing");
     }
-  }, [isComplete, isFailed, isVideoGenerating, stopPolling]);
+  }, [generation?.error_message, generation?.video_url, isComplete, isFailed, isVideoGenerating, reloadVideoGenerations, stopPolling]);
 
   // Handle video generation deletion
   const handleDeleteVideoGeneration = async (genId: string) => {

@@ -59,6 +59,8 @@ export const normalizeGenerationStatus = (status: string | null | undefined): Ge
       return 'images_completed';
     case 'generating_video':
     case 'video_generation':
+    case 'processing':
+    case 'pending':
       return 'generating_video';
     case 'video_completed':
     case 'video_complete':
