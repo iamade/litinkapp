@@ -209,6 +209,75 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     audioFiles
   });
 
+  // Enrich scenes with generation status and video URLs from videoGenerations
+  const enrichedScenes = React.useMemo(() => {
+    if (!videoGenerations || videoGenerations.length === 0) return scenes;
+
+    return scenes.map(scene => {
+      let foundVideoUrl: string | undefined = undefined;
+      let foundStatus = scene.status;
+
+      for (const gen of videoGenerations) {
+        const clips = gen.video_data?.scene_videos || [];
+        
+        const matchedClip = clips.find((sv: any) => {
+          if (!sv) return false;
+          const sameSceneNumber =
+            sv.scene_number === scene.sceneNumber ||
+            sv.scene_sequence === scene.sceneNumber ||
+            sv.scene_id === `scene_${scene.sceneNumber}`;
+
+          if (
+            sameSceneNumber &&
+            typeof sv.shot_index === 'number' &&
+            typeof scene.shotIndex === 'number'
+          ) {
+            return sv.shot_index === scene.shotIndex;
+          }
+
+          if (scene.imageUrl && sv.target_image) {
+            if (sv.target_image === scene.imageUrl) return true;
+            const selectedFilename = scene.imageUrl.split('/').pop()?.split('?')[0];
+            const targetFilename = sv.target_image.split('/').pop()?.split('?')[0];
+            if (selectedFilename && targetFilename && selectedFilename === targetFilename) return true;
+          }
+
+          if (scene.imageUrl && sv.source_image) {
+            if (sv.source_image === scene.imageUrl) return true;
+            const selectedFilename = scene.imageUrl.split('/').pop()?.split('?')[0];
+            const svFilename = sv.source_image.split('/').pop()?.split('?')[0];
+            if (selectedFilename && svFilename && selectedFilename === svFilename) return true;
+          }
+          if (sameSceneNumber && typeof scene.shotIndex !== 'number') return true;
+          // IMPORTANT: Do NOT match sv.scene_sequence to scene.sceneNumber, 
+          // as scene_sequence is the batch sequence index, not the absolute script scene number!
+          return false;
+        });
+
+        // Also check if the generation explicitly targeted this scene ID via task_meta
+        const targetedSceneIds = gen.task_meta?.selected_shot_ids || [];
+        const matchesTarget = targetedSceneIds.includes(scene.id) || targetedSceneIds.includes('__all__');
+
+        if (matchedClip || (matchesTarget && gen.generation_status === 'failed')) {
+          if (matchedClip?.video_url) {
+            foundVideoUrl = matchedClip.video_url;
+            foundStatus = 'completed';
+            break; // Found the most recent successful generation for this scene
+          } else if (gen.generation_status === 'failed') {
+            foundStatus = 'error';
+            // Continue looking to see if an older generation actually succeeded
+          }
+        }
+      }
+
+      return {
+        ...scene,
+        video_url: foundVideoUrl || scene.video_url,
+        status: foundStatus !== 'pending' ? foundStatus : scene.status
+      };
+    });
+  }, [scenes, videoGenerations]);
+
   const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'merge'>('timeline');
   const [selectedSceneIndex, setSelectedSceneIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -255,7 +324,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   }
 
   // Guarded empty state for no scenes with selected script
-  if (!scenes.length && selectedScriptId) {
+  if (!enrichedScenes.length && selectedScriptId) {
     return (
       <div className="p-4 text-sm text-gray-500">
         No scenes available for the selected script. Generate images and audio first.
@@ -265,7 +334,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
 
   const handleSceneSelect = (scene: VideoScene) => {
     // Find the index of the scene in the scenes array
-    const index = scenes.findIndex(s => s.id === scene.id);
+    const index = enrichedScenes.findIndex(s => s.id === scene.id);
     setSelectedSceneIndex(index >= 0 ? index : 0);
   };
 
@@ -275,7 +344,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   };
 
   const getTotalDuration = () => {
-    return scenes.reduce((total, scene) => total + scene.duration, 0);
+    return enrichedScenes.reduce((total, scene) => total + scene.duration, 0);
   };
 
   return (
@@ -303,7 +372,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
         <div className="flex items-center space-x-3">
           <button
             onClick={saveProduction}
-            disabled={controlsDisabled || !scenes.length}
+            disabled={controlsDisabled || !enrichedScenes.length}
             className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-400"
           >
             <Save className="w-4 h-4" />
@@ -458,7 +527,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               
               {/* Scene Timeline */}
               <SceneTimeline
-                scenes={scenes}
+                scenes={enrichedScenes}
                 onSceneSelect={handleSceneSelect}
                 onSceneUpdate={updateScene}
                 onReorder={reorderScenes}
@@ -474,7 +543,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
 
           {activeView === 'preview' && (
             <VideoPreview
-              scenes={scenes}
+              scenes={enrichedScenes}
               currentSceneIndex={selectedSceneIndex}
               isPlaying={isPlaying}
               onPlayPause={() => setIsPlaying(!isPlaying)}
@@ -482,7 +551,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               videoUrl={videoUrl}
               videoGenerations={videoGenerations}
               selectedScript={selectedScript}
-              selectedScene={scenes[selectedSceneIndex] || null}
+              selectedScene={enrichedScenes[selectedSceneIndex] || null}
               onDeleteGeneration={onDeleteGeneration}
             />
           )}
@@ -493,7 +562,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               scriptId={selectedScriptId || undefined}
               videoGenerations={videoGenerations}
               audioFiles={audioFiles}
-              scenes={scenes}
+              scenes={enrichedScenes}
               editorSettings={editorSettings}
               userTier="free"
             />
@@ -579,7 +648,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
       )}
 
       {/* Empty State */}
-      {!scenes.length && !isLoading && (
+      {!enrichedScenes.length && !isLoading && (
         <div className="bg-gray-50 rounded-lg p-12 text-center">
           <Video className="mx-auto h-12 w-12 text-gray-400 mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">

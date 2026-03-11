@@ -1187,12 +1187,14 @@ async def generate_scene_videos(
 
     for i, scene_description in enumerate(scene_descriptions):
         try:
-            # Determine correct scene ID (1-based)
-            if scene_numbers and i < len(scene_numbers):
-                scene_num = scene_numbers[i]
-                scene_id = f"scene_{scene_num}"
-            else:
-                scene_id = f"scene_{i+1}"
+            scene_num, scene_id = resolve_scene_identity(i, scene_numbers)
+            scene_image = scene_images[i] if i < len(scene_images) else None
+            target_image_url = (
+                scene_image.get("image_url")
+                if scene_image and scene_image.get("image_url")
+                else None
+            )
+            target_shot_index = scene_image.get("shot_index", 0) if scene_image else 0
 
             print(
                 f"[SCENE VIDEOS V7] Processing {scene_id} ({i+1}/{len(scene_descriptions)})"
@@ -1203,10 +1205,6 @@ async def generate_scene_videos(
 
             if i == 0:
                 # First scene: use the original scene image
-                scene_image = None
-                if i < len(scene_images) and scene_images[i] is not None:
-                    scene_image = scene_images[i]
-
                 if not scene_image or not scene_image.get("image_url"):
                     print(f"[SCENE VIDEOS V7] ⚠️ No valid image found for {scene_id}")
                     video_results.append(None)
@@ -1385,7 +1383,7 @@ async def generate_scene_videos(
                             {
                                 "video_generation_id": video_gen_id,
                                 "scene_id": scene_id,
-                                "scene_number": i + 1,
+                                "scene_number": scene_num,
                                 "scene_description": scene_description,
                                 "video_url": video_url,
                                 "status": "completed",
@@ -1403,14 +1401,17 @@ async def generate_scene_videos(
                         {
                             "id": video_record_id,
                             "scene_id": scene_id,
+                            "scene_number": scene_num,
+                            "shot_index": target_shot_index,
                             "video_url": video_url,
                             "key_scene_shot_url": key_scene_shot_url,
                             "duration": 5.0,
                             "source_image": starting_image_url,
+                            "target_image": target_image_url,
                             "method": "veo2_image_to_video_sequential",
                             "model": current_model_id,
                             "has_lipsync": has_lipsync,
-                            "scene_sequence": i + 1,
+                            "scene_sequence": scene_num,
                         }
                     )
 
@@ -1447,7 +1448,7 @@ async def generate_scene_videos(
                     {
                         "video_generation_id": video_gen_id,
                         "scene_id": scene_id,
-                        "scene_number": i + 1,
+                        "scene_number": scene_num,
                         "scene_description": scene_description,
                         "status": "failed",
                     },

@@ -367,13 +367,31 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
 
   // Helper function to check if a generation contains a video for a specific scene
   const generationMatchesScene = useCallback((gen: any, scene: VideoScene): boolean => {
-    // If generation has no video data, we can't match it to a scene (unless we have input params, which we assume we don't for now)
-    // So we rely on scene_videos being present
+    // If generation has no video data, checking task_meta instead
     const clips = gen.video_data?.scene_videos || [];
-    if (clips.length === 0) return false;
-
-    return clips.some((sv: any) => {
+    
+    // First try matching via successfully generated clips
+    const hasMatchingClip = clips.some((sv: any) => {
       if (!sv) return false;
+      const sameSceneNumber =
+        sv.scene_number === scene.sceneNumber ||
+        sv.scene_sequence === scene.sceneNumber ||
+        sv.scene_id === `scene_${scene.sceneNumber}`;
+
+      if (
+        sameSceneNumber &&
+        typeof sv.shot_index === 'number' &&
+        typeof scene.shotIndex === 'number'
+      ) {
+        return sv.shot_index === scene.shotIndex;
+      }
+
+      if (scene.imageUrl && sv.target_image) {
+        if (sv.target_image === scene.imageUrl) return true;
+        const selectedFilename = scene.imageUrl.split('/').pop()?.split('?')[0];
+        const targetFilename = sv.target_image.split('/').pop()?.split('?')[0];
+        if (selectedFilename && targetFilename && selectedFilename === targetFilename) return true;
+      }
       
       // Match by source_image URL (exact or filename match)
       if (scene.imageUrl && sv.source_image) {
@@ -384,14 +402,19 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
         if (selectedFilename && svFilename && selectedFilename === svFilename) return true;
       }
       
-      // Match by scene_id (e.g. "scene_1" matches sceneNumber 1)
-      if (sv.scene_id === `scene_${scene.sceneNumber}`) return true;
+      // Only fall back to scene-level matching when the scene has no shot identity.
+      if (sameSceneNumber && typeof scene.shotIndex !== 'number') return true;
       
-      // Match by scene_sequence matching sceneNumber
-      if (sv.scene_sequence === scene.sceneNumber) return true;
+      // Do not match by scene_sequence as it's the batch index
       
       return false;
     });
+
+    if (hasMatchingClip) return true;
+
+    // Fallback: If the generation explicitly targeted this scene ID via task_meta
+    const targetedSceneIds = gen.task_meta?.selected_shot_ids || [];
+    return targetedSceneIds.includes(scene.id) || targetedSceneIds.includes('__all__');
   }, []);
 
   // When a specific scene is selected, further filter playable generations
