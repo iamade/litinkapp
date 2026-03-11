@@ -8,6 +8,7 @@ export interface SceneImage {
   generatedAt?: string;
   id?: string;
   script_id?: string;
+  shot_index?: number;
 }
 
 export interface CharacterImage {

@@ -2449,6 +2449,13 @@ async def generate_audio_for_script(
         chapter_id = request.get("chapter_id")
         script_id = request.get("script_id")
         scene_numbers = request.get("scene_numbers")  # Optional list of integers
+        shot_index = request.get("shot_index")  # Optional shot index within the selected scene
+
+        if shot_index is not None:
+            try:
+                shot_index = int(shot_index)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="shot_index must be an integer")
 
         if not script_id:
             raise HTTPException(status_code=400, detail="script_id is required")
@@ -2458,6 +2465,8 @@ async def generate_audio_for_script(
         )
         if scene_numbers:
             print(f"🎵 Filtering for scenes: {scene_numbers}")
+        if shot_index is not None:
+            print(f"🎵 Filtering for shot index: {shot_index}")
 
         # Verify ownership/access
         # (Simplified for brevity, assumes standard checks)
@@ -2492,6 +2501,7 @@ async def generate_audio_for_script(
             task_meta={
                 "pipeline_state": {"current_stage": "audio"},
                 "selected_scene_numbers": scene_numbers,  # Store for task to use
+                "selected_shot_index": shot_index,
             },
         )
         session.add(video_gen)

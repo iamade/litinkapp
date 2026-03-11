@@ -24,7 +24,7 @@ interface SceneGalleryModalProps {
   onSelectImage: (url: string) => void;
   dialogue?: DialogueLine[];
   expression?: ExpressionLine[];
-  onGenerateAudio?: () => void;
+  onGenerateAudio?: (shotIndex?: number) => void;
   isGeneratingAudio?: boolean;
 }
 
@@ -179,7 +179,7 @@ const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
               {/* Generate Audio button */}
               {onGenerateAudio && (
                 <button
-                  onClick={onGenerateAudio}
+                  onClick={() => onGenerateAudio(displayImage?.shot_index ?? 0)}
                   disabled={isGeneratingAudio}
                   className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-lg ${
                     isGeneratingAudio

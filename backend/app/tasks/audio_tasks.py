@@ -273,6 +273,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
             # Route sets 'task_meta', backend model likely maps it to task_metadata JSON field
 
             selected_scenes = task_meta.get("selected_scene_numbers")
+            selected_shot_index = task_meta.get("selected_shot_index")
 
             # --- DEBUG: Log parsed components BEFORE filtering ---
             logger.warning(f"[AUDIO DEBUG] Raw parsed components (before filtering):")
@@ -307,6 +308,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                     f"    [{i}] scene={seg.get('scene')}, desc={seg.get('description', '')[:50]}..."
                 )
             logger.warning(f"[AUDIO DEBUG] Selected scenes filter: {selected_scenes}")
+            logger.warning(f"[AUDIO DEBUG] Selected shot filter: {selected_shot_index}")
 
             # Helper function to check if a scene matches selected scenes
             # Handles sub-scene matching: Scene 1 matches 1.1, 1.2, 1.3 etc.
@@ -368,6 +370,35 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                     for seg in audio_components.get("background_music", [])
                     if matches_selected_scene(seg.get("scene"), selected_scenes)
                 ]
+
+            if selected_shot_index is not None:
+                logger.info(
+                    f"[AUDIO FILTER] Filtering generation for shot index: {selected_shot_index}"
+                )
+
+                audio_components["character_dialogues"] = [
+                    seg
+                    for seg in audio_components.get("character_dialogues", [])
+                    if seg.get("shot_index") == selected_shot_index
+                ]
+
+                audio_components["narrator_segments"] = [
+                    seg
+                    for seg in audio_components.get("narrator_segments", [])
+                    if seg.get("shot_index") == selected_shot_index
+                ]
+
+                audio_components["sound_effects"] = [
+                    seg
+                    for seg in audio_components.get("sound_effects", [])
+                    if seg.get("shot_index", 0) == selected_shot_index
+                ]
+
+                audio_components["background_music"] = [
+                    seg
+                    for seg in audio_components.get("background_music", [])
+                    if seg.get("shot_index", 0) == selected_shot_index
+                ]
             # -----------------------------
 
             print(f"[AUDIO PARSER] Extracted components (Filtered if applicable):")
@@ -410,6 +441,14 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                                         "music": "",
                                     }
 
+                                entry_shot_index = entry.get("shot_index", 0)
+
+                                if (
+                                    selected_shot_index is not None
+                                    and entry_shot_index != selected_shot_index
+                                ):
+                                    continue
+
                                 sfx = entry.get("sound_effects", [])
                                 if sfx and isinstance(sfx, list):
                                     audio_design_by_scene[scene][
@@ -448,6 +487,9 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                                                 "scene": scene_num,
                                                 "description": sfx_desc,
                                                 "duration": 10.0,
+                                                "shot_index": selected_shot_index
+                                                if selected_shot_index is not None
+                                                else 0,
                                             }
                                         )
 
@@ -468,6 +510,9 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                                                 "description": design["music"],
                                                 "type": "emotional",
                                                 "duration": 15.0,  # Shorter duration
+                                                "shot_index": selected_shot_index
+                                                if selected_shot_index is not None
+                                                else 0,
                                             }
                                         )
 

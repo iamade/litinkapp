@@ -901,6 +901,33 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
             }
         };
 
+        const handleGenerateShotAudio = async (sceneNum: number, shotIndex: number) => {
+            if (!selectedScriptId) {
+                toast.error('No script selected');
+                return;
+            }
+
+            try {
+                setGeneratingScenesAudio(prev => new Set(prev).add(sceneNum));
+                const response = await import('../../lib/api').then(m =>
+                    m.generateScriptAudio(stableSelectedChapterId, selectedScriptId, [sceneNum], shotIndex)
+                );
+                if (response?.video_generation_id) {
+                    setVideoGenerationId(response.video_generation_id);
+                }
+                toast.success(`Audio generation started for Scene ${sceneNum} Shot ${shotIndex === 0 ? 'Key Scene' : shotIndex}`);
+                loadAudio();
+            } catch (error) {
+                console.error('Failed to start shot audio generation:', error);
+                toast.error(`Failed to start audio generation for Scene ${sceneNum}`);
+                setGeneratingScenesAudio(prev => {
+                    const newSet = new Set(prev);
+                    newSet.delete(sceneNum);
+                    return newSet;
+                });
+            }
+        };
+
         return (
             <div className="space-y-6">
                 <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900 rounded-lg p-4">
@@ -1031,7 +1058,13 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                             onSelectImage={(url) => setSelectedSceneImage(sceneNum, url || null)}
                             dialogue={galleryState.dialogue}
                             expression={galleryState.expression}
-                            onGenerateAudio={() => handleGenerateSceneAudio(sceneNum)}
+                            onGenerateAudio={(shotIndex?: number) => {
+                                if (shotIndex !== undefined) {
+                                    handleGenerateShotAudio(sceneNum, shotIndex);
+                                    return;
+                                }
+                                handleGenerateSceneAudio(sceneNum);
+                            }}
                             isGeneratingAudio={generatingScenesAudio.has(sceneNum)}
                         />
                     );

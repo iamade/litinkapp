@@ -218,7 +218,12 @@ export const apiClient = {
   },
 };
 
-export async function generateScriptAudio(chapterId: string | null, scriptId: string, sceneNumbers?: number[]) {
+export async function generateScriptAudio(
+  chapterId: string | null,
+  scriptId: string,
+  sceneNumbers?: number[],
+  shotIndex?: number
+) {
   return apiClient.post<{ 
     status: string; 
     video_generation_id: string; 
@@ -226,7 +231,8 @@ export async function generateScriptAudio(chapterId: string | null, scriptId: st
   }>("/ai/generate-audio-for-script", {
     chapter_id: chapterId,
     script_id: scriptId,
-    scene_numbers: sceneNumbers
+    scene_numbers: sceneNumbers,
+    shot_index: shotIndex
   });
 }
 
