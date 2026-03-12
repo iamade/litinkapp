@@ -224,7 +224,6 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
           if (!sv) return false;
           const sameSceneNumber =
             sv.scene_number === scene.sceneNumber ||
-            sv.scene_sequence === scene.sceneNumber ||
             sv.scene_id === `scene_${scene.sceneNumber}`;
 
           if (

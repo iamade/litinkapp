@@ -170,6 +170,10 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken, videoGen
           if (!shotType) shotType = 'key_scene';
         }
 
+        // Map duration_seconds (backend field) → duration (frontend field)
+        // @ts-expect-error - Backend field access
+        const durationSeconds = f.duration_seconds ?? f.duration ?? 0;
+
         return {
           ...f,
           url: f.url ?? f.audio_url,
@@ -177,6 +181,7 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken, videoGen
           sceneNumber,
           shotType,
           shotIndex,
+          duration: durationSeconds,  // Explicitly map duration_seconds → duration
           type: kind // Override type with normalized kind
         };
       });

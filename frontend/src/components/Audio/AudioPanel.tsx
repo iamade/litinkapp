@@ -964,7 +964,6 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                         if (visibleImages.length === 0 && rawImages.length > 0) {
                             return null;
                         }
-
                         return (
                             <AudioStoryboardSceneRow
                                 key={idx}
@@ -1219,9 +1218,46 @@ const AudioFileCard: React.FC<{
   const isGenerating = file.status === 'generating';
   const isFailed = file.status === 'failed';
 
+  // Real-time duration: use stored value first, then detect from audio element
+  const [realDuration, setRealDuration] = useState<number>(file.duration || 0);
+  const internalAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Format seconds as m:ss
+  const formatDuration = (s: number) => {
+    if (!s || s <= 0) return null;
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  // Duration badge color: red = too short, green = valid, orange = too long
+  const getDurationColor = (s: number) => {
+    if (s <= 0) return 'bg-gray-100 text-gray-500';
+    if (s < 5)  return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300';
+    if (s > 28) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300';
+    return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300';
+  };
+
+  const handleAudioRef = (el: HTMLAudioElement | null) => {
+    internalAudioRef.current = el;
+    if (el) {
+      el.id = `audio-${file.id}`;
+      // Detect duration when metadata loads
+      el.onloadedmetadata = () => {
+        if (el.duration && isFinite(el.duration) && el.duration > 0) {
+          setRealDuration(el.duration);
+        }
+      };
+    }
+    audioRef(el);
+  };
+
+  const durationLabel = formatDuration(realDuration);
+  const durationColorClass = getDurationColor(realDuration);
+
   return (
-    <div className={`bg-white border rounded-lg p-4 ${isSelected ? 'border-purple-500' : ''} ${isGenerating ? 'border-blue-300 bg-blue-50' : ''} ${isFailed ? 'border-red-300 bg-red-50' : ''}`}>
-      {file.url && <audio ref={audioRef} src={file.url} />}
+    <div className={`bg-white dark:bg-gray-800 border rounded-lg p-4 ${isSelected ? 'border-purple-500' : 'border-gray-200 dark:border-gray-700'} ${isGenerating ? 'border-blue-300 bg-blue-50 dark:bg-blue-950/30' : ''} ${isFailed ? 'border-red-300 bg-red-50 dark:bg-red-950/30' : ''}`}>
+      {file.url && <audio ref={handleAudioRef} src={file.url} preload="metadata" />}
 
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center space-x-3">
@@ -1233,8 +1269,19 @@ const AudioFileCard: React.FC<{
             disabled={isGenerating}
           />
           <div className="flex-1">
-            <div className="flex items-center space-x-2">
-              <h5 className="font-medium text-gray-900">{file.text_content || file.text_prompt || file.name}</h5>
+            <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+              <h5 className="font-medium text-gray-900 dark:text-gray-100 text-sm line-clamp-1">{file.text_content || file.text_prompt || file.name}</h5>
+              {/* Duration badge — always show if we have a value */}
+              {durationLabel && (
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${durationColorClass}`}>
+                  ⏱ {durationLabel}
+                </span>
+              )}
+              {!durationLabel && !isGenerating && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
+                  ⏱ loading...
+                </span>
+              )}
               {isGenerating && (
                 <div className="flex items-center space-x-1 text-blue-600">
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -1245,15 +1292,14 @@ const AudioFileCard: React.FC<{
                 <span className="text-sm text-red-600">Failed</span>
               )}
             </div>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               Scene {file.sceneNumber ?? 'Unknown'}
               {file.shotType && (
-                <span className={`ml-2 px-1.5 py-0.5 text-xs rounded ${file.shotType === 'key_scene' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                <span className={`ml-2 px-1.5 py-0.5 text-xs rounded ${file.shotType === 'key_scene' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'}`}>
                   {file.shotType === 'key_scene' ? 'Key Scene' : 'Suggested Shot'}
                 </span>
               )}
               {file.shotIndex !== undefined && file.shotIndex > 0 && ` • Shot ${file.shotIndex}`}
-              {file.duration && file.duration > 0 && ` • ${formatTime(file.duration)}`}
               {file.character && ` • ${file.character}`}
             </p>
             {/* Shot Assignment Dropdown - always show if onReassign is provided */}

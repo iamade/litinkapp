@@ -26,6 +26,11 @@ from app.videos.models import (
     VideoSegment,
     PipelineStepModel,
 )
+from app.videos.association_integrity import (
+    extract_selected_scene_numbers,
+    is_audio_record_in_context,
+    is_generation_excluded,
+)
 from app.books.models import (
     Book,
     Chapter,
@@ -766,6 +771,11 @@ async def generate_entertainment_video(
             )
 
         script_data = script_response
+        if str(script_data.chapter_id) != str(chapter_id):
+            raise HTTPException(
+                status_code=400,
+                detail="Script does not belong to the provided chapter_id.",
+            )
 
         # Step 2: Create video generation record
         selected_shot_ids = request.selected_shot_ids
@@ -778,6 +788,7 @@ async def generate_entertainment_video(
             task_meta["selected_shot_ids"] = selected_shot_ids
         if request.selected_audio_ids:
             task_meta["selected_audio_ids"] = request.selected_audio_ids
+        task_meta["script_id"] = str(script_data.id)
 
         video_generation = VideoGeneration(
             chapter_id=chapter_id,
@@ -812,10 +823,7 @@ async def generate_entertainment_video(
             print(f"  generation_status: completed (using 'generation_status' column)")
 
             stmt = select(AudioGeneration).where(
-                or_(
-                    AudioGeneration.chapter_id == chapter_id,
-                    AudioGeneration.script_id == script_data.id,
-                ),
+                AudioGeneration.script_id == script_data.id,
                 AudioGeneration.user_id == current_user.id,
                 AudioGeneration.status == "completed",
             )
@@ -829,6 +837,16 @@ async def generate_entertainment_video(
 
             result = await session.exec(stmt)
             audio_records = result.all()
+            selected_scene_numbers = extract_selected_scene_numbers(
+                selected_shot_ids, str(script_data.id)
+            )
+            audio_records = [
+                record
+                for record in audio_records
+                if is_audio_record_in_context(
+                    record, str(script_data.id), selected_scene_numbers
+                )
+            ]
 
             print(f"[AUDIO QUERY DEBUG] Found {len(audio_records)} records")
             if audio_records:
@@ -1269,6 +1287,7 @@ async def get_video_generation_status(
 @router.get("/chapter-video-generations/{chapter_id}")
 async def get_chapter_video_generations(
     chapter_id: str,
+    script_id: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -1284,13 +1303,15 @@ async def get_chapter_video_generations(
 
         print(f"🔍 DEBUG: Chapter found: {chapter_exists}")
 
-        stmt = (
-            select(VideoGeneration)
-            .where(
-                VideoGeneration.chapter_id == chapter_id,
-                VideoGeneration.user_id == current_user.id,
-            )
-            .order_by(col(VideoGeneration.created_at).desc())
+        filters = [
+            VideoGeneration.chapter_id == chapter_id,
+            VideoGeneration.user_id == current_user.id,
+        ]
+        if script_id:
+            filters.append(VideoGeneration.script_id == script_id)
+
+        stmt = select(VideoGeneration).where(*filters).order_by(
+            col(VideoGeneration.created_at).desc()
         )
         result = await session.exec(stmt)
         response_data = [g.model_dump() for g in result.all()]
@@ -1299,6 +1320,11 @@ async def get_chapter_video_generations(
 
         generations = []
         for gen in response_data:
+            if script_id and str(gen.get("script_id")) != str(script_id):
+                continue
+            if is_generation_excluded(gen.get("task_meta")):
+                continue
+
             # Add pipeline status for each generation
             try:
                 pipeline_manager = PipelineManager()

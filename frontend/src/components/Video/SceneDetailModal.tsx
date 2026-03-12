@@ -56,6 +56,12 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
   const audioRefs = useRef<Record<string, HTMLAudioElement>>({});
   const [selectedAudioId, setSelectedAudioId] = useState<string | null>(null);
 
+  // Real-time duration detection: map from audioId → actual seconds
+  const [detectedDurations, setDetectedDurations] = useState<Record<string, number>>({});
+
+  const getAudioDuration = (audio: { id: string; duration?: number }) =>
+    detectedDurations[audio.id] ?? audio.duration ?? 0;
+
   // Get all audio for this scene's sceneNumber (all shots)
   const allSceneAudio = storyboardContext?.sceneAudioMap[scene.sceneNumber] || [];
 
@@ -172,13 +178,29 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
     allSceneAudio.find(a => a.id === selectedAudioId), 
   [allSceneAudio, selectedAudioId]);
 
-  const [isValidDuration, durationWarning] = React.useMemo(() => {
-    if (!selectedAudioItem) return [true, '']; // No audio selected yet
-    const duration = selectedAudioItem.duration || 0;
-    if (duration < 5) return [false, `Audio is too short (${duration.toFixed(1)}s). ModelsLab I2V requires at least 5 seconds.`];
-    if (duration > 28) return [false, `Audio is too long (${duration.toFixed(1)}s). Maximum supported duration is 28 seconds.`];
-    return [true, ''];
-  }, [selectedAudioItem]);
+  const [isValidDuration, durationWarning, isTooShort] = React.useMemo(() => {
+    if (!selectedAudioItem) return [true, '', false]; // No audio selected yet
+    // Use real-time detected duration (from loadedmetadata) if available, else stored value
+    const duration = getAudioDuration(selectedAudioItem);
+    if (duration > 0 && duration < 5) return [false, `Audio is too short (${duration.toFixed(1)}s). ModelsLab I2V requires at least 5 seconds.`, true];
+    if (duration > 28) return [false, `Audio is too long (${duration.toFixed(1)}s). Maximum supported duration is 28 seconds — the model will trim it.`, false];
+    return [true, '', false];
+  }, [selectedAudioItem, detectedDurations]);   // re-validate when detected durations update
+
+  // Format duration for display
+  const formatDuration = (s: number) => {
+    if (!s || s <= 0) return null;
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  };
+
+  const getDurationColor = (s: number) => {
+    if (s <= 0) return 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400';
+    if (s < 5)  return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300';
+    if (s > 28) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300';
+    return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300';
+  };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
@@ -334,7 +356,7 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
 
                                 {/* Info */}
                                 <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
                                       {audio.character || (audio.text_content ? audio.text_content.slice(0, 30) + '...' : 'Audio')}
                                     </span>
@@ -343,12 +365,23 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
                                         Assigned
                                       </span>
                                     )}
+                                    {/* Duration badge */}
+                                    {(() => {
+                                      const dur = getAudioDuration(audio);
+                                      const label = formatDuration(dur);
+                                      return label ? (
+                                        <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${getDurationColor(dur)}`}>
+                                          ⏱ {label}
+                                        </span>
+                                      ) : (
+                                        <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-semibold bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500">
+                                          ⏱ –
+                                        </span>
+                                      );
+                                    })()}
                                   </div>
                                   {audio.text_content && (
                                     <p className="text-[10px] text-gray-400 truncate mt-0.5">{audio.text_content}</p>
-                                  )}
-                                  {audio.duration && (
-                                    <span className="text-[10px] text-gray-400">{audio.duration.toFixed(1)}s</span>
                                   )}
                                 </div>
 
@@ -360,8 +393,19 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
                                 </div>
 
                                 <audio
-                                  ref={el => { if (el) audioRefs.current[audio.id] = el; }}
+                                  ref={el => {
+                                    if (el) {
+                                      audioRefs.current[audio.id] = el;
+                                      // Detect real duration from audio metadata
+                                      el.onloadedmetadata = () => {
+                                        if (el.duration && isFinite(el.duration) && el.duration > 0) {
+                                          setDetectedDurations(prev => ({ ...prev, [audio.id]: el.duration }));
+                                        }
+                                      };
+                                    }
+                                  }}
                                   src={audio.url}
+                                  preload="metadata"
                                   onEnded={() => setPlayingAudioId(null)}
                                 />
                               </div>
@@ -379,7 +423,7 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
             <div className="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-900 shrink-0">
               <button
                 onClick={() => onGenerate(selectedAudioId || undefined)}
-                disabled={isGenerating || !selectedAudioId || !isValidDuration}
+                disabled={isGenerating || !selectedAudioId || isTooShort}
                 className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white rounded-lg font-medium transition-colors shadow-sm"
               >
                 {isGenerating ? (

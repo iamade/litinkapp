@@ -179,6 +179,33 @@ const SceneCard: React.FC<{
               )}
             </div>
           </div>
+
+          {/* Status Badge — top-right corner */}
+          <div className="absolute top-2 right-2 z-10" onClick={(e) => e.stopPropagation()}>
+            {isGenerating ? (
+              /* Yellow pulsing — currently generating */
+              <div className="w-5 h-5 rounded-full bg-yellow-400 flex items-center justify-center shadow animate-pulse">
+                <div className="w-2.5 h-2.5 rounded-full border-2 border-yellow-900/40 border-t-transparent animate-spin" />
+              </div>
+            ) : scene.video_url && (scene.status === 'completed' || scene.status === 'processing') ? (
+              /* Green checkmark — video generated */
+              <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shadow">
+                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            ) : scene.status === 'error' ? (
+              /* Red X — generation failed */
+              <div className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center shadow">
+                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </div>
+            ) : (
+              /* Gray circle — not generated */
+              <div className="w-5 h-5 rounded-full bg-gray-400/80 shadow" />
+            )}
+          </div>
           
           {scene.thumbnailUrl || scene.imageUrl ? (
             <img
@@ -192,7 +219,7 @@ const SceneCard: React.FC<{
             </div>
           )}
           {scene.transitions.length > 0 && (
-            <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
+            <div className="absolute bottom-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded">
               {scene.transitions[0].type}
             </div>
           )}
@@ -393,6 +420,41 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
           <span>Add Scene</span>
         </button>
       </div>
+
+      {/* ── Progress Summary Bar ── */}
+      {(() => {
+        const generatedCount = scenes.filter(
+          s => s.video_url && (s.status === 'completed' || s.status === 'processing')
+        ).length;
+        const totalCount = scenes.length;
+        const generatingCount = scenes.filter(s => generatingShotIds.has(s.id) || generatingShotIds.has('__all__')).length;
+        const pct = totalCount > 0 ? Math.round((generatedCount / totalCount) * 100) : 0;
+
+        return (
+          <div className="space-y-1.5 px-1">
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="font-medium text-gray-800 dark:text-gray-200">
+                {generatedCount}/{totalCount} scenes generated
+                {generatingCount > 0 && (
+                  <span className="ml-2 text-yellow-500 dark:text-yellow-400 font-normal animate-pulse">
+                    ({generatingCount} generating…)
+                  </span>
+                )}
+              </span>
+              <span className="text-gray-500 dark:text-gray-400 text-xs">{pct}%</span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${pct}%`,
+                  background: `linear-gradient(to right, #eab308 0%, #22c55e ${Math.max(pct, 20)}%)`,
+                }}
+              />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Timeline Grid */}
       <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

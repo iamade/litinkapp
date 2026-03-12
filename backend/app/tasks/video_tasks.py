@@ -19,6 +19,11 @@ import uuid
 from app.core.services.file import FileService
 
 from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
+from app.videos.association_integrity import (
+    extract_shot_selections,
+    dedupe_scene_videos,
+    resolve_scene_identity,
+)
 
 
 # Removed image generation logic
@@ -514,49 +519,8 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
                     f"[VIDEO GENERATION] selected_audio_ids: {task_meta['selected_audio_ids']}"
                 )
 
-            # Save original scene_descriptions before any filtering
-            # (needed for correct indexing when building target lists)
+            # Save original scene_descriptions for index-safe lookups
             original_scene_descriptions = list(scene_descriptions)
-
-            # Filter scene_descriptions by selected scenes from task_meta
-            if task_meta.get("selected_shot_ids"):
-                selected_shot_ids = task_meta["selected_shot_ids"]
-                # Parse scene numbers from composite frontend IDs
-                # Format: "scene-{timestamp}-{index}-{scriptId}" where index is 0-based
-                selected_scene_indices = []
-                for shot_id in selected_shot_ids:
-                    try:
-                        if isinstance(shot_id, str) and shot_id.startswith("scene-"):
-                            parts = shot_id.split("-")
-                            if len(parts) >= 3:
-                                scene_index = int(parts[2])  # 0-based index
-                                selected_scene_indices.append(scene_index)
-                    except (ValueError, IndexError) as e:
-                        print(
-                            f"[VIDEO GENERATION] Could not parse shot ID {shot_id}: {e}"
-                        )
-
-                if selected_scene_indices:
-                    # Filter scene_descriptions to only selected scenes
-                    filtered_descriptions = []
-                    for idx in sorted(set(selected_scene_indices)):
-                        if idx < len(original_scene_descriptions):
-                            filtered_descriptions.append(
-                                original_scene_descriptions[idx]
-                            )
-
-                    print(
-                        f"[VIDEO GENERATION] Filtered scenes: {len(filtered_descriptions)} of {len(original_scene_descriptions)} (indices: {selected_scene_indices})"
-                    )
-                    scene_descriptions = filtered_descriptions
-                else:
-                    print(
-                        f"[VIDEO GENERATION] No valid scene indices parsed, using all {len(scene_descriptions)} scenes"
-                    )
-            else:
-                print(
-                    f"[VIDEO GENERATION] No selected_shot_ids in task_meta, using all {len(scene_descriptions)} scenes"
-                )
 
             print(f"[VIDEO GENERATION] Processing:")
             print(f"- Scenes: {len(scene_descriptions)}")
@@ -620,43 +584,16 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
 
             print(f"[IMAGE MAPPING] Map keys: {list(scene_image_map.keys())}")
 
-            # Parse selected shot IDs to get (scene_index, shot_index) tuples
-            # Format: scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
-            # Or legacy: scene-{timestamp}-{scene_index}-{script_id}
-            if task_meta.get("selected_shot_ids"):
-                selected_scene_indices = []
-                for shot_id in task_meta.get("selected_shot_ids"):
-                    try:
-                        # Use maxsplit to handle UUIDs with hyphens in script_id
-                        # Format: scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
-                        # We only need the first few parts to get scene_index and shot_index
-                        parts = shot_id.split("-")
-
-                        # Support legacy format: scene-{timestamp}-{scene_index}-{script_id}
-                        # And new format: scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
-
-                        if len(parts) >= 3:
-                            # parts[2] is always scene_index
-                            scene_index = int(parts[2])
-                            shot_index = 0
-
-                            # Check for shot_index at parts[3]
-                            if len(parts) >= 4:
-                                try:
-                                    candidate = int(parts[3])
-                                    if candidate < 100:
-                                        shot_index = candidate
-                                except ValueError:
-                                    # Not an integer, so it's likely part of the scriptID
-                                    pass
-
-                            selected_scene_indices.append((scene_index, shot_index))
-                    except Exception as e:
-                        print(f"[SCENE VIDEOS] Error parsing shot_id {shot_id}: {e}")
-                        continue
-
-                # Sort by scene index
-                selected_scene_indices.sort(key=lambda x: x[0])
+            # Parse selected shot IDs to get deduped (scene_index, shot_index) tuples
+            video_script_id = str(video_gen.get("script_id")) if video_gen.get("script_id") else None
+            selected_shots = extract_shot_selections(
+                task_meta.get("selected_shot_ids"), expected_script_id=video_script_id
+            )
+            if selected_shots:
+                selected_scene_indices = [
+                    (selection.scene_index, selection.shot_index)
+                    for selection in selected_shots
+                ]
 
                 # IMPORTANT: Use the selected indices to order the generation
                 # This matches the user's timeline order
@@ -703,6 +640,9 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
 
                 image_data["scene_images"] = final_scene_images
             else:
+                print(
+                    f"[VIDEO GENERATION] No valid selected_shot_ids in context, using all {len(scene_descriptions)} scenes"
+                )
                 # No selection filter: assign images by order or scene_number
                 target_scene_descriptions = scene_descriptions
                 target_scene_numbers = list(range(1, len(scene_descriptions) + 1))
@@ -767,8 +707,9 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             )
 
             # Compile results
+            video_results = dedupe_scene_videos(video_results)
             successful_videos = len([r for r in video_results if r is not None])
-            total_scenes = len(scene_descriptions)
+            total_scenes = len(target_scene_descriptions)
             success_rate = (
                 (successful_videos / total_scenes * 100) if total_scenes > 0 else 0
             )

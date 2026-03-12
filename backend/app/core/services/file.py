@@ -550,52 +550,30 @@ class BookStructureDetector:
             if not content_lines and not line:
                 continue
 
-            # Stop if we hit another chapter number - RELAXED CHECK
-            if re.match(r"^(\d+)$", line) and i < len(lines) - 5:
-                # Only break if the next line actually looks like a chapter title or continuation
-                # Many books have page numbers in the middle of text flow on raw extraction
-                is_real_chapter_break = False
+            # Check if this line looks like a chapter header to stop extraction
+            is_chapter_break = False
 
-                # Check previous line (if it ends with sentence terminator, break is more likely)
-                # prev_line = lines[i-1].strip() if i > 0 else ""
+            # Fast path optimization: check if line might be a chapter header
+            if len(line) < 150:
+                # If it's just a number, do the relaxed check
+                if re.match(r"^(\d+)$", line) and i < len(lines) - 5:
+                    for j in range(i + 1, min(i + 5, len(lines))):
+                        next_line = lines[j].strip()
+                        if not next_line:
+                            continue
+                        # If next line looks like a title or matches pattern
+                        if (
+                            10 < len(next_line) < 100 and next_line[0].isupper()
+                        ) or self._match_chapter_patterns(next_line):
+                            is_chapter_break = True
+                            break
+                elif self._match_chapter_patterns(line):
+                    # Also stop if we explicitly match a chapter pattern
+                    is_chapter_break = True
 
-                # Check next few lines for title pattern
-                for j in range(i + 1, min(i + 5, len(lines))):
-                    next_line = lines[j].strip()
-                    if not next_line:
-                        continue
-
-                    # If next line looks like a title (uppercase, shortish) or matches chapter pattern
-                    if (
-                        10 < len(next_line) < 100 and next_line[0].isupper()
-                    ) or self._match_chapter_patterns(next_line):
-                        is_real_chapter_break = True
-                        break
-
-                if is_real_chapter_break:
-                    print(
-                        f"[CONTENT EXTRACTION] Stopped at next chapter number break: {line}"
-                    )
-                    break
-                else:
-                    # Probably a page number, ignore it
-                    continue
-                # Check if next few lines contain a title pattern
-                has_title_after = False
-                for j in range(i + 1, min(i + 10, len(lines))):
-                    next_line = lines[j].strip()
-                    if (
-                        next_line
-                        and len(next_line) > 10
-                        and next_line[0].isupper()
-                        and len(next_line.split()) > 2
-                    ):
-                        has_title_after = True
-                        break
-
-                if has_title_after:
-                    print(f"[CONTENT EXTRACTION] Stopped at next chapter: {line}")
-                    break
+            if is_chapter_break:
+                print(f"[CONTENT EXTRACTION] Stopped at next chapter break: {line}")
+                break
 
             # Skip page numbers, headers, footers
             if re.match(r"^\d+$", line) or len(line) < 3:
@@ -608,10 +586,6 @@ class BookStructureDetector:
 
             # Add content line
             content_lines.append(line)
-
-            # Mark substantial content found
-            if len(line) > 30 and not re.match(r"^\d+\.", line):
-                print(f"[CONTENT EXTRACTION] Found substantial content: {line[:50]}...")
 
         content = "\n".join(content_lines).strip()
         print(f"[CONTENT EXTRACTION] Extracted {len(content)} characters")

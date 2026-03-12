@@ -176,6 +176,7 @@ const ProjectView: React.FC = () => {
   const [generatingShotIds, setGeneratingShotIds] = useState<Set<string>>(new Set());
   const [latestVideoUrl, setLatestVideoUrl] = useState<string | null>(null);
   const [videoGenerations, setVideoGenerations] = useState<any[]>([]);
+  
   const safetyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const {
     startPolling,
@@ -190,6 +191,11 @@ const ProjectView: React.FC = () => {
   // Context hooks
   const { selectChapter, selectedScriptId } = useScriptSelection();
   const mountedRef = useRef(true);
+
+  // Clear latest video url when script/chapter changes so it doesn't linger
+  useEffect(() => {
+    setLatestVideoUrl(null);
+  }, [selectedScriptId, selectedChapter?.id]);
 
   // Cleanup on unmount
   useEffect(() => {

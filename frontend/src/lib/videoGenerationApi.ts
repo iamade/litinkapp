@@ -474,12 +474,15 @@ class VideoGenerationAPI {
     return apiClient.post(`/ai/cancel-generation/${videoGenId}`, {});
   }
 
-  async getChapterVideoGenerations(chapterId: string): Promise<{
+  async getChapterVideoGenerations(chapterId: string, scriptId?: string): Promise<{
     chapter_id: string;
     generations: any[];
     total: number;
   }> {
-    return apiClient.get(`/ai/chapter-video-generations/${chapterId}`);
+    const query = scriptId
+      ? `?script_id=${encodeURIComponent(scriptId)}`
+      : "";
+    return apiClient.get(`/ai/chapter-video-generations/${chapterId}${query}`);
   }
 
   /**

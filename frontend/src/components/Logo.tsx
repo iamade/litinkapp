@@ -11,7 +11,7 @@ const Logo: React.FC<LogoProps> = ({ className = '', showText = true }) => {
     <Link to="/" className={`flex items-center gap-3 group ${className}`}>
       <div className="relative w-10 h-10 flex items-center justify-center">
         {/* Glow effect behind the logo */}
-        <div className="absolute inset-0 bg-yellow-400/20 blur-xl opacity-50 group-hover:opacity-80 transition-opacity duration-300 rounded-full"></div>
+        <div className="absolute inset-0 bg-cyan-500/30 blur-xl opacity-50 group-hover:opacity-80 transition-opacity duration-300 rounded-full"></div>
         
         {/* Logo Image */}
         <img 

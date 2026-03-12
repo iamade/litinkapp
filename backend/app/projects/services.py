@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import List, Optional
 from sqlmodel import select
@@ -20,6 +21,48 @@ from fastapi import UploadFile
 from app.core.services.file import BookStructureDetector, FileService
 from app.core.services.embeddings import EmbeddingsService
 from app.api.services.plot import PlotService
+
+
+def _extract_text_content(temp_path: str, suffix: str) -> str:
+    """Synchronous extractor used via asyncio.to_thread to avoid event-loop stalls."""
+    import fitz
+
+    text_content = ""
+    lower_suffix = (suffix or "").lower()
+
+    if lower_suffix == ".pdf":
+        doc = fitz.open(temp_path)
+        try:
+            for page in doc:
+                text_content += page.get_text() + "\n"
+        finally:
+            doc.close()
+        return text_content
+
+    if lower_suffix in [".txt", ".docx"]:
+        try:
+            doc = fitz.open(temp_path)
+            try:
+                for page in doc:
+                    text_content += page.get_text() + "\n"
+                return text_content
+            finally:
+                doc.close()
+        except Exception:
+            with open(temp_path, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read()
+
+    try:
+        doc = fitz.open(temp_path)
+        try:
+            for page in doc:
+                text_content += page.get_text() + "\n"
+        finally:
+            doc.close()
+    except Exception:
+        return ""
+
+    return text_content
 
 
 class IntentService:
@@ -153,7 +196,6 @@ class ProjectService:
     ) -> Project:
         import tempfile
         import os
-        import fitz
         from app.core.services.file import FileService
 
         file_service = FileService()
@@ -187,36 +229,14 @@ class ProjectService:
                     "Upload returned no URL."
                 )
 
-            # 3. Extract text based on file type
-            text_content = ""
-            if suffix.lower() == ".pdf":
-                doc = fitz.open(temp_path)
-                for page in doc:
-                    text_content += page.get_text() + "\n"
-                doc.close()
-            elif suffix.lower() in [".txt", ".docx"]:
-                # For txt files, read directly; for docx we'd need python-docx
-                # For now, use fitz which can handle some formats
-                try:
-                    doc = fitz.open(temp_path)
-                    for page in doc:
-                        text_content += page.get_text() + "\n"
-                    doc.close()
-                except Exception:
-                    # Fallback: read as text
-                    with open(temp_path, "r", encoding="utf-8", errors="ignore") as f:
-                        text_content = f.read()
-            else:
-                # Try fitz for other formats
-                try:
-                    doc = fitz.open(temp_path)
-                    for page in doc:
-                        text_content += page.get_text() + "\n"
-                    doc.close()
-                except Exception as e:
-                    print(
-                        f"[PROJECT UPLOAD] Could not extract text from {file.filename}: {e}"
-                    )
+            # 3. Extract text off the event loop to reduce Gunicorn worker timeout risk
+            try:
+                text_content = await asyncio.to_thread(
+                    _extract_text_content, temp_path, suffix
+                )
+            except Exception as e:
+                print(f"[PROJECT UPLOAD] Could not extract text from {file.filename}: {e}")
+                text_content = ""
 
             file_data_list.append(
                 {

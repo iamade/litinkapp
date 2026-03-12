@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   VideoGeneration,
   GenerationStatus,
@@ -99,8 +99,7 @@ export const useVideoGenerationStatus = (
   // Polling callbacks with proper structure
   // Using refs in callbacks to avoid dependency on state that changes every poll,
   // which would recreate the callback, cascade to startPolling recreation, and stop polling.
-  const callbacks: PollingCallbacks = {
-    onUpdate: useCallback((updatedGeneration: VideoGeneration) => {
+  const handleUpdate = useCallback((updatedGeneration: VideoGeneration) => {
       logDebug('Received generation update', updatedGeneration);
 
       // Handle 204 No Content or null responses
@@ -151,26 +150,32 @@ export const useVideoGenerationStatus = (
 
       setCurrentStep(newCurrentStep);
       setStepProgress(newStepProgress);
-    }, []),  // stable: uses refs instead of state
-    
-    onError: useCallback((pollingError: Error) => {
+    }, []);  // stable: uses refs instead of state
+
+  const handleError = useCallback((pollingError: Error) => {
       logDebug('Polling error occurred', pollingError);
       setError(pollingError);
       setIsPolling(false);
       setIsLoading(false);
-    }, []),
-    
-    onComplete: useCallback((completedGeneration: VideoGeneration) => {
+    }, []);
+
+  const handleComplete = useCallback((completedGeneration: VideoGeneration) => {
       logDebug('Polling completed', completedGeneration);
       setGeneration(completedGeneration);
       setIsPolling(false);
       setIsLoading(false);
-    }, []),
-    
-    onRetry: useCallback((attempt: number, retryError: Error) => {
+    }, []);
+
+  const handleRetry = useCallback((attempt: number, retryError: Error) => {
       logDebug(`Polling retry attempt ${attempt}`, retryError);
-    }, [])
-  };
+    }, []);
+
+  const callbacks = useMemo<PollingCallbacks>(() => ({
+    onUpdate: handleUpdate,
+    onError: handleError,
+    onComplete: handleComplete,
+    onRetry: handleRetry,
+  }), [handleComplete, handleError, handleRetry, handleUpdate]);
 
   // Start polling function with proper state management
   const startPolling = useCallback((newVideoGenId: string) => {
