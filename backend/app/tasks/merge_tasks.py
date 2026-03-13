@@ -331,9 +331,8 @@ async def async_merge_audio_video_for_generation(video_generation_id: str):
 
             # ✅ NEW: Trigger lip sync after merge completion
             print(f"[PIPELINE] Starting lip sync processing after merge completion")
-            from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
-
-            apply_lip_sync_to_generation.delay(video_generation_id)
+            # from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
+            # apply_lip_sync_to_generation.delay(video_generation_id)
 
             return {
                 "status": "success",

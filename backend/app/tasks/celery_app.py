@@ -61,13 +61,11 @@ celery_app.conf.update(
     worker_log_format="[%(asctime)s:%(levelname)s/%(processName)s][%(task_name)s(%(task_id)s)] %(message)s",
 )
 celery_app.conf.imports = [
-    "app.tasks.ai_tasks",
     "app.tasks.blockchain_tasks",
     "app.tasks.audio_tasks",
     "app.tasks.image_tasks",
     "app.tasks.video_tasks",
     "app.tasks.merge_tasks",
-    "app.tasks.lipsync_tasks",
 ]
 
 # Auto-discover tasks from specific modules (only works for packages with a tasks.py module)

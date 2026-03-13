@@ -1753,9 +1753,9 @@ async def trigger_lip_sync_manually(
             )
 
         # Trigger lip sync task
-        from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
+        # from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
 
-        task = apply_lip_sync_to_generation.delay(video_gen_id)
+        # task = apply_lip_sync_to_generation.delay(video_gen_id)
 
         return {
             "message": "Lip sync processing started",
@@ -4763,9 +4763,9 @@ async def trigger_task_for_step(
             print(f"🔗 Started merge task: {task_id}")
 
         elif step == PipelineStep.LIP_SYNC:
-            from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
+            # from app.tasks.lipsync_tasks import apply_lip_sync_to_generation
 
-            task = apply_lip_sync_to_generation.delay(video_gen_id)
+            # task = apply_lip_sync_to_generation.delay(video_gen_id)
             task_id = task.id
             print(f"💋 Started lipsync task: {task_id}")
 
