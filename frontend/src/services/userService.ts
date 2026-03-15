@@ -794,22 +794,11 @@ export const userService = {
     editorSettings: any;
     scriptId?: string;
   }) {
-    // Mock implementation
-    return Promise.resolve({
-      id: `video-prod-${Date.now()}`,
-      chapterId: data.chapterId,
-      scenes: data.scenes || [],
-      finalVideoUrl: null,
-      renderingProgress: 0,
-      editorSettings: data.editorSettings,
-      status: "idle" as const,
-      metadata: {
-        totalDuration: 0,
-        fileSize: 0,
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      scriptId: data.scriptId,
+    return apiClient.post('/ai/save-video-production', {
+      chapter_id: data.chapterId,
+      script_id: data.scriptId,
+      scenes: data.scenes,
+      editor_settings: data.editorSettings,
     });
   },
 

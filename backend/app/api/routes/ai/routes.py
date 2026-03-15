@@ -4121,6 +4121,83 @@ async def save_script_and_scenes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/save-video-production")
+async def save_video_production(
+    request: dict = Body(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Save video production editor state (scene ordering + editor settings) to the latest
+    VideoGeneration for the chapter/script.  Called by the Video tab Save button."""
+    try:
+        chapter_id = request.get("chapter_id") or request.get("chapterId")
+        script_id = request.get("script_id") or request.get("scriptId")
+        scenes = request.get("scenes", [])
+        editor_settings = request.get("editor_settings") or request.get("editorSettings", {})
+        video_generation_id = request.get("video_generation_id") or request.get("videoGenerationId")
+
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required")
+
+        if video_generation_id:
+            # Update the specific generation
+            stmt = select(VideoGeneration).where(
+                VideoGeneration.id == video_generation_id,
+                VideoGeneration.user_id == current_user.id,
+            )
+        else:
+            # Find the most recent generation for this chapter/script
+            filters = [
+                VideoGeneration.chapter_id == chapter_id,
+                VideoGeneration.user_id == current_user.id,
+            ]
+            if script_id:
+                filters.append(VideoGeneration.script_id == script_id)
+            stmt = (
+                select(VideoGeneration)
+                .where(*filters)
+                .order_by(col(VideoGeneration.created_at).desc())
+            )
+
+        result = await session.exec(stmt)
+        video_gen = result.first()
+
+        if not video_gen:
+            # No generation yet — return success without saving (production not started)
+            return {
+                "saved": False,
+                "message": "No video generation found for this chapter/script. Production state not persisted.",
+                "chapter_id": chapter_id,
+            }
+
+        # Merge production settings into video_data
+        video_data = dict(video_gen.video_data or {})
+        video_data["production_settings"] = {
+            "scenes": scenes,
+            "editor_settings": editor_settings,
+            "saved_at": datetime.utcnow().isoformat(),
+        }
+        video_gen.video_data = video_data
+        session.add(video_gen)
+        await session.commit()
+
+        print(
+            f"[SAVE VIDEO PRODUCTION] Saved production state for video_gen {video_gen.id}"
+        )
+        return {
+            "saved": True,
+            "video_generation_id": str(video_gen.id),
+            "chapter_id": chapter_id,
+            "scenes_count": len(scenes),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error saving video production: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/get-script-and-scenes")
 async def get_script_and_scenes(
     chapter_id: str,
