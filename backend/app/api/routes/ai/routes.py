@@ -1328,7 +1328,7 @@ async def get_chapter_video_generations(
             # Add pipeline status for each generation
             try:
                 pipeline_manager = PipelineManager()
-                pipeline_status = pipeline_manager.get_pipeline_status(gen["id"])
+                pipeline_status = await pipeline_manager.get_pipeline_status(gen["id"], session)
                 gen["pipeline_status"] = pipeline_status
 
                 # Add retry capability flag
