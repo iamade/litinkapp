@@ -1558,55 +1558,44 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     fromPlotOverview={!!plotImageUrl && !filteredCharacterImages?.[characterKey]}
                     plotCharacters={plotOverview?.characters || []}
                     onGenerate={async (selectedPlotCharName) => {
-                      // If user selected a plot character, check if they have an existing image
-                      if (selectedPlotCharName) {
-                        const plotChar = plotOverview?.characters?.find(c => c.name === selectedPlotCharName);
-                        if (plotChar) {
-                          // If plot character has an existing image, use it immediately
-                          if (plotChar.image_url) {
-                            // First update local state for immediate feedback
-                            const prompt = `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim();
-                            setCharacterImage(characterKey, {
-                              name: characterKey,
-                              imageUrl: plotChar.image_url,
-                              prompt: prompt,
-                              generationStatus: 'completed',
-                              generatedAt: new Date().toISOString(),
-                              script_id: selectedScriptId ?? undefined
-                            });
-
-                            // Persist to database
-                            try {
-                              await userService.linkCharacterImage(chapterId, {
-                                character_name: characterKey,
-                                image_url: plotChar.image_url,
-                                script_id: selectedScriptId ?? undefined,
-                                prompt: prompt
-                              });
-                              toast.success(`Using image from ${selectedPlotCharName}`);
-                            } catch (error) {
-                              console.error('Failed to persist character image:', error);
-                              toast.error('Image displayed but not saved. Please try again.');
-                            }
-                            return;
-                          }
-
-                          // If no image exists, generate one using their description
-                          const description = `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim();
-                          if (description) {
-                            generateCharacterImage(characterKey, description, generationOptions);
-                            return;
-                          }
-                        }
+                      if (!selectedPlotCharName) {
+                        toast.error('Select a plot character to match first.');
+                        return;
                       }
 
-                      // Fall back to current character details if no selection or description found
-                      const description =
-                        typeof character === "object" && character.physical_description && character.personality && character.role
-                          ? `${character.physical_description}. ${character.personality}. ${character.role}`
-                          : `Portrait of ${characterKey}, detailed character design`;
+                      const plotChar = plotOverview?.characters?.find(c => c.name === selectedPlotCharName);
+                      if (!plotChar) {
+                        toast.error('Selected plot character was not found.');
+                        return;
+                      }
 
-                      generateCharacterImage(characterKey, description, generationOptions);
+                      if (!plotChar.image_url) {
+                        toast.error(`"${selectedPlotCharName}" has no plot image to link yet.`);
+                        return;
+                      }
+
+                      const prompt = `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim();
+                      setCharacterImage(characterKey, {
+                        name: characterKey,
+                        imageUrl: plotChar.image_url,
+                        prompt,
+                        generationStatus: 'completed',
+                        generatedAt: new Date().toISOString(),
+                        script_id: selectedScriptId ?? undefined
+                      });
+
+                      try {
+                        await userService.linkCharacterImage(chapterId, {
+                          character_name: characterKey,
+                          image_url: plotChar.image_url,
+                          script_id: selectedScriptId ?? undefined,
+                          prompt
+                        });
+                        toast.success(`Matched with ${selectedPlotCharName}`);
+                      } catch (error) {
+                        console.error('Failed to persist character image:', error);
+                        toast.error('Image displayed but not saved. Please try again.');
+                      }
                     }}
                     onRegenerate={() => {
                       if (characterImage?.id && !isFallbackImage) {
@@ -1623,13 +1612,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     onDelete={() => deleteImage('character', characterKey)}
                     onView={() => setSelectedImage({ url: characterImage?.imageUrl || '' })}
                     onUnlink={characterImage?.imageUrl ? async () => {
-                      // Clear the local character image mapping by setting an empty CharacterImage
-                      // This removes the visual link without deleting from database
+                      // Clear only the local match; this should never trigger generation UI.
                       setCharacterImage(characterKey, {
                         name: characterKey,
                         imageUrl: '',
                         prompt: '',
-                        generationStatus: 'pending' as const  // Reset to pending so it shows as 'no image'
+                        generationStatus: 'completed' as const
                       });
                       toast.success(`Unlinked image from ${displayName}`);
                     } : undefined}
@@ -2490,7 +2478,13 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
                 </label>
                 <select
                   value={selectedPlotCharacter}
-                  onChange={(e) => setSelectedPlotCharacter(e.target.value)}
+                  onChange={(e) => {
+                    const selected = e.target.value;
+                    setSelectedPlotCharacter(selected);
+                    if (selected) {
+                      onGenerate(selected);
+                    }
+                  }}
                   className="w-full text-xs border rounded px-2 py-1 focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">-- Select Character --</option>
