@@ -30,8 +30,18 @@ class AIService:
                 api_key=settings.DEEPSEEK_API_KEY, base_url=settings.DEEPSEEK_BASE_URL
             )
 
-        # Set primary client (prefer DeepSeek if available, fallback to OpenAI)
-        self.client = self.deepseek_client or self.openai_client
+        # Fallback: OpenRouter (used when DeepSeek/OpenAI keys are absent)
+        self.openrouter_client = None
+        if settings.OPENROUTER_API_KEY:
+            self.openrouter_client = AsyncOpenAI(
+                api_key=settings.OPENROUTER_API_KEY,
+                base_url=settings.OPENROUTER_BASE_URL,
+            )
+        # Default OpenRouter model for AIService fallback
+        self.openrouter_model = "openai/gpt-4o-mini"
+
+        # Set primary client: DeepSeek > OpenAI > OpenRouter
+        self.client = self.deepseek_client or self.openai_client or self.openrouter_client
 
         # Set default models
         self.openai_model = "gpt-3.5-turbo"
@@ -64,6 +74,9 @@ class AIService:
             elif self.openai_client:
                 client = self.openai_client
                 model = model or self.openai_model
+            elif self.openrouter_client:
+                client = self.openrouter_client
+                model = model or self.openrouter_model
             else:
                 raise ValueError("No AI providers available")
         elif provider == "deepseek":
