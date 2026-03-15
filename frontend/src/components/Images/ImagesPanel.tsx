@@ -517,12 +517,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       if (rawImages.length > 0) {
         const formattedImages = rawImages.map((img: any, imgIdx: number) => {
           const isExplicitKeyScene = keySceneImages[sceneNum] === img.id;
-          // Determine if this is the key scene:
-          // 1. If a key scene is explicitly selected, only that image is the key scene
-          // 2. If no key scene is selected, the first image (index 0) is the default key scene
-          const isKeyScene = keySceneImages[sceneNum] 
-            ? isExplicitKeyScene 
-            : imgIdx === 0;
+          // Key scene is explicit-only; users can intentionally keep no key scene selected.
+          const isKeyScene = isExplicitKeyScene;
 
           return {
             id: img.id || `${sceneNum}-${imgIdx}`,
@@ -1449,7 +1445,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                         expression: matchedExpression,
                       });
                     }}
-                    onSetKeyScene={(imageId) => setKeySceneImage(sceneNumber, imageId)}
+                    onSetKeyScene={(imageId) => setKeySceneImage(sceneNumber, imageId === keySceneImages[sceneNumber] ? null : imageId)}
                     onGenerateMoment={(shotDescription, parentSceneImageUrl) => {
                       // Calculate next shot_index: count existing images for this scene with shot_index >= 1
                       const existingImages = sceneImages[sceneNumber] || [];
@@ -1921,7 +1917,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     // NEW: Storyboard configuration props
                     keySceneImageId={keySceneImages[sceneNum]}
                     deselectedImages={deselectedImages}
-                    onSetKeyScene={(imageId: string) => setKeySceneImage(sceneNum, imageId)}
+                    onSetKeyScene={(imageId: string) => setKeySceneImage(sceneNum, imageId === keySceneImages[sceneNum] ? null : imageId)}
                     onToggleDeselected={(imageId: string) => toggleDeselectedImage(imageId)}
                   />
                 );
@@ -2269,9 +2265,11 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
 
         {/* Dialogue Moment Placeholders - Suggested Shots */}
         {dialogueMoments.length > 0 && (() => {
-          // Check if there's at least one completed key scene image
-          const hasCompletedKeyScene = sceneImages.some(img => img.generationStatus === 'completed' && img.imageUrl);
-          
+          const keySceneImage = sceneImages.find(
+            img => img.id === keySceneId && img.generationStatus === 'completed' && img.imageUrl
+          );
+          const hasCompletedKeyScene = !!keySceneImage;
+
           return (
           <div className="mt-3 pt-3 border-t border-gray-200">
             <div className="flex items-center justify-between mb-2">
@@ -2291,10 +2289,7 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
                   key={idx}
                   onClick={() => {
                     if (!hasCompletedKeyScene) return;
-                    // Prefer key scene image (marked with star), fallback to first completed
-                    const keySceneImage = sceneImages.find(img => img.id === keySceneId && img.generationStatus === 'completed' && img.imageUrl);
-                    const parentImage = keySceneImage || sceneImages.find(img => img.generationStatus === 'completed' && img.imageUrl);
-                    onGenerateMoment?.(moment.shot_description, parentImage?.imageUrl);
+                    onGenerateMoment?.(moment.shot_description, keySceneImage?.imageUrl);
                   }}
                   disabled={!hasCompletedKeyScene}
                   title={!hasCompletedKeyScene ? 'Generate a key scene image first to enable suggested shots' : undefined}
