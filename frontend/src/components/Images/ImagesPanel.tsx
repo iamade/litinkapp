@@ -1305,8 +1305,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       `[PERFORMANCE] Vocal/Expression/Body cues should align with scene emotional tone and subtext.`,
       `[CAMERA] ${cameraDirection}`,
       `[CONSTRAINTS] No caption. No text overlay. Maintain same clothing and lighting as reference image.`
-    ].join('
-');
+    ].join('\n');
   };
 
   // Handle opening the generation modal

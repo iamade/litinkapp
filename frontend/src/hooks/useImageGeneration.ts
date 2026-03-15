@@ -245,8 +245,7 @@ export const useImageGeneration = (
         options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined
       ]
         .filter(Boolean)
-        .join('
-')
+        .join('\n')
         .trim();
 
       const request = {
