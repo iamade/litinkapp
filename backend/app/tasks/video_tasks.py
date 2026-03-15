@@ -1204,7 +1204,7 @@ async def generate_scene_videos(
                     try:
                         # Attempt to pad audio
                         padded_url = await pad_audio_to_min_duration(
-                            scene_audio.get("audio_url"), min_duration, user_id
+                            scene_audio.get("audio_url"), min_audio, user_id
                         )
 
                         if padded_url:
