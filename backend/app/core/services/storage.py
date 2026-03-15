@@ -143,9 +143,39 @@ class S3StorageService:
             logger.error(f"Stream upload failed for {path}: {e}")
             raise
 
+    def _strip_url_prefix(self, path: str) -> str:
+        """Strip full URL prefix from storage path, returning just the object key.
+
+        Handles cases where storage_path was stored as a full public URL
+        (e.g. http://localhost:9000/bucket/users/123/file.pdf) instead of
+        just the key (users/123/file.pdf).
+        """
+        if not path or not path.startswith(("http://", "https://")):
+            return path
+
+        # Build expected prefix based on storage backend
+        if self.use_minio:
+            prefix = f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/"
+        elif settings.S3_ENDPOINT:
+            prefix = f"{settings.S3_ENDPOINT}/{self.bucket_name}/"
+        else:
+            prefix = f"https://{self.bucket_name}.s3.{settings.S3_REGION}.amazonaws.com/"
+
+        if path.startswith(prefix):
+            return path[len(prefix):]
+
+        # Fallback: find /{bucket_name}/ anywhere in the URL
+        bucket_marker = f"/{self.bucket_name}/"
+        idx = path.find(bucket_marker)
+        if idx != -1:
+            return path[idx + len(bucket_marker):]
+
+        return path
+
     async def download(self, path: str) -> Optional[bytes]:
         """Download file from storage"""
         try:
+            path = self._strip_url_prefix(path)
             response = self.client.get_object(Bucket=self.bucket_name, Key=path)
             return response["Body"].read()
         except ClientError as e:

@@ -896,14 +896,35 @@ class BookStructureDetector:
         """Extract chapters when no hierarchical structure is detected"""
         lines = content.split("\n")
         chapters = []
+        in_toc_section = False
 
         for line_num, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue
 
+            # Skip TOC sections
+            if self._is_toc_section(line):
+                in_toc_section = True
+                continue
+            if in_toc_section and len(line) > 100:
+                in_toc_section = False
+            if in_toc_section:
+                continue
+
+            # Skip TOC entries (e.g. "1. Title  23")
+            if self._is_toc_entry(line):
+                continue
+
             chapter_match = self._match_chapter_patterns(line)
             if chapter_match:
+                # Guard: require substantial following content to avoid matching page numbers
+                if not self._has_substantial_following_content(lines, line_num):
+                    print(
+                        f"[FLAT CHAPTERS] Skipped '{line}' — insufficient following content (likely page number)"
+                    )
+                    continue
+
                 # Build a proper title
                 chapter_number = chapter_match["number"]
                 chapter_subtitle = chapter_match.get("title", "").strip()
@@ -944,10 +965,8 @@ class BookStructureDetector:
                     content, chapter_info, lines
                 )
 
-                # Add content validation before adding chapters
-                if (
-                    len(extracted_content.strip()) > 200
-                ):  # Only add chapters with substantial content
+                # Only add chapters with substantial content (< 500 chars = likely not a real chapter)
+                if len(extracted_content.strip()) >= 500:
                     chapter_data = {
                         "title": chapter_title,
                         "number": chapter_number,
@@ -5359,7 +5378,19 @@ Chapters:
                 }
                 extracted_chapters.append(chapter_data)
 
-        # Step 3: Filter if too many chapters found
+        # Step 3: Drop chapters with less than 500 chars — likely page headers or misdetections
+        pre_filter_count = len(extracted_chapters)
+        extracted_chapters = [
+            ch for ch in extracted_chapters
+            if len(ch.get("content", "").strip()) >= 500
+        ]
+        if len(extracted_chapters) < pre_filter_count:
+            print(
+                f"[CHAPTER EXTRACTION] Dropped {pre_filter_count - len(extracted_chapters)} "
+                f"chapters with < 500 chars content"
+            )
+
+        # Step 4: Filter if too many chapters found
         if len(extracted_chapters) > 20:
             final_chapters = await self._ai_filter_real_chapters(
                 extracted_chapters, book_type, content
@@ -6591,7 +6622,18 @@ Chapters:
                 temperature=0.1,
             )
 
-            result = json.loads(response.choices[0].message.content)
+            raw_content = response.choices[0].message.content or ""
+            # Strip markdown code fences if present (LLM sometimes wraps JSON in ```json ... ```)
+            json_text = raw_content.strip()
+            if json_text.startswith("```"):
+                json_text = re.sub(r"^```[a-z]*\n?", "", json_text)
+                json_text = re.sub(r"\n?```$", "", json_text).strip()
+            # As a final fallback, extract first {...} block
+            if not json_text.startswith("{"):
+                json_match = re.search(r"\{.*\}", json_text, re.DOTALL)
+                json_text = json_match.group(0) if json_match else ""
+
+            result = json.loads(json_text) if json_text else {}
 
             if not result or "chapters" not in result:
                 print(f"[AI FILTERING] No valid response from AI, keeping all chapters")
