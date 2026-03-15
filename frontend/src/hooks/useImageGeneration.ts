@@ -214,7 +214,8 @@ export const useImageGeneration = (
     characterIds?: string[],
     characterImageUrls?: string[],
     isSuggestedShot: boolean = false,
-    shotIndex?: number  // 0 = Key Scene, 1+ = Suggested Shots
+    shotIndex?: number,  // 0 = Key Scene, 1+ = Suggested Shots
+    customPromptOverride?: string
   ) => {
     setGeneratingScenes((prev) => new Set(prev).add(sceneNumber));
 
@@ -238,13 +239,21 @@ export const useImageGeneration = (
         [Number(sceneKey)]: [tempImage, ...(prev[Number(sceneKey)] || [])]
       }));
 
+      const customPrompt = [
+        customPromptOverride,
+        options.customPrompt,
+        options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined
+      ]
+        .filter(Boolean)
+        .join('
+')
+        .trim();
+
       const request = {
         scene_description: sceneDescription,
         style: options.style,
         aspect_ratio: options.aspectRatio,
-        custom_prompt: options.customPrompt 
-          ? `${options.customPrompt} ${options.lightingMood ? `Lighting mood: ${options.lightingMood}` : ''}`.trim()
-          : (options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined),
+        custom_prompt: customPrompt || undefined,
         script_id: selectedScriptId ?? undefined,
         character_ids: characterIds,
         character_image_urls: characterImageUrls,

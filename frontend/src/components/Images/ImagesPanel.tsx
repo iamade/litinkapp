@@ -1235,6 +1235,80 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     return options;
   };
 
+  const getStyleTokens = () => {
+    const styleMap: Record<string, string> = {
+      cinematic: 'cinematic 3D animation, dramatic composition, soft rim lighting',
+      realistic: 'photorealistic cinematic still, detailed textures, natural skin tones',
+      fantasy: 'fantasy cinematic art, atmospheric haze, rich color depth',
+      cartoon: 'stylized animation frame, clean linework, expressive poses',
+      sketch: 'concept art sketch style, strong silhouettes, cinematic framing'
+    };
+
+    const base = styleMap[generationOptions.style] || styleMap.cinematic;
+    return `${base}, ${generationOptions.aspectRatio} frame`;
+  };
+
+  const extractCameraDirection = (scenePrompt: string) => {
+    const normalized = scenePrompt.toLowerCase();
+    const knownDirections = [
+      'close-up',
+      'wide shot',
+      'medium shot',
+      'over-the-shoulder',
+      'tracking shot',
+      'dolly in',
+      'dolly out',
+      'pan left',
+      'pan right',
+      'tilt up',
+      'tilt down'
+    ];
+
+    const matched = knownDirections.find(direction => normalized.includes(direction));
+    return matched || 'medium shot, eye-level framing, static camera';
+  };
+
+  const buildPromptComposerTemplate = (
+    scenePrompt: string,
+    selectedEntities: Array<{
+      name?: string;
+      role?: string;
+      physical_description?: string;
+      personality?: string;
+      entity_type?: string;
+    }>
+  ) => {
+    const characterBlock = selectedEntities.length > 0
+      ? selectedEntities
+          .map((entity) => {
+            const description = [
+              entity.physical_description,
+              entity.personality,
+              entity.role,
+              `entity type: ${entity.entity_type || 'character'}`
+            ]
+              .filter(Boolean)
+              .join('. ');
+
+            return `${entity.name}: ${description || 'Keep visual continuity with prior references'}. Consistency: same clothing, face, proportions, and lighting as reference images.`;
+          })
+          .join(' | ')
+      : 'No named character provided. Preserve continuity from selected reference scene.';
+
+    const cameraDirection = extractCameraDirection(scenePrompt);
+
+    return [
+      `[STYLE] ${getStyleTokens()}`,
+      `[SCENE] ${scenePrompt}`,
+      `[CHARACTERS] ${characterBlock}`,
+      `[ACTION] Depict the core beat from the scene description with cinematic staging.`,
+      `[PERFORMANCE] Vocal/Expression/Body cues should align with scene emotional tone and subtext.`,
+      `[CAMERA] ${cameraDirection}`,
+      `[CONSTRAINTS] No caption. No text overlay. Maintain same clothing and lighting as reference image.`
+    ].join('
+');
+  };
+
   // Handle opening the generation modal
   // parentSceneImageUrl: URL of the parent scene's generated image (for suggested shots consistency)
   const handleGenerateSceneImage = (
@@ -2078,6 +2152,11 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 const characterUrls = [...new Set([...selectedCharUrls, ...generatedCharUrls])];
                 referenceImages.push(...characterUrls);
                 
+                const selectedEntities = [...characters, ...objectsAndLocations]
+                  .filter((entity: any) => charIds.includes(entity.id || entity.name));
+
+                const composedPrompt = buildPromptComposerTemplate(desc, selectedEntities);
+
                 // Pass character IDs, combined reference URLs, and suggested shot flag
                 generateSceneImage(
                     selectedSceneForGeneration.sceneNumber, 
@@ -2086,7 +2165,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     charIds.length > 0 ? charIds : undefined,
                     referenceImages.length > 0 ? referenceImages : undefined,
                     selectedSceneForGeneration.isSuggestedShot,  // Pass suggested shot flag
-                    selectedSceneForGeneration.shotIndex  // Pass shotIndex (0=Key, 1+=Suggested)
+                    selectedSceneForGeneration.shotIndex,  // Pass shotIndex (0=Key, 1+=Suggested)
+                    composedPrompt
                 );
             }
             setShowSceneGenerationModal(false);
