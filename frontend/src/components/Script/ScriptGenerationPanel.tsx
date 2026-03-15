@@ -222,6 +222,32 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [showFullScript, setShowFullScript] = useState(false);
   const [isAddingCharacter, setIsAddingCharacter] = useState(false);
   const [newCharacterName, setNewCharacterName] = useState('');
+  const [newEntityType, setNewEntityType] = useState<'character' | 'object' | 'location'>('character');
+
+  const addManualEntity = async (script: ChapterScript) => {
+    const entityName = newCharacterName.trim();
+    if (!entityName || !selectedScript) return;
+
+    const updates: Partial<ChapterScript> = {
+      characters: [...(script.characters || []), entityName]
+    };
+
+    if (onCreatePlotCharacter) {
+      try {
+        const created = await onCreatePlotCharacter(entityName, newEntityType);
+        if (created?.id) {
+          updates.character_ids = [...(script.character_ids || []), created.id];
+        }
+      } catch (error) {
+        console.error('Failed to create linked plot entity:', error);
+      }
+    }
+
+    onUpdateScript(selectedScript.id, updates);
+    setNewCharacterName('');
+    setNewEntityType('character');
+    setIsAddingCharacter(false);
+  };
 
   const handleGenerateScript = () => {
     onGenerateScript(scriptStyle, {
@@ -834,37 +860,42 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           {/* Add Character Button/Input */}
           {isAddingCharacter ? (
             <div className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/50 rounded-full">
+              <select
+                value={newEntityType}
+                onChange={(e) => setNewEntityType(e.target.value as 'character' | 'object' | 'location')}
+                className="px-1.5 py-0.5 text-xs rounded border border-blue-300 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
+                aria-label="Entity type"
+              >
+                <option value="character">Character</option>
+                <option value="object">Object</option>
+                <option value="location">Location</option>
+              </select>
               <input
                 type="text"
                 value={newCharacterName}
                 onChange={(e) => setNewCharacterName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && newCharacterName.trim() && selectedScript) {
-                    const newCharacters = [...(script.characters || []), newCharacterName.trim()];
-                    onUpdateScript(selectedScript.id, { characters: newCharacters });
-                    setNewCharacterName('');
-                    setIsAddingCharacter(false);
+                    void addManualEntity(script);
                   } else if (e.key === 'Escape') {
                     setNewCharacterName('');
+                    setNewEntityType('character');
                     setIsAddingCharacter(false);
                   }
                 }}
-                placeholder="Character name..."
+                placeholder="Name..."
                 className="w-32 px-2 py-0.5 text-sm bg-transparent border-none focus:outline-none text-blue-800 dark:text-blue-300 placeholder-blue-400 dark:placeholder-blue-500"
                 autoFocus
               />
               <button
                 onClick={() => {
                   if (newCharacterName.trim() && selectedScript) {
-                    const newCharacters = [...(script.characters || []), newCharacterName.trim()];
-                    onUpdateScript(selectedScript.id, { characters: newCharacters });
-                    setNewCharacterName('');
-                    setIsAddingCharacter(false);
+                    void addManualEntity(script);
                   }
                 }}
                 disabled={!newCharacterName.trim()}
                 className="p-0.5 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 disabled:opacity-50"
-                title="Add character"
+                title="Add entity"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -873,6 +904,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               <button
                 onClick={() => {
                   setNewCharacterName('');
+                  setNewEntityType('character');
                   setIsAddingCharacter(false);
                 }}
                 className="p-0.5 text-gray-500 hover:text-red-600 dark:hover:text-red-400"
@@ -887,7 +919,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
             <button
               onClick={() => setIsAddingCharacter(true)}
               className="inline-flex items-center gap-1 px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-full text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-              title="Add a character manually"
+              title="Add character, object, or location manually"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
