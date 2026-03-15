@@ -34,7 +34,9 @@ interface SceneGenerationModalProps {
   availableCharacters: CharacterImage[];
   onGenerate: (description: string, characterIds: string[]) => void;
   isGenerating: boolean;
-  parentSceneImageUrl?: string;  // For suggested shots - shows reference for consistency
+  parentSceneImageUrl?: string;  // Backward-compatible alias for selected reference image
+  referenceSceneOptions?: Array<{ id: string; label: string; imageUrl: string }>;
+  onReferenceSceneChange?: (imageUrl?: string) => void;
   isSuggestedShot?: boolean;     // Flag to show "suggested shot" context in UI
   userTier?: string;             // User subscription tier for character limits
   sceneContext?: string;         // Additional context from the script for AI enhancement
@@ -50,6 +52,8 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
   onGenerate,
   isGenerating,
   parentSceneImageUrl,
+  referenceSceneOptions = [],
+  onReferenceSceneChange,
   isSuggestedShot = false,
   userTier = 'free',
   sceneContext
@@ -189,27 +193,49 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Parent Scene Reference (for suggested shots) */}
-          {parentSceneImageUrl && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-300">
-                Reference Scene
-                <span className="ml-2 text-xs text-gray-500 font-normal">
-                  (Your shot will match this scene's style and characters)
-                </span>
-              </label>
+          {/* Reference scene selector */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-300">
+              Reference Scene
+              <span className="ml-2 text-xs text-gray-500 font-normal">
+                (Default is last shot from previous scene)
+              </span>
+            </label>
+            <div className="flex items-center gap-2">
+              <select
+                value={parentSceneImageUrl || ''}
+                onChange={(e) => onReferenceSceneChange?.(e.target.value || undefined)}
+                className="flex-1 text-sm border border-gray-700 bg-[#262626] text-gray-200 rounded px-3 py-2 focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">No reference scene</option>
+                {referenceSceneOptions.map((option) => (
+                  <option key={option.id} value={option.imageUrl}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {parentSceneImageUrl && (
+                <button
+                  onClick={() => onReferenceSceneChange?.(undefined)}
+                  className="px-3 py-2 text-xs border border-gray-600 rounded text-gray-300 hover:bg-gray-800"
+                >
+                  Deselect
+                </button>
+              )}
+            </div>
+            {parentSceneImageUrl && (
               <div className="relative rounded-lg overflow-hidden border border-gray-700 w-48 h-28">
-                <img 
-                  src={parentSceneImageUrl} 
-                  alt="Parent scene reference" 
+                <img
+                  src={parentSceneImageUrl}
+                  alt="Selected reference scene"
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                  <span className="text-xs text-gray-300">Main Scene</span>
+                  <span className="text-xs text-gray-300">Reference</span>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Detailed Scene Description */}
           <div className="space-y-3">

@@ -186,9 +186,11 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         sceneNumber: number;
         description: string;
         isRegenerate?: boolean;
-        parentSceneImageUrl?: string;  // For suggested shots - reference parent scene image
-        isSuggestedShot?: boolean;     // Flag to indicate this is a suggested shot
-        shotIndex?: number;           // 0 = Key Scene, 1+ = Suggested Shots
+        parentSceneImageUrl?: string;
+        referenceSceneImageUrl?: string;
+        referenceSceneOptions?: Array<{ id: string; label: string; imageUrl: string }>;
+        isSuggestedShot?: boolean;
+        shotIndex?: number;
     } | null>(null);
 
   // Filter excluded characters (Set for .has() method)
@@ -1204,6 +1206,35 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     setDeleteAction(null);
   };
 
+  const getSceneImagesForNumber = (sceneNumber: number): SceneImage[] => {
+    const compositeKey = `${selectedScriptId}_${sceneNumber}`;
+    const imagesByComposite = (sceneImages as Record<string, SceneImage[]>)[compositeKey];
+    if (Array.isArray(imagesByComposite)) return imagesByComposite;
+    return sceneImages[sceneNumber] || [];
+  };
+
+  const getReferenceSceneOptions = (targetSceneNumber: number) => {
+    const options: Array<{ id: string; label: string; imageUrl: string; sceneNumber: number; shotIndex: number }> = [];
+
+    for (let sceneNum = 1; sceneNum < targetSceneNumber; sceneNum += 1) {
+      const completedSceneImages = getSceneImagesForNumber(sceneNum)
+        .filter(img => img.generationStatus === 'completed' && !!img.imageUrl)
+        .sort((a, b) => (a.shot_index ?? 0) - (b.shot_index ?? 0));
+
+      completedSceneImages.forEach((img, idx) => {
+        options.push({
+          id: img.id || `${sceneNum}-${idx}`,
+          label: `Scene ${sceneNum} • Shot ${(img.shot_index ?? idx) + 1}`,
+          imageUrl: img.imageUrl,
+          sceneNumber: sceneNum,
+          shotIndex: img.shot_index ?? idx
+        });
+      });
+    }
+
+    return options;
+  };
+
   // Handle opening the generation modal
   // parentSceneImageUrl: URL of the parent scene's generated image (for suggested shots consistency)
   const handleGenerateSceneImage = (
@@ -1212,15 +1243,29 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     currentDescription = "",
     parentSceneImageUrl?: string,
     isSuggestedShot = false,
-    shotIndex?: number  // Explicitly passed shotIndex, or calculated
+    shotIndex?: number
   ) => {
+    const referenceSceneOptions = getReferenceSceneOptions(sceneNumber);
+
+    const previousSceneCandidates = referenceSceneOptions
+      .filter(option => option.sceneNumber === sceneNumber - 1)
+      .sort((a, b) => a.shotIndex - b.shotIndex);
+
+    const defaultReferenceSceneImageUrl =
+      parentSceneImageUrl ||
+      (previousSceneCandidates.length > 0
+        ? previousSceneCandidates[previousSceneCandidates.length - 1].imageUrl
+        : undefined);
+
     setSelectedSceneForGeneration({
       sceneNumber,
       description: currentDescription,
       isRegenerate: isRef,
       parentSceneImageUrl,
+      referenceSceneImageUrl: defaultReferenceSceneImageUrl,
+      referenceSceneOptions: referenceSceneOptions.map(({ id, label, imageUrl }) => ({ id, label, imageUrl })),
       isSuggestedShot,
-      shotIndex: shotIndex ?? (isSuggestedShot ? 1 : 0)  // Default to 1 for suggested, 0 for key
+      shotIndex: shotIndex ?? (isSuggestedShot ? 1 : 0)
     });
     setShowSceneGenerationModal(true);
   };
@@ -2023,13 +2068,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     .filter(img => img.imageUrl && img.generationStatus === 'completed')
                     .map(img => img.imageUrl);
                 
-                // 3. Start with parent scene image URL if this is a suggested shot
-                // This goes first for maximum visual consistency with the main scene
+                // 3. Start with selected reference scene image (if any)
                 const referenceImages: string[] = [];
-                if (selectedSceneForGeneration.parentSceneImageUrl) {
-                    referenceImages.push(selectedSceneForGeneration.parentSceneImageUrl);
+                if (selectedSceneForGeneration.referenceSceneImageUrl) {
+                    referenceImages.push(selectedSceneForGeneration.referenceSceneImageUrl);
                 }
-                
+
                 // 4. Add character images (deduplicated)
                 const characterUrls = [...new Set([...selectedCharUrls, ...generatedCharUrls])];
                 referenceImages.push(...characterUrls);
@@ -2070,7 +2114,11 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             }))
         ]}
         isGenerating={generatingScenes.has(selectedSceneForGeneration?.sceneNumber || -1)}
-        parentSceneImageUrl={selectedSceneForGeneration?.parentSceneImageUrl}
+        parentSceneImageUrl={selectedSceneForGeneration?.referenceSceneImageUrl}
+        referenceSceneOptions={selectedSceneForGeneration?.referenceSceneOptions || []}
+        onReferenceSceneChange={(imageUrl?: string) => {
+          setSelectedSceneForGeneration(prev => prev ? { ...prev, referenceSceneImageUrl: imageUrl } : prev);
+        }}
         isSuggestedShot={selectedSceneForGeneration?.isSuggestedShot}
         userTier={userTier}
       />
