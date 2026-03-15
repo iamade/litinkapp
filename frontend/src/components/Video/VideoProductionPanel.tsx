@@ -342,6 +342,15 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     downloadVideo(quality);
   };
 
+  const handleRenderVideo = () => {
+    if (onGenerateVideo) {
+      onGenerateVideo();
+      return;
+    }
+
+    toast.error('Video generation is not available right now.');
+  };
+
   const getTotalDuration = () => {
     return enrichedScenes.reduce((total, scene) => total + scene.duration, 0);
   };
@@ -377,10 +386,9 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             <Save className="w-4 h-4" />
             <span>Save</span>
           </button>
-          {/* Repurposed Render Video button (disabled for now) */}
           <button
-            onClick={() => toast('This button will be repurposed for a new function.')}
-            disabled={controlsDisabled}
+            onClick={handleRenderVideo}
+            disabled={controlsDisabled || !canGenerateVideo}
             className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
           >
             <Video className="w-4 h-4" />
