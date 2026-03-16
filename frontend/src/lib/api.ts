@@ -1,3 +1,5 @@
+import { dispatchCreditsRefresh } from "./credits";
+
 export const API_BASE_URL = import.meta.env.PROD 
   ? "https://litinkapp.onrender.com/api/v1"
   : "http://localhost:8000/api/v1";
@@ -208,6 +210,14 @@ export const apiClient = {
       }
       // Include status code in error message for proper 404 detection
       throw new Error(`[${response.status}] ${errorMessage}`);
+    }
+
+    const shouldRefreshCredits =
+      method !== "GET" &&
+      (endpoint.startsWith("/promo/") || endpoint.includes("/generate") || endpoint.includes("/credits"));
+
+    if (shouldRefreshCredits) {
+      dispatchCreditsRefresh();
     }
 
     if (response.status === 204) {
