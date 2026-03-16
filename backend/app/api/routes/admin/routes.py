@@ -20,6 +20,8 @@ from app.core.services.alert import AlertService
 from app.core.config import settings
 from app.user_profile.models import Profile
 from app.auth.models import User
+from app.promo.models import PromoCode
+from app.promo.schemas import CreatePromoCodeRequest, PromoCodeResponse
 
 logger = logging.getLogger(__name__)
 
@@ -1089,3 +1091,50 @@ async def get_deletion_audit_log(
         raise HTTPException(
             status_code=500, detail=f"Failed to fetch audit log: {str(e)}"
         )
+
+
+# ── Promo Code Admin Endpoints ─────────────────────────────────────────────
+
+
+@router.post("/promo/create", response_model=PromoCodeResponse, status_code=201)
+async def create_promo_code(
+    request: CreatePromoCodeRequest,
+    current_user: User = Depends(get_current_superadmin),
+    session: AsyncSession = Depends(get_session),
+):
+    """Create a new promo code."""
+    code_upper = request.code.strip().upper()
+
+    # Check for duplicate code
+    existing_stmt = select(PromoCode).where(PromoCode.code == code_upper)
+    existing_result = await session.exec(existing_stmt)
+    if existing_result.first():
+        raise HTTPException(
+            status_code=400, detail=f"Promo code '{code_upper}' already exists"
+        )
+
+    promo = PromoCode(
+        code=code_upper,
+        credit_amount=request.credit_amount,
+        expiry_days=request.expiry_days,
+        max_redemptions=request.max_redemptions,
+        is_active=request.is_active,
+        created_by=current_user.id,
+    )
+    session.add(promo)
+    await session.commit()
+    await session.refresh(promo)
+
+    logger.info(f"Admin {current_user.email} created promo code '{code_upper}'")
+    return promo
+
+
+@router.get("/promo/list", response_model=list[PromoCodeResponse])
+async def list_promo_codes(
+    current_user: User = Depends(get_current_superadmin),
+    session: AsyncSession = Depends(get_session),
+):
+    """List all promo codes with their current redemption stats."""
+    stmt = select(PromoCode).order_by(PromoCode.created_at.desc())
+    result = await session.exec(stmt)
+    return result.all()
