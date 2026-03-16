@@ -5,6 +5,7 @@ import { toast } from "react-hot-toast";
 import { Loader2, CheckCircle, XCircle, Settings, CreditCard } from "lucide-react";
 import SubscriptionTierCard from "../components/Subscription/SubscriptionTierCard";
 import UsageIndicator from "../components/Subscription/UsageIndicator";
+import PromoCodeInput from "../components/Subscription/PromoCodeInput";
 import {
   SubscriptionTier,
   UserSubscription,
@@ -132,6 +133,10 @@ export default function SubscriptionPage() {
 
 
 
+  const handlePromoRedeemed = async () => {
+    await loadData();
+  };
+
   if (loading || loadingData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-[#0F0F23]">
@@ -247,6 +252,13 @@ export default function SubscriptionPage() {
               isLoading={upgrading === tier.tier}
             />
           ))}
+        </div>
+
+        <div className="mt-8 max-w-2xl mx-auto">
+          <PromoCodeInput
+            title="Have a promo code?"
+            onRedeemed={handlePromoRedeemed}
+          />
         </div>
 
         {/* FAQ Section */}
