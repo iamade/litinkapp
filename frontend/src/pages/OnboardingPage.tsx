@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../lib/api";
 import { toast } from "react-hot-toast";
-import { User, Shield } from "lucide-react";
+import PromoCodeInput from "../components/Subscription/PromoCodeInput";
 
 // Step 1: Personal Info
 const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }) => {
@@ -292,6 +292,15 @@ export default function OnboardingPage() {
         {step === 3 && <Step3 data={formData} updateData={updateData} />}
         {step === 4 && <Step4 data={formData} updateData={updateData} />}
         {step === 5 && <Step5 data={formData} updateData={updateData} />}
+
+        {step === 5 && (
+          <div className="mt-6">
+            <PromoCodeInput
+              title="Have a promo code?"
+              defaultExpanded={false}
+            />
+          </div>
+        )}
 
         <div className="mt-8 flex justify-between">
            {step > 1 && (

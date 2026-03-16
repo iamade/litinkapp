@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, hasRole } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useUserMode } from "../hooks/useUserMode";
+import { useCreditBalance } from "../hooks/useCreditBalance";
 import { Menu, X, User, LogOut, Moon, Sun, Compass, Sparkles } from "lucide-react";
 import { toast } from "react-hot-toast";
 import Logo from "./Logo";
@@ -14,6 +15,7 @@ export default function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { balance: creditBalance } = useCreditBalance({ enabled: !!user });
 
   const handleSignOut = () => {
     logout();
@@ -144,7 +146,11 @@ export default function Navbar() {
                   )}
                 </button>
 
-                {hasRole(user, "author") && (
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    <span aria-hidden="true">🪙</span>
+                    <span>{creditBalance.toLocaleString()}</span>
+                  </div>
+                  {hasRole(user, "author") && (
                   <Link
                     to="/author"
                     className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-2 rounded-full font-medium hover:from-purple-700 hover:to-blue-700 transition-all transform hover:scale-105"
@@ -306,6 +312,10 @@ export default function Navbar() {
                       </div>
                     </div>
                   )}
+                  <div className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3 py-1.5 text-sm font-semibold text-gray-700 dark:text-gray-200">
+                    <span aria-hidden="true">🪙</span>
+                    <span>{creditBalance.toLocaleString()}</span>
+                  </div>
                   {hasRole(user, "author") && (
                     <Link
                       to="/author"
