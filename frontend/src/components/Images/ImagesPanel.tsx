@@ -1822,7 +1822,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                           name: itemKey,
                           imageUrl: '',
                           prompt: '',
-                          generationStatus: 'pending' as const
+                          generationStatus: 'completed' as const
                         });
                         toast.success(`Unlinked image from ${displayName}`);
                       } : undefined}
