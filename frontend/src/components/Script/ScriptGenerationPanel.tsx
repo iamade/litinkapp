@@ -222,11 +222,11 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [showFullScript, setShowFullScript] = useState(false);
   const [isAddingCharacter, setIsAddingCharacter] = useState(false);
   const [newCharacterName, setNewCharacterName] = useState('');
-  const [newEntityType, setNewEntityType] = useState<'character' | 'object' | 'location'>('character');
+  const [newEntityType, setNewEntityType] = useState<'character' | 'object' | 'location' | ''>('');
 
   const addManualEntity = async (script: ChapterScript) => {
     const entityName = newCharacterName.trim();
-    if (!entityName || !selectedScript) return;
+    if (!entityName || !selectedScript || !newEntityType) return;
 
     const updates: Partial<ChapterScript> = {
       characters: [...(script.characters || []), entityName]
@@ -245,7 +245,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
     onUpdateScript(selectedScript.id, updates);
     setNewCharacterName('');
-    setNewEntityType('character');
+    setNewEntityType('');
     setIsAddingCharacter(false);
   };
 
@@ -862,10 +862,11 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
             <div className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 dark:bg-blue-900/50 rounded-full">
               <select
                 value={newEntityType}
-                onChange={(e) => setNewEntityType(e.target.value as 'character' | 'object' | 'location')}
+                onChange={(e) => setNewEntityType(e.target.value as 'character' | 'object' | 'location' | '')}
                 className="px-1.5 py-0.5 text-xs rounded border border-blue-300 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
                 aria-label="Entity type"
               >
+                <option value="" disabled>Select type</option>
                 <option value="character">Character</option>
                 <option value="object">Object</option>
                 <option value="location">Location</option>
@@ -875,11 +876,11 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                 value={newCharacterName}
                 onChange={(e) => setNewCharacterName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && newCharacterName.trim() && selectedScript) {
+                  if (e.key === 'Enter' && newCharacterName.trim() && newEntityType && selectedScript) {
                     void addManualEntity(script);
                   } else if (e.key === 'Escape') {
                     setNewCharacterName('');
-                    setNewEntityType('character');
+                    setNewEntityType('');
                     setIsAddingCharacter(false);
                   }
                 }}
@@ -889,11 +890,11 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               />
               <button
                 onClick={() => {
-                  if (newCharacterName.trim() && selectedScript) {
+                  if (newCharacterName.trim() && newEntityType && selectedScript) {
                     void addManualEntity(script);
                   }
                 }}
-                disabled={!newCharacterName.trim()}
+                disabled={!newCharacterName.trim() || !newEntityType}
                 className="p-0.5 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 disabled:opacity-50"
                 title="Add entity"
               >
@@ -904,7 +905,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
               <button
                 onClick={() => {
                   setNewCharacterName('');
-                  setNewEntityType('character');
+                  setNewEntityType('');
                   setIsAddingCharacter(false);
                 }}
                 className="p-0.5 text-gray-500 hover:text-red-600 dark:hover:text-red-400"
