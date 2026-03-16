@@ -188,7 +188,14 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         isRegenerate?: boolean;
         parentSceneImageUrl?: string;
         referenceSceneImageUrl?: string;
-        referenceSceneOptions?: Array<{ id: string; label: string; imageUrl: string }>;
+        referenceSceneOptions?: Array<{
+          id: string;
+          label: string;
+          imageUrl: string;
+          sceneNumber: number;
+          shotIndex: number;
+          source: 'previous_scene' | 'current_scene_master' | 'custom_upload';
+        }>;
         isSuggestedShot?: boolean;
         shotIndex?: number;
     } | null>(null);
@@ -1214,7 +1221,14 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   };
 
   const getReferenceSceneOptions = (targetSceneNumber: number) => {
-    const options: Array<{ id: string; label: string; imageUrl: string; sceneNumber: number; shotIndex: number }> = [];
+    const options: Array<{
+      id: string;
+      label: string;
+      imageUrl: string;
+      sceneNumber: number;
+      shotIndex: number;
+      source: 'previous_scene' | 'current_scene_master' | 'custom_upload';
+    }> = [];
 
     for (let sceneNum = 1; sceneNum < targetSceneNumber; sceneNum += 1) {
       const completedSceneImages = getSceneImagesForNumber(sceneNum)
@@ -1224,13 +1238,39 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       completedSceneImages.forEach((img, idx) => {
         options.push({
           id: img.id || `${sceneNum}-${idx}`,
-          label: `Scene ${sceneNum} • Shot ${(img.shot_index ?? idx) + 1}`,
+          label: `Reference: Scene ${sceneNum} • Shot ${(img.shot_index ?? idx) + 1}`,
           imageUrl: img.imageUrl,
           sceneNumber: sceneNum,
-          shotIndex: img.shot_index ?? idx
+          shotIndex: img.shot_index ?? idx,
+          source: 'previous_scene'
         });
       });
     }
+
+    const currentSceneCompleted = getSceneImagesForNumber(targetSceneNumber)
+      .filter(img => img.generationStatus === 'completed' && !!img.imageUrl)
+      .sort((a, b) => (a.shot_index ?? 0) - (b.shot_index ?? 0));
+
+    const explicitKeySceneId = keySceneImages[targetSceneNumber];
+    let currentMasterShots = currentSceneCompleted.filter(img => {
+      if (explicitKeySceneId && img.id) return img.id === explicitKeySceneId;
+      return (img.shot_index ?? 0) === 0;
+    });
+
+    if (currentMasterShots.length === 0 && currentSceneCompleted.length > 0) {
+      currentMasterShots = [currentSceneCompleted[0]];
+    }
+
+    currentMasterShots.forEach((img, idx) => {
+      options.push({
+        id: img.id || `current-master-${targetSceneNumber}-${idx}`,
+        label: `Master shot: Scene ${targetSceneNumber} • Shot ${(img.shot_index ?? idx) + 1}`,
+        imageUrl: img.imageUrl,
+        sceneNumber: targetSceneNumber,
+        shotIndex: img.shot_index ?? idx,
+        source: 'current_scene_master'
+      });
+    });
 
     return options;
   };
@@ -1268,6 +1308,21 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     return matched || 'medium shot, eye-level framing, static camera';
   };
 
+  const getEmotionalCueForScene = (sceneNumber: number) => {
+    const emotionalMap = (selectedScript as any)?.emotional_map;
+    if (!Array.isArray(emotionalMap) || emotionalMap.length === 0) {
+      return null;
+    }
+
+    const matchingEntry = emotionalMap.find((entry: any) => {
+      const rawScene = entry?.scene_number ?? entry?.sceneNumber ?? entry?.scene;
+      const parsedScene = Number(rawScene);
+      return Number.isFinite(parsedScene) && parsedScene === sceneNumber;
+    });
+
+    return matchingEntry || emotionalMap[0] || null;
+  };
+
   const buildPromptComposerTemplate = (
     scenePrompt: string,
     selectedEntities: Array<{
@@ -1276,7 +1331,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       physical_description?: string;
       personality?: string;
       entity_type?: string;
-    }>
+    }>,
+    sceneNumber: number
   ) => {
     const characterBlock = selectedEntities.length > 0
       ? selectedEntities
@@ -1295,16 +1351,27 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           .join(' | ')
       : 'No named character provided. Preserve continuity from selected reference scene.';
 
-    const cameraDirection = extractCameraDirection(scenePrompt);
+    const emotionalCue = getEmotionalCueForScene(sceneNumber);
+    const cameraDirection = emotionalCue?.camera || extractCameraDirection(scenePrompt);
+
+    const actionLine = emotionalCue?.line
+      ? `${emotionalCue.character || 'Character'} says: "${emotionalCue.line}"`
+      : 'Depict the core beat from the scene description with cinematic staging.';
+
+    const performanceLine = emotionalCue
+      ? `Vocal: ${emotionalCue.vocal || 'match scene mood'}. Expression: ${emotionalCue.primary_emotion || 'emotionally grounded'}, ${emotionalCue.subtext || 'authentic subtext'}.`
+      : 'Vocal/Expression/Body cues should align with scene emotional tone and subtext.';
+
+    const negativePromptTokens = 'No caption, no text overlay, no watermark, no UI elements, avoid anatomy distortion, avoid style drift.';
 
     return [
       `[STYLE] ${getStyleTokens()}`,
       `[SCENE] ${scenePrompt}`,
       `[CHARACTERS] ${characterBlock}`,
-      `[ACTION] Depict the core beat from the scene description with cinematic staging.`,
-      `[PERFORMANCE] Vocal/Expression/Body cues should align with scene emotional tone and subtext.`,
+      `[ACTION] ${actionLine}`,
+      `[PERFORMANCE] ${performanceLine}`,
       `[CAMERA] ${cameraDirection}`,
-      `[CONSTRAINTS] No caption. No text overlay. Maintain same clothing and lighting as reference image.`
+      `[CONSTRAINTS] ${negativePromptTokens} Maintain same clothing and lighting as reference image.`
     ].join('\n');
   };
 
@@ -1336,7 +1403,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       isRegenerate: isRef,
       parentSceneImageUrl,
       referenceSceneImageUrl: defaultReferenceSceneImageUrl,
-      referenceSceneOptions: referenceSceneOptions.map(({ id, label, imageUrl }) => ({ id, label, imageUrl })),
+      referenceSceneOptions,
       isSuggestedShot,
       shotIndex: shotIndex ?? (isSuggestedShot ? 1 : 0)
     });
@@ -2154,7 +2221,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 const selectedEntities = [...characters, ...objectsAndLocations]
                   .filter((entity: any) => charIds.includes(entity.id || entity.name));
 
-                const composedPrompt = buildPromptComposerTemplate(desc, selectedEntities);
+                const composedPrompt = buildPromptComposerTemplate(desc, selectedEntities, selectedSceneForGeneration.sceneNumber);
 
                 // Pass character IDs, combined reference URLs, and suggested shot flag
                 generateSceneImage(

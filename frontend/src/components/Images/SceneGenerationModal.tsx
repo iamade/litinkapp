@@ -35,7 +35,14 @@ interface SceneGenerationModalProps {
   onGenerate: (description: string, characterIds: string[]) => void;
   isGenerating: boolean;
   parentSceneImageUrl?: string;  // Backward-compatible alias for selected reference image
-  referenceSceneOptions?: Array<{ id: string; label: string; imageUrl: string }>;
+  referenceSceneOptions?: Array<{
+    id: string;
+    label: string;
+    imageUrl: string;
+    sceneNumber?: number;
+    shotIndex?: number;
+    source?: 'previous_scene' | 'current_scene_master' | 'custom_upload';
+  }>;
   onReferenceSceneChange?: (imageUrl?: string) => void;
   isSuggestedShot?: boolean;     // Flag to show "suggested shot" context in UI
   userTier?: string;             // User subscription tier for character limits
@@ -170,6 +177,25 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
     char.name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const selectedReference = referenceSceneOptions.find(option => option.imageUrl === parentSceneImageUrl);
+
+  const handleCustomReferenceUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : undefined;
+      if (!dataUrl) return;
+      onReferenceSceneChange?.(dataUrl);
+      toast.success('Custom reference uploaded');
+    };
+    reader.onerror = () => {
+      toast.error('Failed to read custom reference image');
+    };
+    reader.readAsDataURL(file);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="w-full max-w-2xl bg-[#1e1e1e] rounded-xl shadow-2xl border border-gray-800 flex flex-col max-h-[90vh]">
@@ -223,6 +249,18 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
                 </button>
               )}
             </div>
+            <div className="flex items-center gap-2">
+              <label className="px-3 py-2 text-xs border border-gray-600 rounded text-gray-300 hover:bg-gray-800 cursor-pointer">
+                Upload Custom Reference
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCustomReferenceUpload}
+                  className="hidden"
+                />
+              </label>
+              <span className="text-xs text-gray-500">Supports local upload for custom continuity source</span>
+            </div>
             {parentSceneImageUrl && (
               <div className="relative rounded-lg overflow-hidden border border-gray-700 w-48 h-28">
                 <img
@@ -231,7 +269,7 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-                  <span className="text-xs text-gray-300">Reference</span>
+                  <span className="text-xs text-gray-300">{selectedReference?.label || 'Reference: Custom upload'}</span>
                 </div>
               </div>
             )}
