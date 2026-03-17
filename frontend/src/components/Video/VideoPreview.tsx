@@ -801,9 +801,9 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
                 className="flex gap-3 overflow-x-auto py-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent"
                 style={{ scrollbarWidth: 'thin' }}
               >
-                {sceneVideos.map((sv, i) => (
+                {sceneVideos.map((sv, i) => sv == null ? null : (
                   <button
-                    key={sv.video_url + i}
+                    key={(sv.video_url ?? '') + i}
                     onClick={() => { setSelectedSceneVideoIndex(i); setVideoError(false); }}
                     className={`shrink-0 w-40 rounded-lg overflow-hidden border-2 transition-all ${
                       i === selectedSceneVideoIndex
@@ -813,7 +813,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
                   >
                     {/* Thumbnail — use source_image if available, else show a placeholder */}
                     <div className="aspect-video bg-gray-800 relative">
-                      {sv.source_image ? (
+                      {sv?.source_image ? (
                         <img src={sv.source_image} alt="" className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
@@ -821,7 +821,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
                         </div>
                       )}
                       {/* Duration badge */}
-                      {sv.duration && (
+                      {sv?.duration && (
                         <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded">
                           {sv.duration}s
                         </span>
@@ -834,8 +834,8 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
                       )}
                     </div>
                     <div className="px-2 py-1.5 bg-gray-800">
-                      <p className="text-xs text-gray-300 truncate">Scene {sv.scene_sequence || i + 1}</p>
-                      {sv.model && <p className="text-[10px] text-gray-500 truncate">{sv.model}</p>}
+                      <p className="text-xs text-gray-300 truncate">Scene {sv?.scene_sequence ?? i + 1}</p>
+                      {sv?.model && <p className="text-[10px] text-gray-500 truncate">{sv.model}</p>}
                     </div>
                   </button>
                 ))}
