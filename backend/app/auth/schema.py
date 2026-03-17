@@ -112,6 +112,7 @@ class UserReadSchema(UserBaseSchema):
 
 class UserUpdateSchema(SQLModel):
     preferred_mode: Optional[str] = None
+    display_name: Optional[str] = Field(default=None, max_length=100)
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     bio: Optional[str] = None
