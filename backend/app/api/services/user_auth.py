@@ -25,6 +25,7 @@ from app.core.logging import get_logger
 from app.core.database import get_session
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
+from app.promo.models import CreditGrant, GrantType
 
 logger = get_logger()
 
@@ -217,6 +218,18 @@ class UserAuthService:
         session.add(new_user)
         await session.commit()
         await session.refresh(new_user)
+
+        # Grant 100 free-tier credits on account creation (base entitlement, not promo)
+        free_tier_grant = CreditGrant(
+            user_id=new_user.id,
+            credits_remaining=100,
+            credits_used=0,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=365),
+            promo_code_id=None,
+            grant_type=GrantType.FREE_TIER,
+        )
+        session.add(free_tier_grant)
+        await session.commit()
 
         activation_token = create_activation_token(new_user.id)
         try:
