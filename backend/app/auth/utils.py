@@ -47,17 +47,27 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
-def generate_display_name() -> str:
-    app_name = settings.SITE_NAME
-    words = app_name.split()
-    prefix = "".join([word[0] for word in words]).upper()
-    remaining_length = 12 - len(prefix) - 1
-    random_string = "".join(
-        random.choices(string.ascii_uppercase + string.digits, k=remaining_length)
-    )
-    display_name = f"{prefix}-{random_string}"
+_ADJECTIVES = [
+    "bold", "bright", "calm", "clever", "cool", "crisp", "daring", "deep",
+    "eager", "epic", "fierce", "free", "golden", "grand", "happy", "keen",
+    "lively", "noble", "quiet", "rapid", "sharp", "smart", "swift", "vivid",
+    "warm", "wise", "witty", "young", "zesty", "brave",
+]
 
-    return display_name
+_NOUNS = [
+    "author", "bard", "beacon", "canvas", "creator", "dreamer", "ember",
+    "fable", "flame", "harbor", "herald", "horizon", "ink", "lantern",
+    "legend", "muse", "narrator", "pixel", "poet", "quest", "sage",
+    "scribe", "spark", "star", "story", "sunrise", "tide", "verse",
+    "vision", "voice",
+]
+
+
+def generate_display_name() -> str:
+    adjective = random.choice(_ADJECTIVES)
+    noun = random.choice(_NOUNS)
+    suffix = "".join(random.choices(string.digits, k=4))
+    return f"{adjective}_{noun}_{suffix}"
 
 
 def create_activation_token(id: uuid.UUID) -> str:
