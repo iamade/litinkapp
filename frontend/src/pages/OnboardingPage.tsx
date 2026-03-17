@@ -12,7 +12,9 @@ const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }
       <h2 className="text-xl font-semibold dark:text-white">Let's get to know you</h2>
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">First Name</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            First Name <span className="text-red-500">*</span>
+          </label>
           <input
             type="text"
             required
@@ -22,7 +24,9 @@ const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Last Name</label>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Last Name <span className="text-red-500">*</span>
+          </label>
           <input
             type="text"
             required
@@ -33,7 +37,9 @@ const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }
         </div>
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Username</label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          Username <span className="text-red-500">*</span>
+        </label>
         <input
           type="text"
           required
@@ -43,7 +49,9 @@ const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Security Question</label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          Security Question <span className="text-gray-500 dark:text-gray-400 font-normal">(Optional)</span>
+        </label>
         <select
           value={data.securityQuestion || ""}
           onChange={(e) => updateData({ securityQuestion: e.target.value })}
@@ -57,7 +65,9 @@ const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Security Answer</label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+          Security Answer <span className="text-gray-500 dark:text-gray-400 font-normal">(Optional)</span>
+        </label>
         <input
           type="text"
           value={data.securityAnswer || ""}
