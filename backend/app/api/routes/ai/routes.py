@@ -848,6 +848,26 @@ async def generate_entertainment_video(
                 )
             ]
 
+            # Reject audio files that are too short — ModelsLab requires >= 5 seconds.
+            short_audio = [
+                r for r in audio_records
+                if (r.duration_seconds or 0) < 5
+            ]
+            if short_audio:
+                short_ids = [str(r.id) for r in short_audio]
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "status": "error",
+                        "message": (
+                            f"{len(short_audio)} selected audio file(s) are shorter than 5 seconds "
+                            "and cannot be used for video rendering."
+                        ),
+                        "short_audio_ids": short_ids,
+                        "action": "Please regenerate or replace these audio clips before rendering.",
+                    },
+                )
+
             print(f"[AUDIO QUERY DEBUG] Found {len(audio_records)} records")
             if audio_records:
                 for idx, record in enumerate(audio_records):
