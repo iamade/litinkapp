@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from app.core.database import get_session
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from app.core.logging import get_logger
 from app.auth.schema import UserCreateSchema, UserReadSchema
@@ -43,6 +44,26 @@ async def register_user(
     except HTTPException as http_ex:
         await session.rollback()
         raise http_ex
+    except IntegrityError as e:
+        await session.rollback()
+        if "ix_user_email" in str(e.orig) or "unique" in str(e.orig).lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "status": "error",
+                    "message": "Email already in use",
+                    "action": "Please use a different email or try logging in",
+                },
+            )
+        logger.exception(f"Database integrity error during registration for {user_data.email}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "error",
+                "message": "Internal server error during registration",
+                "action": "Please try again later or contact support",
+            },
+        )
     except Exception as e:
         logger.exception(f"Failed to register user {user_data.email}: {e}")
         raise HTTPException(

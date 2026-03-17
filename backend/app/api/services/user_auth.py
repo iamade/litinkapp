@@ -58,7 +58,7 @@ class UserAuthService:
         return user
 
     async def check_user_email_exists(self, email: str, session: AsyncSession) -> bool:
-        user = await self.get_user_by_email(email, session)
+        user = await self.get_user_by_email(email, session, include_inactive=True)
         return bool(user)
 
     # ---------------------------
