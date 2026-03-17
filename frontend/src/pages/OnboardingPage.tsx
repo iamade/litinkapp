@@ -45,7 +45,6 @@ const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Security Question</label>
         <select
-          required
           value={data.securityQuestion || ""}
           onChange={(e) => updateData({ securityQuestion: e.target.value })}
           className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -61,7 +60,6 @@ const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Security Answer</label>
         <input
           type="text"
-          required
           value={data.securityAnswer || ""}
           onChange={(e) => updateData({ securityAnswer: e.target.value })}
           className="mt-1 w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -242,7 +240,7 @@ export default function OnboardingPage() {
   const handleNext = () => {
       // Validation for Step 1
       if (step === 1) {
-           if (!formData.firstName || !formData.lastName || !formData.username || !formData.securityQuestion || !formData.securityAnswer) {
+           if (!formData.firstName || !formData.lastName || !formData.username) {
                toast.error("Please fill in all required fields");
                return;
            }
@@ -257,9 +255,17 @@ export default function OnboardingPage() {
   const handleSubmit = async () => {
       setLoading(true);
       try {
+          const normalizedSecurityQuestion = formData.securityQuestion.trim() || null;
+          const normalizedSecurityAnswer = formData.securityAnswer.trim() || null;
+          const onboardingPayload = {
+            ...formData,
+            securityQuestion: normalizedSecurityQuestion,
+            securityAnswer: normalizedSecurityAnswer,
+          };
+
           // Send to backend
           // We need a new endpoint for this: POST /api/v1/user/onboarding
-          await apiClient.post("/users/me/onboarding", formData);
+          await apiClient.post("/users/me/onboarding", onboardingPayload);
           
           toast.success("Profile setup complete!");
           
