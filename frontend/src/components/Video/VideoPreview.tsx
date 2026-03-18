@@ -106,7 +106,6 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
 
   const currentScene = scenes && scenes[currentSceneIndex];
   const totalDuration = scenes ? scenes.reduce((sum, scene) => sum + scene.duration, 0) : 0;
-  const hasGeneratedPlayback = videoGenerations.length > 0 || Boolean(videoUrl);
   
   // Get audio files for current scene/shot from StoryboardContext
   // Uses shotIndex to get only audio for this specific shot
@@ -282,26 +281,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     return unsub;
   }, [subscribe]);
 
-  // Only auto-change scenes based on time when video is actively playing
-  // This prevents the scene from resetting to 0 on component mount
-  // Use a ref for currentSceneIndex to avoid re-triggering the effect when scene changes
-  const currentSceneIndexRef = useRef(currentSceneIndex);
-  currentSceneIndexRef.current = currentSceneIndex;
-
-  useEffect(() => {
-    if (!scenes || !isPlaying || hasGeneratedPlayback) return;
-    // Calculate which scene should be showing based on current time
-    let accumulatedTime = 0;
-    for (let i = 0; i < scenes.length; i++) {
-      if (currentTime < accumulatedTime + scenes[i].duration) {
-        if (i !== currentSceneIndexRef.current) {
-          onSceneChange?.(i);
-        }
-        break;
-      }
-      accumulatedTime += scenes[i].duration;
-    }
-  }, [currentTime, scenes, onSceneChange, isPlaying, hasGeneratedPlayback]);
+  // Keep scene selection manual in preview; do not auto-advance based on playback time.
 
   useEffect(() => {
     // Auto-hide controls after 3 seconds of inactivity
@@ -378,16 +358,22 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   }, [currentSceneIndex]);
 
   // --- Generation Carousel Logic ---
-  // Split generations into playable (≥1 valid clip) and failed (0 clips)
+  // Split generations into playable and failed/error buckets.
   const { playableGenerations, failedGenerations } = useMemo(() => {
     const playable: any[] = [];
     const failed: any[] = [];
 
     for (const gen of videoGenerations) {
+      const status = String(gen.generation_status || '').toLowerCase();
+      const isFailedStatus = status === 'failed' || status === 'error' || status === 'lipsync_failed' || status === 'retrieval_failed';
+
       const clips = gen.video_data?.scene_videos || [];
       const validClips = clips.filter((sv: any) => sv && sv.video_url);
-      // Playable if it has valid clips OR a top-level video URL (e.g. legacy/merged)
-      if (validClips.length > 0 || gen.video_url) {
+      const hasPlayableMedia = validClips.length > 0 || Boolean(gen.video_url);
+
+      if (isFailedStatus) {
+        failed.push(gen);
+      } else if (hasPlayableMedia) {
         playable.push(gen);
       } else {
         failed.push(gen);
