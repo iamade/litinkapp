@@ -16,6 +16,7 @@ import VideoPreview from './VideoPreview';
 import RenderingProgress from './RenderingProgress';
 import type { VideoScene } from '../../types/videoProduction';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import { userService } from '../../services/userService';
 
 interface SceneDescription {
   scene_number: number;
@@ -92,6 +93,143 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   } = useScriptSelection();
 
   const storyboardContext = useStoryboardOptional();
+  const [fallbackSceneData, setFallbackSceneData] = useState<Array<{
+    url: string;
+    sceneNumber: number;
+    shotType: 'key_scene' | 'suggested_shot';
+    shotIndex: number;
+    imageId?: string;
+  }>>([]);
+  const [fallbackAudioCountByShot, setFallbackAudioCountByShot] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!chapterId || !selectedScriptId) {
+      setFallbackSceneData([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadImageData = async () => {
+      try {
+        const response = await userService.getChapterImages(chapterId);
+        if (cancelled) return;
+
+        const allImages = Array.isArray((response as any)?.images) ? (response as any).images : [];
+        const normalized = allImages
+          .filter((img: any) => {
+            const scriptId = img.script_id ?? img.scriptId ?? null;
+            return Boolean(img.image_url) && scriptId === selectedScriptId;
+          })
+          .map((img: any) => {
+            const metadata = img.metadata || {};
+            const sceneNumber = Number(img.scene_number ?? metadata.scene_number ?? 0);
+            const shotIndex = Number(img.shot_index ?? metadata.shot_index ?? 0);
+            const metadataShotType = metadata.shot_type;
+            const shotType =
+              metadataShotType === 'suggested_shot' || shotIndex > 0
+                ? 'suggested_shot'
+                : 'key_scene';
+
+            return {
+              id: img.id,
+              url: img.image_url,
+              sceneNumber: Number.isFinite(sceneNumber) && sceneNumber > 0 ? sceneNumber : 1,
+              shotType: shotType as 'key_scene' | 'suggested_shot',
+              shotIndex: Number.isFinite(shotIndex) && shotIndex >= 0 ? shotIndex : 0,
+              createdAt: img.created_at ? new Date(img.created_at).getTime() : 0,
+            };
+          })
+          .sort((a: any, b: any) => {
+            if (a.sceneNumber !== b.sceneNumber) return a.sceneNumber - b.sceneNumber;
+            if (a.shotIndex !== b.shotIndex) return a.shotIndex - b.shotIndex;
+            return b.createdAt - a.createdAt;
+          });
+
+        const seen = new Set<string>();
+        const deduped = normalized.filter((img: any) => {
+          const key = `${img.sceneNumber}:${img.shotIndex}:${img.url}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        setFallbackSceneData(
+          deduped.map((img: any) => ({
+            url: img.url,
+            sceneNumber: img.sceneNumber,
+            shotType: img.shotType,
+            shotIndex: img.shotIndex,
+            imageId: img.id,
+          }))
+        );
+      } catch (error) {
+        if (!cancelled) {
+          setFallbackSceneData([]);
+        }
+      }
+    };
+
+    loadImageData();
+    return () => {
+      cancelled = true;
+    };
+  }, [chapterId, selectedScriptId]);
+
+  useEffect(() => {
+    if (!chapterId || !selectedScriptId) {
+      setFallbackAudioCountByShot({});
+      return;
+    }
+
+    let cancelled = false;
+    const loadAudioData = async () => {
+      try {
+        const response = await userService.getChapterAudio(chapterId, selectedScriptId);
+        if (cancelled) return;
+
+        const audioFiles = Array.isArray((response as any)?.audio_files)
+          ? (response as any).audio_files
+          : Array.isArray(response)
+            ? response
+            : [];
+
+        const counts: Record<string, number> = {};
+
+        audioFiles.forEach((audio: any) => {
+          const metadata = audio.metadata || audio.audio_metadata || {};
+          const rawScene = metadata.scene ?? audio.scene_id ?? audio.scene_number;
+          let sceneNumber: number | undefined;
+          if (typeof rawScene === 'number') {
+            sceneNumber = Math.floor(rawScene);
+          } else if (typeof rawScene === 'string') {
+            const parsed = parseFloat(rawScene.replace(/^scene_/i, ''));
+            if (!isNaN(parsed)) sceneNumber = Math.floor(parsed);
+          }
+
+          if (!sceneNumber || sceneNumber < 1) return;
+
+          let shotIndex = metadata.shot_index;
+          if (typeof shotIndex !== 'number') {
+            shotIndex = 0;
+          }
+          const safeShotIndex = shotIndex >= 0 ? shotIndex : 0;
+          const key = `${sceneNumber}:${safeShotIndex}`;
+          counts[key] = (counts[key] || 0) + 1;
+        });
+
+        setFallbackAudioCountByShot(counts);
+      } catch (error) {
+        if (!cancelled) {
+          setFallbackAudioCountByShot({});
+        }
+      }
+    };
+
+    loadAudioData();
+    return () => {
+      cancelled = true;
+    };
+  }, [chapterId, selectedScriptId]);
   
   // Build scene metadata from storyboard including shotType
   // Returns array of { url, sceneNumber, shotType, shotIndex } for proper scene initialization
@@ -153,6 +291,10 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
         return allIncludedScenes;
       }
     }
+
+    if (fallbackSceneData.length > 0) {
+      return fallbackSceneData;
+    }
     
     // Fallback: If we only have selectedSceneImages, use those as key scenes
     if (Object.keys(selectedSceneImages).length > 0) {
@@ -174,7 +316,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
       shotType: 'key_scene' as const,
       shotIndex: 0,
     }));
-  }, [imageUrls, storyboardContext]);
+  }, [imageUrls, storyboardContext, fallbackSceneData]);
 
   // Extract just URLs for useVideoProduction (backward compatible)
   const filteredImageUrls = React.useMemo(() => 
@@ -501,6 +643,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
                 onToggleShotSelection={toggleShotSelection}
                 generatingShotIds={generatingShotIds}
                 onGenerateVideo={onGenerateVideo}
+                audioCountByShot={fallbackAudioCountByShot}
               />
             </div>
           )}
