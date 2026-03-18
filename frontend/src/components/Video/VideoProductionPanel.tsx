@@ -4,10 +4,8 @@ import { toast } from 'react-hot-toast';
 import {
   Video,
   Download,
-  Save,
   RefreshCw,
   Film,
-  Layers,
   Monitor
 } from 'lucide-react';
 import { useVideoProduction } from '../../hooks/useVideoProduction';
@@ -16,7 +14,6 @@ import SceneTimeline from './SceneTimeline';
 import EditorSettingsPanel from './EditorSettingsPanel';
 import VideoPreview from './VideoPreview';
 import RenderingProgress from './RenderingProgress';
-import MergePanel from './MergePanel';
 import type { VideoScene } from '../../types/videoProduction';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 
@@ -200,7 +197,6 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     updateEditorSettings,
     processWithFFmpeg,
     downloadVideo,
-    saveProduction
   } = useVideoProduction({
     chapterId,
     scriptId: selectedScriptId || undefined,
@@ -277,7 +273,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     });
   }, [scenes, videoGenerations]);
 
-  const [activeView, setActiveView] = useState<'timeline' | 'preview' | 'merge'>('timeline');
+  const [activeView, setActiveView] = useState<'timeline' | 'preview'>('timeline');
   const [selectedSceneIndex, setSelectedSceneIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
@@ -342,14 +338,6 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     downloadVideo(quality);
   };
 
-  const handleRenderVideo = () => {
-    if (onGenerateVideo) {
-      onGenerateVideo();
-      return;
-    }
-
-    toast.error('Video generation is not available right now.');
-  };
 
   const getTotalDuration = () => {
     return enrichedScenes.reduce((total, scene) => total + scene.duration, 0);
@@ -376,24 +364,6 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
           <p className="text-gray-600 dark:text-gray-400">
             Create and edit your video for "{chapterTitle}"
           </p>
-        </div>
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={saveProduction}
-            disabled={controlsDisabled || !enrichedScenes.length}
-            className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:bg-gray-400"
-          >
-            <Save className="w-4 h-4" />
-            <span>Save</span>
-          </button>
-          <button
-            onClick={handleRenderVideo}
-            disabled={controlsDisabled || !canGenerateVideo}
-            className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
-          >
-            <Video className="w-4 h-4" />
-            <span>Render Video</span>
-          </button>
         </div>
       </div>
       {/* Video Generation Controls */}
@@ -496,19 +466,6 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
                 <span>Preview</span>
               </div>
             </button>
-            <button
-              onClick={() => setActiveView('merge')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeView === 'merge'
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-              }`}
-            >
-              <div className="flex items-center space-x-2">
-                <Layers className="w-4 h-4" />
-                <span>Merge Studio</span>
-              </div>
-            </button>
           </nav>
         </div>
 
@@ -563,17 +520,6 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             />
           )}
 
-          {activeView === 'merge' && (
-            <MergePanel
-              chapterId={chapterId}
-              scriptId={selectedScriptId || undefined}
-              videoGenerations={videoGenerations}
-              audioFiles={audioFiles}
-              scenes={enrichedScenes}
-              editorSettings={editorSettings}
-              userTier="free"
-            />
-          )}
         </div>
       </div>
 
