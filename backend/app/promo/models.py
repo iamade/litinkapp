@@ -4,7 +4,7 @@ from typing import Optional
 from enum import Enum
 from sqlmodel import Field, SQLModel, Column
 from sqlalchemy.dialects import postgresql as pg
-from sqlalchemy import text, func, ForeignKey
+from sqlalchemy import String, text, func, ForeignKey
 
 
 class GrantType(str, Enum):
@@ -82,11 +82,11 @@ class CreditGrant(SQLModel, table=True):
             nullable=True,
         ),
     )
-    grant_type: GrantType = Field(
+    grant_type: str = Field(
         sa_column=Column(
-            pg.ENUM(GrantType, name="grant_type"),
+            String,
             nullable=False,
-            default=GrantType.PROMO,
+            default=GrantType.PROMO.value,
         )
     )
     created_at: datetime = Field(
