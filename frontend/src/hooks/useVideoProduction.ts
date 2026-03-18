@@ -20,6 +20,8 @@ type SceneMetadata = {
   sceneNumber: number;
   shotType: 'key_scene' | 'suggested_shot';
   shotIndex: number;
+  audioFiles?: string[];
+  sceneHeading?: string;
 };
 
 type UseVideoProductionParams = {
@@ -126,7 +128,8 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
           shotType: meta.shotType,
           shotIndex: meta.shotIndex,
           imageUrl: meta.url,
-          audioFiles: audioFiles[index] ? [audioFiles[index]] : [],
+          audioFiles: meta.audioFiles || (audioFiles[index] ? [audioFiles[index]] : []),
+          sceneHeading: meta.sceneHeading,
           duration: 5, // Default 5 seconds per scene
           transitions: [{
             type: index === 0 ? 'none' : 'fade' as const,

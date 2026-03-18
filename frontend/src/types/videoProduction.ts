@@ -2,6 +2,7 @@
 export interface VideoScene {
   id: string;
   sceneNumber: number;
+  sceneHeading?: string;
   shotType?: 'key_scene' | 'suggested_shot'; // Shot type from storyboard
   shotIndex?: number; // Shot index within scene
   imageUrl: string;
