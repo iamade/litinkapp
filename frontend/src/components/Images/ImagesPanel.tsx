@@ -551,6 +551,10 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     if (prevImagesSyncRef.current === newSyncKey) return;
     prevImagesSyncRef.current = newSyncKey;
     
+    // Reset storyboard before applying — clears stale scenes from previous scripts
+    // (e.g. switching from 5-scene script to 3-scene script left scenes 4-5 in the map)
+    storyboardContext.resetStoryboard();
+
     // Now apply the updates
     Object.entries(syncData).forEach(([sceneNum, images]) => {
       storyboardContext.setSceneImages(parseInt(sceneNum), images);
