@@ -33,10 +33,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Drop default first — it may reference the old enum type.
+    op.execute(
+        "ALTER TABLE credit_grants ALTER COLUMN grant_type DROP DEFAULT"
+    )
     # Cast current ENUM values to text, then to varchar.
     op.execute(
         "ALTER TABLE credit_grants ALTER COLUMN grant_type "
         "TYPE VARCHAR USING grant_type::text"
+    )
+    # Set a plain varchar default.
+    op.execute(
+        "ALTER TABLE credit_grants ALTER COLUMN grant_type SET DEFAULT 'promo'"
     )
     # Drop the now-unused ENUM type.
     op.execute("DROP TYPE IF EXISTS grant_type")
