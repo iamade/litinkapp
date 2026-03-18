@@ -106,6 +106,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
 
   const currentScene = scenes && scenes[currentSceneIndex];
   const totalDuration = scenes ? scenes.reduce((sum, scene) => sum + scene.duration, 0) : 0;
+  const hasGeneratedPlayback = videoGenerations.length > 0 || Boolean(videoUrl);
   
   // Get audio files for current scene/shot from StoryboardContext
   // Uses shotIndex to get only audio for this specific shot
@@ -184,6 +185,37 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   const currentSceneScript = getCurrentSceneScript();
   const currentSceneDialogue = getCurrentSceneDialogue();
 
+  const screenplayHeadingByScene = useMemo(() => {
+    const map: Record<number, string> = {};
+
+    const sceneDescriptions = selectedScript?.scene_descriptions || [];
+    sceneDescriptions.forEach((sd) => {
+      if (!sd || typeof sd.scene_number !== 'number') return;
+      const location = (sd.location || '').trim();
+      const timeOfDay = (sd.time_of_day || '').trim();
+      if (location) {
+        map[sd.scene_number] = timeOfDay ? `${location} - ${timeOfDay}` : location;
+      }
+    });
+
+    const scriptText = selectedScript?.script || '';
+    if (!scriptText) return map;
+
+    const headingLines = scriptText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^(INT\.|EXT\.|INT\/EXT\.|EXT\/INT\.)/i.test(line));
+
+    headingLines.forEach((heading, idx) => {
+      const sceneNumber = idx + 1;
+      if (!map[sceneNumber]) {
+        map[sceneNumber] = heading;
+      }
+    });
+
+    return map;
+  }, [selectedScript]);
+
   // Clear and re-load overlays on script change
   useEffect(() => {
     let cancelled = false;
@@ -257,7 +289,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   currentSceneIndexRef.current = currentSceneIndex;
 
   useEffect(() => {
-    if (!scenes || !isPlaying) return;
+    if (!scenes || !isPlaying || hasGeneratedPlayback) return;
     // Calculate which scene should be showing based on current time
     let accumulatedTime = 0;
     for (let i = 0; i < scenes.length; i++) {
@@ -269,7 +301,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
       }
       accumulatedTime += scenes[i].duration;
     }
-  }, [currentTime, scenes, onSceneChange, isPlaying]);
+  }, [currentTime, scenes, onSceneChange, isPlaying, hasGeneratedPlayback]);
 
   useEffect(() => {
     // Auto-hide controls after 3 seconds of inactivity
@@ -428,7 +460,8 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   // But the user requested strict filtering.
   const filteredFailedGenerations = useMemo(() => {
     if (!selectedScene) return failedGenerations;
-     return failedGenerations.filter((gen: any) => generationMatchesScene(gen, selectedScene));
+    const matched = failedGenerations.filter((gen: any) => generationMatchesScene(gen, selectedScene));
+    return matched.length > 0 ? matched : failedGenerations;
   }, [failedGenerations, selectedScene, generationMatchesScene]);
 
   // Extract scene videos from selected generation
@@ -572,8 +605,11 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
                     )}
                  </div>
                  <div className="w-full flex justify-between items-center">
-                    <span className={`text-xs font-medium ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`}>
-                      Scene {scene.sceneNumber}
+                    <span
+                      className={`text-xs font-medium truncate max-w-[7rem] ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`}
+                      title={screenplayHeadingByScene[scene.sceneNumber] || `Scene ${scene.sceneNumber}`}
+                    >
+                      {screenplayHeadingByScene[scene.sceneNumber] || `Scene ${scene.sceneNumber}`}
                     </span>
                     <span className="text-[10px] text-gray-500">
                       {scene.duration}s
