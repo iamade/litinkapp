@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { userService } from '../services/userService';
 import { toast } from 'react-hot-toast';
+import { dispatchCreditsRefresh } from '../lib/credits';
 
 export interface SceneImage {
   sceneNumber: number;
@@ -291,6 +292,7 @@ export const useImageGeneration = (
           newSet.delete(sceneNumber);
           return newSet;
         });
+        dispatchCreditsRefresh();
         toast.success(`Generated image for Scene ${sceneNumber}`);
       }
     } catch (error: unknown) {
@@ -368,6 +370,7 @@ export const useImageGeneration = (
           newSet.delete(characterName);
           return newSet;
         });
+        dispatchCreditsRefresh();
         toast.success(`Generated image for ${characterName}`);
       }
     } catch (error: unknown) {
@@ -578,6 +581,7 @@ export const useImageGeneration = (
 
           // Reload all images from database to get the complete data
           loadImages();
+          dispatchCreditsRefresh();
 
           toast.success(`Generated image for Scene ${sceneNumber}`);
         } else if (status.status === 'failed') {
@@ -762,6 +766,7 @@ export const useImageGeneration = (
 
           // Reload all images from database to get the complete data
           loadImages();
+          dispatchCreditsRefresh();
 
           toast.success(`Generated image for ${characterName}`);
         } else if (status.status === 'failed') {

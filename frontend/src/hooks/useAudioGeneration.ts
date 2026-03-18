@@ -2,6 +2,7 @@
 // Now using normalized audio file arrays with scriptId property for consistent filtering.
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { userService } from '../services/userService';
+import { dispatchCreditsRefresh } from '../lib/credits';
 
 // Legacy hook signature for backward compatibility
 export type UseAudioParams = { chapterId?: string | null; scriptId?: string | null; versionToken?: unknown; videoGenerationId?: string | null };
@@ -232,6 +233,9 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken, videoGen
           
           // Clear generating state since we're done
           setIsGenerating(false);
+          if (isCompleted) {
+            dispatchCreditsRefresh();
+          }
           
           if (isFailed) {
             toast.error(statusData.error_message || 'Audio generation failed');

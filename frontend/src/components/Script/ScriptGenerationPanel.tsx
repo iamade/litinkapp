@@ -4,6 +4,9 @@ import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
 import { apiClient } from '../../lib/api';
 import ExpandScriptModal from './ExpandScriptModal';
+import { useCreditBalance } from '../../hooks/useCreditBalance';
+import { estimateScriptCredits, getInsufficientCreditsTooltip } from '../../lib/creditCosts';
+import { toast } from 'react-hot-toast';
 
 interface SceneDescription {
   scene_number: number;
@@ -223,6 +226,10 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [isAddingCharacter, setIsAddingCharacter] = useState(false);
   const [newCharacterName, setNewCharacterName] = useState('');
   const [newEntityType, setNewEntityType] = useState<'character' | 'object' | 'location' | ''>('');
+  const { balance: creditBalance } = useCreditBalance({ enabled: true });
+  const scriptCreditCost = estimateScriptCredits();
+  const hasScriptCredits = creditBalance >= scriptCreditCost;
+  const scriptCreditTooltip = getInsufficientCreditsTooltip(creditBalance, scriptCreditCost);
 
   const addManualEntity = async (script: ChapterScript) => {
     const entityName = newCharacterName.trim();
@@ -250,6 +257,11 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   };
 
   const handleGenerateScript = () => {
+    if (!hasScriptCredits) {
+      toast.error(scriptCreditTooltip);
+      return;
+    }
+
     onGenerateScript(scriptStyle, {
       ...generationOptions,
       scriptStoryType: scriptStoryType,
@@ -472,24 +484,29 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
       )}
 
       <div className="flex justify-end">
-        <button
-          onClick={handleGenerateScript}
-          disabled={isGeneratingScript}
-          className="flex items-center space-x-2 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 disabled:cursor-not-allowed"
-        >
-          {isGeneratingScript ? (
-            <>
-              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-              <span>Generating...</span>
-            </>
-          ) : (
-            <>
-              <FileText className="w-4 h-4" />
-              <span>Generate Script</span>
-            </>
-          )}
-        </button>
+        <div title={!hasScriptCredits ? scriptCreditTooltip : undefined}>
+          <button
+            onClick={handleGenerateScript}
+            disabled={isGeneratingScript || !hasScriptCredits}
+            className="flex items-center space-x-2 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 disabled:cursor-not-allowed"
+          >
+            {isGeneratingScript ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                <span>Generating...</span>
+              </>
+            ) : (
+              <>
+                <FileText className="w-4 h-4" />
+                <span>Generate Script ({scriptCreditCost} credit{scriptCreditCost === 1 ? '' : 's'})</span>
+              </>
+            )}
+          </button>
+        </div>
       </div>
+      <p className="mt-3 text-right text-xs text-gray-500 dark:text-gray-400">
+        Estimated cost: {scriptCreditCost} credit{scriptCreditCost === 1 ? '' : 's'} • Available: {creditBalance}
+      </p>
     </div>
   );
 

@@ -17,6 +17,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useUserMode } from "../hooks/useUserMode";
+import CreditHistory from "../components/Credits/CreditHistory";
 
 export default function Profile() {
   const { user } = useAuth();
@@ -182,6 +183,7 @@ export default function Profile() {
           <div className="lg:col-span-2 space-y-8">
             {/* Role Management Section */}
             <RoleManagement />
+            <CreditHistory />
             
             {/* Preferred Mode Selection (Only for users with both roles) */}
             {hasRole(user, "explorer") && (hasRole(user, "author") || hasRole(user, "creator")) && (
