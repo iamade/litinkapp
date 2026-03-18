@@ -1,5 +1,5 @@
 // src/components/Video/SceneTimeline.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DndContext, closestCenter, DragEndEvent } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -62,7 +62,6 @@ interface SceneTimelineProps {
   onToggleShotSelection?: (shotId: string) => void;  // Toggle shot selection
   generatingShotIds?: Set<string>;  // Shot IDs currently being generated
   onGenerateVideo?: (selectedShotIds?: string[], overrideAudioIds?: string[]) => void;
-  audioCountByShot?: Record<string, number>;
 }
 
 const SceneCard: React.FC<{
@@ -75,11 +74,10 @@ const SceneCard: React.FC<{
   scriptScene?: SceneDescription;
   sceneCharacters?: string[];
   storyboardAudioCount?: number;
-  sceneHeading?: string;
   isSelectedForGeneration?: boolean;  // Whether this scene is selected for video generation
   onToggleSelection?: () => void;     // Toggle selection for video generation
   isGenerating?: boolean;             // Whether this scene is currently being generated
-}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters, storyboardAudioCount, sceneHeading, isSelectedForGeneration, onToggleSelection, isGenerating }) => {
+}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters, storyboardAudioCount, isSelectedForGeneration, onToggleSelection, isGenerating }) => {
   const {
     attributes,
     listeners,
@@ -125,8 +123,8 @@ const SceneCard: React.FC<{
           <div {...attributes} {...listeners} className="cursor-grab">
             <GripVertical className="w-4 h-4 text-gray-400" />
           </div>
-          <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate max-w-[11rem]" title={sceneHeading || `Scene ${scene.sceneNumber}`}>
-            {sceneHeading || `Scene ${scene.sceneNumber}`}
+          <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+            Scene {scene.sceneNumber}
           </span>
           {scene.shotType && (
             <span className={`px-1.5 py-0.5 text-xs rounded ${scene.shotType === 'key_scene' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'}`}>
@@ -308,8 +306,7 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
   selectedShotIds = [],
   onToggleShotSelection,
   generatingShotIds = new Set(),
-  onGenerateVideo,
-  audioCountByShot = {}
+  onGenerateVideo
 }) => {
   // Script selection context integration
   const {
@@ -373,37 +370,6 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
   };
 
   const totalDuration = scenes.reduce((sum, scene) => sum + scene.duration, 0);
-
-  const screenplayHeadingByScene = useMemo(() => {
-    const map: Record<number, string> = {};
-
-    const sceneDescriptions = selectedScript?.scene_descriptions || [];
-    sceneDescriptions.forEach((sd) => {
-      if (!sd || typeof sd.scene_number !== 'number') return;
-      const location = (sd.location || '').trim();
-      const timeOfDay = (sd.time_of_day || '').trim();
-      if (location) {
-        map[sd.scene_number] = timeOfDay ? `${location} - ${timeOfDay}` : location;
-      }
-    });
-
-    const scriptText = selectedScript?.script || '';
-    if (!scriptText) return map;
-
-    const headingLines = scriptText
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => /^(INT\.|EXT\.|INT\/EXT\.|EXT\/INT\.)/i.test(line));
-
-    headingLines.forEach((heading, idx) => {
-      const sceneNumber = idx + 1;
-      if (!map[sceneNumber]) {
-        map[sceneNumber] = heading;
-      }
-    });
-
-    return map;
-  }, [selectedScript]);
 
   // If no script is selected, render inert timeline
   if (!selectedScriptId) {
@@ -499,9 +465,8 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
             {scenes.map((scene, index) => {
               // Get script-specific scene description if available
-              const scriptScene = selectedScript?.scene_descriptions?.find(sd => sd.scene_number === scene.sceneNumber);
+              const scriptScene = selectedScript?.scene_descriptions?.[index];
               const sceneCharacters = scriptScene?.characters || [];
-              const sceneHeading = screenplayHeadingByScene[scene.sceneNumber];
               
               return (
                 <SceneCard
@@ -519,10 +484,7 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
                   disabled={disabled}
                   scriptScene={scriptScene}
                   sceneCharacters={sceneCharacters}
-                  sceneHeading={sceneHeading}
-                  storyboardAudioCount={storyboardContext
-                    ? storyboardContext.getAudioForShot(scene.sceneNumber, scene.shotIndex)?.length
-                    : audioCountByShot[`${scene.sceneNumber}:${scene.shotIndex ?? 0}`]}
+                  storyboardAudioCount={storyboardContext?.getAudioForShot(scene.sceneNumber, scene.shotIndex)?.length ?? 0}
                   isSelectedForGeneration={selectedShotIds.includes(scene.id)}
                   onToggleSelection={() => onToggleShotSelection?.(scene.id)}
                   isGenerating={generatingShotIds.has(scene.id) || generatingShotIds.has('__all__')}

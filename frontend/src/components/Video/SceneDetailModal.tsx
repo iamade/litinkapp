@@ -15,6 +15,7 @@ interface SceneDetailModalProps {
       visual_description?: string;
       key_actions?: string;
       location?: string;
+      time_of_day?: string;
       characters?: string[];
     }>;
   } | null;
@@ -99,6 +100,13 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
       d => d.scene_number === scene.sceneNumber
     );
   }, [selectedScript, scene.sceneNumber]);
+
+  const screenplayHeading = React.useMemo(() => {
+    if (!sceneDescription?.location) return null;
+    const location = sceneDescription.location.trim().toUpperCase();
+    const timeOfDay = sceneDescription.time_of_day?.trim().toUpperCase();
+    return timeOfDay ? `${location} - ${timeOfDay}` : location;
+  }, [sceneDescription]);
 
   // Extract dialogue from script text for this scene using header-key approach (mirrors ImagesPanel)
   const sceneDialogue = React.useMemo(() => {
@@ -243,7 +251,11 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
             {/* Scene Description */}
             <div className="p-4 border-t border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
               <h4 className="text-xs uppercase tracking-widest text-gray-500 font-semibold mb-2">Scene Description</h4>
-              {sceneDescription?.visual_description ? (
+              {screenplayHeading ? (
+                <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                  {screenplayHeading}
+                </p>
+              ) : sceneDescription?.visual_description ? (
                 <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
                   {sceneDescription.visual_description}
                 </p>
@@ -251,9 +263,6 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
                 <p className="text-sm text-gray-500 italic">Visual scene — no text description available</p>
               ) : (
                 <p className="text-sm text-gray-500 italic">No description available</p>
-              )}
-              {sceneDescription?.location && (
-                <p className="text-xs text-gray-400 mt-1">📍 {sceneDescription.location}</p>
               )}
             </div>
 

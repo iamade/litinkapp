@@ -890,6 +890,7 @@ if (!selectedChapter) {
             onGenerateVideo={handleGenerateVideo}
             videoStatus={videoStatus}
             canGenerateVideo={!!selectedChapter && videoStatus !== "processing" && videoStatus !== "starting"}
+            onTabChange={(tab) => setActiveTab(tab as WorkflowTab)}
           />
         );
       }

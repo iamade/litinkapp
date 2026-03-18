@@ -184,37 +184,6 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   const currentSceneScript = getCurrentSceneScript();
   const currentSceneDialogue = getCurrentSceneDialogue();
 
-  const screenplayHeadingByScene = useMemo(() => {
-    const map: Record<number, string> = {};
-
-    const sceneDescriptions = selectedScript?.scene_descriptions || [];
-    sceneDescriptions.forEach((sd) => {
-      if (!sd || typeof sd.scene_number !== 'number') return;
-      const location = (sd.location || '').trim();
-      const timeOfDay = (sd.time_of_day || '').trim();
-      if (location) {
-        map[sd.scene_number] = timeOfDay ? `${location} - ${timeOfDay}` : location;
-      }
-    });
-
-    const scriptText = selectedScript?.script || '';
-    if (!scriptText) return map;
-
-    const headingLines = scriptText
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => /^(INT\.|EXT\.|INT\/EXT\.|EXT\/INT\.)/i.test(line));
-
-    headingLines.forEach((heading, idx) => {
-      const sceneNumber = idx + 1;
-      if (!map[sceneNumber]) {
-        map[sceneNumber] = heading;
-      }
-    });
-
-    return map;
-  }, [selectedScript]);
-
   // Clear and re-load overlays on script change
   useEffect(() => {
     let cancelled = false;
@@ -281,7 +250,26 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     return unsub;
   }, [subscribe]);
 
-  // Keep scene selection manual in preview; do not auto-advance based on playback time.
+  // Only auto-change scenes based on time when video is actively playing
+  // This prevents the scene from resetting to 0 on component mount
+  // Use a ref for currentSceneIndex to avoid re-triggering the effect when scene changes
+  const currentSceneIndexRef = useRef(currentSceneIndex);
+  currentSceneIndexRef.current = currentSceneIndex;
+
+  useEffect(() => {
+    if (!scenes || !isPlaying) return;
+    // Calculate which scene should be showing based on current time
+    let accumulatedTime = 0;
+    for (let i = 0; i < scenes.length; i++) {
+      if (currentTime < accumulatedTime + scenes[i].duration) {
+        if (i !== currentSceneIndexRef.current) {
+          onSceneChange?.(i);
+        }
+        break;
+      }
+      accumulatedTime += scenes[i].duration;
+    }
+  }, [currentTime, scenes, onSceneChange, isPlaying]);
 
   useEffect(() => {
     // Auto-hide controls after 3 seconds of inactivity
@@ -358,22 +346,16 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   }, [currentSceneIndex]);
 
   // --- Generation Carousel Logic ---
-  // Split generations into playable and failed/error buckets.
+  // Split generations into playable (≥1 valid clip) and failed (0 clips)
   const { playableGenerations, failedGenerations } = useMemo(() => {
     const playable: any[] = [];
     const failed: any[] = [];
 
     for (const gen of videoGenerations) {
-      const status = String(gen.generation_status || '').toLowerCase();
-      const isFailedStatus = status === 'failed' || status === 'error' || status === 'lipsync_failed' || status === 'retrieval_failed';
-
       const clips = gen.video_data?.scene_videos || [];
       const validClips = clips.filter((sv: any) => sv && sv.video_url);
-      const hasPlayableMedia = validClips.length > 0 || Boolean(gen.video_url);
-
-      if (isFailedStatus) {
-        failed.push(gen);
-      } else if (hasPlayableMedia) {
+      // Playable if it has valid clips OR a top-level video URL (e.g. legacy/merged)
+      if (validClips.length > 0 || gen.video_url) {
         playable.push(gen);
       } else {
         failed.push(gen);
@@ -446,8 +428,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
   // But the user requested strict filtering.
   const filteredFailedGenerations = useMemo(() => {
     if (!selectedScene) return failedGenerations;
-    const matched = failedGenerations.filter((gen: any) => generationMatchesScene(gen, selectedScene));
-    return matched.length > 0 ? matched : failedGenerations;
+     return failedGenerations.filter((gen: any) => generationMatchesScene(gen, selectedScene));
   }, [failedGenerations, selectedScene, generationMatchesScene]);
 
   // Extract scene videos from selected generation
@@ -591,11 +572,8 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
                     )}
                  </div>
                  <div className="w-full flex justify-between items-center">
-                    <span
-                      className={`text-xs font-medium truncate max-w-[7rem] ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`}
-                      title={screenplayHeadingByScene[scene.sceneNumber] || `Scene ${scene.sceneNumber}`}
-                    >
-                      {screenplayHeadingByScene[scene.sceneNumber] || `Scene ${scene.sceneNumber}`}
+                    <span className={`text-xs font-medium ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                      Scene {scene.sceneNumber}
                     </span>
                     <span className="text-[10px] text-gray-500">
                       {scene.duration}s

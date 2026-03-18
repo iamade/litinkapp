@@ -6,7 +6,9 @@ import {
   Download,
   RefreshCw,
   Film,
-  Monitor
+  Monitor,
+  ImageIcon,
+  ArrowRight
 } from 'lucide-react';
 import { useVideoProduction } from '../../hooks/useVideoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
@@ -16,8 +18,6 @@ import VideoPreview from './VideoPreview';
 import RenderingProgress from './RenderingProgress';
 import type { VideoScene } from '../../types/videoProduction';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
-import { projectService } from '../../services/projectService';
-import { userService } from '../../services/userService';
 
 interface SceneDescription {
   scene_number: number;
@@ -71,6 +71,7 @@ interface VideoProductionPanelProps {
   generatingShotIds?: Set<string>; // Shot IDs currently being generated
   generationProgress?: GenerationProgress; // Progress data from polling
   onDeleteGeneration?: (genId: string) => void; // Callback to delete a failed generation
+  onTabChange?: (tab: string) => void;
 }
 
 const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
@@ -86,7 +87,8 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   selectedScript,
   generatingShotIds = new Set(),
   generationProgress,
-  onDeleteGeneration
+  onDeleteGeneration,
+  onTabChange
 }) => {
   const {
     selectedScriptId,
@@ -94,226 +96,23 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   } = useScriptSelection();
 
   const storyboardContext = useStoryboardOptional();
-  const [fallbackSceneData, setFallbackSceneData] = useState<Array<{
-    url: string;
-    sceneNumber: number;
-    shotType: 'key_scene' | 'suggested_shot';
-    shotIndex: number;
-    imageId?: string;
-    sceneHeading?: string;
-  }>>([]);
-  const [fallbackSelectedScript, setFallbackSelectedScript] = useState<ChapterScript | null>(null);
-
-  const getSceneHeading = (scene: any, sceneNumber: number): string => {
-    if (!scene) return `Scene ${sceneNumber}`;
-
-    const location = typeof scene.location === 'string' ? scene.location.trim() : '';
-    const timeOfDay = typeof scene.time_of_day === 'string' ? scene.time_of_day.trim() : '';
-    if (location && timeOfDay) {
-      return location.includes(' - ') ? location : `${location} - ${timeOfDay}`;
-    }
-    if (location) return location;
-
-    const visual = typeof scene.visual_description === 'string' ? scene.visual_description.trim() : '';
-    return visual ? visual.slice(0, 60) : `Scene ${sceneNumber}`;
-  };
-  const [fallbackAudioCountByShot, setFallbackAudioCountByShot] = useState<Record<string, number>>({});
-
-
-  useEffect(() => {
-    if (!chapterId || !selectedScriptId) {
-      setFallbackSceneData([]);
-      setFallbackSelectedScript(null);
-      return;
-    }
-
-    let cancelled = false;
-    const loadImageData = async () => {
-      try {
-        const [imagesResponse, storyboardConfig, scriptDetails] = await Promise.all([
-          userService.getChapterImages(chapterId),
-          projectService.getStoryboardConfig(chapterId, selectedScriptId).catch(() => ({ key_scene_images: {}, deselected_images: [], image_order: {} })),
-          userService.getScriptDetails(selectedScriptId).catch(() => null),
-        ]);
-        if (cancelled) return;
-
-        setFallbackSelectedScript((scriptDetails as ChapterScript | null) || null);
-
-        const keySceneImageIds = new Set(Object.values(storyboardConfig?.key_scene_images || {}).filter(Boolean));
-        const deselectedImageIds = new Set(storyboardConfig?.deselected_images || []);
-        const imageOrder = storyboardConfig?.image_order || {};
-
-        const sceneDescriptions = (scriptDetails as any)?.scene_descriptions || [];
-        const sceneHeadingByNumber = new Map<number, string>();
-        if (Array.isArray(sceneDescriptions)) {
-          sceneDescriptions.forEach((scene: any, idx: number) => {
-            const sceneNumber = Number(scene?.scene_number ?? idx + 1);
-            sceneHeadingByNumber.set(sceneNumber, getSceneHeading(scene, sceneNumber));
-          });
-        }
-
-        const allImages = Array.isArray((imagesResponse as any)?.images) ? (imagesResponse as any).images : [];
-        const filtered = allImages.filter((img: any) => {
-          const scriptId = img.script_id ?? img.scriptId ?? null;
-          const imageId = img.id;
-          return Boolean(img.image_url) && scriptId === selectedScriptId && !(imageId && deselectedImageIds.has(imageId));
-        });
-
-        const grouped: Record<number, any[]> = {};
-        filtered.forEach((img: any) => {
-          const metadata = img.metadata || {};
-          const sceneNumber = Number(img.scene_number ?? metadata.scene_number ?? 0);
-          if (!Number.isFinite(sceneNumber) || sceneNumber < 1) return;
-          if (!grouped[sceneNumber]) grouped[sceneNumber] = [];
-          grouped[sceneNumber].push(img);
-        });
-
-        const normalized: Array<{
-          url: string;
-          sceneNumber: number;
-          shotType: 'key_scene' | 'suggested_shot';
-          shotIndex: number;
-          imageId?: string;
-          sceneHeading?: string;
-        }> = [];
-
-        Object.entries(grouped)
-          .sort(([a], [b]) => Number(a) - Number(b))
-          .forEach(([sceneNumStr, images]) => {
-            const sceneNumber = Number(sceneNumStr);
-            const orderedIds = imageOrder[sceneNumStr] || [];
-            const sortedImages = orderedIds.length > 0
-              ? [...images].sort((a, b) => {
-                  const aIdx = orderedIds.indexOf(a.id);
-                  const bIdx = orderedIds.indexOf(b.id);
-                  return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
-                })
-              : [...images].sort((a, b) => {
-                  const aTime = a.created_at ? new Date(a.created_at).getTime() : 0;
-                  const bTime = b.created_at ? new Date(b.created_at).getTime() : 0;
-                  return bTime - aTime;
-                });
-
-            sortedImages.forEach((img: any, idx: number) => {
-              const metadata = img.metadata || {};
-              const rawShotIndex = img.shot_index ?? metadata.shot_index;
-              const shotIndex = Number.isFinite(Number(rawShotIndex)) ? Number(rawShotIndex) : idx;
-              const isKeyScene = img.id ? keySceneImageIds.has(img.id) : false;
-
-              normalized.push({
-                url: img.image_url,
-                sceneNumber,
-                shotType: isKeyScene ? 'key_scene' : 'suggested_shot',
-                shotIndex,
-                imageId: img.id,
-                sceneHeading: sceneHeadingByNumber.get(sceneNumber) || `Scene ${sceneNumber}`,
-              });
-            });
-          });
-
-        setFallbackSceneData(normalized);
-      } catch (error) {
-        if (!cancelled) {
-          setFallbackSceneData([]);
-          setFallbackSelectedScript(null);
-        }
-      }
-    };
-
-    loadImageData();
-    return () => {
-      cancelled = true;
-    };
-  }, [chapterId, selectedScriptId]);
-  useEffect(() => {
-    if (!chapterId || !selectedScriptId) {
-      setFallbackAudioCountByShot({});
-      return;
-    }
-
-    let cancelled = false;
-    const loadAudioData = async () => {
-      try {
-        const response = await userService.getChapterAudio(chapterId, selectedScriptId);
-        if (cancelled) return;
-
-        const audioFiles = Array.isArray((response as any)?.audio_files)
-          ? (response as any).audio_files
-          : Array.isArray(response)
-            ? response
-            : [];
-
-        const counts: Record<string, number> = {};
-
-        audioFiles.forEach((audio: any) => {
-          const metadata = audio.metadata || audio.audio_metadata || {};
-          const rawScene = metadata.scene ?? audio.scene_id ?? audio.scene_number;
-          let sceneNumber: number | undefined;
-          if (typeof rawScene === 'number') {
-            sceneNumber = Math.floor(rawScene);
-          } else if (typeof rawScene === 'string') {
-            const parsed = parseFloat(rawScene.replace(/^scene_/i, ''));
-            if (!isNaN(parsed)) sceneNumber = Math.floor(parsed);
-          }
-
-          if (!sceneNumber || sceneNumber < 1) return;
-
-          let shotIndex = metadata.shot_index;
-          if (typeof shotIndex !== 'number') {
-            shotIndex = 0;
-          }
-          const safeShotIndex = shotIndex >= 0 ? shotIndex : 0;
-          const key = `${sceneNumber}:${safeShotIndex}`;
-          counts[key] = (counts[key] || 0) + 1;
-        });
-
-        setFallbackAudioCountByShot(counts);
-      } catch (error) {
-        if (!cancelled) {
-          setFallbackAudioCountByShot({});
-        }
-      }
-    };
-
-    loadAudioData();
-    return () => {
-      cancelled = true;
-    };
-  }, [chapterId, selectedScriptId]);
   
   // Build scene metadata from storyboard including shotType
   // Returns array of { url, sceneNumber, shotType, shotIndex } for proper scene initialization
   const filteredSceneData = React.useMemo(() => {
-    const activeScript = selectedScript || fallbackSelectedScript;
-    const sceneHeadingByNumber = new Map<number, string>();
-    const sceneDescriptions = activeScript?.scene_descriptions || [];
-
-    if (Array.isArray(sceneDescriptions)) {
-      sceneDescriptions.forEach((scene: any, idx: number) => {
-        const sceneNumber = Number(scene?.scene_number ?? idx + 1);
-        sceneHeadingByNumber.set(sceneNumber, getSceneHeading(scene, sceneNumber));
-      });
-    }
-
     if (!storyboardContext) {
-      if (fallbackSceneData.length > 0) {
-        return fallbackSceneData.map(scene => ({
-          ...scene,
-          sceneHeading: scene.sceneHeading || sceneHeadingByNumber.get(scene.sceneNumber) || `Scene ${scene.sceneNumber}`,
-        }));
-      }
-
+      // Fallback to simple URLs when no context
       return imageUrls.map((url, idx) => ({
         url,
         sceneNumber: idx + 1,
         shotType: 'key_scene' as const,
         shotIndex: 0,
-        sceneHeading: sceneHeadingByNumber.get(idx + 1) || `Scene ${idx + 1}`,
       }));
     }
-
+    
     const { sceneImagesMap, excludedImageIds, selectedSceneImages, imageOrderByScene } = storyboardContext;
-
+    
+    // If we have scene images map, use it to get all non-excluded images with metadata
     if (Object.keys(sceneImagesMap).length > 0) {
       const allIncludedScenes: Array<{
         url: string;
@@ -321,73 +120,65 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
         shotType: 'key_scene' | 'suggested_shot';
         shotIndex: number;
         imageId: string;
-        sceneHeading?: string;
       }> = [];
-
+      
+      // Sort by scene number and get all non-excluded images with their metadata
       Object.entries(sceneImagesMap)
-        .sort(([a], [b]) => parseInt(a, 10) - parseInt(b, 10))
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
         .forEach(([sceneNumStr, images]) => {
-          const sceneNumber = parseInt(sceneNumStr, 10);
+          const sceneNumber = parseInt(sceneNumStr);
           const sceneOrder = imageOrderByScene[sceneNumber] || [];
-
+          
+          // Sort images by their position in imageOrderByScene if available
           const sortedImages = sceneOrder.length > 0
             ? [...images].sort((a, b) => {
                 const aIndex = sceneOrder.indexOf(a.id);
                 const bIndex = sceneOrder.indexOf(b.id);
+                // If not in order array, put at end
                 return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
               })
             : images;
-
+          
           sortedImages.forEach((img, idx) => {
+            // Include image if it's not in excluded list
             if (!excludedImageIds.has(img.id) && img.url) {
               allIncludedScenes.push({
                 url: img.url,
                 sceneNumber,
                 shotType: img.shotType || 'key_scene',
-                shotIndex: (img.shotIndex !== undefined) ? img.shotIndex : idx,
+                shotIndex: (img.shotIndex !== undefined) ? img.shotIndex : idx,  // Use metadata shotIndex if available, else position
                 imageId: img.id,
-                sceneHeading: sceneHeadingByNumber.get(sceneNumber) || `Scene ${sceneNumber}`,
               });
             }
           });
         });
-
+      
       if (allIncludedScenes.length > 0) {
         return allIncludedScenes;
       }
     }
-
-    if (fallbackSceneData.length > 0) {
-      return fallbackSceneData.map(scene => ({
-        ...scene,
-        sceneHeading: scene.sceneHeading || sceneHeadingByNumber.get(scene.sceneNumber) || `Scene ${scene.sceneNumber}`,
-      }));
-    }
-
+    
+    // Fallback: If we only have selectedSceneImages, use those as key scenes
     if (Object.keys(selectedSceneImages).length > 0) {
       return Object.entries(selectedSceneImages)
-        .sort(([a], [b]) => parseInt(a, 10) - parseInt(b, 10))
+        .sort(([a], [b]) => parseInt(a) - parseInt(b))
         .filter(([, url]) => url)
-        .map(([sceneNumStr, url]) => {
-          const sceneNumber = parseInt(sceneNumStr, 10);
-          return {
-            url,
-            sceneNumber,
-            shotType: 'key_scene' as const,
-            shotIndex: 0,
-            sceneHeading: sceneHeadingByNumber.get(sceneNumber) || `Scene ${sceneNumber}`,
-          };
-        });
+        .map(([sceneNumStr, url]) => ({
+          url,
+          sceneNumber: parseInt(sceneNumStr),
+          shotType: 'key_scene' as const,
+          shotIndex: 0,
+        }));
     }
-
+    
+    // Otherwise, return all images as key scenes
     return imageUrls.map((url, idx) => ({
       url,
       sceneNumber: idx + 1,
       shotType: 'key_scene' as const,
       shotIndex: 0,
-      sceneHeading: sceneHeadingByNumber.get(idx + 1) || `Scene ${idx + 1}`,
     }));
-  }, [fallbackSceneData, fallbackSelectedScript, imageUrls, selectedScript, storyboardContext]);
+  }, [imageUrls, storyboardContext]);
 
   // Extract just URLs for useVideoProduction (backward compatible)
   const filteredImageUrls = React.useMemo(() => 
@@ -410,6 +201,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     updateEditorSettings,
     processWithFFmpeg,
     downloadVideo,
+    resetProductionState,
   } = useVideoProduction({
     chapterId,
     scriptId: selectedScriptId || undefined,
@@ -490,6 +282,24 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   const [selectedSceneIndex, setSelectedSceneIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
+
+  const storyboardSceneCount = React.useMemo(() => {
+    if (!storyboardContext) return 0;
+
+    const scenesFromContext = (storyboardContext as { scenes?: unknown[] }).scenes;
+    if (Array.isArray(scenesFromContext) && scenesFromContext.length > 0) {
+      return scenesFromContext.length;
+    }
+
+    const includedImagesCount = Object.values(storyboardContext.sceneImagesMap || {}).reduce((total, images) => (
+      total + images.filter(image => !storyboardContext.excludedImageIds.has(image.id)).length
+    ), 0);
+    const selectedImagesCount = Object.values(storyboardContext.selectedSceneImages || {}).filter(Boolean).length;
+
+    return Math.max(includedImagesCount, selectedImagesCount);
+  }, [storyboardContext]);
+
+  const showSetupGate = !storyboardContext || storyboardSceneCount === 0;
   
   const handleScenePreviewChange = React.useCallback((index: number) => {
     setSelectedSceneIndex(index);
@@ -510,7 +320,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   // Delay scene initialization until script switch completes
   // Uses filteredImageUrls from Images tab storyboard (not Audio tab)
   useEffect(() => {
-    if (selectedScriptId && !scenes.length && filteredImageUrls.length && !isSwitching) {
+    if (selectedScriptId && !showSetupGate && !scenes.length && filteredImageUrls.length && !isSwitching) {
       const timeoutId = window.setTimeout(() => {
         if (!isSwitching) {
           console.log(`[VideoProductionPanel] Initializing scenes with ${filteredImageUrls.length} images from Images tab storyboard`);
@@ -520,13 +330,45 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
       return () => window.clearTimeout(timeoutId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedScriptId, filteredImageUrls.length, scenes.length, isSwitching]);
+  }, [selectedScriptId, showSetupGate, filteredImageUrls.length, scenes.length, isSwitching]);
+
+  useEffect(() => {
+    setActiveView('timeline');
+    setSelectedSceneIndex(0);
+    setIsPlaying(false);
+    setSelectedShotIds([]);
+    resetProductionState();
+  }, [selectedScriptId, resetProductionState]);
 
   // Guarded empty state for no selected script
   if (!selectedScriptId) {
     return (
       <div className="p-4 text-sm text-gray-500">
         Select a script to manage video production.
+      </div>
+    );
+  }
+
+  if (showSetupGate) {
+    return (
+      <div className="bg-gray-900/40 border border-gray-700 rounded-xl p-8">
+        <div className="max-w-lg mx-auto text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-800 border border-gray-700">
+            <ImageIcon className="w-6 h-6 text-blue-400" />
+          </div>
+          <h3 className="text-xl font-semibold text-gray-100 mb-2">Setup Required</h3>
+          <p className="text-sm text-gray-400 mb-6">
+            Video production requires your storyboard selections from the Images tab and audio from the Audio tab. Please complete those steps first.
+          </p>
+          <button
+            onClick={() => onTabChange?.('images')}
+            disabled={!onTabChange}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            <span>Go to Images Tab</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
     );
   }
@@ -709,12 +551,11 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
                 onSceneUpdate={updateScene}
                 onReorder={reorderScenes}
                 onAddTransition={addTransition}
-                selectedScript={selectedScript || fallbackSelectedScript}
+                selectedScript={selectedScript}
                 selectedShotIds={selectedShotIds}
                 onToggleShotSelection={toggleShotSelection}
                 generatingShotIds={generatingShotIds}
                 onGenerateVideo={onGenerateVideo}
-                audioCountByShot={fallbackAudioCountByShot}
               />
             </div>
           )}
@@ -728,7 +569,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               onSceneChange={handleScenePreviewChange}
               videoUrl={videoUrl}
               videoGenerations={videoGenerations}
-              selectedScript={selectedScript || fallbackSelectedScript}
+              selectedScript={selectedScript}
               selectedScene={enrichedScenes[selectedSceneIndex] || null}
               onDeleteGeneration={onDeleteGeneration}
             />

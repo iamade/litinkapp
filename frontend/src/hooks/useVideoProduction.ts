@@ -322,6 +322,13 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
     loadVideoProduction();
   }, [loadVideoProduction]);
 
+  const resetProductionState = useCallback(() => {
+    setVideoProduction(null);
+    setScenes([]);
+    setIsRendering(false);
+    setRenderingProgress(0);
+  }, []);
+
   return {
     videoProduction,
     scenes,
@@ -340,6 +347,7 @@ export function useVideoProductionWithParams(params: UseVideoProductionParams) {
     saveProduction,
     startPipeline,
     renderVideo,
-    refetch
+    refetch,
+    resetProductionState
   };
 }
