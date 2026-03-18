@@ -555,6 +555,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     Object.entries(syncData).forEach(([sceneNum, images]) => {
       storyboardContext.setSceneImages(parseInt(sceneNum), images);
     });
+
+    storyboardContext.setCurrentScriptId?.(selectedScriptId);
     
     // Sync excluded images
     storyboardContext.importFromAudioPanel({

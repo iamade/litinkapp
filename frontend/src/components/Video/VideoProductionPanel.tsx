@@ -299,7 +299,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     return Math.max(includedImagesCount, selectedImagesCount);
   }, [storyboardContext]);
 
-  const showSetupGate = !storyboardContext || storyboardSceneCount === 0;
+  const showSetupGate = !storyboardContext || storyboardSceneCount === 0 || (storyboardContext.currentScriptId !== null && storyboardContext.currentScriptId !== selectedScriptId);
   
   const handleScenePreviewChange = React.useCallback((index: number) => {
     setSelectedSceneIndex(index);

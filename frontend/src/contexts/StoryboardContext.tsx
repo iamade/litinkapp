@@ -47,6 +47,9 @@ interface StoryboardState {
   
   // Image order for each scene
   imageOrderByScene: Record<number, string[]>;
+
+  // Script ID that the storyboard data currently belongs to
+  currentScriptId: string | null;
 }
 
 interface StoryboardContextValue extends StoryboardState {
@@ -57,6 +60,7 @@ interface StoryboardContextValue extends StoryboardState {
   setSceneAudio: (sceneNumber: number, audioFiles: AudioFile[]) => void;
   setSceneImages: (sceneNumber: number, images: SceneImage[]) => void;
   setImageOrder: (sceneNumber: number, imageIds: string[]) => void;
+  setCurrentScriptId: (scriptId: string | null) => void;
   
   // Audio Assignment Actions
   assignAudioToShot: (audioId: string, sceneNumber: number, shotIndex: number) => void;
@@ -88,6 +92,7 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
   const [sceneAudioMap, setSceneAudioMap] = useState<Record<number, AudioFile[]>>({});
   const [sceneImagesMap, setSceneImagesMap] = useState<Record<number, SceneImage[]>>({});
   const [imageOrderByScene, setImageOrderBySceneState] = useState<Record<number, string[]>>({});
+  const [currentScriptId, setCurrentScriptId] = useState<string | null>(null);
   
   const [audioAssignments, setAudioAssignments] = useState<Record<string, { sceneNumber: number; shotIndex: number }>>({});
   const [selectedAudioIds, setSelectedAudioIds] = useState<Set<string>>(new Set());
@@ -239,6 +244,7 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
     setImageOrderBySceneState({});
     setAudioAssignments({});
     setSelectedAudioIds(new Set());
+    setCurrentScriptId(null);
   }, []);
 
   const importFromAudioPanel = useCallback((data: Partial<StoryboardState>) => {
@@ -249,6 +255,7 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
     if (data.imageOrderByScene) setImageOrderBySceneState(data.imageOrderByScene);
     if (data.audioAssignments) setAudioAssignments(data.audioAssignments);
     if (data.selectedAudioIds) setSelectedAudioIds(data.selectedAudioIds);
+    if (data.currentScriptId !== undefined) setCurrentScriptId(data.currentScriptId);
   }, []);
 
   const value = useMemo<StoryboardContextValue>(() => ({
@@ -257,6 +264,7 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
     sceneAudioMap,
     sceneImagesMap,
     imageOrderByScene,
+    currentScriptId,
     audioAssignments,
     selectedAudioIds,
     setSelectedSceneImage,
@@ -265,6 +273,7 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
     setSceneAudio,
     setSceneImages,
     setImageOrder,
+    setCurrentScriptId,
     assignAudioToShot,
     unassignAudio,
     selectAudio,
@@ -284,6 +293,7 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
     sceneAudioMap,
     sceneImagesMap,
     imageOrderByScene,
+    currentScriptId,
     audioAssignments,
     selectedAudioIds,
     setSelectedSceneImage,
@@ -292,6 +302,7 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
     setSceneAudio,
     setSceneImages,
     setImageOrder,
+    setCurrentScriptId,
     assignAudioToShot,
     unassignAudio,
     selectAudio,
