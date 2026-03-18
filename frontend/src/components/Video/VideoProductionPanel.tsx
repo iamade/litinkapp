@@ -277,6 +277,29 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   const [selectedSceneIndex, setSelectedSceneIndex] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
+  const hasInitializedRef = React.useRef<string | null>(null); // tracks scriptId that was initialized
+  const prevScriptIdRef = React.useRef<string | undefined>(selectedScriptId);
+  const scenesRef = React.useRef(scenes); // mirror scenes to ref for non-reactive reads
+  scenesRef.current = scenes;
+  const lastImageCountRef = React.useRef(0); // tracks image count stability
+
+  const storyboardSceneCount = React.useMemo(() => {
+    if (!storyboardContext) return 0;
+
+    const scenesFromContext = (storyboardContext as { scenes?: unknown[] }).scenes;
+    if (Array.isArray(scenesFromContext) && scenesFromContext.length > 0) {
+      return scenesFromContext.length;
+    }
+
+    const includedImagesCount = Object.values(storyboardContext.sceneImagesMap || {}).reduce((total, images) => (
+      total + images.filter(image => !storyboardContext.excludedImageIds.has(image.id)).length
+    ), 0);
+    const selectedImagesCount = Object.values(storyboardContext.selectedSceneImages || {}).filter(Boolean).length;
+
+    return Math.max(includedImagesCount, selectedImagesCount);
+  }, [storyboardContext]);
+
+  const showSetupGate = !storyboardContext || storyboardSceneCount === 0 || (storyboardContext.currentScriptId !== null && storyboardContext.currentScriptId !== selectedScriptId);
   
   const handleScenePreviewChange = React.useCallback((index: number) => {
     setSelectedSceneIndex(index);
@@ -294,20 +317,53 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   // Disable actions during switching or loading
   const controlsDisabled = isSwitching || isLoading;
 
-  // Delay scene initialization until script switch completes
-  // Uses filteredImageUrls from Images tab storyboard (not Audio tab)
+  // Reset UI state when script changes
   useEffect(() => {
-    if (selectedScriptId && !scenes.length && filteredImageUrls.length && !isSwitching) {
-      const timeoutId = window.setTimeout(() => {
-        if (!isSwitching) {
-          console.log(`[VideoProductionPanel] Initializing scenes with ${filteredImageUrls.length} images from Images tab storyboard`);
-          initializeScenes();
-        }
-      }, 100);
-      return () => window.clearTimeout(timeoutId);
+    if (prevScriptIdRef.current !== selectedScriptId) {
+      prevScriptIdRef.current = selectedScriptId;
+      setActiveView('timeline');
+      setSelectedSceneIndex(0);
+      setIsPlaying(false);
+      setSelectedShotIds([]);
+      hasInitializedRef.current = null; // allow init for new script
+      resetProductionState();
     }
+  }, [selectedScriptId, resetProductionState]);
+
+  // Auto-initialize scenes once storyboard images have fully stabilized.
+  // Strategy: track image count across renders. Only fire when the count
+  // has stayed the same for two consecutive effect runs AND at least 600ms
+  // has passed since the last count change.
+  useEffect(() => {
+    if (!selectedScriptId || showSetupGate || isSwitching || !filteredImageUrls.length) {
+      lastImageCountRef.current = 0;
+      return;
+    }
+    if (hasInitializedRef.current === selectedScriptId) return;
+
+    const currentCount = filteredImageUrls.length;
+    const countChanged = currentCount !== lastImageCountRef.current;
+    lastImageCountRef.current = currentCount;
+
+    // If count just changed, don't init — wait for it to settle
+    if (countChanged) return;
+
+    // Count is same as last render — start stability timer
+    const timeoutId = window.setTimeout(() => {
+      if (hasInitializedRef.current === selectedScriptId) return;
+      if (isSwitching) return;
+      if (scenesRef.current.length > 0) return;
+      // Final check: count still matches
+      if (filteredImageUrls.length !== lastImageCountRef.current) return;
+
+      // Scene initialization stable — proceeding
+      hasInitializedRef.current = selectedScriptId;
+      initializeScenes();
+    }, 600);
+
+    return () => window.clearTimeout(timeoutId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedScriptId, filteredImageUrls.length, scenes.length, isSwitching]);
+  }, [selectedScriptId, showSetupGate, filteredImageUrls.length, isSwitching]);
 
   // Guarded empty state for no selected script
   if (!selectedScriptId) {
