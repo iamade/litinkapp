@@ -67,6 +67,9 @@ from app.core.services.pipeline import PipelineManager, PipelineStep
 # from app.core.services.deepseek_script import DeepSeekScriptService
 from app.core.services.openrouter import OpenRouterService, ModelTier
 from app.api.services.subscription import SubscriptionManager
+from app.credits.dependencies import require_credits
+from app.credits.constants import OperationType, TEXT_GEN, SCRIPT_GEN, IMAGE_GEN
+from app.credits.service import CreditService
 
 
 def parse_scene_descriptions(analysis_result: str) -> list:
@@ -392,6 +395,7 @@ async def generate_text(
     request: AIRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
 ):
     """Generate text using AI service"""
     ai_service = AIService()
@@ -400,6 +404,9 @@ async def generate_text(
     book_type = request.context if request.context else "learning"
     difficulty = "medium"
     response = await ai_service.generate_chapter_content(content, book_type, difficulty)
+    credit_service = CreditService(session)
+    await credit_service.confirm_deduction(reservation_id, TEXT_GEN)
+    await session.commit()
     return AIResponse(text=str(response))
 
 
@@ -421,6 +428,7 @@ async def generate_voice(
     voice_id: str = "21m00Tcm4TlvDq8ikWAM",
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VOICE_GEN, 1)),
 ):
     """Generate voice using ElevenLabs service"""
     elevenlabs_service = ElevenLabsService()
@@ -430,6 +438,9 @@ async def generate_voice(
     if result.get("error"):
         raise HTTPException(status_code=500, detail=result["error"])
 
+    credit_service = CreditService(session)
+    await credit_service.confirm_deduction(reservation_id, 1)
+    await session.commit()
     return {"voice_url": result.get("audio_url")}
 
 
@@ -438,6 +449,7 @@ async def generate_emotional_map(
     request: EmotionalMapRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.EMOTIONAL_MAP, SCRIPT_GEN)),
 ):
     """Generate cinematic emotional map for script dialogues"""
     ai_service = AIService()
@@ -475,6 +487,9 @@ async def generate_emotional_map(
         except Exception as e:
             print(f"Error saving emotional map to DB: {e}")
 
+    credit_service = CreditService(session)
+    await credit_service.confirm_deduction(reservation_id, SCRIPT_GEN)
+    await session.commit()
     return EmotionalMapResponse(entries=validated_entries)
 
 
@@ -511,6 +526,7 @@ async def expand_script(
     request: ScriptExpansionRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.EXPAND_SCRIPT, SCRIPT_GEN)),
 ):
     """
     Expand script/story content using AI.
@@ -629,6 +645,9 @@ async def expand_script(
             except Exception as e:
                 print(f"Error saving expanded content to script: {e}")
 
+        credit_service = CreditService(session)
+        await credit_service.confirm_deduction(reservation_id, SCRIPT_GEN)
+        await session.commit()
         return ScriptExpansionResponse(
             expanded_content=expanded_content,
             original_length=original_length,
@@ -744,6 +763,7 @@ async def generate_entertainment_video(
     # request: dict = Body(...),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VIDEO_GEN, SCRIPT_GEN)),
 ):
     """Generate entertainment video using already saved script"""
     try:
@@ -789,6 +809,7 @@ async def generate_entertainment_video(
         if request.selected_audio_ids:
             task_meta["selected_audio_ids"] = request.selected_audio_ids
         task_meta["script_id"] = str(script_data.id)
+        task_meta["credit_reservation_id"] = str(reservation_id)
 
         video_generation = VideoGeneration(
             chapter_id=chapter_id,

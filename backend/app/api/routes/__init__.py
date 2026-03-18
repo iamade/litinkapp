@@ -17,6 +17,7 @@ from .image_generations import router as image_generations_router
 from .admin import router as admin_router
 from .user_profile.onboarding import router as onboarding_router
 from app.promo.routes import router as promo_router
+from app.credits.routes import router as credits_router
 
 api_router = APIRouter()
 
@@ -49,3 +50,4 @@ from .projects import router as projects_router
 api_router.include_router(projects_router, prefix="/projects", tags=["projects"])
 api_router.include_router(onboarding_router)
 api_router.include_router(promo_router, tags=["promo"])
+api_router.include_router(credits_router, tags=["credits"])
