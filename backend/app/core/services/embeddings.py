@@ -1,4 +1,6 @@
 import openai
+from google import genai
+from google.genai import types as genai_types
 from typing import List, Dict, Any, Optional
 import numpy as np
 from sqlmodel import select, delete, col
@@ -20,19 +22,38 @@ class EmbeddingsService:
         self.session = session
         self.client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
         self.embedding_model = "text-embedding-3-small"  # 1536 dimensions
+        self.google_api_key = settings.GOOGLE_AI_STUDIO_API_KEY or None
+        if self.google_api_key:
+            self.google_client = genai.Client(api_key=self.google_api_key)
+        else:
+            self.google_client = None
 
     async def generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for a text using OpenAI"""
-        try:
-            # Sanitize text before sending to OpenAI
-            sanitized_text = TextSanitizer.sanitize_for_openai(text)
+        """Generate embedding using Google text-embedding-004 (primary) with OpenAI fallback"""
+        sanitized_text = TextSanitizer.sanitize_for_openai(text)
 
+        # Try Google first (generous free tier limits)
+        if self.google_client:
+            try:
+                result = self.google_client.models.embed_content(
+                    model="text-embedding-004",
+                    contents=sanitized_text,
+                    config=genai_types.EmbedContentConfig(output_dimensionality=1536),
+                )
+                logger.debug("Embedding generated via Google text-embedding-004")
+                return result.embeddings[0].values
+            except Exception as e:
+                logger.warning(f"Google embedding failed, falling back to OpenAI: {e}")
+
+        # Fallback to OpenAI
+        try:
             response = self.client.embeddings.create(
                 model=self.embedding_model, input=sanitized_text
             )
+            logger.debug("Embedding generated via OpenAI text-embedding-3-small")
             return response.data[0].embedding
         except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
+            logger.error(f"Both embedding providers failed: {e}")
             raise
 
     async def chunk_text(
