@@ -26,9 +26,13 @@ function emitInsufficientCreditsIfNeeded(
 ) {
   if (status !== 402) return;
 
+  // Backend sends {detail: {message, balance, required}} via FastAPI's HTTPException
+  const detail = errorData.detail;
+  const detailObj = typeof detail === "object" && detail !== null ? detail as Record<string, unknown> : {};
+
   dispatchInsufficientCredits({
-    balance: Number(errorData.balance ?? 0),
-    required: Number(errorData.required ?? 0),
+    balance: Number(detailObj.balance ?? errorData.balance ?? 0),
+    required: Number(detailObj.required ?? errorData.required ?? 0),
     detail: getErrorMessage(errorData),
     endpoint,
   });
