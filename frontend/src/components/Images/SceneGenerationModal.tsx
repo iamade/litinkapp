@@ -491,7 +491,7 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
               px-6 py-2 rounded-lg text-sm font-medium text-white shadow-lg shadow-indigo-500/20 
               transition-all flex items-center gap-2
               ${isGenerating || insufficientCreditsMessage
-                ? 'bg-indigo-500/50 cursor-not-allowed' 
+                ? 'bg-gray-600 text-gray-300 opacity-60 cursor-not-allowed' 
                 : 'bg-indigo-600 hover:bg-indigo-500 hover:scale-[1.02] active:scale-[0.98]'}
             `}
           >

@@ -84,17 +84,21 @@ class CreditService:
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(hours=RESERVATION_TTL_HOURS)
 
-        # Lock active grants to prevent concurrent over-commitment
+        # Lock active grant rows to prevent concurrent over-commitment
+        # Note: FOR UPDATE cannot be used with aggregate functions in PostgreSQL,
+        # so we lock the rows first, then sum separately
         lock_stmt = text("""
-            SELECT COALESCE(SUM(credits_remaining), 0) AS raw
+            SELECT id, credits_remaining
             FROM credit_grants
             WHERE user_id = :user_id
               AND expires_at > NOW()
               AND credits_remaining > 0
+            ORDER BY id
             FOR UPDATE
         """)
         lock_result = await self.session.execute(lock_stmt, {"user_id": str(user_id)})
-        raw_balance = int(lock_result.scalar() or 0)
+        locked_rows = lock_result.fetchall()
+        raw_balance = sum(row[1] for row in locked_rows)
 
         # Also fetch current pending reservation total (without locking transactions table)
         pending = await self.get_pending_reservations(user_id)
