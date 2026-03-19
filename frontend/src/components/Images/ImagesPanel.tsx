@@ -1527,7 +1527,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
               onClick={handleGenerateAllScenes}
               title={creditBalance < allScenesEstimatedCost ? getInsufficientCreditsTooltip(creditBalance, allScenesEstimatedCost) : undefined}
               disabled={!scenes.length || generatingScenes.size > 0 || creditBalance < allScenesEstimatedCost}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600"
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:text-gray-500 dark:disabled:text-gray-300 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Wand2 className="w-4 h-4" />
               <span>Generate All Scenes ({allScenesEstimatedCost} cr)</span>

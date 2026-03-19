@@ -488,7 +488,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           <button
             onClick={handleGenerateScript}
             disabled={isGeneratingScript || !hasScriptCredits}
-            className="flex items-center space-x-2 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 disabled:cursor-not-allowed"
+            className="flex items-center space-x-2 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:text-gray-500 dark:disabled:text-gray-300 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {isGeneratingScript ? (
               <>
