@@ -402,15 +402,12 @@ async def generate_text(
 ):
     """Generate text using AI service"""
     ai_service = AIService()
-    # Map prompt to content, context to book_type, and use a default difficulty
-    content = request.prompt
-    book_type = request.context if request.context else "learning"
-    difficulty = "medium"
-    response = await ai_service.generate_chapter_content(content, book_type, difficulty)
     credit_service = CreditService(session)
-    await credit_service.confirm_deduction(reservation_id, TEXT_GEN)
-    await session.commit()
-    return AIResponse(text=str(response))
+    async with credit_service.credit_transaction(reservation_id, TEXT_GEN):
+        content = request.prompt
+        book_type = request.context if request.context else "learning"
+        response = await ai_service.generate_chapter_content(content, book_type, "medium")
+        return AIResponse(text=str(response))
 
 
 @router.post("/generate-quiz")
@@ -435,16 +432,12 @@ async def generate_voice(
 ):
     """Generate voice using ElevenLabs service"""
     elevenlabs_service = ElevenLabsService()
-    # Use generate_enhanced_speech which returns a dict with audio_url
-    result = await elevenlabs_service.generate_enhanced_speech(text, voice_id)
-
-    if result.get("error"):
-        raise HTTPException(status_code=500, detail=result["error"])
-
     credit_service = CreditService(session)
-    await credit_service.confirm_deduction(reservation_id, VOICE_GEN)
-    await session.commit()
-    return {"voice_url": result.get("audio_url")}
+    async with credit_service.credit_transaction(reservation_id, VOICE_GEN):
+        result = await elevenlabs_service.generate_enhanced_speech(text, voice_id)
+        if result.get("error"):
+            raise HTTPException(status_code=500, detail=result["error"])
+        return {"voice_url": result.get("audio_url")}
 
 
 @router.post("/generate-emotional-map", response_model=EmotionalMapResponse)
@@ -456,44 +449,40 @@ async def generate_emotional_map(
 ):
     """Generate cinematic emotional map for script dialogues"""
     ai_service = AIService()
-    entries = await ai_service.generate_emotional_map(
-        request.script_content, request.characters
-    )
-
-    # Validation/Conversion to Schema model
-    validated_entries = []
-    for entry in entries:
-        # Generate a fake ID if missing (though service handles it, safety first)
-        if "line_id" not in entry:
-            entry["line_id"] = str(uuid.uuid4())
-
-        validated_entries.append(EmotionalMapEntry(**entry))
-
-    # Save to database if script_id provided
-    if request.script_id:
-        try:
-            statement = select(Script).where(Script.id == request.script_id)
-            result = await session.exec(statement)
-            script_record = result.first()
-
-            if script_record:
-                # Ensure we are saving a list of dicts (JSON serializable)
-                script_record.emotional_map = [
-                    entry.dict() for entry in validated_entries
-                ]
-                session.add(script_record)
-                await session.commit()
-            else:
-                print(
-                    f"Warning: Script {request.script_id} not found, could not save emotional map."
-                )
-        except Exception as e:
-            print(f"Error saving emotional map to DB: {e}")
-
     credit_service = CreditService(session)
-    await credit_service.confirm_deduction(reservation_id, EMOTIONAL_MAP)
-    await session.commit()
-    return EmotionalMapResponse(entries=validated_entries)
+    async with credit_service.credit_transaction(reservation_id, EMOTIONAL_MAP):
+        entries = await ai_service.generate_emotional_map(
+            request.script_content, request.characters
+        )
+
+        # Validation/Conversion to Schema model
+        validated_entries = []
+        for entry in entries:
+            if "line_id" not in entry:
+                entry["line_id"] = str(uuid.uuid4())
+            validated_entries.append(EmotionalMapEntry(**entry))
+
+        # Save to database if script_id provided
+        if request.script_id:
+            try:
+                statement = select(Script).where(Script.id == request.script_id)
+                result = await session.exec(statement)
+                script_record = result.first()
+
+                if script_record:
+                    script_record.emotional_map = [
+                        entry.dict() for entry in validated_entries
+                    ]
+                    session.add(script_record)
+                    await session.commit()
+                else:
+                    print(
+                        f"Warning: Script {request.script_id} not found, could not save emotional map."
+                    )
+            except Exception as e:
+                print(f"Error saving emotional map to DB: {e}")
+
+        return EmotionalMapResponse(entries=validated_entries)
 
 
 # Script expansion request/response models
@@ -541,7 +530,8 @@ async def expand_script(
 
     The expansion maintains consistency with the original tone and characters.
     """
-    try:
+    credit_service = CreditService(session)
+    async with credit_service.credit_transaction(reservation_id, EXPAND_SCRIPT):
         # Build the expansion prompt
         user_message_parts = []
 
@@ -648,9 +638,6 @@ async def expand_script(
             except Exception as e:
                 print(f"Error saving expanded content to script: {e}")
 
-        credit_service = CreditService(session)
-        await credit_service.confirm_deduction(reservation_id, EXPAND_SCRIPT)
-        await session.commit()
         return ScriptExpansionResponse(
             expanded_content=expanded_content,
             original_length=original_length,
@@ -658,14 +645,6 @@ async def expand_script(
             expansion_ratio=round(expansion_ratio, 2),
             saved=saved,
             message="Content expanded successfully" + (" and saved" if saved else ""),
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error in expand_script: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Error expanding content: {str(e)}"
         )
 
 
@@ -1164,6 +1143,13 @@ async def generate_entertainment_video(
         # )
 
     except Exception as e:
+        # Release the credit reservation if the endpoint fails before the task is queued
+        try:
+            credit_service = CreditService(session)
+            await credit_service.release_reservation(reservation_id)
+            await session.commit()
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -3892,7 +3878,8 @@ async def generate_script_and_scenes_with_gpt(
     reservation_id: uuid.UUID = Depends(require_credits(OperationType.SCRIPT_GEN, SCRIPT_GEN)),
 ):
     """Generate only the AI script and scene descriptions for a chapter (no video generation)"""
-    try:
+    credit_service = CreditService(session)
+    async with credit_service.credit_transaction(reservation_id, SCRIPT_GEN):
         # Extract from request body
         chapter_id = request.get("chapter_id")
         script_style = request.get("script_style", "cinematic_movie")
@@ -4055,11 +4042,6 @@ async def generate_script_and_scenes_with_gpt(
             print(f"Error auto-generating emotional map: {e}")
             validated_entries = []
 
-        # Confirm credit deduction on success
-        credit_service = CreditService(session)
-        await credit_service.confirm_deduction(reservation_id, SCRIPT_GEN)
-        await session.commit()
-
         return {
             "chapter_id": chapter_id,
             "script_id": script_id,
@@ -4071,23 +4053,6 @@ async def generate_script_and_scenes_with_gpt(
             "metadata": script_data["metadata"],
             "emotional_map": validated_entries,
         }
-    except HTTPException:
-        try:
-            credit_service = CreditService(session)
-            await credit_service.release_reservation(reservation_id)
-            await session.commit()
-        except Exception:
-            pass
-        raise
-    except Exception as e:
-        try:
-            credit_service = CreditService(session)
-            await credit_service.release_reservation(reservation_id)
-            await session.commit()
-        except Exception:
-            pass
-        print(f"Error generating script and scenes: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/save-script-and-scenes")
@@ -5498,7 +5463,8 @@ async def analyze_for_consultation(
         except Exception as e:
             return f"[Could not extract text: {str(e)}]"
 
-    try:
+    credit_service = CreditService(session)
+    async with credit_service.credit_transaction(reservation_id, TEXT_GEN):
         # Extract text from each uploaded file
         file_contents = []
         for file in files:
@@ -5506,7 +5472,6 @@ async def analyze_for_consultation(
                 content = await file.read()
                 await file.seek(0)
 
-                # Parse the document to extract text
                 text_content = await extract_text_from_file(
                     content, file.filename or "unknown"
                 )
@@ -5514,7 +5479,7 @@ async def analyze_for_consultation(
                 file_contents.append(
                     {
                         "filename": file.filename or "unknown",
-                        "content": text_content[:10000],  # Limit to first 10k chars
+                        "content": text_content[:10000],
                     }
                 )
             except Exception as e:
@@ -5529,12 +5494,10 @@ async def analyze_for_consultation(
         if not file_contents:
             raise HTTPException(status_code=400, detail="No files provided")
 
-        # Get user tier
         subscription_manager = SubscriptionManager(session)
         usage_check = await subscription_manager.check_usage_limits(current_user.id)
         user_tier = usage_check.get("tier", "free")
 
-        # Call consultation service
         consultation_service = ConsultationService(session)
         result = await consultation_service.generate_guided_analysis(
             file_contents=file_contents,
@@ -5542,35 +5505,7 @@ async def analyze_for_consultation(
             user_tier=user_tier,
         )
 
-        # Confirm credit deduction on success
-        credit_service = CreditService(session)
-        await credit_service.confirm_deduction(reservation_id, TEXT_GEN)
-        await session.commit()
-
         return result
-
-    except HTTPException:
-        try:
-            credit_service = CreditService(session)
-            await credit_service.release_reservation(reservation_id)
-            await session.commit()
-        except Exception:
-            pass
-        raise
-    except Exception as e:
-        try:
-            credit_service = CreditService(session)
-            await credit_service.release_reservation(reservation_id)
-            await session.commit()
-        except Exception:
-            pass
-        print(f"❌ Error in consultation analysis: {e}")
-        import traceback
-
-        print(f"🔍 Full traceback: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to analyze for consultation: {str(e)}"
-        )
 
 
 @router.post("/consultation/chat")

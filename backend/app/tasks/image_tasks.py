@@ -220,6 +220,7 @@ async def async_generate_all_images_for_video(video_generation_id: str):
                     video_style,
                     user_tier,
                     session,
+                    user_id=str(user_id),
                 )
 
             # 2. Generate scene images
@@ -235,6 +236,7 @@ async def async_generate_all_images_for_video(video_generation_id: str):
                     video_style,
                     user_tier,
                     session,
+                    user_id=str(user_id),
                 )
 
             # Compile results
@@ -382,6 +384,8 @@ async def generate_character_images_optimized(
     style: str = "realistic",
     user_tier: str = "free",
     session: AsyncSession = None,
+    user_id: Optional[str] = None,
+    credit_reservation_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Generate character images with optimizations"""
 
@@ -389,6 +393,7 @@ async def generate_character_images_optimized(
         f"[CHARACTER IMAGES OPTIMIZED] Generating images for {len(characters)} characters..."
     )
     character_results = []
+    _total_image_credits = 0  # accumulated when credit_reservation_id is provided
 
     for i, character in enumerate(characters):
         try:
@@ -451,20 +456,25 @@ async def generate_character_images_optimized(
                 await session.commit()
                 record_id = db_result.scalar()
 
-                # Deduct 1 credit per successfully generated image (idempotent)
-                try:
-                    from app.credits.service import CreditService
-                    from app.credits.constants import OperationType, IMAGE_GEN
-                    credit_svc = CreditService(session)
-                    await credit_svc.deduct_for_operation(
-                        user_id=_uuid.UUID(str(user_id)),
-                        amount=IMAGE_GEN,
-                        operation_type=OperationType.IMAGE_GEN,
-                        ref_id=f"image_gen:{record_id}",
-                    )
-                    await session.commit()
-                except Exception as credit_err:
-                    logger.warning("[CREDITS] Character image credit deduction failed: %s", credit_err)
+                # Deduct 1 credit per successfully generated image
+                if user_id:
+                    try:
+                        from app.credits.service import CreditService
+                        from app.credits.constants import OperationType, IMAGE_GEN
+                        if credit_reservation_id:
+                            # Accumulate; reservation will be confirmed after the loop
+                            _total_image_credits += IMAGE_GEN
+                        else:
+                            credit_svc = CreditService(session)
+                            await credit_svc.deduct_for_operation(
+                                user_id=_uuid.UUID(str(user_id)),
+                                amount=IMAGE_GEN,
+                                operation_type=OperationType.IMAGE_GEN,
+                                ref_id=f"image_gen:{record_id}",
+                            )
+                            await session.commit()
+                    except Exception as credit_err:
+                        logger.warning("[CREDITS] Character image credit deduction failed: %s", credit_err)
 
                 character_results.append(
                     {
@@ -523,6 +533,35 @@ async def generate_character_images_optimized(
                 {"character": character, "status": "failed", "error": str(e)}
             )
 
+    # Confirm or release the pre-reserved credits with actual total
+    if credit_reservation_id and user_id:
+        try:
+            from app.credits.service import CreditService
+            from app.credits.constants import OperationType
+            credit_svc = CreditService(session)
+            if _total_image_credits > 0:
+                confirmed = await credit_svc.confirm_deduction(
+                    _uuid.UUID(credit_reservation_id), _total_image_credits
+                )
+                if not confirmed:
+                    logger.warning(
+                        "[CREDITS] Character image confirm_deduction returned False "
+                        "for reservation %s — logging failure",
+                        credit_reservation_id,
+                    )
+                    await credit_svc.log_credit_failure(
+                        user_id=_uuid.UUID(str(user_id)),
+                        reservation_id=_uuid.UUID(credit_reservation_id),
+                        amount=_total_image_credits,
+                        operation_type=OperationType.IMAGE_GEN,
+                        error_message="confirm_deduction returned False",
+                    )
+            else:
+                await credit_svc.release_reservation(_uuid.UUID(credit_reservation_id))
+            await session.commit()
+        except Exception as credit_err:
+            logger.warning("[CREDITS] Character image reservation confirm/release failed: %s", credit_err)
+
     successful_count = len(
         [r for r in character_results if r.get("status") == "success"]
     )
@@ -539,6 +578,8 @@ async def generate_scene_images_optimized(
     style: str = "cinematic",
     user_tier: str = "free",
     session: AsyncSession = None,
+    user_id: Optional[str] = None,
+    credit_reservation_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Generate scene images sequentially with optimizations"""
 
@@ -546,6 +587,7 @@ async def generate_scene_images_optimized(
         f"[SCENE IMAGES OPTIMIZED] Generating images for {len(scene_descriptions)} scenes..."
     )
     scene_results = []
+    _total_image_credits = 0  # accumulated when credit_reservation_id is provided
 
     for i, scene in enumerate(scene_descriptions):
         try:
@@ -627,20 +669,25 @@ async def generate_scene_images_optimized(
                 await session.commit()
                 record_id = db_result.scalar()
 
-                # Deduct 1 credit per successfully generated scene image (idempotent)
-                try:
-                    from app.credits.service import CreditService
-                    from app.credits.constants import OperationType, IMAGE_GEN
-                    credit_svc = CreditService(session)
-                    await credit_svc.deduct_for_operation(
-                        user_id=_uuid.UUID(str(user_id)),
-                        amount=IMAGE_GEN,
-                        operation_type=OperationType.IMAGE_GEN,
-                        ref_id=f"image_gen:{record_id}",
-                    )
-                    await session.commit()
-                except Exception as credit_err:
-                    logger.warning("[CREDITS] Scene image credit deduction failed: %s", credit_err)
+                # Deduct 1 credit per successfully generated scene image
+                if user_id:
+                    try:
+                        from app.credits.service import CreditService
+                        from app.credits.constants import OperationType, IMAGE_GEN
+                        if credit_reservation_id:
+                            # Accumulate; reservation will be confirmed after the loop
+                            _total_image_credits += IMAGE_GEN
+                        else:
+                            credit_svc = CreditService(session)
+                            await credit_svc.deduct_for_operation(
+                                user_id=_uuid.UUID(str(user_id)),
+                                amount=IMAGE_GEN,
+                                operation_type=OperationType.IMAGE_GEN,
+                                ref_id=f"image_gen:{record_id}",
+                            )
+                            await session.commit()
+                    except Exception as credit_err:
+                        logger.warning("[CREDITS] Scene image credit deduction failed: %s", credit_err)
 
                 scene_results.append(
                     {
@@ -705,6 +752,35 @@ async def generate_scene_images_optimized(
                     "error": str(e),
                 }
             )
+
+    # Confirm or release the pre-reserved credits with actual total
+    if credit_reservation_id and user_id:
+        try:
+            from app.credits.service import CreditService
+            from app.credits.constants import OperationType
+            credit_svc = CreditService(session)
+            if _total_image_credits > 0:
+                confirmed = await credit_svc.confirm_deduction(
+                    _uuid.UUID(credit_reservation_id), _total_image_credits
+                )
+                if not confirmed:
+                    logger.warning(
+                        "[CREDITS] Scene image confirm_deduction returned False "
+                        "for reservation %s — logging failure",
+                        credit_reservation_id,
+                    )
+                    await credit_svc.log_credit_failure(
+                        user_id=_uuid.UUID(str(user_id)),
+                        reservation_id=_uuid.UUID(credit_reservation_id),
+                        amount=_total_image_credits,
+                        operation_type=OperationType.IMAGE_GEN,
+                        error_message="confirm_deduction returned False",
+                    )
+            else:
+                await credit_svc.release_reservation(_uuid.UUID(credit_reservation_id))
+            await session.commit()
+        except Exception as credit_err:
+            logger.warning("[CREDITS] Scene image reservation confirm/release failed: %s", credit_err)
 
     successful_count = len([r for r in scene_results if r.get("status") == "success"])
     print(
