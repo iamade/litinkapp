@@ -1,8 +1,42 @@
-import { dispatchCreditsRefresh } from "./credits";
+import { dispatchCreditsRefresh, dispatchInsufficientCredits } from "./credits";
 
 export const API_BASE_URL = import.meta.env.PROD 
   ? "https://litinkapp.onrender.com/api/v1"
   : "http://localhost:8000/api/v1";
+
+type ApiErrorPayload = {
+  detail?: string | { message?: string };
+  balance?: number;
+  required?: number;
+};
+
+function getErrorMessage(errorData: ApiErrorPayload): string {
+  const detail = errorData.detail;
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object" && "message" in detail) {
+    return detail.message || "An API error occurred";
+  }
+  return "An API error occurred";
+}
+
+function emitInsufficientCreditsIfNeeded(
+  status: number,
+  errorData: ApiErrorPayload,
+  endpoint: string
+) {
+  if (status !== 402) return;
+
+  // Backend sends {detail: {message, balance, required}} via FastAPI's HTTPException
+  const detail = errorData.detail;
+  const detailObj = typeof detail === "object" && detail !== null ? detail as Record<string, unknown> : {};
+
+  dispatchInsufficientCredits({
+    balance: Number(detailObj.balance ?? errorData.balance ?? 0),
+    required: Number(detailObj.required ?? errorData.required ?? 0),
+    detail: getErrorMessage(errorData),
+    endpoint,
+  });
+}
 
 // Helper to notify listeners (still useful for UI updates, though token is in cookie)
 let onTokenRefresh: ((token: string) => void) | null = null;
@@ -92,14 +126,9 @@ export const apiClient = {
       }
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const detail = (errorData as { detail?: string | { message?: string } }).detail;
-        let errorMessage = "An API error occurred";
-        if (typeof detail === "string") {
-          errorMessage = detail;
-        } else if (detail && typeof detail === "object" && "message" in detail) {
-          errorMessage = detail.message || errorMessage;
-        }
+        const errorData = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+        emitInsufficientCreditsIfNeeded(response.status, errorData, endpoint);
+        const errorMessage = getErrorMessage(errorData);
         throw new Error(`[${response.status}] ${errorMessage}`);
       }
       
@@ -130,14 +159,9 @@ export const apiClient = {
       }
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const detail = (errorData as { detail?: string | { message?: string } }).detail;
-        let errorMessage = "An API error occurred";
-        if (typeof detail === "string") {
-          errorMessage = detail;
-        } else if (detail && typeof detail === "object" && "message" in detail) {
-          errorMessage = detail.message || errorMessage;
-        }
+        const errorData = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+        emitInsufficientCreditsIfNeeded(response.status, errorData, endpoint);
+        const errorMessage = getErrorMessage(errorData);
         throw new Error(`[${response.status}] ${errorMessage}`);
       }
       return response.json();
@@ -180,12 +204,13 @@ export const apiClient = {
 
 
     if (!response.ok) {
-      let errorData: unknown = {};
+      let errorData: ApiErrorPayload = {};
       try {
         errorData = await response.json();
       } catch {
         // ignore
       }
+      emitInsufficientCreditsIfNeeded(response.status, errorData, endpoint);
       
       // Handle FastAPI 422 validation errors (array format)
       if (response.status === 422 && Array.isArray((errorData as any).detail)) {
@@ -200,14 +225,7 @@ export const apiClient = {
         throw new Error(errorMessages.join(', '));
       }
       
-      // Handle both string detail and object detail (with message property)
-      const detail = (errorData as { detail?: string | { message?: string } }).detail;
-      let errorMessage = "An API error occurred";
-      if (typeof detail === "string") {
-        errorMessage = detail;
-      } else if (detail && typeof detail === "object" && "message" in detail) {
-        errorMessage = detail.message || errorMessage;
-      }
+      const errorMessage = getErrorMessage(errorData);
       // Include status code in error message for proper 404 detection
       throw new Error(`[${response.status}] ${errorMessage}`);
     }

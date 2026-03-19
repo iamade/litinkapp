@@ -47,6 +47,8 @@ interface SceneGenerationModalProps {
   isSuggestedShot?: boolean;     // Flag to show "suggested shot" context in UI
   userTier?: string;             // User subscription tier for character limits
   sceneContext?: string;         // Additional context from the script for AI enhancement
+  estimatedCreditCost?: number;
+  insufficientCreditsMessage?: string;
 }
 
 const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
@@ -63,7 +65,9 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
   onReferenceSceneChange,
   isSuggestedShot = false,
   userTier = 'free',
-  sceneContext
+  sceneContext,
+  estimatedCreditCost = 1,
+  insufficientCreditsMessage
 }) => {
   const [description, setDescription] = useState(initialDescription);
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<Set<string>>(new Set());
@@ -481,11 +485,12 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
           </button>
           <button
             onClick={() => onGenerate(description, Array.from(selectedCharacterIds))}
-            disabled={isGenerating}
+            disabled={isGenerating || !!insufficientCreditsMessage}
+            title={insufficientCreditsMessage}
             className={`
               px-6 py-2 rounded-lg text-sm font-medium text-white shadow-lg shadow-indigo-500/20 
               transition-all flex items-center gap-2
-              ${isGenerating 
+              ${isGenerating || insufficientCreditsMessage
                 ? 'bg-indigo-500/50 cursor-not-allowed' 
                 : 'bg-indigo-600 hover:bg-indigo-500 hover:scale-[1.02] active:scale-[0.98]'}
             `}
@@ -500,7 +505,7 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                 </svg>
-                Save & Generate
+                Save & Generate ({estimatedCreditCost} cr)
               </>
             )}
           </button>

@@ -30,6 +30,7 @@ import { useImageGeneration } from '../hooks/useImageGeneration';
 import { useAudioGeneration } from '../hooks/useAudioGeneration';
 import VideoProductionPanel from '../components/Video/VideoProductionPanel';
 import { useUserMode } from '../hooks/useUserMode';
+import { dispatchCreditsRefresh } from '../lib/credits';
 
 interface Chapter {
   id: string;
@@ -523,6 +524,7 @@ export default function BookViewForEntertainment() {
               }));
             }
             updateProgress("video", "completed");
+            dispatchCreditsRefresh();
             toast.success("Video generation completed!");
             setShowPipelineStatus(false);
             setShowExistingGenerations(true);

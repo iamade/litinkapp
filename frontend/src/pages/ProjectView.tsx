@@ -43,6 +43,9 @@ import { useStoryboardOptional } from '../contexts/StoryboardContext';
 import { useAuth } from '../contexts/AuthContext';
 import { videoGenerationAPI } from '../lib/videoGenerationApi';
 import { useVideoGenerationStatus } from '../hooks/useVideoGenerationStatus';
+import { useCreditBalance } from '../hooks/useCreditBalance';
+import { DEFAULT_VIDEO_SECONDS_PER_SHOT, estimateVideoCreditsFromShots, getInsufficientCreditsTooltip } from '../lib/creditCosts';
+import { dispatchCreditsRefresh } from '../lib/credits';
 
 // Types
 interface ChapterArtifact {
@@ -153,6 +156,7 @@ const ProjectView: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { balance: creditBalance } = useCreditBalance({ enabled: !!user });
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const [artifacts, setArtifacts] = useState<any[]>([]);
@@ -524,6 +528,15 @@ const ProjectView: React.FC = () => {
       return;
     }
 
+    const estimatedShotCount = selectedShotIds && selectedShotIds.length > 0
+      ? selectedShotIds.length
+      : Math.max(1, generatedImageUrls.length);
+    const requiredCredits = estimateVideoCreditsFromShots(estimatedShotCount, DEFAULT_VIDEO_SECONDS_PER_SHOT);
+    if (creditBalance < requiredCredits) {
+      toast.error(getInsufficientCreditsTooltip(creditBalance, requiredCredits));
+      return;
+    }
+
     updateProgress("video", "generating");
     updateProgress("merge", "generating");
     setVideoStatus("starting");
@@ -607,6 +620,7 @@ const ProjectView: React.FC = () => {
       if (generation?.video_url) {
         setLatestVideoUrl(generation.video_url);
       }
+      dispatchCreditsRefresh();
       toast.success('Video generation completed!');
     } else if (isFailed) {
       reloadVideoGenerations().catch((error) => {
