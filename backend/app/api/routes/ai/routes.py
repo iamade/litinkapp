@@ -3889,6 +3889,7 @@ async def generate_script_and_scenes_with_gpt(
     request: dict = Body(...),  # Accept body instead of query params
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.SCRIPT_GEN, SCRIPT_GEN)),
 ):
     """Generate only the AI script and scene descriptions for a chapter (no video generation)"""
     try:
@@ -4054,6 +4055,11 @@ async def generate_script_and_scenes_with_gpt(
             print(f"Error auto-generating emotional map: {e}")
             validated_entries = []
 
+        # Confirm credit deduction on success
+        credit_service = CreditService(session)
+        await credit_service.confirm_deduction(reservation_id, SCRIPT_GEN)
+        await session.commit()
+
         return {
             "chapter_id": chapter_id,
             "script_id": script_id,
@@ -4065,7 +4071,21 @@ async def generate_script_and_scenes_with_gpt(
             "metadata": script_data["metadata"],
             "emotional_map": validated_entries,
         }
+    except HTTPException:
+        try:
+            credit_service = CreditService(session)
+            await credit_service.release_reservation(reservation_id)
+            await session.commit()
+        except Exception:
+            pass
+        raise
     except Exception as e:
+        try:
+            credit_service = CreditService(session)
+            await credit_service.release_reservation(reservation_id)
+            await session.commit()
+        except Exception:
+            pass
         print(f"Error generating script and scenes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -5432,6 +5452,7 @@ async def analyze_for_consultation(
     prompt: str = Form(""),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_session),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
 ):
     """
     Analyze uploaded files and return AI consultation response with app-specific options.
@@ -5521,11 +5542,28 @@ async def analyze_for_consultation(
             user_tier=user_tier,
         )
 
+        # Confirm credit deduction on success
+        credit_service = CreditService(session)
+        await credit_service.confirm_deduction(reservation_id, TEXT_GEN)
+        await session.commit()
+
         return result
 
     except HTTPException:
+        try:
+            credit_service = CreditService(session)
+            await credit_service.release_reservation(reservation_id)
+            await session.commit()
+        except Exception:
+            pass
         raise
     except Exception as e:
+        try:
+            credit_service = CreditService(session)
+            await credit_service.release_reservation(reservation_id)
+            await session.commit()
+        except Exception:
+            pass
         print(f"❌ Error in consultation analysis: {e}")
         import traceback
 
