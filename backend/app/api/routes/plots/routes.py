@@ -20,6 +20,9 @@ from app.books.models import Book
 from app.auth.models import User
 from app.plots.models import PlotOverview, Character
 from app.projects.models import Project
+from app.credits.dependencies import require_credits
+from app.credits.constants import OperationType, PLOT_GEN, CHARACTER_GEN
+from app.credits.service import CreditService
 
 router = APIRouter()
 
@@ -30,6 +33,7 @@ async def generate_plot_overview(
     request: PlotGenerationRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.PLOT_GEN, PLOT_GEN)),
 ):
     """
     Generate comprehensive plot overview with characters for a book.
@@ -139,14 +143,16 @@ async def generate_plot_overview(
                     ]
 
         # Generate plot overview with refinement support
-        result = await plot_service.generate_plot_overview(
-            user_id=current_user.id,
-            book_id=book_id,
-            plot_data=request,
-            refinement_prompt=request.refinement_prompt,
-            existing_plot=existing_plot,
-            existing_characters=existing_characters,
-        )
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, PLOT_GEN):
+            result = await plot_service.generate_plot_overview(
+                user_id=current_user.id,
+                book_id=book_id,
+                plot_data=request,
+                refinement_prompt=request.refinement_prompt,
+                existing_plot=existing_plot,
+                existing_characters=existing_characters,
+            )
 
         # ✅ Record usage for billing/limits
         await subscription_manager.record_usage(
@@ -233,6 +239,7 @@ async def auto_add_characters(
     book_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.CHARACTER_GEN, CHARACTER_GEN)),
 ):
     """
     Automatically generate and add more characters to an existing plot.
@@ -282,11 +289,13 @@ async def auto_add_characters(
             )
 
         # Add characters to existing plot
-        result = await plot_service.add_characters_to_plot(
-            user_id=current_user.id,
-            book_id=book_id,
-            plot_overview_id=existing_plot_data.id,
-        )
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, CHARACTER_GEN):
+            result = await plot_service.add_characters_to_plot(
+                user_id=current_user.id,
+                book_id=book_id,
+                plot_overview_id=existing_plot_data.id,
+            )
 
         return result
 
@@ -490,6 +499,7 @@ async def generate_project_plot_overview(
     request: ProjectPlotGenerationRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.PLOT_GEN, PLOT_GEN)),
 ):
     """
     Generate plot overview from a project's prompt (no book required).
@@ -550,19 +560,21 @@ async def generate_project_plot_overview(
         # Generate plot from project prompt (or refine existing)
         # Pass book_id to enable character extraction from book content
         plot_service = PlotService(session)
-        result = await plot_service.generate_plot_from_prompt(
-            user_id=current_user.id,
-            project_id=project_id,
-            input_prompt=request.input_prompt or project.input_prompt,
-            project_type=request.project_type or project.project_type,
-            story_type=request.story_type,
-            genre=request.genre,
-            tone=request.tone,
-            audience=request.audience,
-            refinement_prompt=request.refinement_prompt,
-            existing_plot=existing_plot,
-            book_id=project.book_id,  # Use linked book for character extraction
-        )
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, PLOT_GEN):
+            result = await plot_service.generate_plot_from_prompt(
+                user_id=current_user.id,
+                project_id=project_id,
+                input_prompt=request.input_prompt or project.input_prompt,
+                project_type=request.project_type or project.project_type,
+                story_type=request.story_type,
+                genre=request.genre,
+                tone=request.tone,
+                audience=request.audience,
+                refinement_prompt=request.refinement_prompt,
+                existing_plot=existing_plot,
+                book_id=project.book_id,  # Use linked book for character extraction
+            )
 
         # ✅ Record usage for billing/limits
         await subscription_manager.record_usage(
@@ -635,6 +647,7 @@ async def auto_add_project_characters(
     project_id: uuid.UUID,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.CHARACTER_GEN, CHARACTER_GEN)),
 ):
     """
     Automatically generate and add more characters to an existing project plot.
@@ -685,13 +698,15 @@ async def auto_add_project_characters(
 
         # Add characters to existing plot
         # If project has a linked book, use book content for extraction
-        result = await plot_service.add_characters_to_project(
-            user_id=current_user.id,
-            project_id=project_id,
-            plot_overview_id=existing_plot_data.id,
-            input_prompt=project.input_prompt,
-            book_id=project.book_id,  # Use book content if available
-        )
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, CHARACTER_GEN):
+            result = await plot_service.add_characters_to_project(
+                user_id=current_user.id,
+                project_id=project_id,
+                plot_overview_id=existing_plot_data.id,
+                input_prompt=project.input_prompt,
+                book_id=project.book_id,  # Use book content if available
+            )
 
         return result
 

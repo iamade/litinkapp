@@ -1,3 +1,4 @@
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 from typing import List, Optional
@@ -13,6 +14,9 @@ from app.api.services.character import CharacterService
 from app.api.services.subscription import SubscriptionManager
 from app.core.database import get_session
 from app.core.auth import get_current_active_user
+from app.credits.dependencies import require_credits
+from app.credits.constants import OperationType, CHARACTER_IMAGE_GEN, CHARACTER_GEN, TEXT_GEN
+from app.credits.service import CreditService
 
 router = APIRouter()
 
@@ -159,6 +163,7 @@ async def generate_character_details_with_ai(
     role: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.CHARACTER_GEN, CHARACTER_GEN)),
 ):
     """
     Generate character details using AI by analyzing book content.
@@ -187,15 +192,17 @@ async def generate_character_details_with_ai(
             )
 
         character_service = CharacterService(session)
+        credit_service = CreditService(session)
 
-        character_details = (
-            await character_service.generate_character_details_from_book(
-                character_name=character_name.strip(),
-                book_id=book_id,
-                user_id=current_user.id,
-                role=role,
+        async with credit_service.credit_transaction(reservation_id, CHARACTER_GEN):
+            character_details = (
+                await character_service.generate_character_details_from_book(
+                    character_name=character_name.strip(),
+                    book_id=book_id,
+                    user_id=current_user.id,
+                    role=role,
+                )
             )
-        )
 
         # Record usage after successful generation
         await subscription_manager.record_usage(
@@ -283,6 +290,7 @@ async def analyze_character_archetypes(
     character_id: str,
     session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
 ):
     """
     Analyze character archetypes.
@@ -300,10 +308,12 @@ async def analyze_character_archetypes(
             raise HTTPException(status_code=404, detail="Character not found")
 
         # Analyze archetypes
-        archetype_match = await character_service.analyze_character_archetypes(
-            character_description=f"{character.name}: {character.physical_description or ''}",
-            personality=character.personality or "",
-        )
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, TEXT_GEN):
+            archetype_match = await character_service.analyze_character_archetypes(
+                character_description=f"{character.name}: {character.physical_description or ''}",
+                personality=character.personality or "",
+            )
 
         # Update character with archetype analysis
         await character_service.update_character(
@@ -332,6 +342,7 @@ async def generate_character_image(
     request: ImageGenerationRequest,
     session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.CHARACTER_IMAGE_GEN, CHARACTER_IMAGE_GEN)),
 ):
     """
     Queue character portrait generation (async).
@@ -349,17 +360,19 @@ async def generate_character_image(
     """
     try:
         character_service = CharacterService(session)
+        credit_service = CreditService(session)
 
         style = getattr(request, "style", "realistic")
         aspect_ratio = getattr(request, "aspect_ratio", "3:4")
 
-        result = await character_service.generate_character_image(
-            character_id=character_id,
-            user_id=current_user.id,
-            custom_prompt=request.prompt,
-            style=style,
-            aspect_ratio=aspect_ratio,
-        )
+        async with credit_service.credit_transaction(reservation_id, CHARACTER_IMAGE_GEN):
+            result = await character_service.generate_character_image(
+                character_id=character_id,
+                user_id=current_user.id,
+                custom_prompt=request.prompt,
+                style=style,
+                aspect_ratio=aspect_ratio,
+            )
 
         return result
 

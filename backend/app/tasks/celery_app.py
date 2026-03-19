@@ -75,6 +75,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.tasks.credit_tasks.release_zombie_reservations",
         "schedule": 600,  # every 10 minutes (seconds)
     },
+    "reconcile-failed-credits": {
+        "task": "app.tasks.credit_tasks.reconcile_failed_credits",
+        "schedule": 900,  # every 15 minutes (seconds)
+    },
 }
 
 # Auto-discover tasks from specific modules (only works for packages with a tasks.py module)

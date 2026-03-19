@@ -14,6 +14,7 @@ For per-unit task deductions (idempotent):
 import uuid
 import math
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -21,7 +22,7 @@ from sqlmodel import select, func
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy import text
 
-from app.credits.models import CreditTransaction
+from app.credits.models import CreditTransaction, CreditFailure
 from app.promo.models import CreditGrant
 from app.promo.services import deduct_credits
 
@@ -191,6 +192,58 @@ class CreditService:
         transaction.status = "released"
         self.session.add(transaction)
         return True
+
+    async def log_credit_failure(
+        self,
+        user_id: uuid.UUID,
+        reservation_id: uuid.UUID,
+        amount: int,
+        operation_type: str,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Persist a credit confirm_deduction failure for later reconciliation."""
+        failure = CreditFailure(
+            user_id=user_id,
+            reservation_id=reservation_id,
+            amount=amount,
+            operation_type=operation_type,
+            error_message=error_message,
+            status="pending",
+        )
+        self.session.add(failure)
+        try:
+            await self.session.commit()
+        except Exception as e:
+            logger.error(
+                "log_credit_failure: could not persist failure record: %s", e
+            )
+
+    @asynccontextmanager
+    async def credit_transaction(self, reservation_id: uuid.UUID, amount: int):
+        """
+        Async context manager that confirms deduction on success and releases
+        the reservation on any exception, then re-raises.
+
+        Usage::
+
+            async with credit_service.credit_transaction(reservation_id, COST):
+                # do the billable work here
+        """
+        try:
+            yield
+            await self.confirm_deduction(reservation_id, amount)
+            await self.session.commit()
+        except Exception:
+            try:
+                await self.release_reservation(reservation_id)
+                await self.session.commit()
+            except Exception as release_err:
+                logger.warning(
+                    "credit_transaction: release failed for reservation %s: %s",
+                    reservation_id,
+                    release_err,
+                )
+            raise
 
     async def deduct_for_operation(
         self,
