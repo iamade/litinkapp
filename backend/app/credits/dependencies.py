@@ -56,10 +56,16 @@ def require_credits(operation_type: str, estimated_amount: int) -> Callable:
             )
             await session.commit()
             return reservation_id
-        except ValueError as exc:
+        except ValueError:
+            balance = await service.get_effective_balance(current_user.id)
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=str(exc),
+                detail={
+                    "message": "Insufficient credits",
+                    "balance": balance,
+                    "required": estimated_amount,
+                    "operation_type": operation_type,
+                },
             )
 
     return _check_and_reserve

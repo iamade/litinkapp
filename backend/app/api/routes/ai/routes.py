@@ -68,7 +68,10 @@ from app.core.services.pipeline import PipelineManager, PipelineStep
 from app.core.services.openrouter import OpenRouterService, ModelTier
 from app.api.services.subscription import SubscriptionManager
 from app.credits.dependencies import require_credits
-from app.credits.constants import OperationType, TEXT_GEN, SCRIPT_GEN, IMAGE_GEN
+from app.credits.constants import (
+    OperationType, TEXT_GEN, SCRIPT_GEN, IMAGE_GEN,
+    VOICE_GEN, EMOTIONAL_MAP, EXPAND_SCRIPT, VIDEO_PER_SECOND,
+)
 from app.credits.service import CreditService
 
 
@@ -428,7 +431,7 @@ async def generate_voice(
     voice_id: str = "21m00Tcm4TlvDq8ikWAM",
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VOICE_GEN, 1)),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VOICE_GEN, VOICE_GEN)),
 ):
     """Generate voice using ElevenLabs service"""
     elevenlabs_service = ElevenLabsService()
@@ -439,7 +442,7 @@ async def generate_voice(
         raise HTTPException(status_code=500, detail=result["error"])
 
     credit_service = CreditService(session)
-    await credit_service.confirm_deduction(reservation_id, 1)
+    await credit_service.confirm_deduction(reservation_id, VOICE_GEN)
     await session.commit()
     return {"voice_url": result.get("audio_url")}
 
@@ -449,7 +452,7 @@ async def generate_emotional_map(
     request: EmotionalMapRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.EMOTIONAL_MAP, SCRIPT_GEN)),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.EMOTIONAL_MAP, EMOTIONAL_MAP)),
 ):
     """Generate cinematic emotional map for script dialogues"""
     ai_service = AIService()
@@ -488,7 +491,7 @@ async def generate_emotional_map(
             print(f"Error saving emotional map to DB: {e}")
 
     credit_service = CreditService(session)
-    await credit_service.confirm_deduction(reservation_id, SCRIPT_GEN)
+    await credit_service.confirm_deduction(reservation_id, EMOTIONAL_MAP)
     await session.commit()
     return EmotionalMapResponse(entries=validated_entries)
 
@@ -526,7 +529,7 @@ async def expand_script(
     request: ScriptExpansionRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.EXPAND_SCRIPT, SCRIPT_GEN)),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.EXPAND_SCRIPT, EXPAND_SCRIPT)),
 ):
     """
     Expand script/story content using AI.
@@ -646,7 +649,7 @@ async def expand_script(
                 print(f"Error saving expanded content to script: {e}")
 
         credit_service = CreditService(session)
-        await credit_service.confirm_deduction(reservation_id, SCRIPT_GEN)
+        await credit_service.confirm_deduction(reservation_id, EXPAND_SCRIPT)
         await session.commit()
         return ScriptExpansionResponse(
             expanded_content=expanded_content,
@@ -763,7 +766,7 @@ async def generate_entertainment_video(
     # request: dict = Body(...),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VIDEO_GEN, SCRIPT_GEN)),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VIDEO_GEN, VIDEO_PER_SECOND * 30)),  # Reserve for ~30s video upfront; actual deducted on completion
 ):
     """Generate entertainment video using already saved script"""
     try:

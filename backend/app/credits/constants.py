@@ -9,6 +9,11 @@ AUDIO_PER_SECOND = 1    # per second of audio
 VIDEO_PER_SECOND = 5    # per second of video
 SCRIPT_GEN = 2          # per script generation
 IMAGE_UPSCALE = 1       # per image upscale
+TEXT_GEN = 1            # per text generation
+VOICE_GEN = 1           # per voice generation
+EMOTIONAL_MAP = 2       # per emotional map generation
+EXPAND_SCRIPT = 2       # per script expansion
+IMAGE_EXPAND = 1        # per image expand
 
 
 class OperationType(str, Enum):

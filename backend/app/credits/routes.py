@@ -19,7 +19,7 @@ router = APIRouter()
 @router.get("/credits/history")
 async def get_credit_history(
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_size: int = Query(default=20, ge=1, le=100, alias="limit"),
     status: Optional[str] = Query(default=None, description="Filter by status: reserved, confirmed, released"),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_session),

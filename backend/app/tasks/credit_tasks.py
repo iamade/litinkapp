@@ -14,7 +14,7 @@ from sqlalchemy import text
 logger = logging.getLogger(__name__)
 
 # Reservations older than this are auto-released
-ZOMBIE_THRESHOLD_HOURS = 1
+ZOMBIE_THRESHOLD_HOURS = 2  # Must match RESERVATION_TTL_HOURS in credits/service.py
 
 
 @celery_app.task(bind=True, name="app.tasks.credit_tasks.release_zombie_reservations")
