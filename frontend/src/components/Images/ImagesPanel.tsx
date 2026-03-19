@@ -53,6 +53,7 @@ import { projectService } from '../../services/projectService';
 import SceneGenerationModal from './SceneGenerationModal';
 import { StoryboardSceneRow } from './StoryboardSceneRow';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 
 const SortableStoryboardRow = ({ id, ...props }: any) => {
   const {
@@ -185,6 +186,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   } | null>(null);
   
   const [showSceneGenerationModal, setShowSceneGenerationModal] = useState(false);
+  const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
+  const [requiredCreditsForModal, setRequiredCreditsForModal] = useState(0);
+  const [operationTypeForModal, setOperationTypeForModal] = useState('Image Generation');
   const [selectedSceneForGeneration, setSelectedSceneForGeneration] = useState<{
         sceneNumber: number;
         description: string;
@@ -233,6 +237,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const singleImageInsufficientReason = creditBalance < perImageCost
     ? getInsufficientCreditsTooltip(creditBalance, perImageCost)
     : "";
+
+  const openInsufficientCreditsModal = (requiredCredits: number, operationType: string) => {
+    setRequiredCreditsForModal(requiredCredits);
+    setOperationTypeForModal(operationType);
+    setShowInsufficientCreditsModal(true);
+  };
 
   // Get scenes from selected script by parsing script text (like ScriptGenerationPanel does)
   const scenes = React.useMemo(() => {
@@ -948,7 +958,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     }
 
     if (creditBalance < allScenesEstimatedCost) {
-      toast.error(getInsufficientCreditsTooltip(creditBalance, allScenesEstimatedCost));
+      openInsufficientCreditsModal(allScenesEstimatedCost, 'Image Generation');
       return;
     }
 
@@ -971,7 +981,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
     if (confirmAction === 'scenes') {
       if (creditBalance < allScenesEstimatedCost) {
-        toast.error(getInsufficientCreditsTooltip(creditBalance, allScenesEstimatedCost));
+        openInsufficientCreditsModal(allScenesEstimatedCost, 'Image Generation');
         return;
       }
       await generateAllSceneImages(scenes, generationOptions);
@@ -1525,9 +1535,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             )}
             <button
               onClick={handleGenerateAllScenes}
-              title={creditBalance < allScenesEstimatedCost ? getInsufficientCreditsTooltip(creditBalance, allScenesEstimatedCost) : undefined}
-              disabled={!scenes.length || generatingScenes.size > 0 || creditBalance < allScenesEstimatedCost}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:text-gray-500 dark:disabled:text-gray-300 disabled:opacity-60 disabled:cursor-not-allowed"
+              disabled={!scenes.length || generatingScenes.size > 0}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Wand2 className="w-4 h-4" />
               <span>Generate All Scenes ({allScenesEstimatedCost} cr)</span>
@@ -1588,7 +1597,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     scene={scene}
                     sceneImages={images}
                     isGenerating={generatingScenes.has(sceneNumber)}
-                    generationDisabledReason={singleImageInsufficientReason || undefined}
+                    generationDisabledReason={undefined}
                     selectedIds={selectedSceneIds}
                     keySceneId={keySceneImages[sceneNumber]}
                     dialogueMoments={sceneMoments}
@@ -1768,7 +1777,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     characterImage={characterImage}
                     characterDetails={character}
                     isGenerating={generatingCharacters.has(characterKey)}
-                    generationDisabledReason={singleImageInsufficientReason || undefined}
+                    generationDisabledReason={undefined}
                     viewMode={viewMode}
                     fromPlotOverview={!!plotImageUrl && !filteredCharacterImages?.[characterKey]}
                     plotCharacters={plotOverview?.characters || []}
@@ -1899,7 +1908,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       characterImage={finalImage}
                       characterDetails={item}
                       isGenerating={generatingCharacters.has(itemKey)}
-                      generationDisabledReason={singleImageInsufficientReason || undefined}
+                      generationDisabledReason={undefined}
                       viewMode={viewMode}
                       fromPlotOverview={!!plotImageUrl && !itemImage}
                       plotCharacters={plotOverview?.characters || []}
@@ -2231,7 +2240,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         }}
         onGenerate={(desc: string, charIds: string[]) => {
             if (creditBalance < perImageCost) {
-                toast.error(getInsufficientCreditsTooltip(creditBalance, perImageCost));
+                openInsufficientCreditsModal(perImageCost, 'Image Generation');
                 return;
             }
             if (selectedSceneForGeneration) {
@@ -2308,6 +2317,15 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         userTier={userTier}
         estimatedCreditCost={perImageCost}
         insufficientCreditsMessage={singleImageInsufficientReason || undefined}
+        onInsufficientCredits={() => openInsufficientCreditsModal(perImageCost, 'Image Generation')}
+      />
+
+      <InsufficientCreditsModal
+        isOpen={showInsufficientCreditsModal}
+        onClose={() => setShowInsufficientCreditsModal(false)}
+        requiredCredits={requiredCreditsForModal}
+        availableCredits={creditBalance}
+        operationType={operationTypeForModal}
       />
     </div>
   );

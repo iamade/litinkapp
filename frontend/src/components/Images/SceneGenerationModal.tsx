@@ -49,6 +49,7 @@ interface SceneGenerationModalProps {
   sceneContext?: string;         // Additional context from the script for AI enhancement
   estimatedCreditCost?: number;
   insufficientCreditsMessage?: string;
+  onInsufficientCredits?: () => void;
 }
 
 const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
@@ -67,7 +68,8 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
   userTier = 'free',
   sceneContext,
   estimatedCreditCost = 1,
-  insufficientCreditsMessage
+  insufficientCreditsMessage,
+  onInsufficientCredits
 }) => {
   const [description, setDescription] = useState(initialDescription);
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<Set<string>>(new Set());
@@ -484,14 +486,20 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
             Cancel
           </button>
           <button
-            onClick={() => onGenerate(description, Array.from(selectedCharacterIds))}
-            disabled={isGenerating || !!insufficientCreditsMessage}
+            onClick={() => {
+              if (insufficientCreditsMessage) {
+                onInsufficientCredits?.();
+                return;
+              }
+              onGenerate(description, Array.from(selectedCharacterIds));
+            }}
+            disabled={isGenerating}
             title={insufficientCreditsMessage}
             className={`
-              px-6 py-2 rounded-lg text-sm font-medium text-white shadow-lg shadow-indigo-500/20 
+              px-6 py-2 rounded-lg text-sm font-medium text-white shadow-lg shadow-indigo-500/20
               transition-all flex items-center gap-2
-              ${isGenerating || insufficientCreditsMessage
-                ? 'bg-gray-600 text-gray-300 opacity-60 cursor-not-allowed' 
+              ${isGenerating
+                ? 'bg-gray-600 text-gray-300 opacity-60 cursor-not-allowed'
                 : 'bg-indigo-600 hover:bg-indigo-500 hover:scale-[1.02] active:scale-[0.98]'}
             `}
           >
