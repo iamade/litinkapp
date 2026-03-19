@@ -709,11 +709,13 @@ async def generate_narrator_audio(
     user_id: Optional[str],
     script_id: Optional[str] = None,
     model_config: Optional[ModelConfig] = None,
+    credit_reservation_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Generate narrator voice audio"""
 
     print(f"[NARRATOR AUDIO] Generating narrator voice...")
     narrator_results = []
+    _total_audio_credits = 0  # accumulated when credit_reservation_id is provided
 
     # Use V7 service voice mapping
     narrator_voice = audio_service.narrator_voices["professional"]
@@ -834,19 +836,24 @@ async def generate_narrator_audio(
                 await session.commit()
                 await session.refresh(audio_record)
 
-                # Deduct credits based on actual audio duration (idempotent)
+                # Deduct credits for actual audio duration
                 if user_id and duration and float(duration) > 0:
                     try:
                         from app.credits.service import CreditService, credits_for_audio_duration
                         from app.credits.constants import OperationType
-                        credit_svc = CreditService(session)
-                        await credit_svc.deduct_for_operation(
-                            user_id=uuid.UUID(user_id),
-                            amount=credits_for_audio_duration(float(duration)),
-                            operation_type=OperationType.AUDIO_GEN,
-                            ref_id=f"audio_gen:{audio_record.id}",
-                        )
-                        await session.commit()
+                        credit_cost = credits_for_audio_duration(float(duration))
+                        if credit_reservation_id:
+                            # Accumulate; reservation will be confirmed after the loop
+                            _total_audio_credits += credit_cost
+                        else:
+                            credit_svc = CreditService(session)
+                            await credit_svc.deduct_for_operation(
+                                user_id=uuid.UUID(user_id),
+                                amount=credit_cost,
+                                operation_type=OperationType.AUDIO_GEN,
+                                ref_id=f"audio_gen:{audio_record.id}",
+                            )
+                            await session.commit()
                     except Exception as credit_err:
                         logger.warning("[CREDITS] Narrator audio credit deduction failed: %s", credit_err)
 
@@ -896,6 +903,45 @@ async def generate_narrator_audio(
                 session.add(failed_record)
                 await session.commit()
 
+    # Confirm the pre-reserved credits with actual total (if reservation was provided)
+    if credit_reservation_id and user_id and _total_audio_credits > 0:
+        try:
+            from app.credits.service import CreditService
+            from app.credits.constants import OperationType
+            from app.core.database import async_session
+            async with async_session() as _session:
+                credit_svc = CreditService(_session)
+                confirmed = await credit_svc.confirm_deduction(
+                    uuid.UUID(credit_reservation_id), _total_audio_credits
+                )
+                if not confirmed:
+                    logger.warning(
+                        "[CREDITS] Narrator audio confirm_deduction returned False "
+                        "for reservation %s — logging failure",
+                        credit_reservation_id,
+                    )
+                    await credit_svc.log_credit_failure(
+                        user_id=uuid.UUID(user_id),
+                        reservation_id=uuid.UUID(credit_reservation_id),
+                        amount=_total_audio_credits,
+                        operation_type=OperationType.AUDIO_GEN,
+                        error_message="confirm_deduction returned False",
+                    )
+                await _session.commit()
+        except Exception as credit_err:
+            logger.warning("[CREDITS] Narrator audio reservation confirm failed: %s", credit_err)
+    elif credit_reservation_id and user_id and _total_audio_credits == 0:
+        # No successful audio — release the reservation
+        try:
+            from app.credits.service import CreditService
+            from app.core.database import async_session
+            async with async_session() as _session:
+                credit_svc = CreditService(_session)
+                await credit_svc.release_reservation(uuid.UUID(credit_reservation_id))
+                await _session.commit()
+        except Exception as credit_err:
+            logger.warning("[CREDITS] Narrator audio reservation release failed: %s", credit_err)
+
     print(
         f"[NARRATOR AUDIO] Completed: {len(narrator_results)}/{len(narrator_segments)} segments"
     )
@@ -910,11 +956,13 @@ async def generate_character_audio(
     user_id: Optional[str],
     script_id: Optional[str] = None,
     model_config: Optional[ModelConfig] = None,
+    credit_reservation_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Generate character voice audio for cinematic scripts"""
 
     print(f"[CHARACTER AUDIO] Generating character voices...")
     character_results = []
+    _total_audio_credits = 0  # accumulated when credit_reservation_id is provided
 
     # Get available character voices - organized by gender
     male_voices = [
@@ -1364,19 +1412,24 @@ async def generate_character_audio(
                 await session.commit()
                 await session.refresh(audio_record)
 
-                # Deduct credits based on actual audio duration (idempotent)
+                # Deduct credits for actual audio duration
                 if user_id and duration and float(duration) > 0:
                     try:
                         from app.credits.service import CreditService, credits_for_audio_duration
                         from app.credits.constants import OperationType
-                        credit_svc = CreditService(session)
-                        await credit_svc.deduct_for_operation(
-                            user_id=uuid.UUID(user_id),
-                            amount=credits_for_audio_duration(float(duration)),
-                            operation_type=OperationType.AUDIO_GEN,
-                            ref_id=f"audio_gen:{audio_record.id}",
-                        )
-                        await session.commit()
+                        credit_cost = credits_for_audio_duration(float(duration))
+                        if credit_reservation_id:
+                            # Accumulate; reservation will be confirmed after the loop
+                            _total_audio_credits += credit_cost
+                        else:
+                            credit_svc = CreditService(session)
+                            await credit_svc.deduct_for_operation(
+                                user_id=uuid.UUID(user_id),
+                                amount=credit_cost,
+                                operation_type=OperationType.AUDIO_GEN,
+                                ref_id=f"audio_gen:{audio_record.id}",
+                            )
+                            await session.commit()
                     except Exception as credit_err:
                         logger.warning("[CREDITS] Character audio credit deduction failed: %s", credit_err)
 
@@ -1452,6 +1505,45 @@ async def generate_character_audio(
                 session.add(video_gen)
                 await session.commit()
         print(f"[CHARACTER AUDIO] Stored voice mappings: {character_voice_mapping}")
+
+    # Confirm the pre-reserved credits with actual total (if reservation was provided)
+    if credit_reservation_id and user_id and _total_audio_credits > 0:
+        try:
+            from app.credits.service import CreditService
+            from app.credits.constants import OperationType
+            from app.core.database import async_session
+            async with async_session() as _session:
+                credit_svc = CreditService(_session)
+                confirmed = await credit_svc.confirm_deduction(
+                    uuid.UUID(credit_reservation_id), _total_audio_credits
+                )
+                if not confirmed:
+                    logger.warning(
+                        "[CREDITS] Character audio confirm_deduction returned False "
+                        "for reservation %s — logging failure",
+                        credit_reservation_id,
+                    )
+                    await credit_svc.log_credit_failure(
+                        user_id=uuid.UUID(user_id),
+                        reservation_id=uuid.UUID(credit_reservation_id),
+                        amount=_total_audio_credits,
+                        operation_type=OperationType.AUDIO_GEN,
+                        error_message="confirm_deduction returned False",
+                    )
+                await _session.commit()
+        except Exception as credit_err:
+            logger.warning("[CREDITS] Character audio reservation confirm failed: %s", credit_err)
+    elif credit_reservation_id and user_id and _total_audio_credits == 0:
+        # No successful audio — release the reservation
+        try:
+            from app.credits.service import CreditService
+            from app.core.database import async_session
+            async with async_session() as _session:
+                credit_svc = CreditService(_session)
+                await credit_svc.release_reservation(uuid.UUID(credit_reservation_id))
+                await _session.commit()
+        except Exception as credit_err:
+            logger.warning("[CREDITS] Character audio reservation release failed: %s", credit_err)
 
     print(
         f"[CHARACTER AUDIO] Completed: {len(character_results)}/{len(character_dialogues)} dialogues"

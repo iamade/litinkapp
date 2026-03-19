@@ -772,26 +772,40 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             )
             await session.commit()
 
-            # Deduct credits based on actual video duration and release the API reservation
+            # Confirm or release the API-level credit reservation based on actual duration
             credit_reservation_id = task_meta.get("credit_reservation_id")
-            if user_id:
+            if user_id and credit_reservation_id:
                 try:
                     from app.credits.service import CreditService, credits_for_video_duration
                     from app.credits.constants import OperationType
                     credit_svc = CreditService(session)
-                    if successful_videos > 0 and total_duration > 0:
-                        await credit_svc.deduct_for_operation(
-                            user_id=uuid.UUID(str(user_id)),
-                            amount=credits_for_video_duration(float(total_duration)),
-                            operation_type=OperationType.VIDEO_GEN,
-                            ref_id=f"video_gen:{video_generation_id}",
+                    actual_cost = (
+                        credits_for_video_duration(float(total_duration))
+                        if successful_videos > 0 and total_duration > 0
+                        else 0
+                    )
+                    confirmed = await credit_svc.confirm_deduction(
+                        uuid.UUID(credit_reservation_id), actual_cost
+                    )
+                    if not confirmed:
+                        logger.warning(
+                            "[CREDITS] confirm_deduction returned False for reservation %s — "
+                            "logging to credit_failures for reconciliation",
+                            credit_reservation_id,
                         )
-                    # Release the API-level reservation (per-unit deductions already done above)
-                    if credit_reservation_id:
-                        await credit_svc.release_reservation(uuid.UUID(credit_reservation_id))
+                        try:
+                            await credit_svc.log_credit_failure(
+                                user_id=uuid.UUID(str(user_id)),
+                                reservation_id=uuid.UUID(credit_reservation_id),
+                                amount=actual_cost,
+                                operation_type=OperationType.VIDEO_GEN,
+                                error_message="confirm_deduction returned False",
+                            )
+                        except Exception as log_err:
+                            logger.warning("[CREDITS] Failed to log credit failure: %s", log_err)
                     await session.commit()
                 except Exception as credit_err:
-                    logger.warning("[CREDITS] Video credit deduction failed: %s", credit_err)
+                    logger.warning("[CREDITS] Video credit confirmation failed: %s", credit_err)
 
             # Update pipeline step based on result
             if successful_videos > 0:
@@ -847,13 +861,14 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             except Exception:
                 pass
 
-            # Release any API-level credit reservation on failure
+            # Release the API-level credit reservation on task failure
             try:
                 _task_meta = locals().get("task_meta") or {}
                 _user_id = locals().get("user_id")
                 _reservation_id = _task_meta.get("credit_reservation_id") if _task_meta else None
                 if _reservation_id and _user_id:
                     from app.credits.service import CreditService
+                    from app.credits.constants import OperationType
                     credit_svc = CreditService(session)
                     await credit_svc.release_reservation(uuid.UUID(_reservation_id))
                     await session.commit()
