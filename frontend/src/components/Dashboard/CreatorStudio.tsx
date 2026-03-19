@@ -14,11 +14,12 @@ import {
   CheckCircle2,
   Trash2
 } from "lucide-react";
-import { projectService, IntentAnalysisResult } from "../../services/projectService";
+import { projectService, IntentAnalysisResult, Project } from "../../services/projectService";
 import { toast } from "react-hot-toast";
 import ProjectFolder from "./ProjectFolder";
 import { checkFileAccessible } from "../../lib/fileValidation";
 import { AIConsultationModal } from "../Consultation/AIConsultationModal";
+import UploadProgress from "./UploadProgress";
 
 interface UploadedBook {
   id: string;
@@ -38,6 +39,9 @@ export default function CreatorStudio() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [recentProjects, setRecentProjects] = useState<any[]>([]);
   
+  // Upload progress state
+  const [uploadingProjectId, setUploadingProjectId] = useState<string | null>(null);
+
   // Delete confirmation modal state
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
@@ -157,11 +161,10 @@ export default function CreatorStudio() {
     };
   }) => {
     setShowConsultationModal(false);
-    const loadingToast = toast.loading("Creating your project...");
-    
+
     try {
       const data = await projectService.createProjectFromUpload(
-        selectedFiles, 
+        selectedFiles,
         config.projectType,
         prompt,
         {
@@ -171,46 +174,57 @@ export default function CreatorStudio() {
           consultation_data: config.consultationData,
         }
       );
-      
-      toast.success("Project created! Redirecting...", { id: loadingToast });
-      window.location.href = `/project/${data.id}`;
+      setUploadingProjectId(data.project_id);
     } catch (e) {
       console.error(e);
-      toast.error("Failed to create project.", { id: loadingToast });
+      toast.error("Failed to create project.");
     }
   };
 
   const handleCreateProject = async () => {
     if (!analysis) return;
-    
-    // Show loading toast
-    const loadingToast = toast.loading("Creating your project...");
-    
-    try {
-      let projectId;
 
+    try {
       if (selectedFiles.length > 0) {
-        // Create project from upload - use first file for now, backend can be extended for multiple
-        // We append the prompt to the upload if available
-         const data = await projectService.createProjectFromUpload(selectedFiles, analysis.primary_intent, prompt);
-         projectId = data.id;
+        const data = await projectService.createProjectFromUpload(
+          selectedFiles,
+          analysis.primary_intent,
+          prompt
+        );
+        setUploadingProjectId(data.project_id);
       } else {
-        // Create text-only project
-        const data = await projectService.createProject({
-          title: `Project: ${prompt.slice(0, 20) || "Untitled"}...`, 
-          input_prompt: prompt,
-          project_type: analysis.primary_intent,
-          workflow_mode: "creator_interactive",
-        });
-        projectId = data.id;
+        // Text-only project: keep simple toast flow
+        const loadingToast = toast.loading("Creating your project...");
+        try {
+          const data = await projectService.createProject({
+            title: `Project: ${prompt.slice(0, 20) || "Untitled"}...`,
+            input_prompt: prompt,
+            project_type: analysis.primary_intent,
+            workflow_mode: "creator_interactive",
+          });
+          toast.success("Project created! Redirecting...", { id: loadingToast });
+          window.location.href = `/project/${data.id}`;
+        } catch (e) {
+          console.error(e);
+          toast.error("Failed to create project.", { id: loadingToast });
+        }
       }
-      
-      toast.success("Project created! Redirecting...", { id: loadingToast });
-      window.location.href = `/project/${projectId}`;
     } catch (e) {
       console.error(e);
-      toast.error("Failed to create project.", { id: loadingToast });
+      toast.error("Failed to start project upload.");
     }
+  };
+
+  const handleUploadComplete = (project: Project) => {
+    setUploadingProjectId(null);
+    toast.success("Project created!");
+    window.location.href = `/project/${project.id}`;
+  };
+
+  const handleUploadError = (_error: string) => {
+    setUploadingProjectId(null);
+    setSelectedFiles([]);
+    setAnalysis(null);
   };
 
   const handleDeleteProject = async (e: React.MouseEvent, projectId: string) => {
@@ -236,6 +250,18 @@ export default function CreatorStudio() {
       setProjectToDelete(null);
     }
   };
+
+  if (uploadingProjectId) {
+    return (
+      <div className="space-y-8">
+        <UploadProgress
+          projectId={uploadingProjectId}
+          onComplete={handleUploadComplete}
+          onError={handleUploadError}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">

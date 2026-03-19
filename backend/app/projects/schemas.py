@@ -48,6 +48,12 @@ class ProjectRead(ProjectBase):
     created_at: datetime
     updated_at: datetime
     artifacts: List[ArtifactSchema] = []
+    upload_status: Optional[str] = None
+    upload_progress: Optional[int] = None
+    upload_stage: Optional[str] = None
+    upload_error: Optional[str] = None
+    upload_total_chapters: Optional[int] = None
+    upload_chapters_processed: Optional[int] = None
 
     class Config:
         from_attributes = True
