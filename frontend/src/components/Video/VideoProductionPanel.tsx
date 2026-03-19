@@ -16,6 +16,9 @@ import VideoPreview from './VideoPreview';
 import RenderingProgress from './RenderingProgress';
 import type { VideoScene } from '../../types/videoProduction';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import { useCreditBalance } from '../../hooks/useCreditBalance';
+import { DEFAULT_VIDEO_SECONDS_PER_SHOT, estimateVideoCreditsFromShots } from '../../lib/creditCosts';
+import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 
 interface SceneDescription {
   scene_number: number;
@@ -90,6 +93,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     selectedScriptId,
     isSwitching
   } = useScriptSelection();
+  const { balance: creditBalance } = useCreditBalance({ enabled: !!selectedScriptId });
 
   const storyboardContext = useStoryboardOptional();
   
@@ -316,6 +320,37 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
 
   // Disable actions during switching or loading
   const controlsDisabled = isSwitching || isLoading;
+  const selectedVideoCost = estimateVideoCreditsFromShots(
+    selectedShotIds.length,
+    DEFAULT_VIDEO_SECONDS_PER_SHOT
+  );
+  const allVideoCost = estimateVideoCreditsFromShots(
+    Math.max(enrichedScenes.length, 1),
+    DEFAULT_VIDEO_SECONDS_PER_SHOT
+  );
+  const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
+  const [requiredCreditsForModal, setRequiredCreditsForModal] = useState(0);
+
+  const openInsufficientCreditsModal = (requiredCredits: number) => {
+    setRequiredCreditsForModal(requiredCredits);
+    setShowInsufficientCreditsModal(true);
+  };
+
+  const handleGenerateSelected = () => {
+    if (creditBalance < selectedVideoCost) {
+      openInsufficientCreditsModal(selectedVideoCost);
+      return;
+    }
+    onGenerateVideo?.(selectedShotIds);
+  };
+
+  const handleGenerateAll = () => {
+    if (creditBalance < allVideoCost) {
+      openInsufficientCreditsModal(allVideoCost);
+      return;
+    }
+    onGenerateVideo?.();
+  };
 
   // Reset UI state when script changes
   useEffect(() => {
@@ -400,6 +435,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   };
 
   return (
+    <>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -432,6 +468,9 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
                 ? `${selectedShotIds.length} shot${selectedShotIds.length > 1 ? 's' : ''} selected`
                 : 'Click checkboxes on shots to select for generation'}
             </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              Est. selected cost: {selectedVideoCost} • Est. all cost: {allVideoCost} • Available: {creditBalance}
+            </span>
             {selectedShotIds.length > 0 && (
               <button
                 onClick={() => setSelectedShotIds([])}
@@ -444,30 +483,34 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
           
           {/* Generation Buttons */}
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => onGenerateVideo?.(selectedShotIds)}
-              disabled={controlsDisabled || !canGenerateVideo || selectedShotIds.length === 0}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
-              <Video className="w-4 h-4" />
-              <span>
-                {videoStatus === "processing" || videoStatus === "starting"
-                  ? "Generating..."
-                  : `Generate Selected (${selectedShotIds.length})`}
-              </span>
-            </button>
-            <button
-              onClick={() => onGenerateVideo?.()}
-              disabled={controlsDisabled || !canGenerateVideo}
-              className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
-              <Video className="w-4 h-4" />
-              <span>
-                {videoStatus === "processing" || videoStatus === "starting"
-                  ? "Generating..."
-                  : "Generate All Videos"}
-              </span>
-            </button>
+            <div>
+              <button
+                onClick={handleGenerateSelected}
+                disabled={controlsDisabled || !canGenerateVideo || selectedShotIds.length === 0}
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              >
+                <Video className="w-4 h-4" />
+                <span>
+                  {videoStatus === "processing" || videoStatus === "starting"
+                    ? "Generating..."
+                    : `Generate Selected (${selectedShotIds.length})`}
+                </span>
+              </button>
+            </div>
+            <div>
+              <button
+                onClick={handleGenerateAll}
+                disabled={controlsDisabled || !canGenerateVideo}
+                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              >
+                <Video className="w-4 h-4" />
+                <span>
+                  {videoStatus === "processing" || videoStatus === "starting"
+                    ? "Generating..."
+                    : "Generate All Videos"}
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -676,6 +719,15 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
         </div>
       )}
     </div>
+
+      <InsufficientCreditsModal
+        isOpen={showInsufficientCreditsModal}
+        onClose={() => setShowInsufficientCreditsModal(false)}
+        requiredCredits={requiredCreditsForModal}
+        availableCredits={creditBalance}
+        operationType="Video Generation"
+      />
+    </>
   );
 };
 

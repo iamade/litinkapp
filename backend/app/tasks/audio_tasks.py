@@ -834,6 +834,22 @@ async def generate_narrator_audio(
                 await session.commit()
                 await session.refresh(audio_record)
 
+                # Deduct credits based on actual audio duration (idempotent)
+                if user_id and duration and float(duration) > 0:
+                    try:
+                        from app.credits.service import CreditService, credits_for_audio_duration
+                        from app.credits.constants import OperationType
+                        credit_svc = CreditService(session)
+                        await credit_svc.deduct_for_operation(
+                            user_id=uuid.UUID(user_id),
+                            amount=credits_for_audio_duration(float(duration)),
+                            operation_type=OperationType.AUDIO_GEN,
+                            ref_id=f"audio_gen:{audio_record.id}",
+                        )
+                        await session.commit()
+                    except Exception as credit_err:
+                        logger.warning("[CREDITS] Narrator audio credit deduction failed: %s", credit_err)
+
                 narrator_results.append(
                     {
                         "id": str(audio_record.id),
@@ -1347,6 +1363,22 @@ async def generate_character_audio(
                 session.add(audio_record)
                 await session.commit()
                 await session.refresh(audio_record)
+
+                # Deduct credits based on actual audio duration (idempotent)
+                if user_id and duration and float(duration) > 0:
+                    try:
+                        from app.credits.service import CreditService, credits_for_audio_duration
+                        from app.credits.constants import OperationType
+                        credit_svc = CreditService(session)
+                        await credit_svc.deduct_for_operation(
+                            user_id=uuid.UUID(user_id),
+                            amount=credits_for_audio_duration(float(duration)),
+                            operation_type=OperationType.AUDIO_GEN,
+                            ref_id=f"audio_gen:{audio_record.id}",
+                        )
+                        await session.commit()
+                    except Exception as credit_err:
+                        logger.warning("[CREDITS] Character audio credit deduction failed: %s", credit_err)
 
                 character_results.append(
                     {

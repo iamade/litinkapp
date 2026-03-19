@@ -45,11 +45,15 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { upscaleImage } from '../../lib/api/upscale';
+import { useCreditBalance } from '../../hooks/useCreditBalance';
+import { estimateImageCredits, estimateUpscaleCredits, getInsufficientCreditsTooltip } from '../../lib/creditCosts';
+import { dispatchCreditsRefresh } from '../../lib/credits';
 
 import { projectService } from '../../services/projectService';
 import SceneGenerationModal from './SceneGenerationModal';
 import { StoryboardSceneRow } from './StoryboardSceneRow';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 
 const SortableStoryboardRow = ({ id, ...props }: any) => {
   const {
@@ -182,6 +186,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   } | null>(null);
   
   const [showSceneGenerationModal, setShowSceneGenerationModal] = useState(false);
+  const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
+  const [requiredCreditsForModal, setRequiredCreditsForModal] = useState(0);
+  const [operationTypeForModal, setOperationTypeForModal] = useState('Image Generation');
   const [selectedSceneForGeneration, setSelectedSceneForGeneration] = useState<{
         sceneNumber: number;
         description: string;
@@ -217,6 +224,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const [isObjectsExpanded, setIsObjectsExpanded] = useState(true);
 
   const [upscalingImages, setUpscalingImages] = useState<Set<string>>(new Set());
+  const { balance: creditBalance } = useCreditBalance({ enabled: !!selectedScriptId });
   
   const [generationOptions, setGenerationOptions] = useState({
     style: 'cinematic',
@@ -225,6 +233,16 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     useCharacterReferences: true,
     lightingMood: 'cinematic'
   } as ImageGenerationOptions);
+  const perImageCost = estimateImageCredits(1);
+  const singleImageInsufficientReason = creditBalance < perImageCost
+    ? getInsufficientCreditsTooltip(creditBalance, perImageCost)
+    : "";
+
+  const openInsufficientCreditsModal = (requiredCredits: number, operationType: string) => {
+    setRequiredCreditsForModal(requiredCredits);
+    setOperationTypeForModal(operationType);
+    setShowInsufficientCreditsModal(true);
+  };
 
   // Get scenes from selected script by parsing script text (like ScriptGenerationPanel does)
   const scenes = React.useMemo(() => {
@@ -350,6 +368,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
     return [];
   }, [selectedScript]);
+  const allScenesEstimatedCost = estimateImageCredits(scenes.length);
 
 
   const {
@@ -373,6 +392,11 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
   const handleUpscaleImage = async (_sceneNumber: number, imageUrl: string) => {
     if (upscalingImages.has(imageUrl)) return;
+    const requiredCredits = estimateUpscaleCredits(1);
+    if (creditBalance < requiredCredits) {
+      toast.error(getInsufficientCreditsTooltip(creditBalance, requiredCredits));
+      return;
+    }
     
     // Add to upscaling set
     setUpscalingImages(prev => new Set(prev).add(imageUrl));
@@ -409,6 +433,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           });
           
           toast.success('Image upscaled successfully!', { id: toastId });
+          dispatchCreditsRefresh();
        }
     } catch (error) {
        console.error(error);
@@ -932,6 +957,11 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       return;
     }
 
+    if (creditBalance < allScenesEstimatedCost) {
+      openInsufficientCreditsModal(allScenesEstimatedCost, 'Image Generation');
+      return;
+    }
+
     setConfirmAction('scenes');
     setShowConfirmModal(true);
   };
@@ -950,6 +980,10 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     setShowConfirmModal(false);
 
     if (confirmAction === 'scenes') {
+      if (creditBalance < allScenesEstimatedCost) {
+        openInsufficientCreditsModal(allScenesEstimatedCost, 'Image Generation');
+        return;
+      }
       await generateAllSceneImages(scenes, generationOptions);
     } else if (confirmAction === 'characters') {
       // Build character details from plot overview
@@ -1502,13 +1536,16 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             <button
               onClick={handleGenerateAllScenes}
               disabled={!scenes.length || generatingScenes.size > 0}
-              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600"
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Wand2 className="w-4 h-4" />
-              <span>Generate All Scenes</span>
+              <span>Generate All Scenes ({allScenesEstimatedCost} cr)</span>
             </button>
           </div>
         </div>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Estimated scene generation cost: {perImageCost} credit per image • Available: {creditBalance}
+        </p>
 
         {!scenes.length ? (
           <div className="text-center py-12 text-gray-500">
@@ -1560,6 +1597,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     scene={scene}
                     sceneImages={images}
                     isGenerating={generatingScenes.has(sceneNumber)}
+                    generationDisabledReason={undefined}
                     selectedIds={selectedSceneIds}
                     keySceneId={keySceneImages[sceneNumber]}
                     dialogueMoments={sceneMoments}
@@ -1739,6 +1777,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     characterImage={characterImage}
                     characterDetails={character}
                     isGenerating={generatingCharacters.has(characterKey)}
+                    generationDisabledReason={undefined}
                     viewMode={viewMode}
                     fromPlotOverview={!!plotImageUrl && !filteredCharacterImages?.[characterKey]}
                     plotCharacters={plotOverview?.characters || []}
@@ -1869,6 +1908,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       characterImage={finalImage}
                       characterDetails={item}
                       isGenerating={generatingCharacters.has(itemKey)}
+                      generationDisabledReason={undefined}
                       viewMode={viewMode}
                       fromPlotOverview={!!plotImageUrl && !itemImage}
                       plotCharacters={plotOverview?.characters || []}
@@ -2199,6 +2239,10 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             setSelectedSceneForGeneration(null);
         }}
         onGenerate={(desc: string, charIds: string[]) => {
+            if (creditBalance < perImageCost) {
+                openInsufficientCreditsModal(perImageCost, 'Image Generation');
+                return;
+            }
             if (selectedSceneForGeneration) {
                 // Collect character image URLs for Image-to-Image generation
                 // 1. Gather URLs from characters selected in the modal (from plot overview)
@@ -2271,6 +2315,17 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         }}
         isSuggestedShot={selectedSceneForGeneration?.isSuggestedShot}
         userTier={userTier}
+        estimatedCreditCost={perImageCost}
+        insufficientCreditsMessage={singleImageInsufficientReason || undefined}
+        onInsufficientCredits={() => openInsufficientCreditsModal(perImageCost, 'Image Generation')}
+      />
+
+      <InsufficientCreditsModal
+        isOpen={showInsufficientCreditsModal}
+        onClose={() => setShowInsufficientCreditsModal(false)}
+        requiredCredits={requiredCreditsForModal}
+        availableCredits={creditBalance}
+        operationType={operationTypeForModal}
       />
     </div>
   );
@@ -2284,6 +2339,7 @@ interface SceneImageCardProps {
   scene: any;
   sceneImages?: SceneImage[];
   isGenerating: boolean;
+  generationDisabledReason?: string;
   selectedIds?: Set<string>;
   keySceneId?: string; // ID of the key scene image for this scene
   dialogueMoments?: Array<{
@@ -2306,6 +2362,7 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
   scene,
   sceneImages = [],
   isGenerating,
+  generationDisabledReason,
   selectedIds,
   keySceneId,
   dialogueMoments = [],
@@ -2428,6 +2485,7 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
           <ImageActions
             hasImage={!!currentImage?.imageUrl}
             isGenerating={isGenerating || displayStatus === 'generating'}
+            generationDisabledReason={generationDisabledReason}
             onGenerate={onGenerate}
             onRegenerate={onRegenerate}
             onDelete={currentImage?.id ? () => onDelete(currentImage.id!) : undefined}
@@ -2486,24 +2544,28 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
                 <button
                   key={idx}
                   onClick={() => {
-                    if (!hasCompletedKeyScene) return;
+                    if (!hasCompletedKeyScene || generationDisabledReason) return;
                     onGenerateMoment?.(moment.shot_description, keySceneImage?.imageUrl);
                   }}
-                  disabled={!hasCompletedKeyScene}
-                  title={!hasCompletedKeyScene ? 'Generate a key scene image first to enable suggested shots' : undefined}
+                  disabled={!hasCompletedKeyScene || !!generationDisabledReason}
+                  title={
+                    !hasCompletedKeyScene
+                      ? 'Generate a key scene image first to enable suggested shots'
+                      : generationDisabledReason
+                  }
                   className={`w-full flex items-center justify-between px-2 py-1.5 text-left text-xs border border-dashed rounded transition-colors group ${
-                    hasCompletedKeyScene 
+                    hasCompletedKeyScene && !generationDisabledReason
                       ? 'bg-gray-50 hover:bg-blue-50 border-gray-300 hover:border-blue-400 cursor-pointer' 
                       : 'bg-gray-100 border-gray-200 cursor-not-allowed opacity-60'
                   }`}
                 >
-                  <span className={`truncate ${hasCompletedKeyScene ? 'text-gray-600 group-hover:text-blue-600' : 'text-gray-400'}`}>
+                  <span className={`truncate ${hasCompletedKeyScene && !generationDisabledReason ? 'text-gray-600 group-hover:text-blue-600' : 'text-gray-400'}`}>
                     {moment.character}: {moment.action}
                     {moment.dialogue_preview && (
                       <span className="text-gray-400 ml-1">"{moment.dialogue_preview}"</span>
                     )}
                   </span>
-                  <Plus className={`w-3 h-3 flex-shrink-0 ml-2 ${hasCompletedKeyScene ? 'text-gray-400 group-hover:text-blue-500' : 'text-gray-300'}`} />
+                  <Plus className={`w-3 h-3 flex-shrink-0 ml-2 ${hasCompletedKeyScene && !generationDisabledReason ? 'text-gray-400 group-hover:text-blue-500' : 'text-gray-300'}`} />
                 </button>
               ))}
               {dialogueMoments.length > 3 && (
@@ -2529,6 +2591,7 @@ interface CharacterImageCardProps {
   characterImage?: CharacterImage;
   characterDetails?: Tables<'characters'> | string;
   isGenerating: boolean;
+  generationDisabledReason?: string;
   viewMode: 'grid' | 'list';
   fromPlotOverview?: boolean;
   plotCharacters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string; image_url?: string }>;
@@ -2544,6 +2607,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
   characterImage,
   characterDetails,
   isGenerating,
+  generationDisabledReason,
   viewMode,
   fromPlotOverview = false,
   plotCharacters = [],
@@ -2602,6 +2666,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
             <ImageActions
               hasImage={!!characterImage?.imageUrl}
               isGenerating={isGenerating}
+              generationDisabledReason={generationDisabledReason}
               onGenerate={() => onGenerate(selectedPlotCharacter)}
               onRegenerate={onRegenerate}
               onDelete={fromPlotOverview ? undefined : onDelete}
@@ -2639,6 +2704,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
           <ImageActions
             hasImage={!!characterImage?.imageUrl}
             isGenerating={isGenerating}
+            generationDisabledReason={generationDisabledReason}
             onGenerate={() => onGenerate(selectedPlotCharacter)}
             onRegenerate={onRegenerate}
             onDelete={fromPlotOverview ? undefined : onDelete}
@@ -2807,6 +2873,7 @@ const ImageThumbnail: React.FC<ImageThumbnailProps> = ({
 interface ImageActionsProps {
   hasImage: boolean;
   isGenerating: boolean;
+  generationDisabledReason?: string;
   onGenerate: () => void;
   onRegenerate: () => void;
   onDelete?: () => void;
@@ -2820,6 +2887,7 @@ interface ImageActionsProps {
 const ImageActions: React.FC<ImageActionsProps> = ({
   hasImage,
   isGenerating,
+  generationDisabledReason,
   onGenerate,
   onRegenerate,
   onDelete,
@@ -2844,9 +2912,9 @@ const ImageActions: React.FC<ImageActionsProps> = ({
             {!hideGenerateButtons && (
               <button
                 onClick={onRegenerate}
-                disabled={isGenerating}
+                disabled={isGenerating || !!generationDisabledReason}
                 className="p-1 bg-black bg-opacity-50 text-white rounded hover:bg-opacity-70 disabled:opacity-50"
-                title="Regenerate"
+                title={generationDisabledReason || "Regenerate"}
               >
                 <RefreshCw className="w-4 h-4" />
               </button>
@@ -2868,9 +2936,9 @@ const ImageActions: React.FC<ImageActionsProps> = ({
           // For scene cards without images - show generate button
           <button
             onClick={onGenerate}
-            disabled={isGenerating}
+            disabled={isGenerating || !!generationDisabledReason}
             className="p-1 bg-black bg-opacity-50 text-white rounded hover:bg-opacity-70 disabled:opacity-50"
-            title={selectedPlotCharHasImage ? "Use existing image" : "Generate image"}
+            title={generationDisabledReason || (selectedPlotCharHasImage ? "Use existing image" : "Generate image")}
           >
             {selectedPlotCharHasImage ? (
               <Download className="w-4 h-4" />
@@ -2897,9 +2965,9 @@ const ImageActions: React.FC<ImageActionsProps> = ({
           {!hideGenerateButtons && (
             <button
               onClick={onRegenerate}
-              disabled={isGenerating}
+              disabled={isGenerating || !!generationDisabledReason}
               className="p-2 text-gray-600 hover:bg-gray-50 rounded disabled:opacity-50"
-              title="Regenerate"
+              title={generationDisabledReason || "Regenerate"}
             >
               <RefreshCw className="w-4 h-4" />
             </button>
@@ -2930,7 +2998,8 @@ const ImageActions: React.FC<ImageActionsProps> = ({
         // For scene cards - show generate button
         <button
           onClick={onGenerate}
-          disabled={isGenerating}
+          disabled={isGenerating || !!generationDisabledReason}
+          title={generationDisabledReason || undefined}
           className="flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-blue-400"
         >
           {selectedPlotCharHasImage ? (

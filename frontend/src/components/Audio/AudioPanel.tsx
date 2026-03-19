@@ -33,6 +33,9 @@ import SceneGalleryModal from './SceneGalleryModal';
 import { deleteAudio } from '../../lib/api';
 import { projectService } from '../../services/projectService';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import { useCreditBalance } from '../../hooks/useCreditBalance';
+import { estimateAudioCredits } from '../../lib/creditCosts';
+import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 
 interface AudioPanelProps {
   // Props are now optional since we use context for script selection
@@ -94,6 +97,16 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   });
 
   const [showGenerationModal, setShowGenerationModal] = useState(false);
+  const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
+  const [requiredCreditsForModal, setRequiredCreditsForModal] = useState(0);
+  const [operationTypeForModal, setOperationTypeForModal] = useState('Audio Generation');
+  const { balance: creditBalance } = useCreditBalance({ enabled: !!selectedScriptId });
+
+  const openInsufficientCreditsModal = (requiredCredits: number, operationType: string) => {
+    setRequiredCreditsForModal(requiredCredits);
+    setOperationTypeForModal(operationType);
+    setShowInsufficientCreditsModal(true);
+  };
 
   // Fallback parser if scene_descriptions is missing or incomplete
   const parseScriptScenes = (scriptText: string): string[] => {
@@ -147,6 +160,20 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     }
     return fromMeta;
   }, [selectedScript]);
+
+  const getSceneDurationSeconds = React.useCallback((sceneNum: number) => {
+    const scene = scenes[sceneNum - 1] as any;
+    const rawDuration = Number(scene?.estimated_duration ?? scene?.duration ?? 5);
+    return Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 5;
+  }, [scenes]);
+
+  const getSceneAudioCost = React.useCallback((sceneNum: number) => {
+    return estimateAudioCredits(getSceneDurationSeconds(sceneNum));
+  }, [getSceneDurationSeconds]);
+
+  const allScenesAudioCost = React.useMemo(() => {
+    return scenes.reduce((total, _scene, idx) => total + getSceneAudioCost(idx + 1), 0);
+  }, [scenes, getSceneAudioCost]);
 
   const {
     files,
@@ -500,6 +527,11 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
       return;
     }
 
+    if (creditBalance < allScenesAudioCost) {
+      openInsufficientCreditsModal(allScenesAudioCost, 'Audio Generation');
+      return;
+    }
+
     setShowGenerationModal(true);
   };
 
@@ -566,6 +598,16 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         setGeneratingScenesAudio(new Set(scenes.map((_, i) => i + 1)));
       }
 
+      const effectiveScenes = sceneNumbersToGenerate && sceneNumbersToGenerate.length > 0
+        ? sceneNumbersToGenerate
+        : scenes.map((_, i) => i + 1);
+      const requiredCredits = effectiveScenes.reduce((total, sceneNum) => total + getSceneAudioCost(sceneNum), 0);
+      if (creditBalance < requiredCredits) {
+        setGeneratingScenesAudio(new Set());
+        openInsufficientCreditsModal(requiredCredits, 'Audio Generation');
+        return;
+      }
+
       const response = await import('../../lib/api').then(m => m.generateScriptAudio(stableSelectedChapterId, selectedScriptId, sceneNumbersToGenerate));
       if (response && response.video_generation_id) {
           setVideoGenerationId(response.video_generation_id);
@@ -598,12 +640,13 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     // isGenerating is properly managed by the hook and becomes false when polling completes
     const isGeneratingAudio = isGenerating;
     return (
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      <div className="mb-6">
+        <div className="flex items-center justify-between">
+          <div>
           <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Audio Production</h3>
           <p className="text-gray-600 dark:text-gray-400">Generate and manage audio for {chapterTitle}</p>
-        </div>
-        <div className="flex items-center space-x-3">
+          </div>
+          <div className="flex items-center space-x-3">
           <button
             onClick={() => setShowSettings(!showSettings)}
             className="flex items-center space-x-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg shadow-sm hover:shadow-md hover:bg-gray-50 transition-all duration-200"
@@ -614,7 +657,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
           <button
             onClick={handleGenerateAll}
             disabled={!scenes.length || isGeneratingAudio}
-            className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg shadow-md hover:shadow-lg hover:from-purple-700 hover:to-indigo-700 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg shadow-md hover:shadow-lg hover:from-purple-700 hover:to-indigo-700 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
           >
             {isGeneratingAudio ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -631,7 +674,11 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
             <Download className="w-4 h-4" />
             <span>Export Mix</span>
           </button>
+          </div>
         </div>
+        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+          Estimated audio cost (all scenes): {allScenesAudioCost} credits • Available: {creditBalance}
+        </p>
       </div>
     );
   };
@@ -880,6 +927,12 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                 return;
             }
 
+            const requiredCredits = getSceneAudioCost(sceneNum);
+            if (creditBalance < requiredCredits) {
+                openInsufficientCreditsModal(requiredCredits, 'Audio Generation');
+                return;
+            }
+
             try {
                 setGeneratingScenesAudio(prev => new Set(prev).add(sceneNum));
                 const response = await import('../../lib/api').then(m => 
@@ -904,6 +957,12 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         const handleGenerateShotAudio = async (sceneNum: number, shotIndex: number) => {
             if (!selectedScriptId) {
                 toast.error('No script selected');
+                return;
+            }
+
+            const requiredCredits = getSceneAudioCost(sceneNum);
+            if (creditBalance < requiredCredits) {
+                openInsufficientCreditsModal(requiredCredits, 'Audio Generation');
                 return;
             }
 
@@ -974,6 +1033,8 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                                 deselectedImages={deselectedImages}
                                 isGeneratingAudio={generatingScenesAudio.has(sceneNum)}
                                 hasAudio={sceneHasAudio(sceneNum)}
+                                estimatedCreditCost={getSceneAudioCost(sceneNum)}
+                                generateDisabledReason={undefined}
                                 onGenerateAudio={() => handleGenerateSceneAudio(sceneNum)}
                                 onView={(url, imgDescription) => {
                                     const desc = imgDescription || (typeof scene === 'string' ? scene : (scene.visual_description || scene.description));
@@ -1179,6 +1240,13 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
         onClose={() => setShowGenerationModal(false)}
         onConfirm={handleConfirmGeneration}
         sceneCount={Object.keys(selectedSceneImages).length > 0 ? Object.keys(selectedSceneImages).length : scenes.length}
+      />
+      <InsufficientCreditsModal
+        isOpen={showInsufficientCreditsModal}
+        onClose={() => setShowInsufficientCreditsModal(false)}
+        requiredCredits={requiredCreditsForModal}
+        availableCredits={creditBalance}
+        operationType={operationTypeForModal}
       />
     </div>
   );

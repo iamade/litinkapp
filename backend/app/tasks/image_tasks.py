@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 from app.core.database import async_session, engine
 import json
 import logging
+import uuid as _uuid
 
 # from app.core.services.modelslab_image import ModelsLabImageService
 from app.core.services.pipeline import PipelineManager, PipelineStep
@@ -450,6 +451,21 @@ async def generate_character_images_optimized(
                 await session.commit()
                 record_id = db_result.scalar()
 
+                # Deduct 1 credit per successfully generated image (idempotent)
+                try:
+                    from app.credits.service import CreditService
+                    from app.credits.constants import OperationType, IMAGE_GEN
+                    credit_svc = CreditService(session)
+                    await credit_svc.deduct_for_operation(
+                        user_id=_uuid.UUID(str(user_id)),
+                        amount=IMAGE_GEN,
+                        operation_type=OperationType.IMAGE_GEN,
+                        ref_id=f"image_gen:{record_id}",
+                    )
+                    await session.commit()
+                except Exception as credit_err:
+                    logger.warning("[CREDITS] Character image credit deduction failed: %s", credit_err)
+
                 character_results.append(
                     {
                         "id": record_id,
@@ -610,6 +626,21 @@ async def generate_scene_images_optimized(
                 db_result = await session.execute(insert_query, image_record_data)
                 await session.commit()
                 record_id = db_result.scalar()
+
+                # Deduct 1 credit per successfully generated scene image (idempotent)
+                try:
+                    from app.credits.service import CreditService
+                    from app.credits.constants import OperationType, IMAGE_GEN
+                    credit_svc = CreditService(session)
+                    await credit_svc.deduct_for_operation(
+                        user_id=_uuid.UUID(str(user_id)),
+                        amount=IMAGE_GEN,
+                        operation_type=OperationType.IMAGE_GEN,
+                        ref_id=f"image_gen:{record_id}",
+                    )
+                    await session.commit()
+                except Exception as credit_err:
+                    logger.warning("[CREDITS] Scene image credit deduction failed: %s", credit_err)
 
                 scene_results.append(
                     {

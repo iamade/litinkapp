@@ -1,3 +1,4 @@
+import uuid
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import select, col
@@ -9,6 +10,9 @@ from app.core.services.standalone_image import StandaloneImageService
 from app.core.services.modelslab_v7_image import ModelsLabV7ImageService
 from app.images.schemas import DeleteImageResponse, ImageExpandRequest, ImageExpandResponse
 from app.videos.models import ImageGeneration
+from app.credits.dependencies import require_credits
+from app.credits.constants import OperationType, IMAGE_GEN
+from app.credits.service import CreditService
 
 router = APIRouter()
 
@@ -156,6 +160,7 @@ async def expand_image(
     request: ImageExpandRequest,
     session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.IMAGE_EXPAND, IMAGE_GEN)),
 ):
     """
     Expand/outpaint an image to a target aspect ratio.
@@ -213,6 +218,9 @@ async def expand_image(
             )
 
         # Handle success response
+        credit_service = CreditService(session)
+        await credit_service.confirm_deduction(reservation_id, IMAGE_GEN)
+        await session.commit()
         return ImageExpandResponse(
             status="success",
             expanded_url=result.get("expanded_url"),

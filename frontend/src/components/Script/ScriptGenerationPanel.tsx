@@ -4,6 +4,10 @@ import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
 import { apiClient } from '../../lib/api';
 import ExpandScriptModal from './ExpandScriptModal';
+import { useCreditBalance } from '../../hooks/useCreditBalance';
+import { estimateScriptCredits } from '../../lib/creditCosts';
+import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
+import { toast } from 'react-hot-toast';
 
 interface SceneDescription {
   scene_number: number;
@@ -221,9 +225,13 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [activeView, setActiveView] = useState<'overview' | 'acts' | 'scenes' | 'dialogue' | 'performance'>('overview');
   const [showFullScript, setShowFullScript] = useState(false);
   const [isAddingCharacter, setIsAddingCharacter] = useState(false);
+  const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
   const [newCharacterName, setNewCharacterName] = useState('');
   const [newEntityType, setNewEntityType] = useState<'character' | 'object' | 'location' | ''>('');
-
+  const { balance: creditBalance } = useCreditBalance({ enabled: true });
+  const scriptCreditCost = estimateScriptCredits();
+  const hasScriptCredits = creditBalance >= scriptCreditCost;
+  
   const addManualEntity = async (script: ChapterScript) => {
     const entityName = newCharacterName.trim();
     if (!entityName || !selectedScript || !newEntityType) return;
@@ -250,6 +258,11 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   };
 
   const handleGenerateScript = () => {
+    if (!hasScriptCredits) {
+      setShowInsufficientCreditsModal(true);
+      return;
+    }
+
     onGenerateScript(scriptStyle, {
       ...generationOptions,
       scriptStoryType: scriptStoryType,
@@ -475,21 +488,24 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
         <button
           onClick={handleGenerateScript}
           disabled={isGeneratingScript}
-          className="flex items-center space-x-2 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-purple-400 disabled:cursor-not-allowed"
+          className="flex items-center space-x-2 px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {isGeneratingScript ? (
-            <>
-              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-              <span>Generating...</span>
-            </>
-          ) : (
-            <>
-              <FileText className="w-4 h-4" />
-              <span>Generate Script</span>
-            </>
-          )}
-        </button>
+            {isGeneratingScript ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                <span>Generating...</span>
+              </>
+            ) : (
+              <>
+                <FileText className="w-4 h-4" />
+                <span>Generate Script ({scriptCreditCost} credit{scriptCreditCost === 1 ? '' : 's'})</span>
+              </>
+            )}
+          </button>
       </div>
+      <p className="mt-3 text-right text-xs text-gray-500 dark:text-gray-400">
+        Estimated cost: {scriptCreditCost} credit{scriptCreditCost === 1 ? '' : 's'} • Available: {creditBalance}
+      </p>
     </div>
   );
 
@@ -1466,7 +1482,14 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
         </div>
       )}
 
-      {/* Expand Script Modal */}
+      <InsufficientCreditsModal
+        isOpen={showInsufficientCreditsModal}
+        onClose={() => setShowInsufficientCreditsModal(false)}
+        requiredCredits={scriptCreditCost}
+        availableCredits={creditBalance}
+        operationType="Script Generation"
+      />
+
       {showExpandModal && expandingScriptId && (
         <ExpandScriptModal
           isOpen={showExpandModal}

@@ -10,6 +10,8 @@ interface AudioStoryboardSceneRowProps {
   isGeneratingAudio?: boolean;
   hasAudio?: boolean;
   onGenerateAudio?: () => void;
+  estimatedCreditCost?: number;
+  generateDisabledReason?: string;
   onView?: (url: string, description: string, shotIndex?: number) => void;
   // Storyboard configuration (read-only from Image tab)
   keySceneImageId?: string;
@@ -109,6 +111,8 @@ export const AudioStoryboardSceneRow: React.FC<AudioStoryboardSceneRowProps> = (
   isGeneratingAudio = false,
   hasAudio = false,
   onGenerateAudio,
+  estimatedCreditCost = 0,
+  generateDisabledReason,
   onView,
   keySceneImageId,
   deselectedImages,
@@ -149,22 +153,26 @@ export const AudioStoryboardSceneRow: React.FC<AudioStoryboardSceneRowProps> = (
 
         {/* Generate Audio Button */}
         {onGenerateAudio && (
-          <button
-            onClick={onGenerateAudio}
-            disabled={isGeneratingAudio}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              isGeneratingAudio
-                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 hover:shadow-md'
-            }`}
-          >
-            {isGeneratingAudio ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Volume2 className="w-4 h-4" />
-            )}
-            <span>{isGeneratingAudio ? 'Generating...' : 'Generate Audio'}</span>
-          </button>
+          <div title={generateDisabledReason}>
+            <button
+              onClick={onGenerateAudio}
+              disabled={isGeneratingAudio}
+              className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                isGeneratingAudio
+                  ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-300 opacity-60 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 hover:shadow-md'
+              }`}
+            >
+              {isGeneratingAudio ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Volume2 className="w-4 h-4" />
+              )}
+              <span>
+                {isGeneratingAudio ? 'Generating...' : `Generate Audio (${estimatedCreditCost} cr)`}
+              </span>
+            </button>
+          </div>
         )}
       </div>
 

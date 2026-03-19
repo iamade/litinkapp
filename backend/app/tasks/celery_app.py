@@ -66,7 +66,16 @@ celery_app.conf.imports = [
     "app.tasks.image_tasks",
     "app.tasks.video_tasks",
     "app.tasks.merge_tasks",
+    "app.tasks.credit_tasks",
 ]
+
+# Celery Beat periodic schedule
+celery_app.conf.beat_schedule = {
+    "release-zombie-credit-reservations": {
+        "task": "app.tasks.credit_tasks.release_zombie_reservations",
+        "schedule": 600,  # every 10 minutes (seconds)
+    },
+}
 
 # Auto-discover tasks from specific modules (only works for packages with a tasks.py module)
 celery_app.autodiscover_tasks(

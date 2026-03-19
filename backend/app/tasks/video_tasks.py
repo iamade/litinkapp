@@ -772,6 +772,27 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             )
             await session.commit()
 
+            # Deduct credits based on actual video duration and release the API reservation
+            credit_reservation_id = task_meta.get("credit_reservation_id")
+            if user_id:
+                try:
+                    from app.credits.service import CreditService, credits_for_video_duration
+                    from app.credits.constants import OperationType
+                    credit_svc = CreditService(session)
+                    if successful_videos > 0 and total_duration > 0:
+                        await credit_svc.deduct_for_operation(
+                            user_id=uuid.UUID(str(user_id)),
+                            amount=credits_for_video_duration(float(total_duration)),
+                            operation_type=OperationType.VIDEO_GEN,
+                            ref_id=f"video_gen:{video_generation_id}",
+                        )
+                    # Release the API-level reservation (per-unit deductions already done above)
+                    if credit_reservation_id:
+                        await credit_svc.release_reservation(uuid.UUID(credit_reservation_id))
+                    await session.commit()
+                except Exception as credit_err:
+                    logger.warning("[CREDITS] Video credit deduction failed: %s", credit_err)
+
             # Update pipeline step based on result
             if successful_videos > 0:
                 await update_pipeline_step(
@@ -825,6 +846,19 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
                 await session.rollback()
             except Exception:
                 pass
+
+            # Release any API-level credit reservation on failure
+            try:
+                _task_meta = locals().get("task_meta") or {}
+                _user_id = locals().get("user_id")
+                _reservation_id = _task_meta.get("credit_reservation_id") if _task_meta else None
+                if _reservation_id and _user_id:
+                    from app.credits.service import CreditService
+                    credit_svc = CreditService(session)
+                    await credit_svc.release_reservation(uuid.UUID(_reservation_id))
+                    await session.commit()
+            except Exception as credit_err:
+                logger.warning("[CREDITS] Failed to release reservation on video task failure: %s", credit_err)
 
             # ✅ Update pipeline step to failed
             await update_pipeline_step(
