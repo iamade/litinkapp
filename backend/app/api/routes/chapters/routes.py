@@ -46,6 +46,9 @@ from app.videos.models import ImageGeneration, AudioGeneration, Script, AudioExp
 from app.api.services.subscription import SubscriptionManager
 from app.auth.models import User
 from app.projects.models import Project, Artifact
+from app.credits.dependencies import require_credits
+from app.credits.constants import OperationType, SCENE_IMAGE_GEN, CHARACTER_IMAGE_GEN
+from app.credits.service import CreditService
 
 router = APIRouter()
 
@@ -504,6 +507,7 @@ async def generate_scene_image(
     request: SceneImageRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.SCENE_IMAGE_GEN, SCENE_IMAGE_GEN)),
 ):
     """Generate an image for a specific scene in the chapter (asynchronous)"""
     try:
@@ -591,39 +595,41 @@ async def generate_scene_image(
             )
 
         # Queue the scene image generation task
+        credit_service = CreditService(session)
         try:
-            print(
-                f"[DEBUG] [generate_scene_image] About to queue task for record_id={record_id}, scene={scene_number}"
-            )
-            task = generate_scene_image_task.delay(
-                record_id=record_id,
-                scene_description=scene_description,
-                scene_number=scene_number,
-                user_id=str(current_user.id),
-                chapter_id=chapter_id,
-                script_id=str(request.script_id) if request.script_id else None,
-                style=request.style,
-                aspect_ratio=request.aspect_ratio,
-                custom_prompt=request.custom_prompt,
-                user_tier=user_tier,
-                retry_count=0,
-                character_ids=request.character_ids,
-                character_image_urls=request.character_image_urls,
-                is_suggested_shot=request.is_suggested_shot,
-            )
+            async with credit_service.credit_transaction(reservation_id, SCENE_IMAGE_GEN):
+                print(
+                    f"[DEBUG] [generate_scene_image] About to queue task for record_id={record_id}, scene={scene_number}"
+                )
+                task = generate_scene_image_task.delay(
+                    record_id=record_id,
+                    scene_description=scene_description,
+                    scene_number=scene_number,
+                    user_id=str(current_user.id),
+                    chapter_id=chapter_id,
+                    script_id=str(request.script_id) if request.script_id else None,
+                    style=request.style,
+                    aspect_ratio=request.aspect_ratio,
+                    custom_prompt=request.custom_prompt,
+                    user_tier=user_tier,
+                    retry_count=0,
+                    character_ids=request.character_ids,
+                    character_image_urls=request.character_image_urls,
+                    is_suggested_shot=request.is_suggested_shot,
+                )
 
-            print(
-                f"[DEBUG] [generate_scene_image] Task queued successfully with task_id={task.id}"
-            )
-            return ImageGenerationQueuedResponse(
-                task_id=task.id,
-                status="queued",
-                message="Scene image generation has been queued and will be processed in the background",
-                estimated_time_seconds=60,
-                record_id=record_id,
-                scene_number=scene_number,
-                retry_count=0,
-            )
+                print(
+                    f"[DEBUG] [generate_scene_image] Task queued successfully with task_id={task.id}"
+                )
+                return ImageGenerationQueuedResponse(
+                    task_id=task.id,
+                    status="queued",
+                    message="Scene image generation has been queued and will be processed in the background",
+                    estimated_time_seconds=60,
+                    record_id=record_id,
+                    scene_number=scene_number,
+                    retry_count=0,
+                )
 
         except Exception as task_error:
             # If task queueing fails, mark the DB record as failed
@@ -663,6 +669,7 @@ async def generate_character_image(
     request: CharacterImageRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.CHARACTER_IMAGE_GEN, CHARACTER_IMAGE_GEN)),
 ):
     """Generate an image for a character in the chapter (asynchronous)"""
     try:
@@ -709,24 +716,26 @@ async def generate_character_image(
         record_id = str(record.id)
 
         # Queue the character image generation task
-        task = generate_character_image_task.delay(
-            character_name=character_info["name"],
-            character_description=character_info["description"],
-            user_id=str(current_user.id),
-            chapter_id=chapter_id,
-            style=request.style,
-            aspect_ratio=request.aspect_ratio,
-            custom_prompt=request.custom_prompt,
-            record_id=record_id,  # Pass the record_id to the task
-        )
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, CHARACTER_IMAGE_GEN):
+            task = generate_character_image_task.delay(
+                character_name=character_info["name"],
+                character_description=character_info["description"],
+                user_id=str(current_user.id),
+                chapter_id=chapter_id,
+                style=request.style,
+                aspect_ratio=request.aspect_ratio,
+                custom_prompt=request.custom_prompt,
+                record_id=record_id,  # Pass the record_id to the task
+            )
 
-        return ImageGenerationQueuedResponse(
-            task_id=task.id,
-            status="queued",
-            message="Character image generation has been queued and will be processed in the background",
-            estimated_time_seconds=60,  # Estimated time for character image generation
-            record_id=record_id,  # Include record_id for polling
-        )
+            return ImageGenerationQueuedResponse(
+                task_id=task.id,
+                status="queued",
+                message="Character image generation has been queued and will be processed in the background",
+                estimated_time_seconds=60,  # Estimated time for character image generation
+                record_id=record_id,  # Include record_id for polling
+            )
 
     except HTTPException:
         raise

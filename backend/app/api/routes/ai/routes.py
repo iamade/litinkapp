@@ -71,6 +71,8 @@ from app.credits.dependencies import require_credits
 from app.credits.constants import (
     OperationType, TEXT_GEN, SCRIPT_GEN, IMAGE_GEN,
     VOICE_GEN, EMOTIONAL_MAP, EXPAND_SCRIPT, VIDEO_PER_SECOND,
+    SOUND_EFFECT_GEN, AUDIO_NARRATION, SCREENPLAY_GEN,
+    VIDEO_AVATAR_GEN, ENHANCED_SPEECH,
 )
 from app.credits.service import CreditService
 
@@ -415,11 +417,14 @@ async def generate_quiz(
     request: QuizGenerationRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
 ):
     """Generate quiz using AI service"""
     ai_service = AIService()
-    quiz = await ai_service.generate_quiz(request.chapter_content, request.difficulty)
-    return quiz
+    credit_service = CreditService(session)
+    async with credit_service.credit_transaction(reservation_id, TEXT_GEN):
+        quiz = await ai_service.generate_quiz(request.chapter_content, request.difficulty)
+        return quiz
 
 
 @router.post("/generate-voice")
@@ -2169,8 +2174,10 @@ async def generate_video_avatar(
     avatar_style: str = "realistic",
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VIDEO_AVATAR_GEN, VIDEO_AVATAR_GEN)),
 ):
     """Generate video avatar from chapter content"""
+    credit_service = CreditService(session)
     try:
         # Verify chapter access
         stmt = (
@@ -2194,18 +2201,19 @@ async def generate_video_avatar(
 
         # Generate video avatar
         video_service = VideoService(session)
-        avatar_result = await video_service.generate_story_scene(
-            scene_description=chapter_data.title,
-            dialogue=chapter_data.content[:500],
-            avatar_style=avatar_style,
-        )
-
-        if not avatar_result:
-            raise HTTPException(
-                status_code=500, detail="Failed to generate video avatar"
+        async with credit_service.credit_transaction(reservation_id, VIDEO_AVATAR_GEN):
+            avatar_result = await video_service.generate_story_scene(
+                scene_description=chapter_data.title,
+                dialogue=chapter_data.content[:500],
+                avatar_style=avatar_style,
             )
 
-        return avatar_result
+            if not avatar_result:
+                raise HTTPException(
+                    status_code=500, detail="Failed to generate video avatar"
+                )
+
+            return avatar_result
 
     except Exception as e:
         print(f"Error generating video avatar: {e}")
@@ -2217,8 +2225,10 @@ async def enhance_entertainment_content(
     chapter_id: str,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
 ):
     """Enhance entertainment content using PlotDrive service"""
+    credit_service = CreditService(session)
     try:
         # Verify chapter access
         stmt = (
@@ -2251,9 +2261,9 @@ async def enhance_entertainment_content(
                 status_code=404, detail="Could not retrieve chapter context"
             )
 
-        enhancement = await rag_service.enhance_entertainment_content(chapter_context)
-
-        return {"chapter_id": chapter_id, "enhancement": enhancement}
+        async with credit_service.credit_transaction(reservation_id, TEXT_GEN):
+            enhancement = await rag_service.enhance_entertainment_content(chapter_context)
+            return {"chapter_id": chapter_id, "enhancement": enhancement}
 
     except Exception as e:
         print(f"Error enhancing entertainment content: {e}")
@@ -2266,8 +2276,10 @@ async def generate_screenplay(
     style: str = "realistic",
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.SCREENPLAY_GEN, SCREENPLAY_GEN)),
 ):
     """Generate screenplay using RAG service with PlotDrive"""
+    credit_service = CreditService(session)
     try:
         # Verify chapter access
         stmt = (
@@ -2300,11 +2312,11 @@ async def generate_screenplay(
                 status_code=404, detail="Could not retrieve chapter context"
             )
 
-        screenplay = await rag_service._generate_entertainment_script(
-            chapter_context, style
-        )
-
-        return {"chapter_id": chapter_id, "screenplay": screenplay, "style": style}
+        async with credit_service.credit_transaction(reservation_id, SCREENPLAY_GEN):
+            screenplay = await rag_service._generate_entertainment_script(
+                chapter_context, style
+            )
+            return {"chapter_id": chapter_id, "screenplay": screenplay, "style": style}
 
     except Exception as e:
         print(f"Error generating screenplay: {e}")
@@ -2447,23 +2459,26 @@ async def generate_enhanced_speech(
     speed: float = 1.0,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.ENHANCED_SPEECH, ENHANCED_SPEECH)),
 ):
     """Generate enhanced speech with emotion and speed control"""
-    try:
-        elevenlabs_service = ElevenLabsService()
-        result = await elevenlabs_service.generate_enhanced_speech(
-            text=text,
-            voice_id=voice_id,
-            user_id=current_user.id,
-            emotion=emotion,
-            speed=speed,
-        )
+    elevenlabs_service = ElevenLabsService()
+    credit_service = CreditService(session)
+    async with credit_service.credit_transaction(reservation_id, ENHANCED_SPEECH):
+        try:
+            result = await elevenlabs_service.generate_enhanced_speech(
+                text=text,
+                voice_id=voice_id,
+                user_id=current_user.id,
+                emotion=emotion,
+                speed=speed,
+            )
 
-        return result
+            return result
 
-    except Exception as e:
-        print(f"Error generating enhanced speech: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            print(f"Error generating enhanced speech: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/generate-sound-effects")
@@ -2473,22 +2488,25 @@ async def generate_sound_effects(
     intensity: str = "medium",
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.SOUND_EFFECT_GEN, SOUND_EFFECT_GEN)),
 ):
     """Generate sound effects"""
-    try:
-        elevenlabs_service = ElevenLabsService()
-        audio_url = await elevenlabs_service.generate_sound_effect(
-            effect_type=effect_type,
-            duration=duration,
-            intensity=intensity,
-            user_id=current_user.id,
-        )
+    elevenlabs_service = ElevenLabsService()
+    credit_service = CreditService(session)
+    async with credit_service.credit_transaction(reservation_id, SOUND_EFFECT_GEN):
+        try:
+            audio_url = await elevenlabs_service.generate_sound_effect(
+                effect_type=effect_type,
+                duration=duration,
+                intensity=intensity,
+                user_id=current_user.id,
+            )
 
-        return {"audio_url": audio_url}
+            return {"audio_url": audio_url}
 
-    except Exception as e:
-        print(f"Error generating sound effects: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            print(f"Error generating sound effects: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/generate-audio-for-script")
@@ -2496,6 +2514,7 @@ async def generate_audio_for_script(
     request: dict = Body(...),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.AUDIO_NARRATION, AUDIO_NARRATION)),
 ):
     """
     Generate all audio assets (dialogue, narration, music, sfx) for a script.
@@ -2568,16 +2587,18 @@ async def generate_audio_for_script(
         print(f"✅ Created VideoGeneration container: {video_gen_id}")
 
         # 3. Trigger Celery Task
-        from app.tasks.audio_tasks import generate_all_audio_for_video
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, AUDIO_NARRATION):
+            from app.tasks.audio_tasks import generate_all_audio_for_video
 
-        task = generate_all_audio_for_video.delay(video_gen_id)
+            task = generate_all_audio_for_video.delay(video_gen_id)
 
-        return {
-            "status": "processing",
-            "message": "Audio generation started",
-            "video_generation_id": video_gen_id,
-            "task_id": task.id,
-        }
+            return {
+                "status": "processing",
+                "message": "Audio generation started",
+                "video_generation_id": video_gen_id,
+                "task_id": task.id,
+            }
 
     except Exception as e:
         print(f"❌ Error initiating audio generation: {e}")
@@ -2592,6 +2613,7 @@ async def generate_audio_narration(
     request: dict,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.AUDIO_NARRATION, AUDIO_NARRATION)),
 ):
     """Generate audio narration for learning content using RAG embeddings and ElevenLabs"""
     try:
@@ -2628,6 +2650,7 @@ async def generate_audio_narration(
 
         # Generate tutorial script using RAG and AI
         ai_service = AIService()
+        credit_service = CreditService(session)
 
         # Create tutorial prompt based on chapter content
         tutorial_prompt = f"""
@@ -2652,48 +2675,49 @@ async def generate_audio_narration(
         Format the script for ElevenLabs audio narration.
         """
 
-        # Generate tutorial script using AI
-        tutorial_script = await ai_service.generate_tutorial_script(tutorial_prompt)
+        async with credit_service.credit_transaction(reservation_id, AUDIO_NARRATION):
+            # Generate tutorial script using AI
+            tutorial_script = await ai_service.generate_tutorial_script(tutorial_prompt)
 
-        if not tutorial_script:
-            raise HTTPException(
-                status_code=500, detail="Failed to generate tutorial script"
+            if not tutorial_script:
+                raise HTTPException(
+                    status_code=500, detail="Failed to generate tutorial script"
+                )
+
+            # Generate audio using ElevenLabs
+            elevenlabs_service = ElevenLabsService()
+
+            audio_result = await elevenlabs_service.create_audio_narration(
+                text=tutorial_script,
+                narrator_style="professional",
+                user_id=current_user.id,
             )
 
-        # Generate audio using ElevenLabs
-        elevenlabs_service = ElevenLabsService()
+            if not audio_result:
+                raise HTTPException(
+                    status_code=500, detail="Failed to generate audio narration"
+                )
 
-        audio_result = await elevenlabs_service.create_audio_narration(
-            text=tutorial_script,
-            narrator_style="professional",
-            user_id=current_user.id,
-        )
-
-        if not audio_result:
-            raise HTTPException(
-                status_code=500, detail="Failed to generate audio narration"
+            # Store the result in database (optional)
+            audio_record = LearningContent(
+                chapter_id=chapter_id,
+                book_id=book_data.id,
+                user_id=current_user.id,
+                content_type="audio_narration",
+                content_url=audio_result,
+                script=tutorial_script,
+                duration=180,  # Default 3 minutes
+                status="ready",
             )
+            session.add(audio_record)
+            await session.commit()
 
-        # Store the result in database (optional)
-        audio_record = LearningContent(
-            chapter_id=chapter_id,
-            book_id=book_data.id,
-            user_id=current_user.id,
-            content_type="audio_narration",
-            content_url=audio_result,
-            script=tutorial_script,
-            duration=180,  # Default 3 minutes
-            status="ready",
-        )
-        session.add(audio_record)
-        await session.commit()
-
-        return {
-            "id": f"audio_{int(time.time())}",
-            "audio_url": audio_result,
-            "duration": 180,
-            "status": "ready",
-        }
+            return {
+                "id": f"audio_{int(time.time())}",
+                "audio_url": audio_result,
+                "duration": 180,
+                "status": "ready",
+            }
 
     except Exception as e:
         print(f"Error generating audio narration: {e}")
@@ -2705,6 +2729,7 @@ async def generate_realistic_video(
     request: dict,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VIDEO_AVATAR_GEN, VIDEO_AVATAR_GEN)),
 ):
     """Generate realistic video tutorial using RAG embeddings and Tavus with enhanced error handling"""
     try:
@@ -2753,6 +2778,7 @@ async def generate_realistic_video(
 
         # Generate tutorial script using RAG and AI
         ai_service = AIService()
+        credit_service = CreditService(session)
 
         # Create tutorial prompt for video
         tutorial_prompt = f"""
@@ -2777,132 +2803,109 @@ async def generate_realistic_video(
 
         print(f"🤖 Generating tutorial script...")
 
-        # Generate tutorial script using AI
-        tutorial_script = await ai_service.generate_tutorial_script(tutorial_prompt)
+        async with credit_service.credit_transaction(reservation_id, VIDEO_AVATAR_GEN):
+            # Generate tutorial script using AI
+            tutorial_script = await ai_service.generate_tutorial_script(tutorial_prompt)
 
-        if not tutorial_script:
-            print("❌ Failed to generate tutorial script")
-            raise HTTPException(
-                status_code=500, detail="Failed to generate tutorial script"
-            )
-
-        print(f"✅ Tutorial script generated ({len(tutorial_script)} characters)")
-
-        # Generate video using Tavus
-        video_service = VideoService(session)
-
-        # Store initial record with pending status
-        initial_record = {
-            "chapter_id": chapter_id,
-            "book_id": book_data["id"],
-            "user_id": current_user.id,
-            "content_type": "realistic_video",
-            "content_url": None,
-            "tavus_url": None,
-            "tavus_video_id": None,
-            "script": tutorial_script,
-            "duration": 180,
-            "status": "processing",
-            "error_message": None,
-        }
-
-        print(f"💾 Storing initial record in database...")
-        learning_content = LearningContent(
-            chapter_id=chapter_id,
-            book_id=book_data.id,
-            user_id=current_user.id,
-            content_type="video_tutorial",
-            title=f"Video Tutorial: {chapter_data.title}",
-            script=tutorial_script,
-            duration=180,
-            status="processing",
-            error_message=None,
-        )
-        session.add(learning_content)
-        await session.commit()
-        await session.refresh(learning_content)
-        content_id = str(learning_content.id)
-
-        print(f"✅ Database record created with ID: {content_id}")
-
-        # Use Tavus directly with the tutorial script
-        print(f"🎬 Calling Tavus API for video generation...")
-        tavus_result = await video_service._generate_tavus_video(
-            tutorial_script, "realistic", content_id
-        )
-
-        if not tavus_result:
-            print("❌ Tavus video generation returned None")
-            # Update record with failed status
-            if content_id:
-                learning_content.status = "failed"
-                learning_content.error_message = (
-                    "Tavus video generation failed - no result returned"
+            if not tutorial_script:
+                print("❌ Failed to generate tutorial script")
+                raise HTTPException(
+                    status_code=500, detail="Failed to generate tutorial script"
                 )
-                session.add(learning_content)
-                await session.commit()
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate realistic video - Tavus returned no result",
+
+            print(f"✅ Tutorial script generated ({len(tutorial_script)} characters)")
+
+            # Generate video using Tavus
+            video_service = VideoService(session)
+
+            print(f"💾 Storing initial record in database...")
+            learning_content = LearningContent(
+                chapter_id=chapter_id,
+                book_id=book_data.id,
+                user_id=current_user.id,
+                content_type="video_tutorial",
+                title=f"Video Tutorial: {chapter_data.title}",
+                script=tutorial_script,
+                duration=180,
+                status="processing",
+                error_message=None,
             )
-
-        print(f"✅ Tavus API call completed")
-        print(f"📊 Tavus result status: {tavus_result.get('status', 'unknown')}")
-
-        # Extract Tavus information
-        tavus_video_id = tavus_result.get("video_id")
-        tavus_url = tavus_result.get("hosted_url") or tavus_result.get("video_url")
-        download_url = tavus_result.get("download_url")
-        final_video_url = tavus_result.get("video_url") or tavus_result.get(
-            "download_url"
-        )
-
-        print(f"🆔 Tavus Video ID: {tavus_video_id}")
-        print(f"🌐 Tavus URL: {tavus_url}")
-        print(f"🔗 Final Video URL: {final_video_url}")
-
-        # Only set content_url if video is truly ready (downloadable URL present)
-        update_data = {
-            "tavus_url": tavus_url,
-            "tavus_video_id": tavus_video_id,
-            "status": "ready" if final_video_url else "processing",
-        }
-        if final_video_url:
-            update_data["content_url"] = final_video_url
-            update_data["duration"] = tavus_result.get("duration", 180)
-        if content_id:
-            print(f"💾 Updating database record with Tavus results...")
-            learning_content.tavus_url = tavus_url
-            learning_content.tavus_video_id = tavus_video_id
-            learning_content.status = "ready" if final_video_url else "processing"
-
-            if final_video_url:
-                learning_content.content_url = final_video_url
-                learning_content.duration = tavus_result.get("duration", 180)
-
             session.add(learning_content)
             await session.commit()
+            await session.refresh(learning_content)
+            content_id = str(learning_content.id)
 
-        # Return response
-        response_data = {
-            "id": content_id or f"video_{int(time.time())}",
-            "tavus_url": tavus_url,
-            "tavus_video_id": tavus_video_id,
-            "status": "ready" if final_video_url else "processing",
-        }
+            print(f"✅ Database record created with ID: {content_id}")
 
-        if final_video_url:
-            response_data["video_url"] = final_video_url
-            response_data["duration"] = tavus_result.get("duration", 180)
-        elif tavus_url:
-            # If we have a hosted_url but no final video_url, the video is still processing
-            # but we can provide the hosted_url for immediate access
-            response_data["hosted_url"] = tavus_url
-            response_data["message"] = (
-                "Video is still processing. You can access it via the hosted URL or wait for completion."
+            # Use Tavus directly with the tutorial script
+            print(f"🎬 Calling Tavus API for video generation...")
+            tavus_result = await video_service._generate_tavus_video(
+                tutorial_script, "realistic", content_id
             )
 
-        print(f"✅ Realistic video generation completed successfully")
+            if not tavus_result:
+                print("❌ Tavus video generation returned None")
+                # Update record with failed status
+                if content_id:
+                    learning_content.status = "failed"
+                    learning_content.error_message = (
+                        "Tavus video generation failed - no result returned"
+                    )
+                    session.add(learning_content)
+                    await session.commit()
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to generate realistic video - Tavus returned no result",
+                )
+
+            print(f"✅ Tavus API call completed")
+            print(f"📊 Tavus result status: {tavus_result.get('status', 'unknown')}")
+
+            # Extract Tavus information
+            tavus_video_id = tavus_result.get("video_id")
+            tavus_url = tavus_result.get("hosted_url") or tavus_result.get("video_url")
+            download_url = tavus_result.get("download_url")
+            final_video_url = tavus_result.get("video_url") or tavus_result.get(
+                "download_url"
+            )
+
+            print(f"🆔 Tavus Video ID: {tavus_video_id}")
+            print(f"🌐 Tavus URL: {tavus_url}")
+            print(f"🔗 Final Video URL: {final_video_url}")
+
+            if content_id:
+                print(f"💾 Updating database record with Tavus results...")
+                learning_content.tavus_url = tavus_url
+                learning_content.tavus_video_id = tavus_video_id
+                learning_content.status = "ready" if final_video_url else "processing"
+
+                if final_video_url:
+                    learning_content.content_url = final_video_url
+                    learning_content.duration = tavus_result.get("duration", 180)
+
+                session.add(learning_content)
+                await session.commit()
+
+            # Return response
+            response_data = {
+                "id": content_id or f"video_{int(time.time())}",
+                "tavus_url": tavus_url,
+                "tavus_video_id": tavus_video_id,
+                "status": "ready" if final_video_url else "processing",
+            }
+
+            if final_video_url:
+                response_data["video_url"] = final_video_url
+                response_data["duration"] = tavus_result.get("duration", 180)
+            elif tavus_url:
+                # If we have a hosted_url but no final video_url, the video is still processing
+                # but we can provide the hosted_url for immediate access
+                response_data["hosted_url"] = tavus_url
+                response_data["message"] = (
+                    "Video is still processing. You can access it via the hosted URL or wait for completion."
+                )
+
+            print(f"✅ Realistic video generation completed successfully")
         return response_data
 
     except HTTPException:
@@ -3227,6 +3230,7 @@ async def generate_script_and_scenes(
     request: dict = Body(...),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.SCRIPT_GEN, SCRIPT_GEN)),
 ):
     """Generate only the AI script and scene descriptions for a chapter using OpenRouter (no video generation)"""
     try:
@@ -3425,15 +3429,17 @@ async def generate_script_and_scenes(
             target_duration = None
 
         # ✅ Generate script using OpenRouter with tier-appropriate model
-        script_result = await openrouter_service.generate_script(
-            content=chapter_content,  # Use chapter content (works for both Chapter and Artifact)
-            user_tier=user_model_tier,
-            script_type=script_style,
-            target_duration=target_duration,
-            plot_context=(
-                plot_info if plot_info and plot_info.get("enhanced_content") else None
-            ),
-        )
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, SCRIPT_GEN):
+            script_result = await openrouter_service.generate_script(
+                content=chapter_content,  # Use chapter content (works for both Chapter and Artifact)
+                user_tier=user_model_tier,
+                script_type=script_style,
+                target_duration=target_duration,
+                plot_context=(
+                    plot_info if plot_info and plot_info.get("enhanced_content") else None
+                ),
+            )
 
         if script_result.get("status") != "success":
             raise HTTPException(
