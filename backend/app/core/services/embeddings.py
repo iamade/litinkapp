@@ -36,11 +36,11 @@ class EmbeddingsService:
         if self.google_client:
             try:
                 result = self.google_client.models.embed_content(
-                    model="text-embedding-004",
+                    model="gemini-embedding-001",
                     contents=sanitized_text,
                     config=genai_types.EmbedContentConfig(output_dimensionality=1536),
                 )
-                logger.debug("Embedding generated via Google text-embedding-004")
+                logger.debug("Embedding generated via Google gemini-embedding-001")
                 return result.embeddings[0].values
             except Exception as e:
                 logger.warning(f"Google embedding failed, falling back to OpenAI: {e}")
