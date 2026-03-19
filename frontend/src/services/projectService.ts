@@ -32,14 +32,29 @@ export interface StoryboardConfig {
   image_order: Record<string, string[]>;     // scene_number (str) -> ordered list of image_ids
 }
 
+export interface UploadInitResponse {
+  project_id: string;
+  status: string;
+}
+
+export interface ProjectUploadStatus {
+  status: "processing" | "completed" | "failed";
+  stage?: string;
+  progress: number;
+  total_chapters?: number;
+  chapters_processed?: number;
+  error?: string;
+  project?: Project;
+}
+
 export const projectService = {
   createProject: async (data: any) => {
     return await apiClient.post<Project>("/projects/", data);
   },
 
   createProjectFromUpload: async (
-    files: File[], 
-    projectType: string, 
+    files: File[],
+    projectType: string,
     inputPrompt?: string,
     consultationConfig?: {
       content_terminology?: string;
@@ -55,9 +70,8 @@ export const projectService = {
         };
       };
     }
-  ) => {
+  ): Promise<UploadInitResponse> => {
     const formData = new FormData();
-    // Append each file with the same key 'files' - backend will receive as List[UploadFile]
     files.forEach(file => {
       formData.append("files", file);
     });
@@ -65,7 +79,6 @@ export const projectService = {
     if (inputPrompt) {
         formData.append("input_prompt", inputPrompt);
     }
-    // Add consultation config fields if provided
     if (consultationConfig?.content_terminology) {
       formData.append("content_terminology", consultationConfig.content_terminology);
     }
@@ -75,13 +88,15 @@ export const projectService = {
     if (consultationConfig?.content_type) {
       formData.append("content_type", consultationConfig.content_type);
     }
-    // Pass consultation data as JSON string for backend to parse
     if (consultationConfig?.consultation_data) {
       formData.append("consultation_data", JSON.stringify(consultationConfig.consultation_data));
     }
-    
-    // Use apiClient.upload which handles FormData and multipart
-    return await apiClient.upload<Project>("/projects/upload", formData);
+
+    return await apiClient.upload<UploadInitResponse>("/projects/upload", formData);
+  },
+
+  getProjectUploadStatus: async (projectId: string): Promise<ProjectUploadStatus> => {
+    return await apiClient.get<ProjectUploadStatus>(`/projects/${projectId}/upload-status`);
   },
 
   getProjects: async () => {
