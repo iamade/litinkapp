@@ -80,8 +80,9 @@ export default function CreatorStudio() {
     if (newFiles.length > 0) {
       // Append to existing selection
       setSelectedFiles(prev => [...prev, ...newFiles]);
-      // Reset uploaded book state when files change
+      // Reset uploaded book state and analysis when files change
       setUploadedBook(null);
+      setAnalysis(null);
     }
     
     // Reset the file input so the same file can be selected again if needed
@@ -326,8 +327,8 @@ You can also just upload a book and we'll handle the rest!`}
                     Attached Files ({selectedFiles.length})
                   </span>
                   {selectedFiles.length > 1 && (
-                    <button 
-                      onClick={() => setSelectedFiles([])}
+                    <button
+                      onClick={() => { setSelectedFiles([]); setAnalysis(null); }}
                       className="text-xs text-gray-500 hover:text-red-500 transition-colors"
                     >
                       Clear all
@@ -347,8 +348,8 @@ You can also just upload a book and we'll handle the rest!`}
                       <span className="text-xs text-gray-500 dark:text-gray-400">
                         ({(file.size / 1024).toFixed(0)}KB)
                       </span>
-                      <button 
-                        onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== index))} 
+                      <button
+                        onClick={() => { setSelectedFiles(prev => prev.filter((_, i) => i !== index)); setAnalysis(null); }}
                         className="text-gray-400 hover:text-red-500 transition-colors"
                         title="Remove file"
                       >
@@ -399,7 +400,16 @@ You can also just upload a book and we'll handle the rest!`}
           {/* Analysis Result Preview */}
           {analysis && (
             <div className="mt-8 bg-purple-50 dark:bg-purple-900/20 rounded-xl p-6 border border-purple-100 dark:border-purple-800 animate-in fade-in slide-in-from-top-4">
-               <h3 className="font-bold text-gray-900 dark:text-white mb-2">Analysis Results</h3>
+               <div className="flex items-center justify-between mb-2">
+                 <h3 className="font-bold text-gray-900 dark:text-white">Analysis Results</h3>
+                 <button
+                   onClick={() => setAnalysis(null)}
+                   className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                   title="Dismiss"
+                 >
+                   <X className="h-4 w-4" />
+                 </button>
+               </div>
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                      <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider">Detected Type</span>
@@ -503,7 +513,7 @@ You can also just upload a book and we'll handle the rest!`}
           files={selectedFiles}
           initialPrompt={prompt}
           onComplete={handleConsultationComplete}
-          onCancel={() => setShowConsultationModal(false)}
+          onCancel={() => { setShowConsultationModal(false); setAnalysis(null); }}
         />
       )}
     </div>
