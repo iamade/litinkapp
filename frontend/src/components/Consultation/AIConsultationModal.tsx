@@ -436,43 +436,42 @@ export function AIConsultationModal({
 
         {/* Input Area */}
         <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-          {readyToCreate ? (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage(inputValue)}
+              placeholder="Type a message or select an option above..."
+              className="flex-1 px-4 py-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400"
+              disabled={isAnalyzing || isTyping}
+            />
             <button
-              onClick={handleCreateProject}
-              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white py-3 px-6 rounded-xl font-bold flex items-center justify-center gap-2 transition-all transform hover:scale-[1.02] shadow-lg"
+              onClick={() => sendMessage(inputValue)}
+              disabled={!inputValue.trim() || isAnalyzing || isTyping}
+              className="p-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors"
             >
-              <Sparkles className="h-5 w-5" />
-              Create Project
+              <Send className="h-5 w-5" />
             </button>
-          ) : (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage(inputValue)}
-                placeholder="Type a message or select an option above..."
-                className="flex-1 px-4 py-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400"
-                disabled={isAnalyzing || isTyping}
-              />
+            {readyToCreate && (
               <button
-                onClick={() => sendMessage(inputValue)}
-                disabled={!inputValue.trim() || isAnalyzing || isTyping}
-                className="p-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors"
+                onClick={handleCreateProject}
+                className="px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg"
               >
-                <Send className="h-5 w-5" />
+                <Sparkles className="h-5 w-5" />
+                Create Project
               </button>
-              {selectedAction && !hasUnansweredQuestions && (
-                <button
-                  onClick={handleCreateProject}
-                  className="px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors"
-                >
-                  <Check className="h-4 w-4" />
-                  Confirm & Create
-                </button>
-              )}
-            </div>
-          )}
+            )}
+            {!readyToCreate && selectedAction && !hasUnansweredQuestions && (
+              <button
+                onClick={handleCreateProject}
+                className="px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors"
+              >
+                <Check className="h-4 w-4" />
+                Confirm & Create
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
