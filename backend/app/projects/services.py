@@ -323,7 +323,7 @@ async def _process_project_upload_background(
                 for idx, chapter in enumerate(chapters):
                     chapter_title = chapter.get("title", f"Chapter {idx + 1}")
                     chapter_content = chapter.get("content", "")
-                    chapter_number = chapter.get("number", idx + 1)
+                    chapter_number = int(chapter.get("number", idx + 1))
                     chapter_summary = chapter.get("summary", "")
 
                     book_chapter = ChapterModel(
@@ -924,7 +924,7 @@ class ProjectService:
                 for idx, chapter in enumerate(chapters):
                     chapter_title = chapter.get("title", f"Chapter {idx+1}")
                     chapter_content = chapter.get("content", "")
-                    chapter_number = chapter.get("number", idx + 1)
+                    chapter_number = int(chapter.get("number", idx + 1))
                     chapter_summary = chapter.get("summary", "")
 
                     # Create Chapter in Book table (for RAG/embeddings)
