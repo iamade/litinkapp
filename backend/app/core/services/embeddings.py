@@ -1,3 +1,4 @@
+import asyncio
 import openai
 from google import genai
 from google.genai import types as genai_types
@@ -32,18 +33,25 @@ class EmbeddingsService:
         """Generate embedding using Google text-embedding-004 (primary) with OpenAI fallback"""
         sanitized_text = TextSanitizer.sanitize_for_openai(text)
 
-        # Try Google first (generous free tier limits)
+        # Try Google first (free tier: 100 req/min for gemini-embedding-001)
         if self.google_client:
-            try:
-                result = self.google_client.models.embed_content(
-                    model="gemini-embedding-001",
-                    contents=sanitized_text,
-                    config=genai_types.EmbedContentConfig(output_dimensionality=1536),
-                )
-                logger.debug("Embedding generated via Google gemini-embedding-001")
-                return result.embeddings[0].values
-            except Exception as e:
-                logger.warning(f"Google embedding failed, falling back to OpenAI: {e}")
+            for attempt in range(3):
+                try:
+                    result = self.google_client.models.embed_content(
+                        model="gemini-embedding-001",
+                        contents=sanitized_text,
+                        config=genai_types.EmbedContentConfig(output_dimensionality=1536),
+                    )
+                    logger.debug("Embedding generated via Google gemini-embedding-001")
+                    return result.embeddings[0].values
+                except Exception as e:
+                    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                        wait_time = (attempt + 1) * 30  # 30s, 60s, 90s
+                        logger.warning(f"Google embedding rate limited, waiting {wait_time}s (attempt {attempt + 1}/3)")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    logger.warning(f"Google embedding failed, falling back to OpenAI: {e}")
+                    break
 
         # Fallback to OpenAI
         try:
