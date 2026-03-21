@@ -337,7 +337,11 @@ What is it? You look worried.
         ]
 
     async def analyze_content(
-        self, content: str, user_tier: ModelTier, analysis_type: str = "summary"
+        self,
+        content: str,
+        user_tier: ModelTier,
+        analysis_type: str = "summary",
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Analyze content for various purposes (summary, keywords, difficulty, etc.)
@@ -367,7 +371,7 @@ What is it? You look worried.
         ]:
             system_prompt = self._get_special_system_prompt(analysis_type)
             user_message = content
-            max_tokens = config.max_tokens if config.max_tokens else 4000
+            max_tokens = max_tokens if max_tokens is not None else (config.max_tokens if config.max_tokens else 4000)
             temperature = 0.7  # Higher temperature for creative generation
         else:
             analysis_prompts = {
@@ -383,7 +387,7 @@ What is it? You look worried.
             user_message = (
                 f"{prompt}\n\nContent:\n{content[:3000]}"  # Limit content for analysis
             )
-            max_tokens = 500
+            max_tokens = max_tokens if max_tokens is not None else 500
             temperature = 0.3  # Lower temperature for analysis
 
         async def _analyze_with_model(model_id: str, **kwargs) -> Dict[str, Any]:
