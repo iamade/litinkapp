@@ -54,6 +54,7 @@ class ProjectRead(ProjectBase):
     upload_error: Optional[str] = None
     upload_total_chapters: Optional[int] = None
     upload_chapters_processed: Optional[int] = None
+    consultation_message_count: int = 0
 
     class Config:
         from_attributes = True

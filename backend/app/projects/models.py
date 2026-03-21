@@ -116,6 +116,9 @@ class Project(SQLModel, table=True):
     upload_total_chapters: Optional[int] = Field(default=None)
     upload_chapters_processed: Optional[int] = Field(default=None)
 
+    # Consultation tracking
+    consultation_message_count: int = Field(default=0)
+
     # Relationships
     artifacts: List["Artifact"] = Relationship(
         back_populates="project",

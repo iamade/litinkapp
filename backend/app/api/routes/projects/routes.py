@@ -17,6 +17,9 @@ from app.projects.models import ProjectType
 from fastapi import UploadFile, File, Form
 from app.projects.services import ProjectService, IntentService, _process_project_upload_background
 from app.api.services.consultation import ConsultationService
+from app.credits.dependencies import require_credits
+from app.credits.constants import OperationType, TEXT_GEN
+import uuid
 
 router = APIRouter()
 
@@ -73,6 +76,7 @@ async def create_project_upload(
     consultation_data: Optional[str] = Form(None),  # JSON string
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
 ):
     """
     Create a new project from uploaded files (PDF, DOCX, TXT, etc).
@@ -122,6 +126,7 @@ async def create_project_upload(
         input_prompt=input_prompt,
         is_multi_script=is_multi_script,
         consultation_config=consultation_config,
+        reservation_id=str(reservation_id),
     )
 
     return UploadInitResponse(project_id=str(project.id), status="processing")

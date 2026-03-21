@@ -5691,15 +5691,7 @@ async def consultation_chat(
                 },
             )
 
-        if _is_prompt_injection_or_off_topic(message):
-            return {
-                "status": "redirected",
-                "ai_message": CONSULTATION_OFF_TOPIC_REDIRECT,
-                "ready_to_proceed": False,
-                "follow_up_questions": [
-                    "What do you want to create from your uploaded content?"
-                ],
-            }
+        off_topic_or_injection = _is_prompt_injection_or_off_topic(message)
 
         # Get user tier
         subscription_manager = SubscriptionManager(session)
@@ -5756,6 +5748,21 @@ async def consultation_chat(
                 "credit_cost": 1,
                 "messages_used": messages_used,
                 "messages_remaining": 0,
+                "message_limit": cap,
+                "user_tier": user_tier,
+                "consultation_message_count": messages_used,
+            }
+
+        if off_topic_or_injection:
+            return {
+                "status": "redirected",
+                "ai_message": CONSULTATION_OFF_TOPIC_REDIRECT,
+                "ready_to_proceed": False,
+                "follow_up_questions": [
+                    "What do you want to create from your uploaded content?"
+                ],
+                "messages_used": messages_used,
+                "messages_remaining": messages_remaining,
                 "message_limit": cap,
                 "user_tier": user_tier,
                 "consultation_message_count": messages_used,
