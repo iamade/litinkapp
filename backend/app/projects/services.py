@@ -22,6 +22,8 @@ from fastapi import UploadFile
 from app.core.services.file import BookStructureDetector, FileService
 from app.core.services.embeddings import EmbeddingsService
 from app.api.services.plot import PlotService
+from app.credits.constants import TEXT_GEN
+from app.credits.service import CreditService
 
 
 def _extract_text_content(temp_path: str, suffix: str) -> str:
@@ -137,6 +139,7 @@ async def _process_project_upload_background(
     input_prompt: Optional[str],
     is_multi_script: bool,
     consultation_config: Optional[dict],
+    reservation_id: Optional[str] = None,
 ) -> None:
     """Background task: extract text, parse chapters, generate embeddings, save artifacts."""
     from app.core.database import async_session
@@ -148,8 +151,28 @@ async def _process_project_upload_background(
     project_uuid = uuid.UUID(project_id)
     book_uuid = uuid.UUID(book_id)
     user_uuid = uuid.UUID(user_id)
+    reservation_uuid = None
+    if reservation_id:
+        try:
+            reservation_uuid = uuid.UUID(reservation_id)
+        except ValueError:
+            reservation_uuid = None
 
     async with async_session() as session:
+        reservation_settled = False
+
+        async def _release_reserved_credit() -> None:
+            nonlocal reservation_settled
+            if not reservation_uuid or reservation_settled:
+                return
+            try:
+                credit_service = CreditService(session)
+                await credit_service.release_reservation(reservation_uuid)
+                await session.commit()
+                reservation_settled = True
+            except Exception as release_err:
+                print(f"[BG UPLOAD] Failed to release reservation {reservation_uuid}: {release_err}")
+
         try:
             file_service = FileService()
 
@@ -183,6 +206,9 @@ async def _process_project_upload_background(
 
             if is_multi_script:
                 total = len(file_data_list)
+                if total == 0:
+                    raise ValueError("No chapters extracted from upload")
+
                 await _update_project_progress(
                     session,
                     project_uuid,
@@ -310,6 +336,9 @@ async def _process_project_upload_background(
                         chapters = extracted_data
 
                 total = len(chapters)
+                if total == 0:
+                    raise ValueError("No chapters extracted from upload")
+
                 await _update_project_progress(
                     session,
                     project_uuid,
@@ -408,6 +437,17 @@ async def _process_project_upload_background(
                 upload_stage="finalizing",
                 upload_progress=100,
             )
+
+            if reservation_uuid and not reservation_settled:
+                credit_service = CreditService(session)
+                confirmed = await credit_service.confirm_deduction(
+                    reservation_uuid, TEXT_GEN
+                )
+                if not confirmed:
+                    raise RuntimeError("Failed to confirm project upload credit deduction")
+                await session.commit()
+                reservation_settled = True
+
             print(f"[BG UPLOAD] Project {project_id} processing complete.")
 
         except Exception as e:
@@ -422,6 +462,8 @@ async def _process_project_upload_background(
                 )
             except Exception as err:
                 print(f"[BG UPLOAD] Could not save error status: {err}")
+            finally:
+                await _release_reserved_credit()
         finally:
             for fd in file_data:
                 temp_path = fd.get("temp_path", "")
