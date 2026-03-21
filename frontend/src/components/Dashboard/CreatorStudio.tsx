@@ -100,18 +100,6 @@ export default function CreatorStudio() {
     fileInputRef.current?.click();
   };
 
-  // Helper to detect if uploaded files are books (epub or large text files)
-  const detectIfBook = (files: File[]): boolean => {
-    for (const file of files) {
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      // Epub files are definitely books
-      if (ext === 'epub') return true;
-      // Large PDFs (>500KB) are likely books
-      if (ext === 'pdf' && file.size > 500 * 1024) return true;
-    }
-    return false;
-  };
-
   // State for AI Consultation Modal
   const [showConsultationModal, setShowConsultationModal] = useState(false);
 
@@ -120,17 +108,14 @@ export default function CreatorStudio() {
 
     setIsAnalyzing(true);
     try {
-      // Check if files are books - books skip consultation
-      const isBook = selectedFiles.length > 0 && detectIfBook(selectedFiles);
-      
-      if (!isBook && selectedFiles.length > 0) {
-        // Non-book files go through AI consultation
+      if (selectedFiles.length > 0) {
+        // Unified flow: all file uploads go through AI consultation
         setShowConsultationModal(true);
         setIsAnalyzing(false);
         return;
       }
       
-      // Standard flow for books or text-only prompts
+      // Text-only flow keeps intent analysis preview
       const fileNames = selectedFiles.map(f => f.name).join(', ');
       const textToAnalyze = prompt || (selectedFiles.length > 0 ? `Create a project from the files: ${fileNames}` : "");
       
@@ -213,6 +198,28 @@ export default function CreatorStudio() {
     } catch (e) {
       console.error(e);
       toast.error("Failed to start project upload.");
+    }
+  };
+
+  const handleSkipConsultation = async () => {
+    if (selectedFiles.length === 0) return;
+
+    setShowConsultationModal(false);
+    try {
+      const data = await projectService.createProjectFromUpload(
+        selectedFiles,
+        "entertainment",
+        prompt,
+        {
+          content_terminology: "Film",
+          content_type: "single_script",
+          universe_name: ((selectedFiles[0]?.name?.split(".").slice(0, -1).join(".")) || selectedFiles[0]?.name) || "Untitled Project",
+        }
+      );
+      setUploadingProjectId(data.project_id);
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to create project.");
     }
   };
 
@@ -378,13 +385,27 @@ You can also just upload a book and we'll handle the rest!`}
                 <span className="flex items-center gap-1"><MonitorPlay className="h-4 w-4"/> Training</span>
              </div>
 
+             <div className="flex items-center gap-2">
+             {selectedFiles.length > 0 && (
+               <button
+                onClick={handleSkipConsultation}
+                disabled={isAnalyzing}
+                className="bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-4 py-3 rounded-xl font-semibold hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Skip Consultation
+              </button>
+             )}
              <button
-              onClick={analysis ? handleCreateProject : handleAnalyze}
+              onClick={selectedFiles.length > 0 ? handleAnalyze : (analysis ? handleCreateProject : handleAnalyze)}
               disabled={isAnalyzing || (!prompt.trim() && selectedFiles.length === 0 && !uploadedBook)}
               className="bg-purple-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-purple-700 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {isAnalyzing ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
+              ) : selectedFiles.length > 0 ? (
+                <>
+                  Analyze & Start
+                </>
               ) : analysis ? (
                 <>
                   Create Project <ArrowRight className="h-5 w-5" />
@@ -395,10 +416,11 @@ You can also just upload a book and we'll handle the rest!`}
                 </>
               )}
             </button>
+            </div>
           </div>
 
           {/* Analysis Result Preview */}
-          {analysis && (
+          {analysis && selectedFiles.length === 0 && (
             <div className="mt-8 bg-purple-50 dark:bg-purple-900/20 rounded-xl p-6 border border-purple-100 dark:border-purple-800 animate-in fade-in slide-in-from-top-4">
                <div className="flex items-center justify-between mb-2">
                  <h3 className="font-bold text-gray-900 dark:text-white">Analysis Results</h3>
@@ -513,6 +535,7 @@ You can also just upload a book and we'll handle the rest!`}
           files={selectedFiles}
           initialPrompt={prompt}
           onComplete={handleConsultationComplete}
+          onSkip={handleSkipConsultation}
           onCancel={() => { setShowConsultationModal(false); setAnalysis(null); }}
         />
       )}
