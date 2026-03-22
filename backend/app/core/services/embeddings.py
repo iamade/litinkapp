@@ -1,4 +1,7 @@
+import asyncio
 import openai
+from google import genai
+from google.genai import types as genai_types
 from typing import List, Dict, Any, Optional
 import numpy as np
 from sqlmodel import select, delete, col
@@ -20,19 +23,45 @@ class EmbeddingsService:
         self.session = session
         self.client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
         self.embedding_model = "text-embedding-3-small"  # 1536 dimensions
+        self.google_api_key = settings.GOOGLE_AI_STUDIO_API_KEY or None
+        if self.google_api_key:
+            self.google_client = genai.Client(api_key=self.google_api_key)
+        else:
+            self.google_client = None
 
     async def generate_embedding(self, text: str) -> List[float]:
-        """Generate embedding for a text using OpenAI"""
-        try:
-            # Sanitize text before sending to OpenAI
-            sanitized_text = TextSanitizer.sanitize_for_openai(text)
+        """Generate embedding using Google text-embedding-004 (primary) with OpenAI fallback"""
+        sanitized_text = TextSanitizer.sanitize_for_openai(text)
 
+        # Try Google first (free tier: 100 req/min for gemini-embedding-001)
+        if self.google_client:
+            for attempt in range(3):
+                try:
+                    result = self.google_client.models.embed_content(
+                        model="gemini-embedding-001",
+                        contents=sanitized_text,
+                        config=genai_types.EmbedContentConfig(output_dimensionality=1536),
+                    )
+                    logger.debug("Embedding generated via Google gemini-embedding-001")
+                    return result.embeddings[0].values
+                except Exception as e:
+                    if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                        wait_time = (attempt + 1) * 30  # 30s, 60s, 90s
+                        logger.warning(f"Google embedding rate limited, waiting {wait_time}s (attempt {attempt + 1}/3)")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    logger.warning(f"Google embedding failed, falling back to OpenAI: {e}")
+                    break
+
+        # Fallback to OpenAI
+        try:
             response = self.client.embeddings.create(
                 model=self.embedding_model, input=sanitized_text
             )
+            logger.debug("Embedding generated via OpenAI text-embedding-3-small")
             return response.data[0].embedding
         except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
+            logger.error(f"Both embedding providers failed: {e}")
             raise
 
     async def chunk_text(

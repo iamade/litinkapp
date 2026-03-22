@@ -3,6 +3,7 @@ import { dispatchCreditsRefresh, dispatchInsufficientCredits } from "./credits";
 export const API_BASE_URL = import.meta.env.PROD 
   ? "https://litinkapp.onrender.com/api/v1"
   : "http://localhost:8000/api/v1";
+export const AUTH_EXPIRED_EVENT = "auth:expired";
 
 type ApiErrorPayload = {
   detail?: string | { message?: string };
@@ -65,6 +66,8 @@ async function refreshToken(): Promise<boolean> {
   }
 }
 
+let refreshPromise: Promise<boolean> | null = null;
+
 let setLoading: ((v: boolean) => void) | null = null;
 export function setLoadingContextSetter(setter: (v: boolean) => void) {
   setLoading = setter;
@@ -114,7 +117,12 @@ export const apiClient = {
       });
 
       if (response.status === 401) {
-        const refreshed = await refreshToken();
+        if (!refreshPromise) {
+          refreshPromise = refreshToken().finally(() => {
+            refreshPromise = null;
+          });
+        }
+        const refreshed = await refreshPromise;
         if (refreshed) {
           response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: "POST",
@@ -122,6 +130,9 @@ export const apiClient = {
             body: JSON.stringify(body),
             credentials: "include",
           });
+        } else {
+          window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+          throw new Error("[401] Session expired. Please login again.");
         }
       }
 
@@ -147,7 +158,12 @@ export const apiClient = {
 
       if (response.status === 401) {
         // Try refresh
-        const refreshed = await refreshToken();
+        if (!refreshPromise) {
+          refreshPromise = refreshToken().finally(() => {
+            refreshPromise = null;
+          });
+        }
+        const refreshed = await refreshPromise;
         if (refreshed) {
           response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: "POST",
@@ -155,6 +171,9 @@ export const apiClient = {
             body: formData,
             credentials: "include",
           });
+        } else {
+          window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+          throw new Error("[401] Session expired. Please login again.");
         }
       }
 
@@ -191,7 +210,12 @@ export const apiClient = {
     
     if (response.status === 401 && !isPublicEndpoint) {
       // Try refresh
-      const refreshed = await refreshToken();
+      if (!refreshPromise) {
+        refreshPromise = refreshToken().finally(() => {
+          refreshPromise = null;
+        });
+      }
+      const refreshed = await refreshPromise;
       if (refreshed) {
         response = await fetch(`${API_BASE_URL}${endpoint}`, {
           method,
@@ -199,6 +223,9 @@ export const apiClient = {
           body: body ? JSON.stringify(body) : null,
           credentials: "include",
         });
+      } else {
+        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+        throw new Error("[401] Session expired. Please login again.");
       }
     }
 

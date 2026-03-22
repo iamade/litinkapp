@@ -1950,6 +1950,48 @@ class FileService:
             print(f"Error processing TXT: {e}")
             raise
 
+    def _is_front_back_matter(
+        self, title: str, item_href: str, word_count: int
+    ) -> tuple:
+        """Check if an epub spine item is front/back matter that should be filtered.
+
+        Returns (should_drop: bool, reason: str).
+        """
+        title_lower = title.lower().strip() if title else ""
+        href_lower = item_href.lower() if item_href else ""
+
+        # Unconditional drops — by title
+        UNCONDITIONAL_TITLE = {
+            "imprint", "copyright", "colophon", "uncopyright",
+            "halftitlepage", "titlepage", "half title", "title page",
+            "also available", "copyright page",
+        }
+        for pattern in UNCONDITIONAL_TITLE:
+            if title_lower == pattern or title_lower.startswith(pattern):
+                return True, f"unconditional title match: '{pattern}'"
+
+        # Unconditional drops — by href filename
+        UNCONDITIONAL_HREF = {
+            "imprint.xhtml", "colophon.xhtml", "uncopyright.xhtml",
+            "titlepage.xhtml", "halftitlepage.xhtml", "copyright.xhtml",
+        }
+        href_basename = href_lower.rsplit("/", 1)[-1]
+        if href_basename in UNCONDITIONAL_HREF:
+            return True, f"unconditional href match: '{href_basename}'"
+
+        # Conditional drops (skip if < 3000 words)
+        CONDITIONAL_TITLE = {
+            "acknowledgments", "acknowledgements", "about the author",
+            "index", "bibliography", "glossary", "endnotes", "footnotes",
+        }
+        for pattern in CONDITIONAL_TITLE:
+            if title_lower == pattern or title_lower.startswith(pattern):
+                if word_count < 3000:
+                    return True, f"conditional title match (short): '{pattern}'"
+                break
+
+        return False, ""
+
     def extract_epub_chapters(self, file_path: str) -> List[Dict[str, Any]]:
         """Extract chapters from EPUB file using its built-in structure"""
         try:
@@ -2041,6 +2083,20 @@ class FileService:
                         title = f"Chapter {chapter_number}"
                     else:
                         chapter_number += 1
+
+                    # Filter front/back matter
+                    item_href = item.get_name() if hasattr(item, "get_name") else ""
+                    word_count = len(clean_text.split())
+                    should_drop, drop_reason = self._is_front_back_matter(
+                        title, item_href, word_count
+                    )
+                    if should_drop:
+                        chapter_number -= 1
+                        skipped_count += 1
+                        print(
+                            f"[EPUB] Skipping item {idx} '{title}': {drop_reason}"
+                        )
+                        continue
 
                     chapters.append(
                         {
@@ -5215,8 +5271,9 @@ Chapters:
         print(f"[CHAPTER EXTRACTION] Storage path type: {type(storage_path)}")
 
         # Step 1: Try EPUB-specific extraction for EPUB files
+        _fn_lower = safe_filename.lower()
         if (
-            safe_filename.lower().endswith(".epub")
+            (_fn_lower.endswith(".epub") or _fn_lower.endswith(".epub.zip"))
             and storage_path
             and isinstance(storage_path, str)
         ):
@@ -5224,11 +5281,16 @@ Chapters:
             print("[EPUB EXTRACTION] Attempting EPUB chapter extraction...")
             if progress_callback:
                 await progress_callback(20, "Processing EPUB file...", "epub")
+            temp_file_path = None
+            extra_temp_path = None
             try:
+                import zipfile as _zipfile
+                import shutil as _shutil
                 from app.core.services.storage import storage_service
 
+                dl_suffix = ".epub.zip" if _fn_lower.endswith(".epub.zip") else ".epub"
                 with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".epub"
+                    delete=False, suffix=dl_suffix
                 ) as temp_file:
                     file_content = await storage_service.download(storage_path)
                     if file_content is None:
@@ -5236,14 +5298,91 @@ Chapters:
                     temp_file.write(file_content)
                     temp_file_path = temp_file.name
 
-                epub_chapters = self.extract_epub_chapters(temp_file_path)
+                # Resolve actual epub path for .epub.zip uploads
+                epub_to_process = temp_file_path
+                if _fn_lower.endswith(".epub.zip"):
+                    epub_to_process = None
+                    if _zipfile.is_zipfile(temp_file_path):
+                        with _zipfile.ZipFile(temp_file_path, "r") as zf:
+                            names = zf.namelist()
+                            if "mimetype" in names or "META-INF/container.xml" in names:
+                                # The zip IS the epub — copy with .epub extension
+                                extra_temp_path = temp_file_path + ".epub"
+                                _shutil.copy2(temp_file_path, extra_temp_path)
+                                epub_to_process = extra_temp_path
+                                print(
+                                    "[EPUB EXTRACTION] .epub.zip is a valid EPUB, using directly"
+                                )
+                            else:
+                                inner_epubs = [n for n in names if n.lower().endswith(".epub")]
+                                if inner_epubs:
+                                    extra_temp_path = zf.extract(
+                                        inner_epubs[0], path=tempfile.gettempdir()
+                                    )
+                                    epub_to_process = extra_temp_path
+                                    print(
+                                        f"[EPUB EXTRACTION] Extracted inner epub: {inner_epubs[0]}"
+                                    )
+                                else:
+                                    # Try nested directory structure
+                                    # (e.g. "Moby Dick.epub/mimetype" instead of "mimetype")
+                                    import pathlib as _pathlib
+
+                                    with tempfile.TemporaryDirectory() as _extract_dir:
+                                        zf.extractall(_extract_dir)
+                                        _container_files = list(
+                                            _pathlib.Path(_extract_dir).rglob(
+                                                "META-INF/container.xml"
+                                            )
+                                        )
+                                        if _container_files:
+                                            _epub_root = _container_files[0].parent.parent
+                                            extra_temp_path = temp_file_path + "_nested.epub"
+                                            _mimetype_path = _epub_root / "mimetype"
+                                            with _zipfile.ZipFile(
+                                                extra_temp_path, "w", _zipfile.ZIP_DEFLATED
+                                            ) as _new_zf:
+                                                if _mimetype_path.exists():
+                                                    _new_zf.write(
+                                                        _mimetype_path,
+                                                        "mimetype",
+                                                        compress_type=_zipfile.ZIP_STORED,
+                                                    )
+                                                for _f in _epub_root.rglob("*"):
+                                                    if _f.is_file() and _f.name != "mimetype":
+                                                        _new_zf.write(
+                                                            _f,
+                                                            _f.relative_to(_epub_root),
+                                                        )
+                                            epub_to_process = extra_temp_path
+                                            print(
+                                                f"[EPUB EXTRACTION] Found nested epub dir "
+                                                f"'{_epub_root.name}', re-zipped as flat epub"
+                                            )
+                                        else:
+                                            print(
+                                                "[EPUB EXTRACTION] No epub found inside .epub.zip, falling through"
+                                            )
+                    else:
+                        print(
+                            "[EPUB EXTRACTION] .epub.zip is not a valid zip file, falling through"
+                        )
+
+                if epub_to_process:
+                    epub_chapters = self.extract_epub_chapters(epub_to_process)
+                else:
+                    epub_chapters = []
 
                 # FIX: Ensure epub_chapters is a valid list
                 if not isinstance(epub_chapters, list):
                     epub_chapters = []
 
                 os.unlink(temp_file_path)
-                print(f"[EPUB EXTRACTION] Cleaned up temporary file: {temp_file_path}")
+                temp_file_path = None
+                if extra_temp_path and os.path.exists(extra_temp_path):
+                    os.unlink(extra_temp_path)
+                    extra_temp_path = None
+                print(f"[EPUB EXTRACTION] Cleaned up temporary files")
 
                 if len(epub_chapters) > 0:
                     print(
@@ -5266,10 +5405,15 @@ Chapters:
             except Exception as e:
                 print(f"[EPUB EXTRACTION] Failed: {e}")
                 print(f"[EPUB EXTRACTION] Full error: {traceback.format_exc()}")
-                # Clean up temp file even if there's an error
-                if "temp_file_path" in locals():
+                # Clean up temp files even if there's an error
+                if temp_file_path and os.path.exists(temp_file_path):
                     try:
                         os.unlink(temp_file_path)
+                    except:
+                        pass
+                if extra_temp_path and os.path.exists(extra_temp_path):
+                    try:
+                        os.unlink(extra_temp_path)
                     except:
                         pass
 
@@ -5398,8 +5542,56 @@ Chapters:
         else:
             final_chapters = extracted_chapters
 
+        # Fix 3: Fallback chunking when all methods yielded 0 chapters
+        if len(final_chapters) == 0 and content and content.strip():
+            print(
+                "[CHAPTER EXTRACTION] All methods failed, falling back to word-count chunking"
+            )
+            final_chapters = self._chunk_content_by_words(content, chunk_size=3000)
+            print(
+                f"[CHAPTER EXTRACTION] Fallback chunking produced {len(final_chapters)} parts"
+            )
+
         print(f"[CHAPTER EXTRACTION] FINAL: {len(final_chapters)} chapters extracted")
         return final_chapters
+
+    def _chunk_content_by_words(
+        self, content: str, chunk_size: int = 3000
+    ) -> List[Dict[str, Any]]:
+        """Split content into roughly chunk_size-word chunks, respecting paragraph boundaries."""
+        paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+        chunks = []
+        current_words: List[str] = []
+        part_number = 0
+
+        for para in paragraphs:
+            para_words = para.split()
+            if current_words and len(current_words) + len(para_words) > chunk_size:
+                part_number += 1
+                chunks.append(
+                    {
+                        "number": str(part_number),
+                        "title": f"Part {part_number}",
+                        "content": " ".join(current_words),
+                        "type": "chapter",
+                    }
+                )
+                current_words = para_words
+            else:
+                current_words.extend(para_words)
+
+        if current_words:
+            part_number += 1
+            chunks.append(
+                {
+                    "number": str(part_number),
+                    "title": f"Part {part_number}",
+                    "content": " ".join(current_words),
+                    "type": "chapter",
+                }
+            )
+
+        return chunks
 
     def _organize_chapters_into_sections(
         self, chapters: List[Dict]

@@ -1,6 +1,9 @@
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any, Tuple
+import asyncio
+import os
 import re
+import tempfile
 import uuid
 from fastapi import (
     APIRouter,
@@ -75,6 +78,8 @@ from app.credits.constants import (
     VIDEO_AVATAR_GEN, ENHANCED_SPEECH,
 )
 from app.credits.service import CreditService
+from app.core.services.file import FileService
+from app.core.services.redis import redis_client
 
 
 def parse_scene_descriptions(analysis_result: str) -> list:
@@ -5417,13 +5422,91 @@ class ConsultationChatRequest(SQLModel):
     context: Dict = {}
 
 
+CONSULTATION_CHAT_LIMIT = 5
+CONSULTATION_CHAT_WINDOW_SECONDS = 60
+CONSULTATION_OFF_TOPIC_REDIRECT = (
+    "I'm here to help with your creative project! Let's focus on bringing your story to life."
+)
+_consultation_rate_limit_memory: Dict[str, List[float]] = {}
+_consultation_rate_limit_lock = asyncio.Lock()
+
+
+async def _enforce_consultation_chat_rate_limit(user_id: str) -> Tuple[bool, int]:
+    """Rate limit consultation chat to 5 messages/minute per user."""
+    redis_conn = getattr(redis_client, "redis_client", None)
+    if getattr(redis_client, "is_connected", False) and redis_conn is not None:
+        try:
+            key = f"consultation:chat:rate:{user_id}"
+            count = await redis_conn.incr(key)
+            if count == 1:
+                await redis_conn.expire(key, CONSULTATION_CHAT_WINDOW_SECONDS)
+            if count > CONSULTATION_CHAT_LIMIT:
+                ttl = await redis_conn.ttl(key)
+                return False, max(int(ttl or 1), 1)
+            return True, 0
+        except Exception:
+            # Fall through to in-memory limiter if Redis is unavailable.
+            pass
+
+    now = time.time()
+    async with _consultation_rate_limit_lock:
+        key = str(user_id)
+        recent = [
+            ts
+            for ts in _consultation_rate_limit_memory.get(key, [])
+            if now - ts < CONSULTATION_CHAT_WINDOW_SECONDS
+        ]
+        if len(recent) >= CONSULTATION_CHAT_LIMIT:
+            retry_after = max(
+                int(CONSULTATION_CHAT_WINDOW_SECONDS - (now - min(recent))),
+                1,
+            )
+            _consultation_rate_limit_memory[key] = recent
+            return False, retry_after
+
+        recent.append(now)
+        _consultation_rate_limit_memory[key] = recent
+        return True, 0
+
+
+def _is_prompt_injection_or_off_topic(message: str) -> bool:
+    lowered = message.lower()
+
+    prompt_injection_patterns = [
+        "ignore previous instructions",
+        "ignore all previous",
+        "reveal your system prompt",
+        "show your system prompt",
+        "what are your hidden instructions",
+        "developer instructions",
+        "execute code",
+        "run command",
+        "access external systems",
+    ]
+    if any(pattern in lowered for pattern in prompt_injection_patterns):
+        return True
+
+    off_topic_patterns = [
+        "stock price",
+        "crypto",
+        "weather",
+        "sports score",
+        "politics",
+        "tax return",
+        "medical diagnosis",
+        "dating advice",
+        "password",
+        "hack",
+    ]
+    return any(pattern in lowered for pattern in off_topic_patterns)
+
+
 @router.post("/consultation/analyze")
 async def analyze_for_consultation(
     files: List[UploadFile] = File(...),
     prompt: str = Form(""),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_session),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
 ):
     """
     Analyze uploaded files and return AI consultation response with app-specific options.
@@ -5432,24 +5515,29 @@ async def analyze_for_consultation(
     from app.api.services.consultation import ConsultationService
     import io
 
-    async def extract_text_from_file(content: bytes, filename: str) -> str:
-        """Extract text from uploaded file based on file type."""
+    async def extract_text_from_file(
+        content: bytes,
+        filename: str,
+    ) -> Dict[str, Any]:
+        """Extract text and metadata from uploaded file based on file type."""
         ext = filename.split(".")[-1].lower() if "." in filename else ""
 
         try:
             if ext == "txt":
-                return content.decode("utf-8", errors="ignore")
+                return {"content": content.decode("utf-8", errors="ignore")}
 
-            elif ext == "docx":
+            if ext == "docx":
                 try:
                     from docx import Document
 
                     doc = Document(io.BytesIO(content))
-                    return "\n".join([para.text for para in doc.paragraphs])
+                    return {
+                        "content": "\n".join([para.text for para in doc.paragraphs])
+                    }
                 except ImportError:
-                    return content.decode("utf-8", errors="ignore")
+                    return {"content": content.decode("utf-8", errors="ignore")}
 
-            elif ext == "pdf":
+            if ext == "pdf":
                 try:
                     import fitz  # PyMuPDF
 
@@ -5458,60 +5546,116 @@ async def analyze_for_consultation(
                     for page in pdf:
                         text += page.get_text()
                     pdf.close()
-                    return text
+                    return {"content": text}
                 except ImportError:
-                    return f"[PDF file: {filename} - install PyMuPDF to extract text]"
+                    return {
+                        "content": f"[PDF file: {filename} - install PyMuPDF to extract text]"
+                    }
 
-            else:
-                # Try to decode as text
-                return content.decode("utf-8", errors="ignore")
+            if ext == "epub":
+                temp_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as tmp:
+                        tmp.write(content)
+                        temp_path = tmp.name
+
+                    file_service = FileService()
+                    chapters = file_service.extract_epub_chapters(temp_path)
+                    epub_payload = await file_service.process_epub(temp_path)
+
+                    chapter_lines = [
+                        f"Chapter {idx + 1}: {chapter.get('title', f'Chapter {idx + 1}') }"
+                        for idx, chapter in enumerate(chapters)
+                    ]
+                    chapter_preview = "\n".join(chapter_lines[:30])
+
+                    text_content = epub_payload.get("text", "")
+                    return {
+                        "content": text_content,
+                        "is_epub": True,
+                        "chapter_count": len(chapters),
+                        "chapters": chapter_lines,
+                        "metadata": {
+                            "title": os.path.splitext(filename)[0],
+                            "author": epub_payload.get("author"),
+                        },
+                        "epub_note": (
+                            f"EPUB metadata: title='{os.path.splitext(filename)[0]}', "
+                            f"chapters_found={len(chapters)}.\n"
+                            f"Chapters:\n{chapter_preview}"
+                        ),
+                    }
+                finally:
+                    if temp_path and os.path.exists(temp_path):
+                        os.unlink(temp_path)
+
+            return {"content": content.decode("utf-8", errors="ignore")}
 
         except Exception as e:
-            return f"[Could not extract text: {str(e)}]"
+            return {"content": f"[Could not extract text: {str(e)}]"}
 
-    credit_service = CreditService(session)
-    async with credit_service.credit_transaction(reservation_id, TEXT_GEN):
-        # Extract text from each uploaded file
-        file_contents = []
-        for file in files:
-            try:
-                content = await file.read()
-                await file.seek(0)
+    file_contents = []
+    epub_files = []
 
-                text_content = await extract_text_from_file(
-                    content, file.filename or "unknown"
-                )
+    for file in files:
+        try:
+            content = await file.read()
+            await file.seek(0)
 
-                file_contents.append(
-                    {
-                        "filename": file.filename or "unknown",
-                        "content": text_content[:10000],
-                    }
-                )
-            except Exception as e:
-                print(f"⚠️ Error parsing file {file.filename}: {e}")
-                file_contents.append(
-                    {
-                        "filename": file.filename or "unknown",
-                        "content": f"[Could not parse file: {str(e)}]",
-                    }
-                )
+            parsed = await extract_text_from_file(content, file.filename or "unknown")
+            payload = {
+                "filename": file.filename or "unknown",
+                "content": str(parsed.get("content", ""))[:10000],
+            }
 
-        if not file_contents:
-            raise HTTPException(status_code=400, detail="No files provided")
+            if parsed.get("is_epub"):
+                payload["is_epub"] = True
+                payload["chapter_count"] = int(parsed.get("chapter_count", 0))
+                payload["chapters"] = parsed.get("chapters", [])
+                payload["metadata"] = parsed.get("metadata", {})
+                payload["epub_note"] = parsed.get("epub_note", "")
+                epub_files.append(payload)
 
-        subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(current_user.id)
-        user_tier = usage_check.get("tier", "free")
+            file_contents.append(payload)
+        except Exception as e:
+            print(f"⚠️ Error parsing file {file.filename}: {e}")
+            file_contents.append(
+                {
+                    "filename": file.filename or "unknown",
+                    "content": f"[Could not parse file: {str(e)}]",
+                }
+            )
 
-        consultation_service = ConsultationService(session)
-        result = await consultation_service.generate_guided_analysis(
-            file_contents=file_contents,
-            user_prompt=prompt,
-            user_tier=user_tier,
+    if not file_contents:
+        raise HTTPException(status_code=400, detail="No files provided")
+
+    subscription_manager = SubscriptionManager(session)
+    usage_check = await subscription_manager.check_usage_limits(current_user.id)
+    user_tier = usage_check.get("tier", "free")
+
+    consultation_service = ConsultationService(session)
+    enriched_prompt = prompt
+    if epub_files:
+        epub_details = "\n".join(
+            [
+                f"- {f['filename']}: {f.get('chapter_count', 0)} chapters"
+                for f in epub_files
+            ]
         )
+        enriched_prompt = (
+            f"{prompt}\n\nEPUB context:\n{epub_details}\n"
+            "Offer adaptation direction such as 'Create as cinematic universe' "
+            "or 'Single story adaptation'."
+        ).strip()
 
-        return result
+    result = await consultation_service.generate_guided_analysis(
+        file_contents=file_contents,
+        user_prompt=enriched_prompt,
+        user_tier=user_tier,
+        max_tokens=250,
+    )
+
+    return result
 
 
 @router.post("/consultation/chat")
@@ -5526,17 +5670,117 @@ async def consultation_chat(
     from app.api.services.consultation import ConsultationService
 
     try:
+        message = (request.message or "").strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="Message cannot be empty")
+        if len(message) > 500:
+            raise HTTPException(
+                status_code=400,
+                detail="Message exceeds 500 characters. Please shorten your input.",
+            )
+
+        allowed, retry_after = await _enforce_consultation_chat_rate_limit(
+            str(current_user.id)
+        )
+        if not allowed:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "message": "Rate limit exceeded. You can send up to 5 messages per minute.",
+                    "retry_after_seconds": retry_after,
+                },
+            )
+
+        off_topic_or_injection = _is_prompt_injection_or_off_topic(message)
+
         # Get user tier
         subscription_manager = SubscriptionManager(session)
         usage_check = await subscription_manager.check_usage_limits(current_user.id)
-        user_tier = usage_check.get("tier", "free")
+        user_tier = str(usage_check.get("tier", "free")).lower()
+
+        # Track per-session chat usage using context state.
+        # Internal subscription tiers map to product labels as:
+        # pro -> Standard, professional -> Pro.
+        tier_caps = {
+            "free": 15,
+            "basic": 30,
+            "standard": 50,
+            "pro": 50,
+            "premium": 100,
+            "professional": 250,
+            "enterprise": 250,
+        }
+        cap = tier_caps.get(user_tier, tier_caps["free"])
+
+        prior_count = 0
+        try:
+            prior_count = int(request.context.get("consultation_message_count", 0))
+        except (TypeError, ValueError):
+            prior_count = 0
+        if prior_count <= 0:
+            history = request.context.get("messages", [])
+            prior_count = len(
+                [m for m in history if isinstance(m, dict) and m.get("role") == "user"]
+            )
+
+        messages_used = prior_count + 1
+        messages_remaining = max(0, cap - messages_used)
+        is_free_tier = user_tier == "free"
+        credit_confirmed = bool(request.context.get("credit_confirmed"))
+
+        if messages_used > cap and is_free_tier:
+            return {
+                "status": "limit_reached",
+                "ai_message": "You've reached your free consultation message limit. Upgrade to continue.",
+                "cap_reached": True,
+                "messages_used": cap,
+                "messages_remaining": 0,
+                "message_limit": cap,
+                "user_tier": user_tier,
+                "consultation_message_count": cap,
+            }
+
+        if messages_used > cap and not is_free_tier and not credit_confirmed:
+            return {
+                "status": "credit_required",
+                "ai_message": "This message requires 1 credit. Confirm to continue.",
+                "requires_credit": True,
+                "credit_cost": 1,
+                "messages_used": messages_used,
+                "messages_remaining": 0,
+                "message_limit": cap,
+                "user_tier": user_tier,
+                "consultation_message_count": messages_used,
+            }
+
+        if off_topic_or_injection:
+            return {
+                "status": "redirected",
+                "ai_message": CONSULTATION_OFF_TOPIC_REDIRECT,
+                "ready_to_proceed": False,
+                "follow_up_questions": [
+                    "What do you want to create from your uploaded content?"
+                ],
+                "messages_used": messages_used,
+                "messages_remaining": messages_remaining,
+                "message_limit": cap,
+                "user_tier": user_tier,
+                "consultation_message_count": messages_used,
+            }
 
         consultation_service = ConsultationService(session)
         result = await consultation_service.continue_conversation(
-            message=request.message,
+            message=message,
             context=request.context,
             user_tier=user_tier,
+            max_tokens=250,
+            consultation_message_count=messages_used,
         )
+        result["messages_used"] = messages_used
+        result["messages_remaining"] = messages_remaining
+        result["message_limit"] = cap
+        result["user_tier"] = user_tier
+        result["consultation_message_count"] = messages_used
 
         return result
 

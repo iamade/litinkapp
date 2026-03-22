@@ -1,4 +1,6 @@
 import asyncio
+import os
+import time
 import uuid
 from typing import List, Optional
 from sqlmodel import select
@@ -21,6 +23,8 @@ from fastapi import UploadFile
 from app.core.services.file import BookStructureDetector, FileService
 from app.core.services.embeddings import EmbeddingsService
 from app.api.services.plot import PlotService
+from app.credits.constants import TEXT_GEN
+from app.credits.service import CreditService
 
 
 def _extract_text_content(temp_path: str, suffix: str) -> str:
@@ -110,6 +114,363 @@ class IntentService:
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 
+async def _update_project_progress(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    **kwargs,
+) -> None:
+    """Update upload progress fields on a project record."""
+    stmt = select(Project).where(Project.id == project_id)
+    result = await session.exec(stmt)
+    project = result.first()
+    if not project:
+        return
+    for key, value in kwargs.items():
+        setattr(project, key, value)
+    session.add(project)
+    await session.commit()
+
+
+async def _process_project_upload_background(
+    project_id: str,
+    book_id: str,
+    user_id: str,
+    file_data: list,
+    project_type_value: str,
+    input_prompt: Optional[str],
+    is_multi_script: bool,
+    consultation_config: Optional[dict],
+    reservation_id: Optional[str] = None,
+) -> None:
+    """Background task: extract text, parse chapters, save artifacts, then defer embeddings + plot."""
+    from app.core.database import async_session
+    from app.core.services.file import FileService
+    from app.books.models import Book as BookModel, Chapter as ChapterModel
+    from app.api.services.plot import PlotService
+
+    project_uuid = uuid.UUID(project_id)
+    book_uuid = uuid.UUID(book_id)
+    user_uuid = uuid.UUID(user_id)
+    reservation_uuid = None
+    if reservation_id:
+        try:
+            reservation_uuid = uuid.UUID(reservation_id)
+        except ValueError:
+            reservation_uuid = None
+
+    async with async_session() as session:
+        reservation_settled = False
+
+        async def _release_reserved_credit() -> None:
+            nonlocal reservation_settled
+            if not reservation_uuid or reservation_settled:
+                return
+            try:
+                credit_service = CreditService(session)
+                await credit_service.release_reservation(reservation_uuid)
+                await session.commit()
+                reservation_settled = True
+            except Exception as release_err:
+                print(f"[BG UPLOAD] Failed to release reservation {reservation_uuid}: {release_err}")
+
+        try:
+            file_service = FileService()
+            bg_start = time.time()
+
+            # Stage: parsing - extract text from temp files
+            parse_start = time.time()
+            await _update_project_progress(
+                session, project_uuid, upload_stage="parsing", upload_progress=10
+            )
+
+            file_data_list = []
+            for fd in file_data:
+                suffix = os.path.splitext(fd["filename"])[1] if fd["filename"] else ""
+                try:
+                    text_content = await asyncio.to_thread(
+                        _extract_text_content, fd["temp_path"], suffix
+                    )
+                except Exception as e:
+                    print(f"[BG UPLOAD] Text extraction failed for {fd['filename']}: {e}")
+                    text_content = ""
+                file_data_list.append(
+                    {
+                        "filename": fd["filename"],
+                        "text_content": text_content,
+                        "file_url": fd["file_url"],
+                        "temp_path": fd["temp_path"],
+                    }
+                )
+            print(f"[BG UPLOAD] Stage 'parsing' done in {time.time() - parse_start:.2f}s")
+
+            structure_start = time.time()
+            await _update_project_progress(
+                session, project_uuid, upload_stage="structuring", upload_progress=20
+            )
+
+            if is_multi_script:
+                total = len(file_data_list)
+                if total == 0:
+                    raise ValueError("No chapters extracted from upload")
+
+                await _update_project_progress(
+                    session,
+                    project_uuid,
+                    upload_stage="saving",
+                    upload_progress=25,
+                    upload_total_chapters=total,
+                )
+
+                save_start = time.time()
+                for idx, fd in enumerate(file_data_list):
+                    script_title = (
+                        os.path.splitext(fd["filename"])[0].replace("_", " ").title()
+                    )
+                    book_chapter = ChapterModel(
+                        book_id=book_uuid,
+                        title=script_title,
+                        content=fd["text_content"],
+                        chapter_number=idx + 1,
+                        summary=f"Script file: {fd['filename']}",
+                    )
+                    session.add(book_chapter)
+                    await session.flush()
+
+                    artifact = Artifact(
+                        project_id=project_uuid,
+                        artifact_type=ArtifactType.CHAPTER.value,
+                        version=1,
+                        content={
+                            "title": script_title,
+                            "content": fd["text_content"],
+                            "chapter_number": idx + 1,
+                            "summary": f"Uploaded script from {fd['filename']}",
+                            "chapter_id": str(book_chapter.id),
+                            "original_filename": fd["filename"],
+                        },
+                        generation_metadata={
+                            "source": "upload_multi_script",
+                            "original_structure": "script_file",
+                            "book_chapter_id": str(book_chapter.id),
+                            "source_files": [fd["filename"]],
+                        },
+                        source_file_url=fd["file_url"],
+                        is_script=True,
+                        script_order=idx + 1,
+                        content_type_label="Script",
+                    )
+                    session.add(artifact)
+
+                    chapters_done = idx + 1
+                    progress_pct = 25 + int((chapters_done / total) * 65)
+                    await _update_project_progress(
+                        session,
+                        project_uuid,
+                        upload_chapters_processed=chapters_done,
+                        upload_progress=progress_pct,
+                    )
+                print(f"[BG UPLOAD] Stage 'saving' (multi-script) done in {time.time() - save_start:.2f}s")
+
+                # Save consultation artifact if provided
+                if consultation_config and consultation_config.get("consultation_data"):
+                    consultation_artifact = Artifact(
+                        project_id=project_uuid,
+                        artifact_type=ArtifactType.DOCUMENT_SUMMARY.value,
+                        version=1,
+                        content={
+                            "type": "cinematic_universe_consultation",
+                            "consultation": consultation_config.get(
+                                "consultation_data", {}
+                            ).get("agreements", {}),
+                            "conversation": consultation_config.get(
+                                "consultation_data", {}
+                            ).get("conversation", []),
+                            "agreements": consultation_config.get(
+                                "consultation_data", {}
+                            ).get("agreements", {}),
+                        },
+                        generation_metadata={
+                            "source": "ai_consultation_modal",
+                            "universe_name": consultation_config.get("universe_name"),
+                            "content_terminology": consultation_config.get(
+                                "content_terminology"
+                            ),
+                        },
+                    )
+                    session.add(consultation_artifact)
+
+                stmt = select(BookModel).where(BookModel.id == book_uuid)
+                result = await session.exec(stmt)
+                book = result.first()
+                if book:
+                    book.total_chapters = len(file_data_list)
+                    session.add(book)
+                await session.commit()
+
+            else:
+                # Single file: LLM chapter extraction
+                all_text = file_data_list[0]["text_content"]
+
+                print(f"[BG UPLOAD] Stage 'structuring' done in {time.time() - structure_start:.2f}s")
+                extract_start = time.time()
+
+                try:
+                    extracted_data = await file_service.extract_chapters_with_new_flow(
+                        content=all_text,
+                        book_type=project_type_value,
+                        original_filename=file_data_list[0]["filename"],
+                        storage_path=file_data_list[0]["file_url"],
+                    )
+                except Exception as e:
+                    print(f"[BG UPLOAD] Chapter extraction failed: {e}")
+                    raise e
+
+                print(f"[BG UPLOAD] Stage 'chapter extraction' done in {time.time() - extract_start:.2f}s")
+
+                chapters = []
+                structure_type = "flat"
+                if extracted_data and isinstance(extracted_data, list):
+                    first_item = extracted_data[0] if extracted_data else {}
+                    if "chapters" in first_item:
+                        structure_type = "hierarchical"
+                        for section in extracted_data:
+                            chapters.extend(section.get("chapters", []))
+                    else:
+                        chapters = extracted_data
+
+                total = len(chapters)
+                if total == 0:
+                    raise ValueError("No chapters extracted from upload")
+
+                await _update_project_progress(
+                    session,
+                    project_uuid,
+                    upload_stage="saving",
+                    upload_progress=30,
+                    upload_total_chapters=total,
+                )
+
+                file_names = [fd["filename"] for fd in file_data_list]
+
+                save_start = time.time()
+                for idx, chapter in enumerate(chapters):
+                    chapter_title = chapter.get("title", f"Chapter {idx + 1}")
+                    chapter_content = chapter.get("content", "")
+                    chapter_number = int(chapter.get("number", idx + 1))
+                    chapter_summary = chapter.get("summary", "")
+
+                    book_chapter = ChapterModel(
+                        book_id=book_uuid,
+                        title=chapter_title,
+                        content=chapter_content,
+                        chapter_number=chapter_number,
+                        summary=chapter_summary,
+                    )
+                    session.add(book_chapter)
+                    await session.flush()
+
+                    artifact = Artifact(
+                        project_id=project_uuid,
+                        artifact_type=ArtifactType.CHAPTER.value,
+                        version=1,
+                        content={
+                            "title": chapter_title,
+                            "content": chapter_content,
+                            "chapter_number": chapter_number,
+                            "summary": chapter_summary,
+                            "chapter_id": str(book_chapter.id),
+                        },
+                        generation_metadata={
+                            "source": "upload_extraction",
+                            "original_structure": structure_type,
+                            "section_title": chapter.get("section_title"),
+                            "book_chapter_id": str(book_chapter.id),
+                            "source_files": file_names,
+                        },
+                    )
+                    session.add(artifact)
+
+                    chapters_done = idx + 1
+                    progress_pct = 30 + int((chapters_done / total) * 55)
+                    await _update_project_progress(
+                        session,
+                        project_uuid,
+                        upload_chapters_processed=chapters_done,
+                        upload_progress=progress_pct,
+                    )
+
+                print(f"[BG UPLOAD] Stage 'saving' (single-file) done in {time.time() - save_start:.2f}s")
+
+                stmt = select(BookModel).where(BookModel.id == book_uuid)
+                result = await session.exec(stmt)
+                book = result.first()
+                if book:
+                    book.total_chapters = len(chapters)
+                    session.add(book)
+                await session.commit()
+
+            # Mark upload as completed — chapters are in DB, embeddings will be deferred
+            await _update_project_progress(
+                session,
+                project_uuid,
+                upload_status="completed",
+                upload_stage="finalizing",
+                upload_progress=100,
+            )
+
+            if reservation_uuid and not reservation_settled:
+                credit_service = CreditService(session)
+                confirmed = await credit_service.confirm_deduction(
+                    reservation_uuid, TEXT_GEN
+                )
+                if not confirmed:
+                    raise RuntimeError("Failed to confirm project upload credit deduction")
+                await session.commit()
+                reservation_settled = True
+
+            print(f"[BG UPLOAD] Project {project_id} processing complete in {time.time() - bg_start:.2f}s. Dispatching deferred tasks.")
+
+            # Dispatch embedding generation as a separate Celery task
+            from app.tasks.embedding_tasks import generate_project_embeddings_task
+            generate_project_embeddings_task.delay(project_id, book_id)
+            print(f"[BG UPLOAD] Embedding task dispatched for project={project_id}")
+
+            # Dispatch plot generation as a separate Celery task (single-file only)
+            if not is_multi_script and input_prompt:
+                from app.tasks.plot_tasks import generate_plot_task
+                generate_plot_task.delay(
+                    project_id=project_id,
+                    book_id=book_id,
+                    user_id=user_id,
+                    input_prompt=input_prompt,
+                    project_type=project_type_value,
+                )
+                print(f"[BG UPLOAD] Plot task dispatched for project={project_id}")
+
+        except Exception as e:
+            print(f"[BG UPLOAD] Processing failed for project {project_id}: {e}")
+            try:
+                await session.rollback()
+                await _update_project_progress(
+                    session,
+                    project_uuid,
+                    upload_status="failed",
+                    upload_error=str(e)[:500],
+                )
+            except Exception as err:
+                print(f"[BG UPLOAD] Could not save error status: {err}")
+            finally:
+                await _release_reserved_credit()
+        finally:
+            for fd in file_data:
+                temp_path = fd.get("temp_path", "")
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+
+
 class ProjectService:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -185,6 +546,133 @@ class ProjectService:
         await self.session.delete(project)
         await self.session.commit()
         return True
+
+    async def create_project_shell(
+        self,
+        files: List[UploadFile],
+        user_id: uuid.UUID,
+        project_type: ProjectType = ProjectType.ENTERTAINMENT,
+        input_prompt: Optional[str] = None,
+        consultation_config: Optional[dict] = None,
+    ) -> tuple:
+        """Upload files to storage, create Book + Project shell, return (project, file_data, is_multi_script).
+
+        File data contains {filename, file_url, temp_path} for each file.
+        The caller is responsible for kicking off _process_project_upload_background.
+        """
+        import tempfile
+        from app.core.services.file import FileService
+        from app.books.models import Book as BookModel
+
+        file_service = FileService()
+        project_uuid = uuid.uuid4()  # used for storage paths
+
+        file_data = []
+        temp_paths = []
+
+        for file in files:
+            suffix = os.path.splitext(file.filename)[1] if file.filename else ""
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp:
+                content = await file.read()
+                temp.write(content)
+                temp_path = temp.name
+                temp_paths.append(temp_path)
+
+            remote_path = f"users/{user_id}/projects/{project_uuid}/{file.filename}"
+            try:
+                file_url = await file_service.upload_file(temp_path, remote_path)
+            except Exception as upload_err:
+                for tp in temp_paths:
+                    if os.path.exists(tp):
+                        os.unlink(tp)
+                raise ValueError(
+                    f"Failed to upload file '{file.filename}' to storage: {upload_err}"
+                ) from upload_err
+
+            if not file_url:
+                for tp in temp_paths:
+                    if os.path.exists(tp):
+                        os.unlink(tp)
+                raise ValueError(
+                    f"Failed to upload file '{file.filename}' to storage. Upload returned no URL."
+                )
+
+            file_data.append(
+                {
+                    "filename": file.filename or "unknown",
+                    "file_url": file_url,
+                    "temp_path": temp_path,
+                }
+            )
+
+        is_multi_script = len(files) > 1
+        primary_filename = file_data[0]["filename"]
+        file_urls = [fd["file_url"] for fd in file_data]
+        file_names = [fd["filename"] for fd in file_data]
+
+        if len(files) == 1:
+            project_title = (
+                os.path.splitext(primary_filename)[0].replace("_", " ").title()
+                if primary_filename
+                else "New Project"
+            )
+        else:
+            project_title = (
+                f"Cinematic Universe - {os.path.splitext(primary_filename)[0].replace('_', ' ').title()} (+{len(files)-1} more)"
+                if primary_filename
+                else "Multi-Script Project"
+            )
+
+        book = BookModel(
+            title=project_title,
+            user_id=user_id,
+            book_type=(
+                project_type.value if hasattr(project_type, "value") else "entertainment"
+            ),
+            source_mode="creator",
+            status="ready",
+            description=(
+                input_prompt
+                if input_prompt
+                else f"Project from {len(files)} file(s): {', '.join(file_names[:3])}{'...' if len(file_names) > 3 else ''}"
+            ),
+            original_file_storage_path=file_urls[0] if file_urls else None,
+        )
+        self.session.add(book)
+        await self.session.commit()
+        await self.session.refresh(book)
+
+        if is_multi_script:
+            pipeline_steps = ["consultation", "plot", "chapters", "script"]
+            current_step = "consultation"
+        else:
+            pipeline_steps = ["plot", "chapters", "script"]
+            current_step = "chapters"
+
+        project = Project(
+            title=project_title,
+            user_id=user_id,
+            project_type=project_type,
+            workflow_mode=WorkflowMode.CREATOR,
+            status=ProjectStatus.DRAFT,
+            source_material_url=", ".join(file_urls),
+            book_id=book.id,
+            pipeline_steps=pipeline_steps,
+            current_step=current_step,
+            input_prompt=input_prompt if input_prompt else None,
+            upload_status="processing",
+            upload_stage="parsing",
+            upload_progress=5,
+        )
+        self.session.add(project)
+        await self.session.commit()
+        await self.session.refresh(project)
+
+        book.project_id = project.id
+        self.session.add(book)
+        await self.session.commit()
+
+        return project, file_data, is_multi_script
 
     async def create_project_from_upload(
         self,
@@ -354,20 +842,6 @@ class ProjectService:
                     self.session.add(book_chapter)
                     await self.session.flush()  # Flush to get ID
 
-                    # Generate embeddings for the script (RAG)
-                    try:
-                        embeddings_service = EmbeddingsService(self.session)
-                        await embeddings_service.create_chapter_embeddings(
-                            book_chapter.id, file_data["text_content"]
-                        )
-                        print(
-                            f"[PROJECT UPLOAD] Generated embeddings for script {idx + 1}"
-                        )
-                    except Exception as e:
-                        print(
-                            f"[PROJECT UPLOAD] Error generating embeddings for script {idx + 1}: {e}"
-                        )
-
                     # Create Artifact in Project with SCRIPT-SPECIFIC FIELDS
                     artifact = Artifact(
                         project_id=project.id,
@@ -475,7 +949,7 @@ class ProjectService:
                 for idx, chapter in enumerate(chapters):
                     chapter_title = chapter.get("title", f"Chapter {idx+1}")
                     chapter_content = chapter.get("content", "")
-                    chapter_number = chapter.get("number", idx + 1)
+                    chapter_number = int(chapter.get("number", idx + 1))
                     chapter_summary = chapter.get("summary", "")
 
                     # Create Chapter in Book table (for RAG/embeddings)
@@ -488,20 +962,6 @@ class ProjectService:
                     )
                     self.session.add(book_chapter)
                     await self.session.flush()  # Flush to get ID
-
-                    # Generate embeddings for the chapter (RAG)
-                    try:
-                        embeddings_service = EmbeddingsService(self.session)
-                        await embeddings_service.create_chapter_embeddings(
-                            book_chapter.id, chapter_content
-                        )
-                        print(
-                            f"[PROJECT UPLOAD] Generated embeddings for chapter {chapter_number}"
-                        )
-                    except Exception as e:
-                        print(
-                            f"[PROJECT UPLOAD] Error generating embeddings for chapter {chapter_number}: {e}"
-                        )
 
                     # Create Artifact in Project (for UI display)
                     artifact = Artifact(
@@ -532,30 +992,24 @@ class ProjectService:
                 await self.session.commit()
                 print(f"[PROJECT UPLOAD] {len(chapters)} chapters + artifacts saved.")
 
-                # 8. Generate Plot Overview if input_prompt is provided (single file mode only)
-                if input_prompt:
-                    try:
-                        print(
-                            f"[PROJECT UPLOAD] Generating plot overview with prompt: {input_prompt[:50]}..."
-                        )
-                        plot_service = PlotService(self.session)
-                        project_type_str = (
-                            project_type.value
-                            if hasattr(project_type, "value")
-                            else str(project_type)
-                        )
+            # Dispatch deferred Celery tasks now that chapters are committed to DB
+            from app.tasks.embedding_tasks import generate_project_embeddings_task
+            generate_project_embeddings_task.delay(str(project.id), str(book.id))
+            print(f"[PROJECT UPLOAD] Embedding task dispatched for project={project.id}")
 
-                        await plot_service.generate_plot_from_prompt(
-                            user_id=user_id,
-                            project_id=project.id,
-                            input_prompt=input_prompt,
-                            project_type=project_type_str,
-                            book_id=book.id,
-                        )
-                        print("[PROJECT UPLOAD] Plot generation successful.")
-                    except Exception as e:
-                        print(f"[PROJECT UPLOAD] Plot generation failed: {e}")
-                        # Continue without failing the whole upload
+            if not is_multi_script and input_prompt:
+                from app.tasks.plot_tasks import generate_plot_task
+                project_type_str = (
+                    project_type.value if hasattr(project_type, "value") else str(project_type)
+                )
+                generate_plot_task.delay(
+                    project_id=str(project.id),
+                    book_id=str(book.id),
+                    user_id=str(user_id),
+                    input_prompt=input_prompt,
+                    project_type=project_type_str,
+                )
+                print(f"[PROJECT UPLOAD] Plot task dispatched for project={project.id}")
 
             # Re-fetch with artifacts
             statement = (

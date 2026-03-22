@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 from pydantic import BaseModel
 
@@ -15,8 +15,11 @@ from app.projects.schemas import (
 )
 from app.projects.models import ProjectType
 from fastapi import UploadFile, File, Form
-from app.projects.services import ProjectService, IntentService
+from app.projects.services import ProjectService, IntentService, _process_project_upload_background
 from app.api.services.consultation import ConsultationService
+from app.credits.dependencies import require_credits
+from app.credits.constants import OperationType, TEXT_GEN
+import uuid
 
 router = APIRouter()
 
@@ -46,8 +49,24 @@ class ConsultationResponse(BaseModel):
     error: Optional[str] = None
 
 
-@router.post("/upload", response_model=ProjectRead)
+class UploadInitResponse(BaseModel):
+    project_id: str
+    status: str
+
+
+class UploadStatusResponse(BaseModel):
+    status: str
+    stage: Optional[str] = None
+    progress: int = 0
+    total_chapters: Optional[int] = None
+    chapters_processed: Optional[int] = None
+    error: Optional[str] = None
+    project: Optional[ProjectRead] = None
+
+
+@router.post("/upload", response_model=UploadInitResponse, status_code=202)
 async def create_project_upload(
+    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     project_type: ProjectType = Form(ProjectType.ENTERTAINMENT),
     input_prompt: Optional[str] = Form(None),
@@ -57,15 +76,15 @@ async def create_project_upload(
     consultation_data: Optional[str] = Form(None),  # JSON string
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
 ):
     """
     Create a new project from uploaded files (PDF, DOCX, TXT, etc).
-    Supports multiple file uploads simultaneously.
-    Extracts chapters and stores them as artifacts.
+    Returns 202 immediately; processing happens in the background.
+    Poll GET /{project_id}/upload-status for progress.
     """
     import json
 
-    # Parse consultation_data JSON if provided
     parsed_consultation_data = None
     if consultation_data:
         try:
@@ -73,29 +92,75 @@ async def create_project_upload(
         except json.JSONDecodeError:
             pass
 
+    consultation_config = (
+        {
+            "content_terminology": content_terminology,
+            "universe_name": universe_name,
+            "content_type": content_type,
+            "consultation_data": parsed_consultation_data,
+        }
+        if any(
+            [content_terminology, universe_name, content_type, parsed_consultation_data]
+        )
+        else None
+    )
+
     project_service = ProjectService(session)
-    return await project_service.create_project_from_upload(
+    project, file_data, is_multi_script = await project_service.create_project_shell(
         files,
         current_user.id,
         project_type,
         input_prompt,
-        consultation_config=(
-            {
-                "content_terminology": content_terminology,
-                "universe_name": universe_name,
-                "content_type": content_type,
-                "consultation_data": parsed_consultation_data,
-            }
-            if any(
-                [
-                    content_terminology,
-                    universe_name,
-                    content_type,
-                    parsed_consultation_data,
-                ]
-            )
-            else None
+        consultation_config,
+    )
+
+    background_tasks.add_task(
+        _process_project_upload_background,
+        project_id=str(project.id),
+        book_id=str(project.book_id),
+        user_id=str(current_user.id),
+        file_data=file_data,
+        project_type_value=(
+            project_type.value if hasattr(project_type, "value") else str(project_type)
         ),
+        input_prompt=input_prompt,
+        is_multi_script=is_multi_script,
+        consultation_config=consultation_config,
+        reservation_id=str(reservation_id),
+    )
+
+    return UploadInitResponse(project_id=str(project.id), status="processing")
+
+
+@router.get("/{project_id}/upload-status", response_model=UploadStatusResponse)
+async def get_project_upload_status(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Get the current upload processing status for a project.
+    Returns stage, progress percentage, chapter counts, and error if any.
+    """
+    project_service = ProjectService(session)
+    project = await project_service.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    project_data = None
+    if project.upload_status == "completed":
+        project_data = project
+
+    return UploadStatusResponse(
+        status=project.upload_status or "processing",
+        stage=project.upload_stage,
+        progress=project.upload_progress or 0,
+        total_chapters=project.upload_total_chapters,
+        chapters_processed=project.upload_chapters_processed,
+        error=project.upload_error,
+        project=project_data,
     )
 
 

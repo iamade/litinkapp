@@ -14,11 +14,12 @@ import {
   CheckCircle2,
   Trash2
 } from "lucide-react";
-import { projectService, IntentAnalysisResult } from "../../services/projectService";
+import { projectService, IntentAnalysisResult, Project } from "../../services/projectService";
 import { toast } from "react-hot-toast";
 import ProjectFolder from "./ProjectFolder";
 import { checkFileAccessible } from "../../lib/fileValidation";
 import { AIConsultationModal } from "../Consultation/AIConsultationModal";
+import UploadProgress from "./UploadProgress";
 
 interface UploadedBook {
   id: string;
@@ -38,6 +39,9 @@ export default function CreatorStudio() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [recentProjects, setRecentProjects] = useState<any[]>([]);
   
+  // Upload progress state
+  const [uploadingProjectId, setUploadingProjectId] = useState<string | null>(null);
+
   // Delete confirmation modal state
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
@@ -76,8 +80,9 @@ export default function CreatorStudio() {
     if (newFiles.length > 0) {
       // Append to existing selection
       setSelectedFiles(prev => [...prev, ...newFiles]);
-      // Reset uploaded book state when files change
+      // Reset uploaded book state and analysis when files change
       setUploadedBook(null);
+      setAnalysis(null);
     }
     
     // Reset the file input so the same file can be selected again if needed
@@ -95,18 +100,6 @@ export default function CreatorStudio() {
     fileInputRef.current?.click();
   };
 
-  // Helper to detect if uploaded files are books (epub or large text files)
-  const detectIfBook = (files: File[]): boolean => {
-    for (const file of files) {
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      // Epub files are definitely books
-      if (ext === 'epub') return true;
-      // Large PDFs (>500KB) are likely books
-      if (ext === 'pdf' && file.size > 500 * 1024) return true;
-    }
-    return false;
-  };
-
   // State for AI Consultation Modal
   const [showConsultationModal, setShowConsultationModal] = useState(false);
 
@@ -115,17 +108,14 @@ export default function CreatorStudio() {
 
     setIsAnalyzing(true);
     try {
-      // Check if files are books - books skip consultation
-      const isBook = selectedFiles.length > 0 && detectIfBook(selectedFiles);
-      
-      if (!isBook && selectedFiles.length > 0) {
-        // Non-book files go through AI consultation
+      if (selectedFiles.length > 0) {
+        // Unified flow: all file uploads go through AI consultation
         setShowConsultationModal(true);
         setIsAnalyzing(false);
         return;
       }
       
-      // Standard flow for books or text-only prompts
+      // Text-only flow keeps intent analysis preview
       const fileNames = selectedFiles.map(f => f.name).join(', ');
       const textToAnalyze = prompt || (selectedFiles.length > 0 ? `Create a project from the files: ${fileNames}` : "");
       
@@ -157,11 +147,10 @@ export default function CreatorStudio() {
     };
   }) => {
     setShowConsultationModal(false);
-    const loadingToast = toast.loading("Creating your project...");
-    
+
     try {
       const data = await projectService.createProjectFromUpload(
-        selectedFiles, 
+        selectedFiles,
         config.projectType,
         prompt,
         {
@@ -171,46 +160,79 @@ export default function CreatorStudio() {
           consultation_data: config.consultationData,
         }
       );
-      
-      toast.success("Project created! Redirecting...", { id: loadingToast });
-      window.location.href = `/project/${data.id}`;
+      setUploadingProjectId(data.project_id);
     } catch (e) {
       console.error(e);
-      toast.error("Failed to create project.", { id: loadingToast });
+      toast.error("Failed to create project.");
     }
   };
 
   const handleCreateProject = async () => {
     if (!analysis) return;
-    
-    // Show loading toast
-    const loadingToast = toast.loading("Creating your project...");
-    
-    try {
-      let projectId;
 
+    try {
       if (selectedFiles.length > 0) {
-        // Create project from upload - use first file for now, backend can be extended for multiple
-        // We append the prompt to the upload if available
-         const data = await projectService.createProjectFromUpload(selectedFiles, analysis.primary_intent, prompt);
-         projectId = data.id;
+        const data = await projectService.createProjectFromUpload(
+          selectedFiles,
+          analysis.primary_intent,
+          prompt
+        );
+        setUploadingProjectId(data.project_id);
       } else {
-        // Create text-only project
-        const data = await projectService.createProject({
-          title: `Project: ${prompt.slice(0, 20) || "Untitled"}...`, 
-          input_prompt: prompt,
-          project_type: analysis.primary_intent,
-          workflow_mode: "creator_interactive",
-        });
-        projectId = data.id;
+        // Text-only project: keep simple toast flow
+        const loadingToast = toast.loading("Creating your project...");
+        try {
+          const data = await projectService.createProject({
+            title: `Project: ${prompt.slice(0, 20) || "Untitled"}...`,
+            input_prompt: prompt,
+            project_type: analysis.primary_intent,
+            workflow_mode: "creator_interactive",
+          });
+          toast.success("Project created! Redirecting...", { id: loadingToast });
+          window.location.href = `/project/${data.id}`;
+        } catch (e) {
+          console.error(e);
+          toast.error("Failed to create project.", { id: loadingToast });
+        }
       }
-      
-      toast.success("Project created! Redirecting...", { id: loadingToast });
-      window.location.href = `/project/${projectId}`;
     } catch (e) {
       console.error(e);
-      toast.error("Failed to create project.", { id: loadingToast });
+      toast.error("Failed to start project upload.");
     }
+  };
+
+  const handleSkipConsultation = async () => {
+    if (selectedFiles.length === 0) return;
+
+    setShowConsultationModal(false);
+    try {
+      const data = await projectService.createProjectFromUpload(
+        selectedFiles,
+        "entertainment",
+        prompt,
+        {
+          content_terminology: "Film",
+          content_type: "single_script",
+          universe_name: ((selectedFiles[0]?.name?.split(".").slice(0, -1).join(".")) || selectedFiles[0]?.name) || "Untitled Project",
+        }
+      );
+      setUploadingProjectId(data.project_id);
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to create project.");
+    }
+  };
+
+  const handleUploadComplete = (project: Project) => {
+    setUploadingProjectId(null);
+    toast.success("Project created!");
+    window.location.href = `/project/${project.id}`;
+  };
+
+  const handleUploadError = (_error: string) => {
+    setUploadingProjectId(null);
+    setSelectedFiles([]);
+    setAnalysis(null);
   };
 
   const handleDeleteProject = async (e: React.MouseEvent, projectId: string) => {
@@ -236,6 +258,18 @@ export default function CreatorStudio() {
       setProjectToDelete(null);
     }
   };
+
+  if (uploadingProjectId) {
+    return (
+      <div className="space-y-8">
+        <UploadProgress
+          projectId={uploadingProjectId}
+          onComplete={handleUploadComplete}
+          onError={handleUploadError}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -300,8 +334,8 @@ You can also just upload a book and we'll handle the rest!`}
                     Attached Files ({selectedFiles.length})
                   </span>
                   {selectedFiles.length > 1 && (
-                    <button 
-                      onClick={() => setSelectedFiles([])}
+                    <button
+                      onClick={() => { setSelectedFiles([]); setAnalysis(null); }}
                       className="text-xs text-gray-500 hover:text-red-500 transition-colors"
                     >
                       Clear all
@@ -321,8 +355,8 @@ You can also just upload a book and we'll handle the rest!`}
                       <span className="text-xs text-gray-500 dark:text-gray-400">
                         ({(file.size / 1024).toFixed(0)}KB)
                       </span>
-                      <button 
-                        onClick={() => setSelectedFiles(prev => prev.filter((_, i) => i !== index))} 
+                      <button
+                        onClick={() => { setSelectedFiles(prev => prev.filter((_, i) => i !== index)); setAnalysis(null); }}
                         className="text-gray-400 hover:text-red-500 transition-colors"
                         title="Remove file"
                       >
@@ -351,13 +385,27 @@ You can also just upload a book and we'll handle the rest!`}
                 <span className="flex items-center gap-1"><MonitorPlay className="h-4 w-4"/> Training</span>
              </div>
 
+             <div className="flex items-center gap-2">
+             {selectedFiles.length > 0 && (
+               <button
+                onClick={handleSkipConsultation}
+                disabled={isAnalyzing}
+                className="bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-4 py-3 rounded-xl font-semibold hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Skip Consultation
+              </button>
+             )}
              <button
-              onClick={analysis ? handleCreateProject : handleAnalyze}
+              onClick={selectedFiles.length > 0 ? handleAnalyze : (analysis ? handleCreateProject : handleAnalyze)}
               disabled={isAnalyzing || (!prompt.trim() && selectedFiles.length === 0 && !uploadedBook)}
               className="bg-purple-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-purple-700 transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {isAnalyzing ? (
                 <Loader2 className="h-5 w-5 animate-spin" />
+              ) : selectedFiles.length > 0 ? (
+                <>
+                  Analyze & Start
+                </>
               ) : analysis ? (
                 <>
                   Create Project <ArrowRight className="h-5 w-5" />
@@ -368,12 +416,22 @@ You can also just upload a book and we'll handle the rest!`}
                 </>
               )}
             </button>
+            </div>
           </div>
 
           {/* Analysis Result Preview */}
-          {analysis && (
+          {analysis && selectedFiles.length === 0 && (
             <div className="mt-8 bg-purple-50 dark:bg-purple-900/20 rounded-xl p-6 border border-purple-100 dark:border-purple-800 animate-in fade-in slide-in-from-top-4">
-               <h3 className="font-bold text-gray-900 dark:text-white mb-2">Analysis Results</h3>
+               <div className="flex items-center justify-between mb-2">
+                 <h3 className="font-bold text-gray-900 dark:text-white">Analysis Results</h3>
+                 <button
+                   onClick={() => setAnalysis(null)}
+                   className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+                   title="Dismiss"
+                 >
+                   <X className="h-4 w-4" />
+                 </button>
+               </div>
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                      <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wider">Detected Type</span>
@@ -477,7 +535,8 @@ You can also just upload a book and we'll handle the rest!`}
           files={selectedFiles}
           initialPrompt={prompt}
           onComplete={handleConsultationComplete}
-          onCancel={() => setShowConsultationModal(false)}
+          onSkip={handleSkipConsultation}
+          onCancel={() => { setShowConsultationModal(false); setAnalysis(null); }}
         />
       )}
     </div>

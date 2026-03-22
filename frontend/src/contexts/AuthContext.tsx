@@ -5,8 +5,7 @@ import {
   useEffect,
   ReactNode,
 } from "react";
-import { apiClient } from "../lib/api";
-import { setOnTokenRefresh } from "../lib/api";
+import { apiClient, API_BASE_URL, AUTH_EXPIRED_EVENT, setOnTokenRefresh } from "../lib/api";
 
 interface User {
   id: string;
@@ -91,6 +90,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
       }
     });
+  }, []);
+
+  useEffect(() => {
+    let isLoggingOut = false;
+    const handleAuthExpired = () => {
+      if (isLoggingOut) return;
+      isLoggingOut = true;
+      setUser(null);
+      fetch(`${API_BASE_URL}/auth/logout`, { method: 'POST', credentials: 'include' })
+        .catch(() => {})
+        .finally(() => { isLoggingOut = false; });
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
   }, []);
 
   // Redirect to onboarding if needed

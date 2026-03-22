@@ -108,6 +108,17 @@ class Project(SQLModel, table=True):
         sa_column=Column(pg.TEXT),
     )  # Film, Episode, Part, Chapter, or custom
 
+    # Upload Progress Tracking
+    upload_status: Optional[str] = Field(default=None)  # processing/completed/failed
+    upload_progress: Optional[int] = Field(default=None)  # 0-100
+    upload_stage: Optional[str] = Field(default=None)  # parsing/structuring/embeddings/finalizing
+    upload_error: Optional[str] = Field(default=None, sa_column=Column(pg.TEXT))
+    upload_total_chapters: Optional[int] = Field(default=None)
+    upload_chapters_processed: Optional[int] = Field(default=None)
+
+    # Consultation tracking
+    consultation_message_count: int = Field(default=0)
+
     # Relationships
     artifacts: List["Artifact"] = Relationship(
         back_populates="project",
