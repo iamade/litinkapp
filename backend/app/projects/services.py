@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 import uuid
 from typing import List, Optional
 from sqlmodel import select
@@ -141,10 +142,9 @@ async def _process_project_upload_background(
     consultation_config: Optional[dict],
     reservation_id: Optional[str] = None,
 ) -> None:
-    """Background task: extract text, parse chapters, generate embeddings, save artifacts."""
+    """Background task: extract text, parse chapters, save artifacts, then defer embeddings + plot."""
     from app.core.database import async_session
     from app.core.services.file import FileService
-    from app.core.services.embeddings import EmbeddingsService
     from app.books.models import Book as BookModel, Chapter as ChapterModel
     from app.api.services.plot import PlotService
 
@@ -175,8 +175,10 @@ async def _process_project_upload_background(
 
         try:
             file_service = FileService()
+            bg_start = time.time()
 
             # Stage: parsing - extract text from temp files
+            parse_start = time.time()
             await _update_project_progress(
                 session, project_uuid, upload_stage="parsing", upload_progress=10
             )
@@ -199,7 +201,9 @@ async def _process_project_upload_background(
                         "temp_path": fd["temp_path"],
                     }
                 )
+            print(f"[BG UPLOAD] Stage 'parsing' done in {time.time() - parse_start:.2f}s")
 
+            structure_start = time.time()
             await _update_project_progress(
                 session, project_uuid, upload_stage="structuring", upload_progress=20
             )
@@ -212,11 +216,12 @@ async def _process_project_upload_background(
                 await _update_project_progress(
                     session,
                     project_uuid,
-                    upload_stage="embeddings",
+                    upload_stage="saving",
                     upload_progress=25,
                     upload_total_chapters=total,
                 )
 
+                save_start = time.time()
                 for idx, fd in enumerate(file_data_list):
                     script_title = (
                         os.path.splitext(fd["filename"])[0].replace("_", " ").title()
@@ -230,14 +235,6 @@ async def _process_project_upload_background(
                     )
                     session.add(book_chapter)
                     await session.flush()
-
-                    try:
-                        embeddings_service = EmbeddingsService(session)
-                        await embeddings_service.create_chapter_embeddings(
-                            book_chapter.id, fd["text_content"]
-                        )
-                    except Exception as e:
-                        print(f"[BG UPLOAD] Embeddings error for script {idx + 1}: {e}")
 
                     artifact = Artifact(
                         project_id=project_uuid,
@@ -272,6 +269,7 @@ async def _process_project_upload_background(
                         upload_chapters_processed=chapters_done,
                         upload_progress=progress_pct,
                     )
+                print(f"[BG UPLOAD] Stage 'saving' (multi-script) done in {time.time() - save_start:.2f}s")
 
                 # Save consultation artifact if provided
                 if consultation_config and consultation_config.get("consultation_data"):
@@ -313,6 +311,9 @@ async def _process_project_upload_background(
                 # Single file: LLM chapter extraction
                 all_text = file_data_list[0]["text_content"]
 
+                print(f"[BG UPLOAD] Stage 'structuring' done in {time.time() - structure_start:.2f}s")
+                extract_start = time.time()
+
                 try:
                     extracted_data = await file_service.extract_chapters_with_new_flow(
                         content=all_text,
@@ -323,6 +324,8 @@ async def _process_project_upload_background(
                 except Exception as e:
                     print(f"[BG UPLOAD] Chapter extraction failed: {e}")
                     raise e
+
+                print(f"[BG UPLOAD] Stage 'chapter extraction' done in {time.time() - extract_start:.2f}s")
 
                 chapters = []
                 structure_type = "flat"
@@ -342,13 +345,14 @@ async def _process_project_upload_background(
                 await _update_project_progress(
                     session,
                     project_uuid,
-                    upload_stage="embeddings",
+                    upload_stage="saving",
                     upload_progress=30,
                     upload_total_chapters=total,
                 )
 
                 file_names = [fd["filename"] for fd in file_data_list]
 
+                save_start = time.time()
                 for idx, chapter in enumerate(chapters):
                     chapter_title = chapter.get("title", f"Chapter {idx + 1}")
                     chapter_content = chapter.get("content", "")
@@ -364,16 +368,6 @@ async def _process_project_upload_background(
                     )
                     session.add(book_chapter)
                     await session.flush()
-
-                    try:
-                        embeddings_service = EmbeddingsService(session)
-                        await embeddings_service.create_chapter_embeddings(
-                            book_chapter.id, chapter_content
-                        )
-                    except Exception as e:
-                        print(
-                            f"[BG UPLOAD] Embeddings error for chapter {chapter_number}: {e}"
-                        )
 
                     artifact = Artifact(
                         project_id=project_uuid,
@@ -405,6 +399,8 @@ async def _process_project_upload_background(
                         upload_progress=progress_pct,
                     )
 
+                print(f"[BG UPLOAD] Stage 'saving' (single-file) done in {time.time() - save_start:.2f}s")
+
                 stmt = select(BookModel).where(BookModel.id == book_uuid)
                 result = await session.exec(stmt)
                 book = result.first()
@@ -413,23 +409,7 @@ async def _process_project_upload_background(
                     session.add(book)
                 await session.commit()
 
-                # Generate plot if input_prompt provided
-                await _update_project_progress(
-                    session, project_uuid, upload_stage="finalizing", upload_progress=87
-                )
-                if input_prompt:
-                    try:
-                        plot_service = PlotService(session)
-                        await plot_service.generate_plot_from_prompt(
-                            user_id=user_uuid,
-                            project_id=project_uuid,
-                            input_prompt=input_prompt,
-                            project_type=project_type_value,
-                            book_id=book_uuid,
-                        )
-                    except Exception as e:
-                        print(f"[BG UPLOAD] Plot generation failed: {e}")
-
+            # Mark upload as completed — chapters are in DB, embeddings will be deferred
             await _update_project_progress(
                 session,
                 project_uuid,
@@ -448,7 +428,24 @@ async def _process_project_upload_background(
                 await session.commit()
                 reservation_settled = True
 
-            print(f"[BG UPLOAD] Project {project_id} processing complete.")
+            print(f"[BG UPLOAD] Project {project_id} processing complete in {time.time() - bg_start:.2f}s. Dispatching deferred tasks.")
+
+            # Dispatch embedding generation as a separate Celery task
+            from app.tasks.embedding_tasks import generate_project_embeddings_task
+            generate_project_embeddings_task.delay(project_id, book_id)
+            print(f"[BG UPLOAD] Embedding task dispatched for project={project_id}")
+
+            # Dispatch plot generation as a separate Celery task (single-file only)
+            if not is_multi_script and input_prompt:
+                from app.tasks.plot_tasks import generate_plot_task
+                generate_plot_task.delay(
+                    project_id=project_id,
+                    book_id=book_id,
+                    user_id=user_id,
+                    input_prompt=input_prompt,
+                    project_type=project_type_value,
+                )
+                print(f"[BG UPLOAD] Plot task dispatched for project={project_id}")
 
         except Exception as e:
             print(f"[BG UPLOAD] Processing failed for project {project_id}: {e}")
@@ -845,20 +842,6 @@ class ProjectService:
                     self.session.add(book_chapter)
                     await self.session.flush()  # Flush to get ID
 
-                    # Generate embeddings for the script (RAG)
-                    try:
-                        embeddings_service = EmbeddingsService(self.session)
-                        await embeddings_service.create_chapter_embeddings(
-                            book_chapter.id, file_data["text_content"]
-                        )
-                        print(
-                            f"[PROJECT UPLOAD] Generated embeddings for script {idx + 1}"
-                        )
-                    except Exception as e:
-                        print(
-                            f"[PROJECT UPLOAD] Error generating embeddings for script {idx + 1}: {e}"
-                        )
-
                     # Create Artifact in Project with SCRIPT-SPECIFIC FIELDS
                     artifact = Artifact(
                         project_id=project.id,
@@ -980,20 +963,6 @@ class ProjectService:
                     self.session.add(book_chapter)
                     await self.session.flush()  # Flush to get ID
 
-                    # Generate embeddings for the chapter (RAG)
-                    try:
-                        embeddings_service = EmbeddingsService(self.session)
-                        await embeddings_service.create_chapter_embeddings(
-                            book_chapter.id, chapter_content
-                        )
-                        print(
-                            f"[PROJECT UPLOAD] Generated embeddings for chapter {chapter_number}"
-                        )
-                    except Exception as e:
-                        print(
-                            f"[PROJECT UPLOAD] Error generating embeddings for chapter {chapter_number}: {e}"
-                        )
-
                     # Create Artifact in Project (for UI display)
                     artifact = Artifact(
                         project_id=project.id,
@@ -1023,30 +992,24 @@ class ProjectService:
                 await self.session.commit()
                 print(f"[PROJECT UPLOAD] {len(chapters)} chapters + artifacts saved.")
 
-                # 8. Generate Plot Overview if input_prompt is provided (single file mode only)
-                if input_prompt:
-                    try:
-                        print(
-                            f"[PROJECT UPLOAD] Generating plot overview with prompt: {input_prompt[:50]}..."
-                        )
-                        plot_service = PlotService(self.session)
-                        project_type_str = (
-                            project_type.value
-                            if hasattr(project_type, "value")
-                            else str(project_type)
-                        )
+            # Dispatch deferred Celery tasks now that chapters are committed to DB
+            from app.tasks.embedding_tasks import generate_project_embeddings_task
+            generate_project_embeddings_task.delay(str(project.id), str(book.id))
+            print(f"[PROJECT UPLOAD] Embedding task dispatched for project={project.id}")
 
-                        await plot_service.generate_plot_from_prompt(
-                            user_id=user_id,
-                            project_id=project.id,
-                            input_prompt=input_prompt,
-                            project_type=project_type_str,
-                            book_id=book.id,
-                        )
-                        print("[PROJECT UPLOAD] Plot generation successful.")
-                    except Exception as e:
-                        print(f"[PROJECT UPLOAD] Plot generation failed: {e}")
-                        # Continue without failing the whole upload
+            if not is_multi_script and input_prompt:
+                from app.tasks.plot_tasks import generate_plot_task
+                project_type_str = (
+                    project_type.value if hasattr(project_type, "value") else str(project_type)
+                )
+                generate_plot_task.delay(
+                    project_id=str(project.id),
+                    book_id=str(book.id),
+                    user_id=str(user_id),
+                    input_prompt=input_prompt,
+                    project_type=project_type_str,
+                )
+                print(f"[PROJECT UPLOAD] Plot task dispatched for project={project.id}")
 
             # Re-fetch with artifacts
             statement = (

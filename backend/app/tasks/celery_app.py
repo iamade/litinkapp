@@ -50,6 +50,8 @@ celery_app.conf.update(
         "app.tasks.blockchain_tasks.*": {"queue": "litink_tasks"},
         "app.tasks.merge_tasks.*": {"queue": "litink_tasks"},
         "app.tasks.lipsync_tasks.*": {"queue": "litink_tasks"},
+        "app.tasks.embedding_tasks.*": {"queue": "litink_tasks"},
+        "app.tasks.plot_tasks.*": {"queue": "litink_tasks"},
         "send_email_task": {"queue": "litink_tasks"},
     },
     # Timezone settings (from original config)
@@ -67,6 +69,8 @@ celery_app.conf.imports = [
     "app.tasks.video_tasks",
     "app.tasks.merge_tasks",
     "app.tasks.credit_tasks",
+    "app.tasks.embedding_tasks",
+    "app.tasks.plot_tasks",
 ]
 
 # Celery Beat periodic schedule
