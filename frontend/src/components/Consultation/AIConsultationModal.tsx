@@ -143,6 +143,7 @@ export function AIConsultationModal({
   const [hasUnansweredQuestions, setHasUnansweredQuestions] = useState(false);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
+  const [fileSummary, setFileSummary] = useState("");
   const [messagesUsed, setMessagesUsed] = useState(0);
   const [messagesRemaining, setMessagesRemaining] = useState(tierLimit);
   const [messageLimit, setMessageLimit] = useState(tierLimit);
@@ -193,11 +194,13 @@ export function AIConsultationModal({
         ai_message?: string;
         suggested_actions?: SuggestedAction[];
         recommended_action?: string;
+        file_summary?: string;
       }>("/ai/consultation/analyze", formData);
 
       if (data.content_analysis) {
         setAnalysis(data.content_analysis);
       }
+      setFileSummary(data.file_summary || "");
 
       const aiMessage: ConsultationMessage = {
         role: "assistant",
@@ -303,7 +306,7 @@ export function AIConsultationModal({
           message: trimmed,
           context: {
             messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
-            file_summary: analysis?.summary || "",
+            file_summary: fileSummary,
             consultation_message_count: sessionMessageCount,
             credit_confirmed: options?.creditConfirmed || false,
           },
