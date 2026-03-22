@@ -424,10 +424,25 @@ Respond with your analysis in the JSON format specified."""
             result_text = response.get("result", "")
             parsed = self._parse_llm_json_response(result_text)
 
+            # Build file summary for subsequent chat messages
+            file_summary_parts = []
+            for fc in file_contents:
+                title = fc.get("filename", "Unknown")
+                content_preview = str(fc.get("content", ""))[:2000]
+                metadata = fc.get("metadata", {}) or {}
+                chapter_count = fc.get("chapter_count", 0)
+                file_summary_parts.append(
+                    f"File: {title}\n"
+                    f"{'Chapters: ' + str(chapter_count) if chapter_count else ''}\n"
+                    f"Content preview: {content_preview}"
+                )
+            file_summary = "\n---\n".join(file_summary_parts)
+
             return {
                 "status": "success",
                 **parsed,
                 "model_used": response.get("model_used"),
+                "file_summary": file_summary,
             }
 
         except Exception as e:
@@ -435,6 +450,7 @@ Respond with your analysis in the JSON format specified."""
             return {
                 "status": "error",
                 "error": str(e),
+                "file_summary": "",
                 "content_analysis": {
                     "document_type": "other",
                     "title": (
