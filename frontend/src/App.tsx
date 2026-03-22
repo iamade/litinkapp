@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState } from "react";
-import { BrowserRouter as Router, Routes, Route, useNavigate } from "react-router-dom";
-import { AuthProvider } from "./contexts/AuthContext";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { Toaster } from "react-hot-toast";
 import Navbar from "./components/Navbar";
@@ -101,6 +101,14 @@ function InsufficientCreditsModalHandler() {
   );
 }
 
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  if (loading) return <div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-purple-600"></div></div>;
+  if (!user) return <Navigate to="/auth?mode=login" state={{ from: location }} replace />;
+  return <>{children}</>;
+}
+
 function App() {
   return (
     <ThemeProvider>
@@ -117,19 +125,19 @@ function App() {
                     <Routes>
                       <Route path="/" element={<HomePage />} />
                       <Route path="/auth" element={<AuthPage />} />
-                      <Route path="/dashboard" element={<Dashboard />} />
-                      <Route path="/author" element={<AuthorPanel />} />
+                      <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                      <Route path="/author" element={<ProtectedRoute><AuthorPanel /></ProtectedRoute>} />
                       <Route path="/learn" element={<LearningMode />} />
                       <Route path="/explore" element={<EntertainmentMode />} />
-                      <Route path="/creator" element={<CreatorMode />} />
-                      <Route path="/project/:id" element={<ProjectView />} />
-                      <Route path="/profile" element={<Profile />} />
-                      <Route path="/upload" element={<BookUpload />} />
-                      <Route path="/book/:id" element={<BookView />} />
+                      <Route path="/creator" element={<ProtectedRoute><CreatorMode /></ProtectedRoute>} />
+                      <Route path="/project/:id" element={<ProtectedRoute><ProjectView /></ProtectedRoute>} />
+                      <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+                      <Route path="/upload" element={<ProtectedRoute><BookUpload /></ProtectedRoute>} />
+                      <Route path="/book/:id" element={<ProtectedRoute><BookView /></ProtectedRoute>} />
                       <Route path="/subscription" element={<SubscriptionPage />} />
-                      <Route path="/admin" element={<AdminDashboard />} />
+                      <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
                       <Route path="/reset-password" element={<ResetPasswordPage />} />
-                      <Route path="/onboarding" element={<OnboardingPage />} />
+                      <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
                       <Route path="/auth/activate/:token" element={<ActivationPage />} />
                     </Routes>
                   </div>
