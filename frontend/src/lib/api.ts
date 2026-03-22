@@ -5,6 +5,10 @@ export const API_BASE_URL = import.meta.env.PROD
   : "http://localhost:8000/api/v1";
 export const AUTH_EXPIRED_EVENT = "auth:expired";
 
+// Suppress AUTH_EXPIRED_EVENT during login flow to prevent race condition
+let suppressAuthExpired = false;
+export function setSuppressAuthExpired(v: boolean) { suppressAuthExpired = v; }
+
 type ApiErrorPayload = {
   detail?: string | { message?: string };
   balance?: number;
@@ -131,7 +135,7 @@ export const apiClient = {
             credentials: "include",
           });
         } else {
-          window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+          if (!suppressAuthExpired) window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
           throw new Error("[401] Session expired. Please login again.");
         }
       }
@@ -172,7 +176,7 @@ export const apiClient = {
             credentials: "include",
           });
         } else {
-          window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+          if (!suppressAuthExpired) window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
           throw new Error("[401] Session expired. Please login again.");
         }
       }
@@ -224,7 +228,7 @@ export const apiClient = {
           credentials: "include",
         });
       } else {
-        window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
+        if (!suppressAuthExpired) window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT));
         throw new Error("[401] Session expired. Please login again.");
       }
     }
