@@ -132,4 +132,4 @@ async def _async_generate_project_embeddings(task, project_id: str, book_id: str
                     project_id,
                     inner_err,
                 )
-            raise self.retry(exc=e, countdown=60)
+            raise task.retry(exc=e, countdown=60)
