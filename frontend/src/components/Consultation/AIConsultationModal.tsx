@@ -201,6 +201,9 @@ export function AIConsultationModal({
         setAnalysis(data.content_analysis);
       }
       setFileSummary(data.file_summary || "");
+      // Analysis consumes the first consultation message.
+      setMessagesUsed(1);
+      setMessagesRemaining(Math.max(0, messageLimit - 1));
 
       const aiMessage: ConsultationMessage = {
         role: "assistant",
@@ -642,7 +645,7 @@ export function AIConsultationModal({
               >
                 Skip & Create
               </button>
-              {readyToCreate && (
+              {(readyToCreate || (capReached && messages.length > 1)) && (
                 <button
                   onClick={handleCreateProject}
                   className="px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg"
