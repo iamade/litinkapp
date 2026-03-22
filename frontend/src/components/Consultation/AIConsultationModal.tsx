@@ -597,14 +597,14 @@ export function AIConsultationModal({
             </div>
           </div>
 
-          {capReached && normalizedTier === "free" ? (
+          {capReached && normalizedTier === "free" && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20 p-4 flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
                   Free message cap reached
                 </p>
                 <p className="text-xs text-amber-800 dark:text-amber-300">
-                  Upgrade your plan to continue this consultation.
+                  Upgrade your plan to continue chatting, or create your project now.
                 </p>
               </div>
               <button
@@ -616,55 +616,58 @@ export function AIConsultationModal({
                 Upgrade
               </button>
             </div>
-          ) : (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value.slice(0, USER_MESSAGE_MAX_CHARS))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void sendMessage(inputValue);
-                  }
-                }}
-                placeholder="Type a message or select an option above..."
-                className="flex-1 px-4 py-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400"
-                disabled={isAnalyzing || isTyping}
-              />
-              <button
-                onClick={() => sendMessage(inputValue)}
-                disabled={!inputValue.trim() || isAnalyzing || isTyping || cooldownRemaining > 0}
-                className="p-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors"
-              >
-                <Send className="h-5 w-5" />
-              </button>
-              <button
-                onClick={handleSkipAndCreate}
-                className="px-4 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 rounded-xl font-medium transition-colors"
-              >
-                Skip & Create
-              </button>
-              {(readyToCreate || (capReached && messages.length > 1)) && (
-                <button
-                  onClick={handleCreateProject}
-                  className="px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg"
-                >
-                  <Sparkles className="h-5 w-5" />
-                  Create Project
-                </button>
-              )}
-              {!readyToCreate && selectedAction && !hasUnansweredQuestions && (
-                <button
-                  onClick={handleCreateProject}
-                  className="px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors"
-                >
-                  <Check className="h-4 w-4" />
-                  Confirm & Create
-                </button>
-              )}
-            </div>
           )}
+          <div className="flex gap-2">
+            {!(capReached && normalizedTier === "free") && (
+              <>
+                <input
+                  type="text"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value.slice(0, USER_MESSAGE_MAX_CHARS))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void sendMessage(inputValue);
+                    }
+                  }}
+                  placeholder="Type a message or select an option above..."
+                  className="flex-1 px-4 py-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent text-gray-900 dark:text-white placeholder-gray-400"
+                  disabled={isAnalyzing || isTyping}
+                />
+                <button
+                  onClick={() => sendMessage(inputValue)}
+                  disabled={!inputValue.trim() || isAnalyzing || isTyping || cooldownRemaining > 0}
+                  className="p-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl transition-colors"
+                >
+                  <Send className="h-5 w-5" />
+                </button>
+              </>
+            )}
+            <button
+              onClick={handleSkipAndCreate}
+              className="px-4 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 rounded-xl font-medium transition-colors"
+            >
+              Skip & Create
+            </button>
+            {(readyToCreate || (capReached && messages.length > 1)) && (
+              <button
+                onClick={handleCreateProject}
+                className="px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg"
+              >
+                <Sparkles className="h-5 w-5" />
+                Create Project
+              </button>
+            )}
+            {!readyToCreate && selectedAction && !hasUnansweredQuestions && (
+              <button
+                onClick={handleCreateProject}
+                className="px-4 py-3 bg-green-600 hover:bg-green-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors"
+              >
+                <Check className="h-4 w-4" />
+                Confirm & Create
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
