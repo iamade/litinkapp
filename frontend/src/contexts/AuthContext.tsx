@@ -5,7 +5,7 @@ import {
   useEffect,
   ReactNode,
 } from "react";
-import { apiClient, API_BASE_URL, AUTH_EXPIRED_EVENT, setOnTokenRefresh } from "../lib/api";
+import { apiClient, API_BASE_URL, AUTH_EXPIRED_EVENT, setOnTokenRefresh, setSuppressAuthExpired } from "../lib/api";
 
 interface User {
   id: string;
@@ -114,10 +114,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [user]);
 
   const login = async (email: string, password: string) => {
-    await apiClient.post("/auth/login", { email, password });
-    // After login, cookies are set. Fetch user profile.
-    const profile = await apiClient.get<User>("/users/me");
-    setUser(profile);
+    // Suppress auth-expired events during login to prevent race condition:
+    // login 200 → /users/me 401 (cookie not stored yet) → AUTH_EXPIRED → logout clears cookies
+    setSuppressAuthExpired(true);
+    try {
+      await apiClient.post("/auth/login", { email, password });
+      // After login, cookies are set. Fetch user profile.
+      const profile = await apiClient.get<User>("/users/me");
+      setUser(profile);
+    } finally {
+      setSuppressAuthExpired(false);
+    }
   };
 
   const register = async (
