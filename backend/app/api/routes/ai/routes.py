@@ -5774,6 +5774,7 @@ async def consultation_chat(
             context=request.context,
             user_tier=user_tier,
             max_tokens=250,
+            consultation_message_count=messages_used,
         )
         result["messages_used"] = messages_used
         result["messages_remaining"] = messages_remaining

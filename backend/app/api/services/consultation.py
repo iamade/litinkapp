@@ -477,6 +477,7 @@ Respond with your analysis in the JSON format specified."""
         context: Dict[str, Any],
         user_tier: str = "free",
         max_tokens: int = 250,
+        consultation_message_count: int = 0,
     ) -> Dict[str, Any]:
         """
         Continue the consultation conversation with a follow-up message.
@@ -503,6 +504,17 @@ Respond with your analysis in the JSON format specified."""
 You are continuing a consultation conversation about a media production project.
 Maintain context from the previous messages and help guide the user to their next step.
 
+IMPORTANT - When to set ready_to_proceed to true:
+- Set ready_to_proceed to TRUE when the user has confirmed or indicated ANY of these:
+  1. What type of content they want (film, series, ad, etc.)
+  2. Agreement with your suggested approach
+  3. A clear creative direction (even if brief)
+  4. Phrases like "let's go", "sounds good", "yes", "proceed", "create it", "that works"
+- Do NOT keep asking questions if the user seems ready. 2-3 exchanges is usually enough.
+- When ready_to_proceed is true, you MUST also fill in project_config with your best inference.
+- When ready_to_proceed is true, set follow_up_questions to an empty array [].
+- Err on the side of proceeding. The user can always adjust later.
+
 Respond in JSON format:
 {{
     "ai_message": "Your conversational response",
@@ -517,6 +529,10 @@ Respond in JSON format:
     }}
 }}"""
 
+        nudge = ""
+        if consultation_message_count >= 3:
+            nudge = f"\n\nNote: This is message {consultation_message_count} of the consultation. If you have enough context, recommend proceeding and set ready_to_proceed to true. Don't keep the user in consultation longer than needed."
+
         user_message = f"""Previous context about uploaded files:
 {file_summary}
 
@@ -525,7 +541,7 @@ Conversation history:
 
 New user message: {message}
 
-Respond helpfully and guide them toward their creative goal."""
+Respond helpfully and guide them toward their creative goal.{nudge}"""
 
         tier_enum = ModelTier(user_tier.lower()) if user_tier else ModelTier.FREE
 
