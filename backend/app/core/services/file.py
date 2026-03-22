@@ -5324,9 +5324,45 @@ Chapters:
                                         f"[EPUB EXTRACTION] Extracted inner epub: {inner_epubs[0]}"
                                     )
                                 else:
-                                    print(
-                                        "[EPUB EXTRACTION] No epub found inside .epub.zip, falling through"
-                                    )
+                                    # Try nested directory structure
+                                    # (e.g. "Moby Dick.epub/mimetype" instead of "mimetype")
+                                    import pathlib as _pathlib
+
+                                    with tempfile.TemporaryDirectory() as _extract_dir:
+                                        zf.extractall(_extract_dir)
+                                        _container_files = list(
+                                            _pathlib.Path(_extract_dir).rglob(
+                                                "META-INF/container.xml"
+                                            )
+                                        )
+                                        if _container_files:
+                                            _epub_root = _container_files[0].parent.parent
+                                            extra_temp_path = temp_file_path + "_nested.epub"
+                                            _mimetype_path = _epub_root / "mimetype"
+                                            with _zipfile.ZipFile(
+                                                extra_temp_path, "w", _zipfile.ZIP_DEFLATED
+                                            ) as _new_zf:
+                                                if _mimetype_path.exists():
+                                                    _new_zf.write(
+                                                        _mimetype_path,
+                                                        "mimetype",
+                                                        compress_type=_zipfile.ZIP_STORED,
+                                                    )
+                                                for _f in _epub_root.rglob("*"):
+                                                    if _f.is_file() and _f.name != "mimetype":
+                                                        _new_zf.write(
+                                                            _f,
+                                                            _f.relative_to(_epub_root),
+                                                        )
+                                            epub_to_process = extra_temp_path
+                                            print(
+                                                f"[EPUB EXTRACTION] Found nested epub dir "
+                                                f"'{_epub_root.name}', re-zipped as flat epub"
+                                            )
+                                        else:
+                                            print(
+                                                "[EPUB EXTRACTION] No epub found inside .epub.zip, falling through"
+                                            )
                     else:
                         print(
                             "[EPUB EXTRACTION] .epub.zip is not a valid zip file, falling through"
