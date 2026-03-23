@@ -793,6 +793,7 @@ const ProjectView: React.FC = () => {
             videoUrl={generation?.video_url || latestVideoUrl || undefined}
             videoGenerations={filteredVideoGenerations}
             onDeleteGeneration={handleDeleteVideoGeneration}
+            onNavigateToTab={(tab) => setActiveTab(tab as WorkflowTab)}
           />
         );
 

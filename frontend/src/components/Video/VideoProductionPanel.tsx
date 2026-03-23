@@ -72,6 +72,7 @@ interface VideoProductionPanelProps {
   generatingShotIds?: Set<string>; // Shot IDs currently being generated
   generationProgress?: GenerationProgress; // Progress data from polling
   onDeleteGeneration?: (genId: string) => void; // Callback to delete a failed generation
+  onNavigateToTab?: (tab: string) => void; // Navigate to another tab (e.g. 'images')
 }
 
 const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
@@ -87,7 +88,8 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   selectedScript,
   generatingShotIds = new Set(),
   generationProgress,
-  onDeleteGeneration
+  onDeleteGeneration,
+  onNavigateToTab
 }) => {
   const {
     selectedScriptId,
@@ -303,7 +305,8 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     return Math.max(includedImagesCount, selectedImagesCount);
   }, [storyboardContext]);
 
-  const showSetupGate = !storyboardContext || storyboardSceneCount === 0;
+  // Show setup gate when storyboard has no scenes OR when filtered images for current script are empty
+  const showSetupGate = !storyboardContext || storyboardSceneCount === 0 || filteredImageUrls.length === 0;
   
   const handleScenePreviewChange = React.useCallback((index: number) => {
     setSelectedSceneIndex(index);
@@ -409,10 +412,22 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   }
 
   // Guarded empty state for no scenes with selected script
-  if (!enrichedScenes.length && selectedScriptId) {
+  if ((!enrichedScenes.length || showSetupGate) && selectedScriptId) {
     return (
-      <div className="p-4 text-sm text-gray-500">
-        No scenes available for the selected script. Generate images and audio first.
+      <div className="flex flex-col items-center justify-center p-12 text-center">
+        <Video className="w-12 h-12 text-gray-400 dark:text-gray-600 mb-4" />
+        <h3 className="text-lg font-medium text-gray-600 dark:text-gray-300 mb-2">No scenes available for this script</h3>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-md">
+          Generate scene images in the Images tab first, then come back here to produce videos.
+        </p>
+        {onNavigateToTab && (
+          <button
+            onClick={() => onNavigateToTab('images')}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            Go to Images Tab
+          </button>
+        )}
       </div>
     );
   }
