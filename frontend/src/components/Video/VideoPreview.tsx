@@ -423,13 +423,11 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
     return playableGenerations.filter((gen: any) => generationMatchesScene(gen, selectedScene));
   }, [playableGenerations, selectedScene, generationMatchesScene]);
   
-  // Also filter failed generations to strictly show failures RELEVANT to the scene if possible.
-  // Note: Failed generations often lack video_data, so we might miss some.
-  // But the user requested strict filtering.
+  // Do not filter failed generations by scene. Failed jobs often lack scene-level
+  // video_data, and users still need to see and delete them from any scene view.
   const filteredFailedGenerations = useMemo(() => {
-    if (!selectedScene) return failedGenerations;
-     return failedGenerations.filter((gen: any) => generationMatchesScene(gen, selectedScene));
-  }, [failedGenerations, selectedScene, generationMatchesScene]);
+    return failedGenerations;
+  }, [failedGenerations]);
 
   // Extract scene videos from selected generation
   const hasGenerations = filteredGenerations.length > 0;
