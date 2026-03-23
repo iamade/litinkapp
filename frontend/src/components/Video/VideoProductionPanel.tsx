@@ -361,9 +361,8 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
       setIsPlaying(false);
       setSelectedShotIds([]);
       hasInitializedRef.current = null; // allow init for new script
-      resetProductionState();
     }
-  }, [selectedScriptId, resetProductionState]);
+  }, [selectedScriptId]);
 
   // Auto-initialize scenes once storyboard images have fully stabilized.
   // Strategy: track image count across renders. Only fire when the count
