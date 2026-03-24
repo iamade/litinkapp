@@ -20,6 +20,11 @@ import AdminDashboard from "./pages/AdminDashboard";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import OnboardingPage from "./pages/OnboardingPage";
 import ActivationPage from "./pages/ActivationPage";
+import LegalHub from "./pages/LegalHub";
+import TermsOfService from "./pages/TermsOfService";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import WebsiteTerms from "./pages/WebsiteTerms";
+import Footer from "./components/Footer";
 import { setLoadingContextSetter } from "./lib/api";
 import { VideoGenerationProvider } from "./contexts/VideoGenerationContext";
 import { ScriptSelectionProvider } from "./contexts/ScriptSelectionContext";
@@ -139,7 +144,13 @@ function App() {
                       <Route path="/reset-password" element={<ResetPasswordPage />} />
                       <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
                       <Route path="/auth/activate/:token" element={<ActivationPage />} />
+                      {/* Legal pages - public, no auth required */}
+                      <Route path="/legal" element={<LegalHub />} />
+                      <Route path="/terms" element={<TermsOfService />} />
+                      <Route path="/privacy" element={<PrivacyPolicy />} />
+                      <Route path="/website-terms" element={<WebsiteTerms />} />
                     </Routes>
+                    <Footer />
                   </div>
                 </Router>
               </LoadingProvider>
