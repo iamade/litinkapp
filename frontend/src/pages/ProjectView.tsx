@@ -1288,8 +1288,8 @@ const ProjectView: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
         )}
+      </div>
       
       {/* Chapter View Modal */}
       <ChapterContentModal 
