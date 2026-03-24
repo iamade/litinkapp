@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { toast } from "react-hot-toast";
@@ -40,6 +40,7 @@ export default function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const { login, register, resendVerificationEmail } = useAuth();
   const navigate = useNavigate();
 
@@ -58,6 +59,11 @@ export default function AuthPage() {
       if (isLogin) {
         await login(email, password);
       } else {
+        if (!agreedToTerms) {
+          toast.error("You must agree to the Terms of Service and Privacy Policy.");
+          setLoading(false);
+          return;
+        }
         if (password !== confirmPassword) {
           toast.error("Passwords do not match.");
           setLoading(false);
@@ -232,6 +238,29 @@ export default function AuthPage() {
                         </div>
                     )}
 
+                    {/* Terms & Privacy Checkbox - Registration Only */}
+                    {!isLogin && (
+                        <div className="flex items-start gap-3 mt-2">
+                            <input
+                                type="checkbox"
+                                id="agree-terms"
+                                checked={agreedToTerms}
+                                onChange={(e) => setAgreedToTerms(e.target.checked)}
+                                className="mt-0.5 w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-purple-600 focus:ring-purple-500 bg-white dark:bg-[#0A0A1B] cursor-pointer"
+                            />
+                            <label htmlFor="agree-terms" className="text-xs text-gray-500 dark:text-gray-400 cursor-pointer leading-relaxed">
+                                I agree to the{" "}
+                                <Link to="/terms" target="_blank" className="text-purple-600 dark:text-purple-400 hover:underline">
+                                    Terms of Service
+                                </Link>{" "}
+                                and{" "}
+                                <Link to="/privacy" target="_blank" className="text-purple-600 dark:text-purple-400 hover:underline">
+                                    Privacy Policy
+                                </Link>
+                            </label>
+                        </div>
+                    )}
+
 
                     <button
                         type="submit"
@@ -276,6 +305,7 @@ export default function AuthPage() {
                                 setIsLogin(!isLogin);
                                 setPassword("");
                                 setConfirmPassword("");
+                                setAgreedToTerms(false);
                             }}
                             className="text-sm text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors"
                          >
