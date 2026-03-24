@@ -119,6 +119,18 @@ class Project(SQLModel, table=True):
     # Consultation tracking
     consultation_message_count: int = Field(default=0)
 
+    # Output type — what the user wants to produce
+    # Values: 'full_production', 'trailer', 'short_clip', 'ad'
+    output_type: Optional[str] = Field(
+        default="full_production",
+        sa_column=Column(pg.VARCHAR(30), server_default=text("'full_production'")),
+    )
+
+    # Trailer-specific configuration (only used when output_type='trailer')
+    trailer_config: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+
     # Relationships
     artifacts: List["Artifact"] = Relationship(
         back_populates="project",

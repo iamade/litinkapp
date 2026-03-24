@@ -554,6 +554,7 @@ class ProjectService:
         project_type: ProjectType = ProjectType.ENTERTAINMENT,
         input_prompt: Optional[str] = None,
         consultation_config: Optional[dict] = None,
+        output_type: Optional[str] = None,
     ) -> tuple:
         """Upload files to storage, create Book + Project shell, return (project, file_data, is_multi_script).
 
@@ -663,6 +664,7 @@ class ProjectService:
             upload_status="processing",
             upload_stage="parsing",
             upload_progress=5,
+            output_type=output_type or "full_production",
         )
         self.session.add(project)
         await self.session.commit()

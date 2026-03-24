@@ -27,7 +27,7 @@ class ProjectBase(BaseModel):
 
 
 class ProjectCreate(ProjectBase):
-    pass
+    output_type: Optional[str] = "full_production"
 
 
 class ProjectUpdate(BaseModel):
@@ -55,6 +55,8 @@ class ProjectRead(ProjectBase):
     upload_total_chapters: Optional[int] = None
     upload_chapters_processed: Optional[int] = None
     consultation_message_count: int = 0
+    output_type: Optional[str] = "full_production"
+    trailer_config: Dict[str, Any] = {}
 
     class Config:
         from_attributes = True

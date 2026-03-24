@@ -74,6 +74,7 @@ async def create_project_upload(
     universe_name: Optional[str] = Form(None),
     content_type: Optional[str] = Form(None),
     consultation_data: Optional[str] = Form(None),  # JSON string
+    output_type: Optional[str] = Form(None),
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
@@ -91,6 +92,16 @@ async def create_project_upload(
             parsed_consultation_data = json.loads(consultation_data)
         except json.JSONDecodeError:
             pass
+
+    # Detect trailer intent from consultation result if output_type not explicitly set
+    _TRAILER_ACTIONS = {"trailer_promo", "trailer", "promo"}
+    if output_type is None and parsed_consultation_data:
+        recommended = parsed_consultation_data.get("recommended_action", "") or ""
+        action = parsed_consultation_data.get("action_to_take", "") or ""
+        if recommended in _TRAILER_ACTIONS or action in _TRAILER_ACTIONS:
+            output_type = "trailer"
+    if output_type is None:
+        output_type = "full_production"
 
     consultation_config = (
         {
@@ -112,6 +123,7 @@ async def create_project_upload(
         project_type,
         input_prompt,
         consultation_config,
+        output_type=output_type,
     )
 
     background_tasks.add_task(
