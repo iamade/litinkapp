@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Star } from "lucide-react";
+import { Check, Star, Zap } from "lucide-react";
 import { SubscriptionTier } from "../../services/subscriptionService";
 
 interface TierFeatures {
@@ -14,73 +14,173 @@ interface TierFeatures {
   chapters_per_book?: number | string;
   model_selection?: boolean;
   voice_cloning?: boolean;
-  images_per_month?: number | string;  // Character and scene image generation limit
-  audio_per_month?: number | string;   // Audio/voiceover generation limit
-  scripts_per_month?: number | string; // Script generation limit
-  plots_per_month?: number | string;   // Plot overview generation limit
-  ai_assists_per_month?: number | string; // AI assist/chat limit
+  images_per_month?: number | string;
+  audio_per_month?: number | string;
+  scripts_per_month?: number | string;
+  plots_per_month?: number | string;
+  ai_assists_per_month?: number | string;
+  videos_per_month?: number | string;
+  max_resolution?: string;
+  watermark?: boolean;
+  priority?: number;
+  support?: string;
+  price_monthly?: number;
 }
 
 interface SubscriptionTierCardProps {
   tier: SubscriptionTier;
   currentTier?: string;
-  onSelect: (tier: SubscriptionTier, billingPeriod: 'monthly' | 'annual') => void;
+  onSelect: (tier: SubscriptionTier, billingPeriod: "monthly" | "annual") => void;
   isLoading?: boolean;
+  compact?: boolean;
 }
+
+// Credit estimates per tier (matches backend TIER_LIMITS)
+const TIER_CREDITS: Record<string, { label: string; amount: string }> = {
+  free: { label: "Credits included", amount: "100" },
+  basic: { label: "Credits/month", amount: "1,500" },
+  pro: { label: "Credits/month", amount: "5,000" },
+  premium: { label: "Credits/month", amount: "15,000" },
+  professional: { label: "Credits/month", amount: "50,000" },
+  enterprise: { label: "Credits", amount: "Unlimited" },
+};
 
 export default function SubscriptionTierCard({
   tier,
   currentTier,
   onSelect,
   isLoading = false,
+  compact = false,
 }: SubscriptionTierCardProps) {
-  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annual'>('monthly');
+  const [billingPeriod, setBillingPeriod] = useState<"monthly" | "annual">("monthly");
   const isCurrentTier = currentTier === tier.tier;
-  const isPopular = tier.tier === "pro"; // Mark pro as popular
+  const isPopular = tier.tier === "pro";
+  const isEnterprise = tier.tier === "enterprise";
 
-  const annualPrice = Math.round(tier.monthly_price * 12 * 0.8); // 20% discount for annual
-  const displayPrice = billingPeriod === 'monthly' ? tier.monthly_price : annualPrice;
-  const periodLabel = billingPeriod === 'monthly' ? '/month' : '/year';
+  const annualPrice = Math.round(tier.monthly_price * 12 * 0.8);
+  const displayPrice = billingPeriod === "monthly" ? tier.monthly_price : annualPrice;
+  const periodLabel = billingPeriod === "monthly" ? "/mo" : "/yr";
+
+  const credits = TIER_CREDITS[tier.tier] || { label: "Credits", amount: "—" };
 
   const getTierColor = (tierName: string) => {
     switch (tierName) {
       case "free":
-        return "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50";
+        return "border-gray-200 dark:border-gray-700";
       case "basic":
-        return "border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-900/20";
+        return "border-blue-200 dark:border-blue-800";
       case "pro":
-        return "border-purple-200 dark:border-purple-900/50 bg-purple-50 dark:bg-purple-900/20";
-      case "team":
-        return "border-pink-200 dark:border-pink-900/50 bg-pink-50 dark:bg-pink-900/20";
+        return "border-purple-400 dark:border-purple-600 ring-1 ring-purple-200 dark:ring-purple-800";
+      case "premium":
+        return "border-amber-200 dark:border-amber-800";
+      case "professional":
+        return "border-rose-200 dark:border-rose-800";
+      case "enterprise":
+        return "border-indigo-200 dark:border-indigo-800";
       default:
-        return "border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50";
+        return "border-gray-200 dark:border-gray-700";
     }
   };
 
-  const getButtonColor = (tierName: string) => {
+  const getButtonStyle = (tierName: string) => {
+    if (tierName === "pro") {
+      return "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-lg shadow-purple-500/25";
+    }
+    if (tierName === "enterprise") {
+      return "bg-indigo-600 hover:bg-indigo-700 text-white";
+    }
+    return "bg-gray-900 dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-100 text-white dark:text-gray-900";
+  };
+
+  const getAccentColor = (tierName: string) => {
     switch (tierName) {
-      case "free":
-        return "bg-gray-600 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600";
-      case "basic":
-        return "bg-blue-600 hover:bg-blue-700";
-      case "pro":
-        return "bg-purple-600 hover:bg-purple-700";
-      case "team":
-        return "bg-pink-600 hover:bg-pink-700";
-      default:
-        return "bg-gray-600 hover:bg-gray-700";
+      case "free": return "text-gray-600 dark:text-gray-400";
+      case "basic": return "text-blue-600 dark:text-blue-400";
+      case "pro": return "text-purple-600 dark:text-purple-400";
+      case "premium": return "text-amber-600 dark:text-amber-400";
+      case "professional": return "text-rose-600 dark:text-rose-400";
+      case "enterprise": return "text-indigo-600 dark:text-indigo-400";
+      default: return "text-gray-600 dark:text-gray-400";
     }
   };
+
+  const features = tier.features as TierFeatures;
+
+  // Build feature list
+  const featureList: string[] = [];
+
+  // Credits (most important)
+  featureList.push(`${credits.amount} credits${tier.tier === "free" ? "" : "/month"}`);
+
+  // Generation limits
+  if (features?.videos_per_month) {
+    featureList.push(
+      features.videos_per_month === "unlimited"
+        ? "Unlimited video generations"
+        : `${features.videos_per_month} video generations/mo`
+    );
+  }
+  if (features?.images_per_month) {
+    featureList.push(
+      features.images_per_month === "unlimited"
+        ? "Unlimited image generations"
+        : `${features.images_per_month} image generations/mo`
+    );
+  }
+  if (features?.audio_per_month) {
+    featureList.push(
+      features.audio_per_month === "unlimited"
+        ? "Unlimited audio generations"
+        : `${features.audio_per_month} audio generations/mo`
+    );
+  }
+
+  // Resolution
+  if (features?.max_resolution) {
+    featureList.push(`${features.max_resolution} resolution`);
+  }
+
+  // Watermark
+  if (features?.watermark === false) {
+    featureList.push("No watermark");
+  }
+
+  // Books
+  if (features?.books_upload_limit) {
+    featureList.push(
+      features.books_upload_limit === "unlimited"
+        ? "Unlimited book uploads"
+        : `${features.books_upload_limit} book uploads`
+    );
+  }
+
+  // AI features
+  if (features?.model_selection) featureList.push("AI model selection");
+  if (features?.voice_cloning) featureList.push("Voice cloning");
+  if (features?.api_access) featureList.push("API access");
+
+  // Priority
+  if (features?.priority && features.priority >= 2) {
+    featureList.push("Priority processing");
+  }
+
+  // Support
+  if (features?.support === "dedicated_rep" || features?.support === "24/7_dedicated") {
+    featureList.push("Dedicated support");
+  } else if (features?.support === "priority_email") {
+    featureList.push("Priority email support");
+  }
 
   return (
     <div
-      className={`relative rounded-2xl border-2 p-6 transition-all hover:shadow-lg dark:hover:shadow-purple-900/20 ${
-        getTierColor(tier.tier)
-      } ${isCurrentTier ? "ring-2 ring-purple-500" : ""}`}
+      className={`relative rounded-2xl border-2 bg-white dark:bg-gray-800/50 p-6 transition-all hover:shadow-xl dark:hover:shadow-purple-900/10 flex flex-col ${getTierColor(
+        tier.tier
+      )} ${isCurrentTier ? "ring-2 ring-green-500" : ""}`}
     >
-      {isPopular && (
+      {/* Badges */}
+      {isPopular && !isCurrentTier && (
         <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-          <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-1 rounded-full text-sm font-medium flex items-center gap-1 shadow-lg">
+          <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-4 py-1 rounded-full text-xs font-bold flex items-center gap-1 shadow-lg uppercase tracking-wide">
             <Star className="h-3 w-3" />
             Most Popular
           </div>
@@ -89,255 +189,132 @@ export default function SubscriptionTierCard({
 
       {isCurrentTier && (
         <div className="absolute -top-3 right-4">
-          <div className="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-medium shadow-lg">
+          <div className="bg-green-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg uppercase tracking-wide">
             Current Plan
           </div>
         </div>
       )}
 
-      <div className="text-center mb-6">
-        <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2 capitalize">
+      {/* Header */}
+      <div className="mb-6">
+        <h3 className="text-lg font-bold text-gray-900 dark:text-white capitalize">
           {tier.display_name}
         </h3>
-
-        {/* Billing Period Toggle */}
-        {tier.tier !== "free" && (
-          <div className="flex items-center justify-center bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mb-4 max-w-fit mx-auto">
-            <button
-              onClick={() => setBillingPeriod('monthly')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                billingPeriod === 'monthly'
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              Monthly
-            </button>
-            <button
-              onClick={() => setBillingPeriod('annual')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                billingPeriod === 'annual'
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              Annual
-              <span className="ml-1 text-xs bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-1 py-0.5 rounded">
-                -20%
-              </span>
-            </button>
-          </div>
-        )}
-
-        <div className="flex items-center justify-center gap-1 mb-4">
-          <span className="text-4xl font-bold text-gray-900 dark:text-white">
-            ${displayPrice}
-          </span>
-          <span className="text-gray-600 dark:text-gray-400">{periodLabel}</span>
-        </div>
         {tier.description && (
-          <p className="text-gray-600 dark:text-gray-400 text-sm">{tier.description}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            {tier.description}
+          </p>
         )}
       </div>
 
-      <div className="space-y-4 mb-6">
-        {/* Video Generation Limits */}
-        <div className="space-y-2">
-          <h4 className="text-xs font-semibold text-gray-900 dark:text-gray-200 uppercase tracking-wide opacity-70">Video Generation</h4>
-          <div className="flex items-center gap-3">
-            <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-            <span className="text-sm text-gray-700 dark:text-gray-300">
-              {tier.monthly_video_limit === -1
-                ? "Unlimited video generations per month"
-                : `${tier.monthly_video_limit} video${tier.monthly_video_limit !== 1 ? 's' : ''} per month`}
+      {/* Price */}
+      <div className="mb-6">
+        {isEnterprise ? (
+          <div>
+            <span className="text-3xl font-bold text-gray-900 dark:text-white">
+              Custom
             </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-            <span className="text-sm text-gray-700 dark:text-gray-300">
-              {tier.video_quality} video resolution
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-            <span className="text-sm text-gray-700 dark:text-gray-300">
-              {tier.has_watermark ? "Videos include watermark" : "No watermark"}
-            </span>
-          </div>
-
-          {tier.max_video_duration && (
-            <div className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-               Max {Math.round(tier.max_video_duration / 60)} mins per video
-              </span>
-            </div>
-          )}
-
-          {tier.priority_processing && (
-            <div className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                🚀 Priority processing
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Image Generation Limits */}
-        {tier.features && (tier.features as TierFeatures).images_per_month && (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold text-gray-900 dark:text-gray-200 uppercase tracking-wide opacity-70">Image Generation</h4>
-            <div className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                {(tier.features as TierFeatures).images_per_month === 'unlimited'
-                  ? 'Unlimited images per month'
-                  : `${(tier.features as TierFeatures).images_per_month} images per month`}
-              </span>
-            </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 ml-8">
-              Includes character & scene images
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Tailored to your needs
             </p>
           </div>
-        )}
+        ) : (
+          <>
+            {/* Billing Toggle */}
+            {tier.tier !== "free" && (
+              <div className="flex items-center bg-gray-100 dark:bg-gray-700/50 rounded-lg p-0.5 mb-3 w-fit">
+                <button
+                  onClick={() => setBillingPeriod("monthly")}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    billingPeriod === "monthly"
+                      ? "bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm"
+                      : "text-gray-500 dark:text-gray-400"
+                  }`}
+                >
+                  Monthly
+                </button>
+                <button
+                  onClick={() => setBillingPeriod("annual")}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    billingPeriod === "annual"
+                      ? "bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm"
+                      : "text-gray-500 dark:text-gray-400"
+                  }`}
+                >
+                  Annual
+                  <span className="ml-1 text-[10px] text-green-600 dark:text-green-400 font-bold">
+                    -20%
+                  </span>
+                </button>
+              </div>
+            )}
 
-        {/* Audio Generation Limits */}
-        {tier.features && (tier.features as TierFeatures).audio_per_month && (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold text-gray-900 dark:text-gray-200 uppercase tracking-wide opacity-70">Audio Generation</h4>
-            <div className="flex items-center gap-3">
-              <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-              <span className="text-sm text-gray-700 dark:text-gray-300">
-                {(tier.features as TierFeatures).audio_per_month === 'unlimited'
-                  ? 'Unlimited audio generations per month'
-                  : `${(tier.features as TierFeatures).audio_per_month} audio generations per month`}
+            <div className="flex items-baseline gap-1">
+              <span className="text-4xl font-bold text-gray-900 dark:text-white">
+                ${displayPrice}
+              </span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                {tier.tier === "free" ? "" : periodLabel}
               </span>
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 ml-8">
-              Includes voiceovers & narration
-            </p>
-          </div>
+          </>
         )}
+      </div>
 
-        {/* AI Text Generation Limits */}
-        {tier.features && ((tier.features as TierFeatures).scripts_per_month || (tier.features as TierFeatures).plots_per_month || (tier.features as TierFeatures).ai_assists_per_month) && (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold text-gray-900 dark:text-gray-200 uppercase tracking-wide opacity-70">AI Text Generation</h4>
-            {(tier.features as TierFeatures).scripts_per_month && (
-              <div className="flex items-center gap-3">
-                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  {(tier.features as TierFeatures).scripts_per_month === 'unlimited'
-                    ? 'Unlimited script generations'
-                    : `${(tier.features as TierFeatures).scripts_per_month} script generations/month`}
-                </span>
-              </div>
-            )}
-            {(tier.features as TierFeatures).plots_per_month && (
-              <div className="flex items-center gap-3">
-                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  {(tier.features as TierFeatures).plots_per_month === 'unlimited'
-                    ? 'Unlimited plot generations'
-                    : `${(tier.features as TierFeatures).plots_per_month} plot generations/month`}
-                </span>
-              </div>
-            )}
-            {(tier.features as TierFeatures).ai_assists_per_month && (
-              <div className="flex items-center gap-3">
-                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  {(tier.features as TierFeatures).ai_assists_per_month === 'unlimited'
-                    ? 'Unlimited AI assist requests'
-                    : `${(tier.features as TierFeatures).ai_assists_per_month} AI assist requests/month`}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Book & Content Limits */}
-        {tier.features && (
-          <div className="space-y-2">
-             <h4 className="text-xs font-semibold text-gray-900 dark:text-gray-200 uppercase tracking-wide opacity-70">Content Limits</h4>
-            {(tier.features as TierFeatures).books_upload_limit && (
-              <div className="flex items-center gap-3">
-                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Upload up to {(tier.features as TierFeatures).books_upload_limit} books
-                </span>
-              </div>
-            )}
-            {(tier.features as TierFeatures).chapters_per_book && (
-              <div className="flex items-center gap-3">
-                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  {(tier.features as TierFeatures).chapters_per_book === 'unlimited' 
-                    ? 'All chapters included' 
-                    : `${(tier.features as TierFeatures).chapters_per_book} chapters/book`}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* AI Features */}
-        {tier.features && ((tier.features as TierFeatures).model_selection || (tier.features as TierFeatures).voice_cloning) && (
-          <div className="space-y-2">
-             <h4 className="text-xs font-semibold text-gray-900 dark:text-gray-200 uppercase tracking-wide opacity-70">AI Features</h4>
-            {(tier.features as TierFeatures).model_selection && (
-              <div className="flex items-center gap-3">
-                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Select AI Model
-                </span>
-              </div>
-            )}
-            {(tier.features as TierFeatures).voice_cloning && (
-              <div className="flex items-center gap-3">
-                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Voice cloning included
-                </span>
-              </div>
-            )}
-            {(tier.features as TierFeatures).custom_voices && (
-               <div className="flex items-center gap-3">
-                <Check className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                <span className="text-sm text-gray-700 dark:text-gray-300">
-                  Premium voice library
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="pt-4 mt-auto">
-             <button
-              onClick={() => onSelect(tier, billingPeriod)}
-              disabled={isCurrentTier || isLoading}
-              className={`w-full py-3 px-6 rounded-xl font-semibold text-white transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none shadow-md ${
-                getButtonColor(tier.tier)
-              }`}
-            >
-              {isLoading ? (
-                <div className="flex items-center justify-center gap-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  Processing...
-                </div>
-              ) : isCurrentTier ? (
-                "Current Plan"
-              ) : tier.tier === "free" ? (
-                "Get Started"
-              ) : (
-                "Upgrade Now"
-              )}
-            </button>
+      {/* Credits Highlight */}
+      <div className={`flex items-center gap-2 mb-6 px-3 py-2.5 rounded-lg bg-gray-50 dark:bg-gray-700/30 border border-gray-100 dark:border-gray-700`}>
+        <Zap className={`h-4 w-4 flex-shrink-0 ${getAccentColor(tier.tier)}`} />
+        <div>
+          <span className={`text-lg font-bold ${getAccentColor(tier.tier)}`}>
+            {credits.amount}
+          </span>
+          <span className="text-xs text-gray-500 dark:text-gray-400 ml-1.5">
+            {credits.label}
+          </span>
         </div>
       </div>
+
+      {/* Features */}
+      <div className="space-y-2.5 mb-6 flex-1">
+        {featureList.slice(1).map((feature, index) => (
+          <div key={index} className="flex items-start gap-2.5">
+            <Check className="h-4 w-4 text-green-500 dark:text-green-400 flex-shrink-0 mt-0.5" />
+            <span className="text-sm text-gray-600 dark:text-gray-300">
+              {feature}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* CTA Button */}
+      <button
+        onClick={() => {
+          if (isEnterprise) {
+            window.location.href = "mailto:sales@litink.ai?subject=Enterprise%20Plan%20Inquiry";
+            return;
+          }
+          onSelect(tier, billingPeriod);
+        }}
+        disabled={isCurrentTier || (isLoading && !isEnterprise)}
+        className={`w-full py-3 px-6 rounded-xl font-semibold transition-all transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none ${getButtonStyle(
+          tier.tier
+        )}`}
+      >
+        {isLoading && !isEnterprise ? (
+          <div className="flex items-center justify-center gap-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+            Processing...
+          </div>
+        ) : isCurrentTier ? (
+          "Current Plan"
+        ) : isEnterprise ? (
+          "Contact Sales"
+        ) : tier.tier === "free" ? (
+          "Get Started Free"
+        ) : (
+          "Upgrade"
+        )}
+      </button>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-hot-toast";
-import { Loader2, CheckCircle, XCircle, Settings, CreditCard } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, Settings, CreditCard, Check } from "lucide-react";
 import SubscriptionTierCard from "../components/Subscription/SubscriptionTierCard";
 import UsageIndicator from "../components/Subscription/UsageIndicator";
 import PromoCodeInput from "../components/Subscription/PromoCodeInput";
@@ -152,12 +152,12 @@ export default function SubscriptionPage() {
     <div className="min-h-screen py-8 bg-gray-50 dark:bg-[#0F0F23] transition-colors duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
-            Subscription Plans
+        <div className="text-center mb-10">
+          <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-3">
+            Plans &amp; Pricing
           </h1>
-          <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-            Choose the perfect plan for your creative needs. Upgrade or downgrade at any time.
+          <p className="text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+            Start free. Scale as you grow. Every plan includes AI-powered video generation, image creation, and voiceover synthesis.
           </p>
         </div>
 
@@ -241,18 +241,60 @@ export default function SubscriptionPage() {
           </div>
         )}
 
-        {/* Subscription Tiers */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {tiers.map((tier) => (
-            <SubscriptionTierCard
-              key={tier.tier}
-              tier={tier}
-              currentTier={currentSubscription?.tier}
-              onSelect={handleUpgrade}
-              isLoading={upgrading === tier.tier}
-            />
-          ))}
+        {/* Main Subscription Tiers (excluding Enterprise) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {tiers
+            .filter((t) => t.tier !== "enterprise")
+            .map((tier) => (
+              <SubscriptionTierCard
+                key={tier.tier}
+                tier={tier}
+                currentTier={currentSubscription?.tier}
+                onSelect={handleUpgrade}
+                isLoading={upgrading === tier.tier}
+              />
+            ))}
         </div>
+
+        {/* Enterprise Tier — Separate Section */}
+        {tiers.find((t) => t.tier === "enterprise") && (
+          <div className="mt-8 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/30 dark:to-purple-950/30 rounded-2xl border border-indigo-200 dark:border-indigo-800 p-8">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                  Enterprise
+                </h3>
+                <p className="text-gray-600 dark:text-gray-400 max-w-lg">
+                  Need unlimited generations, dedicated support, custom SLAs, or team collaboration? 
+                  We'll build a plan tailored to your organization.
+                </p>
+                <div className="flex flex-wrap gap-4 mt-4 text-sm text-gray-700 dark:text-gray-300">
+                  <span className="flex items-center gap-1.5">
+                    <Check className="h-4 w-4 text-green-500" /> Unlimited credits
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Check className="h-4 w-4 text-green-500" /> 8K resolution
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Check className="h-4 w-4 text-green-500" /> API access
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Check className="h-4 w-4 text-green-500" /> 24/7 dedicated support
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Check className="h-4 w-4 text-green-500" /> Custom SLA
+                  </span>
+                </div>
+              </div>
+              <a
+                href="mailto:sales@litink.ai?subject=Enterprise%20Plan%20Inquiry"
+                className="flex-shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-xl font-semibold transition-all transform hover:scale-[1.02] shadow-lg"
+              >
+                Contact Sales
+              </a>
+            </div>
+          </div>
+        )}
 
         <div className="mt-8 max-w-2xl mx-auto">
           <PromoCodeInput
@@ -285,10 +327,18 @@ export default function SubscriptionPage() {
             </div>
             <div>
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-                Is there a free trial?
+                How do credits work?
               </h3>
               <p className="text-gray-600 dark:text-gray-400">
-                Our free tier allows you to upload 2 books and generate 2 videos per month. This gives you a great way to try our platform before upgrading.
+                Credits are consumed when you use AI features — image generation, video generation, voiceover synthesis, and script analysis. Each feature has a credit cost shown before generation. Your credits refresh monthly with your subscription.
+              </p>
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                Is there a free plan?
+              </h3>
+              <p className="text-gray-600 dark:text-gray-400">
+                Yes! Our Free plan includes 100 credits so you can try AI video generation, image creation, and voiceover before upgrading. No credit card required.
               </p>
             </div>
             <div>
@@ -296,7 +346,7 @@ export default function SubscriptionPage() {
                 How does billing work?
               </h3>
               <p className="text-gray-600 dark:text-gray-400">
-                All plans are billed monthly. You can cancel anytime, and you'll retain access until the end of your billing period. Refunds are processed according to our refund policy.
+                Plans are billed monthly or annually (save 20% with annual). You can cancel anytime and retain access until the end of your billing period.
               </p>
             </div>
           </div>
