@@ -218,6 +218,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     return scenes.map(scene => {
       let foundVideoUrl: string | undefined = undefined;
       let foundStatus = scene.status;
+      const sameNumberScenesCount = scenes.filter(s => s.sceneNumber === scene.sceneNumber).length;
 
       for (const gen of videoGenerations) {
         const clips = gen.video_data?.scene_videos || [];
@@ -249,7 +250,13 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             const svFilename = sv.source_image.split('/').pop()?.split('?')[0];
             if (selectedFilename && svFilename && selectedFilename === svFilename) return true;
           }
-          if (sameSceneNumber && typeof scene.shotIndex !== 'number') return true;
+
+          const sceneHasShotIndex = typeof scene.shotIndex === 'number';
+          const svHasShotIndex = typeof sv.shot_index === 'number';
+          if (sameSceneNumber && !sceneHasShotIndex && !svHasShotIndex && sameNumberScenesCount === 1) {
+            return true;
+          }
+
           // IMPORTANT: Do NOT match sv.scene_sequence to scene.sceneNumber, 
           // as scene_sequence is the batch sequence index, not the absolute script scene number!
           return false;

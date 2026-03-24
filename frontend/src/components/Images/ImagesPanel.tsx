@@ -167,7 +167,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     setKeySceneImage,
     toggleDeselectedImage,
     setImageOrder,
-    loadStoryboardConfig,
     getStoryboardConfig,
     markStoryboardClean,
   } = useScriptSelection();
@@ -499,20 +498,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterId, versionToken]);
 
-  // NEW: Load storyboard configuration when script changes
-  useEffect(() => {
-    if (chapterId && selectedScriptId) {
-      projectService.getStoryboardConfig(chapterId, selectedScriptId)
-        .then((config) => {
-          loadStoryboardConfig(config);
-        })
-        .catch((error) => {
-          console.log('No storyboard config found or error loading:', error);
-          // This is expected for new scripts, just use empty config
-        });
-    }
-  }, [chapterId, selectedScriptId, loadStoryboardConfig]);
-
   // Auto-save storyboard config with debounce when dirty
   useEffect(() => {
     if (!storyboardDirty || !chapterId || !selectedScriptId) return;
@@ -576,10 +561,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     if (prevImagesSyncRef.current === newSyncKey) return;
     prevImagesSyncRef.current = newSyncKey;
     
-    // Reset storyboard before applying — clears stale scenes from previous scripts
-    // (e.g. switching from 5-scene script to 3-scene script left scenes 4-5 in the map)
-    storyboardContext.resetStoryboard();
-
     // Now apply the updates
     Object.entries(syncData).forEach(([sceneNum, images]) => {
       storyboardContext.setSceneImages(parseInt(sceneNum), images);

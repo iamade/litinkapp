@@ -423,7 +423,7 @@ const ProjectView: React.FC = () => {
       .sort((a: any, b: any) => a.sceneNumber - b.sceneNumber)
       .map((img: any) => img.imageUrl);
     setGeneratedImageUrls(imageUrls);
-  }, [sceneImages]);
+  }, [sceneImages, selectedScriptId]);
 
   useEffect(() => {
     const audioUrls: string[] = [];
