@@ -65,6 +65,9 @@ export default function ProjectFolder({ project, onDelete, onClick }: ProjectFol
           </span>
           <span className="mx-2">•</span>
           <span className="uppercase tracking-wide text-[10px]">{project.project_type || 'Unknown'}</span>
+          {project.output_type === 'trailer' && (
+            <><span className="mx-2">•</span><span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300">🎬 Trailer</span></>
+          )}
         </div>
       </div>
     </div>

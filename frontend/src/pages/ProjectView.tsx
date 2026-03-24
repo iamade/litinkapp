@@ -1165,6 +1165,24 @@ const ProjectView: React.FC = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Trailer Workshop Placeholder */}
+        {project.output_type === 'trailer' ? (
+          <div className="flex flex-col items-center justify-center p-16 text-center bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700">
+            <span className="text-6xl mb-6">🎬</span>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">Trailer Workshop</h2>
+            <p className="text-gray-500 dark:text-gray-400 mb-6 max-w-md">
+              Your trailer project has been created! The Trailer Workshop is being built and will be available soon. 
+              You'll be able to select highlight scenes, customize narration, and generate your trailer here.
+            </p>
+            <div className="flex gap-4 text-sm text-gray-400 dark:text-gray-500">
+              <span>Duration: {project.trailer_config?.target_duration_seconds || 90}s</span>
+              <span>•</span>
+              <span>Tone: {project.trailer_config?.tone || 'epic'}</span>
+              <span>•</span>
+              <span>Style: {project.trailer_config?.style || 'cinematic'}</span>
+            </div>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
           {/* Main Content: Chapters */}
@@ -1271,6 +1289,7 @@ const ProjectView: React.FC = () => {
           </div>
         </div>
       </div>
+        )}
       
       {/* Chapter View Modal */}
       <ChapterContentModal 

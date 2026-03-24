@@ -16,6 +16,16 @@ export interface Project {
   content_terminology?: string;  // Film, Episode, Part, Chapter, or custom
   pipeline_steps?: string[];
   current_step?: string;
+  output_type?: 'full_production' | 'trailer' | 'short_clip' | 'ad';
+  trailer_config?: {
+    target_duration_seconds?: number;
+    tone?: string;
+    style?: string;
+    highlight_scene_ids?: string[];
+    title_cards?: { series_name?: string; tagline?: string; cta_text?: string };
+    music_mood?: string;
+    aspect_ratio?: string;
+  };
 }
 
 export interface IntentAnalysisResult {
