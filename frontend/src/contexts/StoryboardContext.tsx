@@ -1,7 +1,10 @@
 // src/contexts/StoryboardContext.tsx
 // Shared state for storyboard selections across Audio and Video tabs
 
-import React, { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef, ReactNode } from 'react';
+import { useScriptSelection } from './ScriptSelectionContext';
+import { userService } from '../services/userService';
+import { projectService } from '../services/projectService';
 
 // Types for scene-audio linking
 interface SceneImage {
@@ -83,14 +86,112 @@ interface StoryboardContextValue extends StoryboardState {
 const StoryboardContext = createContext<StoryboardContextValue | null>(null);
 
 export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const { selectedScriptId, stableSelectedChapterId } = useScriptSelection();
+
   const [selectedSceneImages, setSelectedSceneImagesState] = useState<Record<number, string>>({});
   const [excludedImageIds, setExcludedImageIds] = useState<Set<string>>(new Set());
   const [sceneAudioMap, setSceneAudioMap] = useState<Record<number, AudioFile[]>>({});
   const [sceneImagesMap, setSceneImagesMap] = useState<Record<number, SceneImage[]>>({});
   const [imageOrderByScene, setImageOrderBySceneState] = useState<Record<number, string[]>>({});
-  
+
   const [audioAssignments, setAudioAssignments] = useState<Record<string, { sceneNumber: number; shotIndex: number }>>({});
   const [selectedAudioIds, setSelectedAudioIds] = useState<Set<string>>(new Set());
+
+  // Auto-fetch storyboard data when script changes
+  const prevScriptRef = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!selectedScriptId || !stableSelectedChapterId) return;
+    if (prevScriptRef.current === selectedScriptId) return;
+
+    prevScriptRef.current = selectedScriptId;
+
+    // Clear stale data immediately
+    setSceneImagesMap({});
+    setSelectedSceneImagesState({});
+    setExcludedImageIds(new Set());
+    setSceneAudioMap({});
+    setImageOrderBySceneState({});
+    setAudioAssignments({});
+    setSelectedAudioIds(new Set());
+
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        // 1. Fetch all images for the chapter
+        const chapterImagesRes = await userService.getChapterImages(stableSelectedChapterId);
+        if (controller.signal.aborted) return;
+
+        const allImages = chapterImagesRes.images || [];
+
+        // 2. Fetch storyboard config for this script
+        let storyboardConfig: { key_scene_images?: Record<string, string>; deselected_images?: string[]; image_order?: Record<string, string[]> } = {};
+        try {
+          storyboardConfig = await projectService.getStoryboardConfig(stableSelectedChapterId, selectedScriptId);
+        } catch {
+          // config may not exist yet — use defaults
+        }
+        if (controller.signal.aborted) return;
+
+        // 3. Filter images for this script
+        const scriptImages = allImages.filter((img: any) => {
+          const normalizedScriptId = img.script_id ?? img.scriptId;
+          return normalizedScriptId === selectedScriptId && img.image_type === 'scene';
+        });
+
+        const keySceneImages: Record<string, string> = storyboardConfig?.key_scene_images || {};
+        const deselectedImages: string[] = storyboardConfig?.deselected_images || [];
+        const imageOrder: Record<string, string[]> = storyboardConfig?.image_order || {};
+
+        // Group by scene number
+        const grouped: Record<number, SceneImage[]> = {};
+        scriptImages.forEach((img: any) => {
+          const sceneNum = img.scene_number ?? img.metadata?.scene_number ?? 1;
+          const sn = Number(sceneNum);
+          if (!grouped[sn]) grouped[sn] = [];
+          const isKey = keySceneImages[String(sn)] === img.id;
+          grouped[sn].push({
+            id: img.id,
+            url: img.image_url || '',
+            sceneNumber: sn,
+            shotType: isKey ? 'key_scene' : 'suggested_shot',
+            shotIndex: img.shot_index ?? img.metadata?.shot_index ?? grouped[sn].length,
+          });
+        });
+
+        // Apply grouped images to context
+        Object.entries(grouped).forEach(([sceneNum, images]) => {
+          setSceneImagesMap(prev => ({ ...prev, [parseInt(sceneNum)]: images }));
+        });
+
+        // Set excluded images
+        setExcludedImageIds(new Set(deselectedImages));
+
+        // Set selected scene images (key scenes)
+        const selected: Record<number, string> = {};
+        Object.entries(keySceneImages).forEach(([sceneNum, imageId]) => {
+          const img = scriptImages.find((i: any) => i.id === imageId);
+          if (img) selected[parseInt(sceneNum)] = img.image_url || '';
+        });
+        setSelectedSceneImagesState(selected);
+
+        // Set image order
+        const orderMap: Record<number, string[]> = {};
+        Object.entries(imageOrder).forEach(([sceneNum, ids]) => {
+          orderMap[parseInt(sceneNum)] = ids;
+        });
+        setImageOrderBySceneState(orderMap);
+
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error('[StoryboardContext] Failed to fetch storyboard data:', err);
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }, [selectedScriptId, stableSelectedChapterId]);
 
   // Actions
   const setSelectedSceneImage = useCallback((sceneNumber: number, imageUrl: string | null) => {
