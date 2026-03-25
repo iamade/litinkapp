@@ -33,54 +33,54 @@ class ModelConfig:
 # All models accessed via OpenRouter for reliable connectivity and fallback handling
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="deepseek/deepseek-chat",  # DeepSeek-v3.2-thinking
-        fallback="qwen/qwen-2.5-72b-instruct",  # Qwen (Efficient)
-        fallback2="openai/chatgpt-4o-latest",  # ChatGPT-4o-latest
+        primary="nvidia/nemotron-3-super-120b-a12b:free",  # FREE, 262K ctx
+        fallback="qwen/qwen3-next-80b-a3b-instruct:free",  # FREE, 262K ctx
+        fallback2="deepseek/deepseek-chat",  # $0.55/1M, 164K ctx, reliable paid backup
         max_tokens=4000,
         temperature=0.7,
-        cost_per_1k_input=0.0,  # Free tier - no cost tracking
+        cost_per_1k_input=0.0,
         cost_per_1k_output=0.0,
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="qwen/qwen-2.5-72b-instruct",  # Qwen (Replacing Grok-4.1)
-        fallback="openai/chatgpt-4o-latest",  # ChatGPT-4o-latest
-        fallback2="baidu/ernie-4.5-21b-a3b-thinking",  # Ernie-5.0
+        primary="qwen/qwen3.5-flash-02-23",  # $0.33/1M, 1M ctx, best value
+        fallback="mistralai/mistral-small-2603",  # $0.75/1M, 262K ctx, reliable
+        fallback2="openai/gpt-5.4-nano",  # $1.45/1M, 400K ctx, OpenAI quality
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.00014,
         cost_per_1k_output=0.00028,
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="google/gemini-2.5-pro",  # # Gemini-2.5-pro
-        fallback="openai/gpt-4.5-preview",  # GPT-4.5-preview
-        fallback2="anthropic/claude-opus-4",  # Claude-Opus-4.1
+        primary="google/gemini-2.5-pro",  # $2.50/1M, 1M ctx
+        fallback="anthropic/claude-sonnet-4.5",  # $9/1M, 1M ctx
+        fallback2="openai/gpt-5.4",  # $17.50/1M, 1M ctx, frontier
         max_tokens=8000,
         temperature=0.7,
         cost_per_1k_input=0.00025,
         cost_per_1k_output=0.00125,
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="anthropic/claude-sonnet-4.5",  # Claude-Sonnet-4.5
-        fallback="google/gemini-3-flash-preview",  # Gemini-3-flash (Thinking)
-        fallback2="qwen/qwen3-coder",  # Qwen-Thinking
+        primary="google/gemini-3-flash-preview",  # $3.50/1M, 1M ctx, fast+thinking
+        fallback="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
+        fallback2="anthropic/claude-sonnet-4.5",  # $18.00/1M, 1M ctx, high quality
         max_tokens=8000,
         temperature=0.75,
         cost_per_1k_input=0.00150,
         cost_per_1k_output=0.00600,
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="google/gemini-3-flash-preview",  # Gemini-3-flash
-        fallback="google/gemini-2.5-pro",  # Gemini-2.5-pro
-        fallback2="openai/gpt-5",  # GPT-5.1
+        primary="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
+        fallback="openai/gpt-5.4",  # $17.50/1M, 1M ctx, latest OpenAI
+        fallback2="anthropic/claude-sonnet-4.6",  # $18.00/1M, 1M ctx
         max_tokens=16000,
         temperature=0.8,
         cost_per_1k_input=0.00250,
         cost_per_1k_output=0.01000,
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="google/gemini-3-pro-preview",  # Gemini-3-pro (#1 Creative)
-        fallback="anthropic/claude-opus-4.5",  # Claude-Opus-4.5
-        fallback2="openai/gpt-5.2-pro",  # GPT-5.1-high
+        primary="anthropic/claude-opus-4.6",  # $30.00/1M, 1M ctx, best quality
+        fallback="openai/gpt-5.4-pro",  # $210.00/1M, 1M ctx, OpenAI flagship
+        fallback2="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, reliable fallback
         max_tokens=16000,
         temperature=0.8,
         cost_per_1k_input=0.00500,
