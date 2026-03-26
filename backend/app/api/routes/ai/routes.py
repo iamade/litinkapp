@@ -308,6 +308,19 @@ async def enhance_with_plot_context(
 
         if not plot_overview:
             print(f"[PlotService] No plot found with book_id={book_id}")
+            # Fallback: In Creator mode, plots are stored under project_id, not book_id.
+            # If this book_id belongs to a Project, try looking up by project_id instead.
+            from app.projects.models import Project
+            stmt = select(Project).where(Project.book_id == book_id)
+            result = await session.exec(stmt)
+            project = result.first()
+            if project:
+                print(f"[PlotService] Found project {project.id} linked to book {book_id}, trying project_id lookup")
+                plot_overview = await plot_service.get_plot_overview(
+                    user_id=user_id, book_id=project.id
+                )
+                if plot_overview:
+                    print(f"[PlotService] Found plot via project_id={project.id}")
 
         if not plot_overview and not custom_logline:
             return {"enhanced_content": None, "plot_info": None}
