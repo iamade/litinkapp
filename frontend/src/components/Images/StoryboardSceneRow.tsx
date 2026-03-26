@@ -64,7 +64,7 @@ const SortableImageCard = ({
         transform,
         transition,
         isDragging
-    } = useSortable({ id: image.imageUrl }); // Use URL as ID for uniqueness
+    } = useSortable({ id: image.id || image.imageUrl || `img-${Math.random()}` });
 
     const style = {
         transform: CSS.Transform.toString(transform),
@@ -239,8 +239,9 @@ export const StoryboardSceneRow: React.FC<StoryboardSceneRowProps> = ({
     const { active, over } = event;
     
     if (over && active.id !== over.id && onReorder) {
-        const oldIndex = images.findIndex(img => img.imageUrl === active.id);
-        const newIndex = images.findIndex(img => img.imageUrl === over.id);
+        const findIndex = (id: string | number) => images.findIndex((img, idx) => (img.id || img.imageUrl || `img-${idx}`) === id);
+        const oldIndex = findIndex(active.id);
+        const newIndex = findIndex(over.id);
         if (oldIndex !== -1 && newIndex !== -1) {
             const newOrder = arrayMove(images, oldIndex, newIndex);
             onReorder(newOrder);
@@ -292,13 +293,13 @@ export const StoryboardSceneRow: React.FC<StoryboardSceneRowProps> = ({
                 onDragEnd={handleDragEnd}
              >
                 <SortableContext 
-                    items={images.map(img => img.imageUrl)} 
+                    items={images.map((img, idx) => img.id || img.imageUrl || `img-${idx}`)} 
                     strategy={horizontalListSortingStrategy}
                 >
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                        {images.map((img) => (
+                        {images.map((img, idx) => (
                             <SortableImageCard
-                                key={img.imageUrl} // Ensure URL is unique, usually is
+                                key={img.id || img.imageUrl || `img-${sceneNumber}-${idx}`}
                                 image={img}
                                 isSelected={img.imageUrl === selectedImageUrl}
                                 onSelect={() => onSelect(img.imageUrl === selectedImageUrl ? null : img.imageUrl)}
