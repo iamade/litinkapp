@@ -417,6 +417,25 @@ async def generate_character_images_optimized(
                 if not image_url:
                     raise Exception("No image URL in V7 response")
 
+                # Persist image from ModelsLab CDN to our own S3 storage
+                original_cdn_url = image_url
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    storage = get_storage_service()
+                    # Use a temporary UUID for the path since we don't have record_id yet
+                    temp_id = str(_uuid.uuid4())
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=user_id or "system",
+                        media_type="images",
+                        record_id=temp_id,
+                        extension="png",
+                    )
+                    image_url = await storage.persist_from_url(image_url, s3_path, content_type="image/png")
+                    logger.info(f"[BatchCharacterImage] Persisted image to S3: {s3_path}")
+                except Exception as persist_error:
+                    logger.error(f"[BatchCharacterImage] Failed to persist image to S3: {persist_error}")
+                    raise Exception(f"Image generated but failed to persist to storage: {persist_error}")
+
                 # Store in database
                 image_record_data = {
                     "video_generation_id": video_gen_id,
@@ -630,6 +649,24 @@ async def generate_scene_images_optimized(
                 if not image_url:
                     raise Exception("No image URL in V7 response")
 
+                # Persist image from ModelsLab CDN to our own S3 storage
+                original_cdn_url = image_url
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    storage = get_storage_service()
+                    temp_id = str(_uuid.uuid4())
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=user_id or "system",
+                        media_type="images",
+                        record_id=temp_id,
+                        extension="png",
+                    )
+                    image_url = await storage.persist_from_url(image_url, s3_path, content_type="image/png")
+                    logger.info(f"[BatchSceneImage] Persisted image to S3: {s3_path}")
+                except Exception as persist_error:
+                    logger.error(f"[BatchSceneImage] Failed to persist image to S3: {persist_error}")
+                    raise Exception(f"Image generated but failed to persist to storage: {persist_error}")
+
                 # Store in database
                 image_record_data = {
                     "video_generation_id": video_gen_id,
@@ -649,6 +686,7 @@ async def generate_scene_images_optimized(
                             "service": "modelslab_v7",
                             "model_used": result.get("model_used", "gen4_image"),
                             "generation_time": result.get("generation_time", 0),
+                            "original_cdn_url": original_cdn_url,
                         }
                     ),
                 }
@@ -930,6 +968,23 @@ async def async_generate_character_image_task(
             image_url = result.get("image_url")
             generation_time = result.get("generation_time", 0)
             model_used = result.get("model_used", "gen4_image")
+
+            # Persist image from ModelsLab CDN to our own S3 storage
+            original_cdn_url = image_url
+            try:
+                from app.core.services.storage import get_storage_service, S3StorageService
+                storage = get_storage_service()
+                s3_path = S3StorageService.build_media_path(
+                    user_id=user_id,
+                    media_type="images",
+                    record_id=record_id,
+                    extension="png",
+                )
+                image_url = await storage.persist_from_url(image_url, s3_path, content_type="image/png")
+                logger.info(f"[CharacterImageTask] Persisted image to S3: {s3_path}")
+            except Exception as persist_error:
+                logger.error(f"[CharacterImageTask] Failed to persist image to S3: {persist_error}")
+                raise Exception(f"Image generated but failed to persist to storage: {persist_error}")
 
             # Update the image_generations record with the result
             update_query = text(
@@ -1313,6 +1368,24 @@ async def async_generate_scene_image_task(
             if not image_url:
                 raise Exception("No image URL returned from ModelsLab service")
 
+            # Persist image from ModelsLab CDN to our own S3 storage
+            original_cdn_url = image_url
+            try:
+                from app.core.services.storage import get_storage_service, S3StorageService
+                storage = get_storage_service()
+                s3_path = S3StorageService.build_media_path(
+                    user_id=user_id,
+                    media_type="images",
+                    record_id=record_id,
+                    extension="png",
+                )
+                image_url = await storage.persist_from_url(image_url, s3_path, content_type="image/png")
+                logger.info(f"[SceneImageTask] Persisted image to S3: {s3_path}")
+            except Exception as persist_error:
+                logger.error(f"[SceneImageTask] Failed to persist image to S3: {persist_error}")
+                # Re-raise — don't store ephemeral URLs that will 404 in 2 weeks
+                raise Exception(f"Image generated but failed to persist to storage: {persist_error}")
+
             # Prepare metadata with scene info
             existing_metadata = {}
             try:
@@ -1339,6 +1412,7 @@ async def async_generate_scene_image_task(
                 "prompt_used": final_description,
                 "style": style or "cinematic",
                 "aspect_ratio": aspect_ratio or "16:9",
+                "original_cdn_url": original_cdn_url,
             }
 
             # Update record with success data using transaction

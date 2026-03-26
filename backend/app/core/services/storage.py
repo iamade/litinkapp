@@ -1,6 +1,8 @@
 from __future__ import annotations
 import os
-from typing import Optional, BinaryIO
+import io
+import mimetypes
+from typing import Optional, BinaryIO, Tuple
 from pathlib import Path
 from app.core.config import settings
 import boto3
@@ -142,6 +144,113 @@ class S3StorageService:
         except Exception as e:
             logger.error(f"Stream upload failed for {path}: {e}")
             raise
+
+    async def persist_from_url(
+        self,
+        source_url: str,
+        dest_path: str,
+        content_type: Optional[str] = None,
+        max_retries: int = 3,
+        timeout_seconds: int = 120,
+    ) -> str:
+        """
+        Download a file from an external URL and upload it to our S3 storage.
+
+        This is used to persist ephemeral CDN URLs (e.g. ModelsLab) into our
+        own permanent storage before the CDN purges them.
+
+        Args:
+            source_url: External URL to download from (e.g. ModelsLab CDN)
+            dest_path: S3 object key (e.g. media/{user_id}/images/{record_id}.png)
+            content_type: Optional MIME type override; auto-detected if not provided
+            max_retries: Number of download retries with exponential backoff
+            timeout_seconds: HTTP request timeout for the download
+
+        Returns:
+            Public URL of the persisted file in our S3 storage
+
+        Raises:
+            Exception: If download or upload fails after all retries
+        """
+        import httpx
+        import asyncio
+
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                # Download from source URL with streaming
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(timeout_seconds),
+                    follow_redirects=True,
+                ) as client:
+                    response = await client.get(source_url)
+                    response.raise_for_status()
+
+                    file_bytes = response.content
+
+                    # Auto-detect content type from response headers or URL
+                    if not content_type:
+                        content_type = response.headers.get("content-type", "").split(";")[0].strip()
+                        if not content_type or content_type == "application/octet-stream":
+                            # Guess from URL extension
+                            guessed, _ = mimetypes.guess_type(source_url.split("?")[0])
+                            content_type = guessed or "application/octet-stream"
+
+                # Upload to our S3 storage
+                permanent_url = await self.upload(file_bytes, dest_path, content_type)
+
+                logger.info(
+                    f"[Storage] Persisted {len(file_bytes)} bytes from external URL to {dest_path}"
+                )
+                return permanent_url
+
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                if e.response.status_code == 404:
+                    # CDN hasn't propagated yet, retry with backoff
+                    logger.warning(
+                        f"[Storage] Source URL returned 404 (attempt {attempt + 1}/{max_retries}): {source_url}"
+                    )
+                else:
+                    logger.warning(
+                        f"[Storage] Download failed with HTTP {e.response.status_code} (attempt {attempt + 1}/{max_retries}): {source_url}"
+                    )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt * 3)  # 3s, 6s, 12s
+
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"[Storage] persist_from_url failed (attempt {attempt + 1}/{max_retries}): {e}"
+                )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2 ** attempt * 3)
+
+        raise Exception(
+            f"Failed to persist file from {source_url} after {max_retries} attempts: {last_error}"
+        )
+
+    @staticmethod
+    def build_media_path(
+        user_id: str,
+        media_type: str,
+        record_id: str,
+        extension: str = "png",
+    ) -> str:
+        """
+        Build a structured S3 path for persisted media.
+
+        Args:
+            user_id: User UUID
+            media_type: 'images', 'audio', or 'video'
+            record_id: Database record UUID
+            extension: File extension (png, mp3, mp4, etc.)
+
+        Returns:
+            S3 object key like media/{user_id}/images/{record_id}.png
+        """
+        return f"media/{user_id}/{media_type}/{record_id}.{extension}"
 
     def _strip_url_prefix(self, path: str) -> str:
         """Strip full URL prefix from storage path, returning just the object key.
