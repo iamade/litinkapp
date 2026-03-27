@@ -792,6 +792,24 @@ async def generate_narrator_audio(
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
+
+                # Persist audio from CDN to our own S3 storage
+                original_cdn_url = audio_url
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    import uuid as _uuid_mod
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else 'system',
+                        media_type='audio',
+                        record_id=str(_uuid_mod.uuid4()),
+                        extension='mp3',
+                    )
+                    audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                    logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
+                except Exception as persist_error:
+                    logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
+                    raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
             else:
                 raise Exception(
                     f"V7 Audio generation failed: {result.get('error', 'Unknown error')}"
@@ -827,6 +845,7 @@ async def generate_narrator_audio(
                         "shot_type": shot_type,
                         "shot_index": shot_index,
                         "service": "modelslab_v7",
+                        "original_cdn_url": original_cdn_url,
                         "model_used": result.get(
                             "model_used", "eleven_multilingual_v2"
                         ),
@@ -1371,6 +1390,24 @@ async def generate_character_audio(
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
+
+                # Persist audio from CDN to our own S3 storage
+                original_cdn_url = audio_url
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    import uuid as _uuid_mod
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else 'system',
+                        media_type='audio',
+                        record_id=str(_uuid_mod.uuid4()),
+                        extension='mp3',
+                    )
+                    audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                    logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
+                except Exception as persist_error:
+                    logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
+                    raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
             else:
                 raise Exception(
                     f"V7 Audio generation failed: {result.get('error', 'Unknown error')}"
@@ -1403,6 +1440,7 @@ async def generate_character_audio(
                         "shot_type": shot_type,
                         "shot_index": shot_index,
                         "service": result.get("service", "modelslab_v7"),
+                        "original_cdn_url": original_cdn_url,
                         "model_used": result.get(
                             "model_used", "eleven_multilingual_v2"
                         ),
@@ -1587,6 +1625,24 @@ async def generate_sound_effects_audio(
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
 
+                # Persist audio from CDN to our own S3 storage
+                original_cdn_url = audio_url
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    import uuid as _uuid_mod
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else 'system',
+                        media_type='audio',
+                        record_id=str(_uuid_mod.uuid4()),
+                        extension='mp3',
+                    )
+                    audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                    logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
+                except Exception as persist_error:
+                    logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
+                    raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+
                 # Using passed script_id
 
                 # Store in database
@@ -1610,6 +1666,7 @@ async def generate_sound_effects_audio(
                             "shot_index": shot_index,
                             "effect_type": effect.get("type", "sound_effect"),
                             "service": "modelslab_v7",
+                            "original_cdn_url": original_cdn_url,
                             "model_used": result.get(
                                 "model_used", "eleven_sound_effect"
                             ),
@@ -1700,6 +1757,24 @@ async def generate_background_music(
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
 
+                # Persist audio from CDN to our own S3 storage
+                original_cdn_url = audio_url
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    import uuid as _uuid_mod
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else 'system',
+                        media_type='audio',
+                        record_id=str(_uuid_mod.uuid4()),
+                        extension='mp3',
+                    )
+                    audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                    logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
+                except Exception as persist_error:
+                    logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
+                    raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+
                 # Using passed script_id
 
                 # Store in database
@@ -1723,6 +1798,7 @@ async def generate_background_music(
                             "shot_type": shot_type,
                             "shot_index": shot_index,
                             "service": "modelslab_v7",
+                            "original_cdn_url": original_cdn_url,
                             "model_used": result.get("model_used", "music_v1"),
                         },
                     )
@@ -1876,6 +1952,23 @@ def generate_chapter_audio_task(
 
                     if result and result.get("audio_url"):
                         audio_url = result["audio_url"]
+                        # Persist audio from CDN to our own S3 storage
+                        original_cdn_url = audio_url
+                        try:
+                            from app.core.services.storage import get_storage_service, S3StorageService
+                            import uuid as _uuid_mod
+                            storage = get_storage_service()
+                            s3_path = S3StorageService.build_media_path(
+                                user_id=str(user_id) if user_id else 'system',
+                                media_type='audio',
+                                record_id=str(_uuid_mod.uuid4()),
+                                extension='mp3',
+                            )
+                            audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                            logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
+                        except Exception as persist_error:
+                            logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
+                            raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
                         audio_duration = None
                     else:
                         raise Exception("Failed to generate audio with ElevenLabs")
@@ -1901,6 +1994,23 @@ def generate_chapter_audio_task(
 
                 if result.get("status") == "success":
                     audio_url = result.get("audio_url")
+                    # Persist audio from CDN to our own S3 storage
+                    original_cdn_url = audio_url
+                    try:
+                        from app.core.services.storage import get_storage_service, S3StorageService
+                        import uuid as _uuid_mod
+                        storage = get_storage_service()
+                        s3_path = S3StorageService.build_media_path(
+                            user_id=str(user_id) if user_id else 'system',
+                            media_type='audio',
+                            record_id=str(_uuid_mod.uuid4()),
+                            extension='mp3',
+                        )
+                        audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                        logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
+                    except Exception as persist_error:
+                        logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
+                        raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
                     audio_duration = result.get("audio_time", duration)
                 else:
                     raise Exception(
@@ -1932,6 +2042,7 @@ def generate_chapter_audio_task(
                             "voice_id": voice_id,
                             "emotion": emotion,
                             "speed": speed,
+                            "original_cdn_url": original_cdn_url,
                             "service_used": (
                                 "elevenlabs" if use_elevenlabs else "modelslab"
                             ),
