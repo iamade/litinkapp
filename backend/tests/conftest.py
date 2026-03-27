@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -9,6 +10,36 @@ import pytest
 BACKEND_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
+
+# Lightweight stubs so tests can import storage service without optional deps installed.
+if "boto3" not in sys.modules:
+    boto3_stub = types.ModuleType("boto3")
+    boto3_stub.client = MagicMock()
+    sys.modules["boto3"] = boto3_stub
+
+if "botocore" not in sys.modules:
+    botocore_stub = types.ModuleType("botocore")
+    sys.modules["botocore"] = botocore_stub
+
+if "botocore.client" not in sys.modules:
+    botocore_client_stub = types.ModuleType("botocore.client")
+
+    class _Config:  # pragma: no cover
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+    botocore_client_stub.Config = _Config
+    sys.modules["botocore.client"] = botocore_client_stub
+
+if "botocore.exceptions" not in sys.modules:
+    botocore_exceptions_stub = types.ModuleType("botocore.exceptions")
+
+    class _ClientError(Exception):
+        pass
+
+    botocore_exceptions_stub.ClientError = _ClientError
+    sys.modules["botocore.exceptions"] = botocore_exceptions_stub
 
 
 @pytest.fixture
