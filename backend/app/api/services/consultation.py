@@ -99,7 +99,7 @@ class ConsultationService:
             )
 
             # 5. Parse the JSON response
-            result_text = response.get("result", "")
+            result_text = response.get("result") or ""
 
             # Try to extract JSON from the response
             consultation_result = self._parse_llm_json_response(result_text)
@@ -160,6 +160,14 @@ Based on the above scripts and the user's creative direction, provide your cinem
 
     def _parse_llm_json_response(self, response_text: str) -> Dict[str, Any]:
         """Extract and parse JSON from LLM response."""
+        if not response_text:
+            logger.warning("Empty response text received from LLM")
+            return {
+                "suggested_names": ["Untitled Universe"],
+                "ai_commentary": "The AI model returned an empty response. Please try again.",
+                "parse_error": True,
+            }
+
         # Try direct JSON parse first
         try:
             return json.loads(response_text)
@@ -315,7 +323,7 @@ Based on the above scripts and the user's creative direction, provide your cinem
         file_contents: List[Dict[str, Any]],
         user_prompt: str,
         user_tier: str = "free",
-        max_tokens: int = 250,
+        max_tokens: int = 1000,
     ) -> Dict[str, Any]:
         """
         Analyze uploaded files and generate guided response with app-specific options.
@@ -429,7 +437,7 @@ Respond with your analysis in the JSON format specified."""
                 max_tokens=max_tokens,
             )
 
-            result_text = response.get("result", "")
+            result_text = response.get("result") or ""
             parsed = self._parse_llm_json_response(result_text)
 
             # Build file summary for subsequent chat messages
@@ -558,7 +566,7 @@ Respond helpfully and guide them toward their creative goal.{nudge}"""
                 max_tokens=max_tokens,
             )
 
-            result_text = response.get("result", "")
+            result_text = response.get("result") or ""
             parsed = self._parse_llm_json_response(result_text)
 
             return {

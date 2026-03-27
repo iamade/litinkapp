@@ -33,8 +33,8 @@ class ModelConfig:
 # All models accessed via OpenRouter for reliable connectivity and fallback handling
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="nvidia/nemotron-3-super-120b-a12b:free",  # FREE, 262K ctx
-        fallback="qwen/qwen3-next-80b-a3b-instruct:free",  # FREE, 262K ctx
+        primary="meta-llama/llama-3.3-70b-instruct:free",  # FREE, 131K ctx, battle-tested
+        fallback="stepfun/step-3.5-flash:free",  # FREE, 1M ctx, strong reasoning MoE
         fallback2="deepseek/deepseek-chat",  # $0.55/1M, 164K ctx, reliable paid backup
         max_tokens=4000,
         temperature=0.7,

@@ -462,10 +462,15 @@ What is it? You look worried.
                 cost=total_cost,
             )
 
+            result_content = response.choices[0].message.content
+            if not result_content:
+                logger.warning(f"[OpenRouter] Model {model} returned empty/None content for {analysis_type}")
+                raise Exception(f"Model {model} returned empty response for {analysis_type}")
+
             return {
                 "status": "success",
                 "analysis_type": analysis_type,
-                "result": response.choices[0].message.content,
+                "result": result_content,
                 "model": model,
                 "model_used": model,
                 "usage": {
