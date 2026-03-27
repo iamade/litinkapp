@@ -1,6 +1,7 @@
 from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List, Optional
+from celery.utils.log import get_task_logger
 
 from app.api.services.video import VideoService
 from app.core.database import async_session, engine
@@ -24,6 +25,8 @@ from app.videos.association_integrity import (
     dedupe_scene_videos,
     resolve_scene_identity,
 )
+
+logger = get_task_logger(__name__)
 
 
 # Removed image generation logic
@@ -1330,6 +1333,38 @@ async def generate_scene_videos(
                 video_url = result.get("video_url")
                 has_lipsync = bool(init_audio_url)
 
+                # Persist video from CDN to our own S3 storage
+                if video_url:
+                    original_cdn_url = video_url
+                    try:
+                        from app.core.services.storage import (
+                            get_storage_service,
+                            S3StorageService,
+                        )
+                        import uuid as _uuid_mod
+
+                        storage = get_storage_service()
+                        s3_path = S3StorageService.build_media_path(
+                            user_id=str(user_id) if user_id else "system",
+                            media_type="video",
+                            record_id=str(_uuid_mod.uuid4()),
+                            extension="mp4",
+                        )
+                        video_url = await storage.persist_from_url(
+                            video_url,
+                            s3_path,
+                            content_type="video/mp4",
+                            timeout_seconds=300,
+                        )
+                        logger.info(f"[VideoTask] Persisted video to S3: {s3_path}")
+                    except Exception as persist_error:
+                        logger.error(
+                            f"[VideoTask] Failed to persist video to S3: {persist_error}"
+                        )
+                        raise Exception(
+                            f"Video generated but failed to persist to storage: {persist_error}"
+                        )
+
                 if video_url:
                     # Extract the last frame as key scene shot for the next scene
                     key_scene_shot_url = None
@@ -1561,6 +1596,38 @@ async def async_retry_video_retrieval_task(
             # Success - update task with video URL and mark as completed
             video_url = retry_result.get("video_url")
             video_duration = retry_result.get("duration", 0)
+
+            # Persist video from CDN to our own S3 storage
+            if video_url:
+                original_cdn_url = video_url
+                try:
+                    from app.core.services.storage import (
+                        get_storage_service,
+                        S3StorageService,
+                    )
+                    import uuid as _uuid_mod
+
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else "system",
+                        media_type="video",
+                        record_id=str(video_generation_id),
+                        extension="mp4",
+                    )
+                    video_url = await storage.persist_from_url(
+                        video_url,
+                        s3_path,
+                        content_type="video/mp4",
+                        timeout_seconds=300,
+                    )
+                    logger.info(f"[VideoRetryTask] Persisted video to S3: {s3_path}")
+                except Exception as persist_error:
+                    logger.error(
+                        f"[VideoRetryTask] Failed to persist video to S3: {persist_error}"
+                    )
+                    raise Exception(
+                        f"Video retrieved but failed to persist to storage: {persist_error}"
+                    )
 
             task_meta = video_gen.get("task_meta", {})
             task_meta.update(
@@ -1795,6 +1862,38 @@ async def async_automatic_video_retry_task(video_generation_id: str):
             # Success - update task with video URL and mark as completed
             video_url = retry_result.get("video_url")
             video_duration = retry_result.get("duration", 0)
+
+            # Persist video from CDN to our own S3 storage
+            if video_url:
+                original_cdn_url = video_url
+                try:
+                    from app.core.services.storage import (
+                        get_storage_service,
+                        S3StorageService,
+                    )
+                    import uuid as _uuid_mod
+
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else "system",
+                        media_type="video",
+                        record_id=str(video_generation_id),
+                        extension="mp4",
+                    )
+                    video_url = await storage.persist_from_url(
+                        video_url,
+                        s3_path,
+                        content_type="video/mp4",
+                        timeout_seconds=300,
+                    )
+                    logger.info(f"[AutoRetryTask] Persisted video to S3: {s3_path}")
+                except Exception as persist_error:
+                    logger.error(
+                        f"[AutoRetryTask] Failed to persist video to S3: {persist_error}"
+                    )
+                    raise Exception(
+                        f"Video retrieved but failed to persist to storage: {persist_error}"
+                    )
 
             task_meta = video_gen.get("task_meta", {})
             task_meta.update(
