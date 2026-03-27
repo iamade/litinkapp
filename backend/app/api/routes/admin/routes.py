@@ -1138,3 +1138,45 @@ async def list_promo_codes(
     stmt = select(PromoCode).order_by(PromoCode.created_at.desc())
     result = await session.exec(stmt)
     return result.all()
+
+
+@router.get("/media-health")
+async def get_media_health(
+    session: AsyncSession = Depends(get_session),
+    current_user: dict = Depends(get_current_superadmin),
+):
+    """Health check: count of images on own storage vs ModelsLab CDN vs expired."""
+    query = text(
+        """
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'completed') as total,
+            COUNT(*) FILTER (
+                WHERE status = 'completed'
+                AND image_url IS NOT NULL
+                AND image_url NOT LIKE '%%pub-%%'
+                AND image_url NOT LIKE '%%modelslab%%'
+                AND image_url NOT LIKE '%%stablediffusionapi%%'
+            ) as on_own_storage,
+            COUNT(*) FILTER (
+                WHERE status = 'completed'
+                AND (
+                    image_url LIKE '%%pub-%%'
+                    OR image_url LIKE '%%modelslab%%'
+                    OR image_url LIKE '%%stablediffusionapi%%'
+                )
+            ) as on_cdn,
+            COUNT(*) FILTER (
+                WHERE status = 'completed'
+                AND image_url IS NULL
+            ) as expired_null
+        FROM image_generations
+    """
+    )
+    result = await session.execute(query)
+    row = result.mappings().first()
+    return {
+        "total_images": row["total"],
+        "on_own_storage": row["on_own_storage"],
+        "on_modelslab_cdn": row["on_cdn"],
+        "expired_null": row["expired_null"],
+    }
