@@ -5652,7 +5652,7 @@ async def analyze_for_consultation(
         file_contents=file_contents,
         user_prompt=enriched_prompt,
         user_tier=user_tier,
-        max_tokens=250,
+        max_tokens=2000,
     )
 
     return result
@@ -5773,7 +5773,7 @@ async def consultation_chat(
             message=message,
             context=request.context,
             user_tier=user_tier,
-            max_tokens=250,
+            max_tokens=2000,
             consultation_message_count=messages_used,
         )
         result["messages_used"] = messages_used

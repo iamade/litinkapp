@@ -440,6 +440,15 @@ Respond with your analysis in the JSON format specified."""
             result_text = response.get("result") or ""
             parsed = self._parse_llm_json_response(result_text)
 
+            # If parse failed but we have partial data, construct ai_message
+            if parsed.get("parse_error") and not parsed.get("ai_message"):
+                content_analysis = parsed.get("content_analysis", {})
+                title = content_analysis.get("title", "your document")
+                doc_type = content_analysis.get("document_type", "document")
+                summary = content_analysis.get("summary", "")
+                if title != "your document" or summary:
+                    parsed["ai_message"] = f"I've analyzed your {doc_type} '{title}'. {summary} What would you like to create with it?"
+
             # Build file summary for subsequent chat messages
             file_summary_parts = []
             for fc in file_contents:
