@@ -1014,7 +1014,7 @@ async def batch_generate_images(
                             "prompt", img_request.get("description", "")
                         ),
                         "aspect_ratio": img_request.get("aspect_ratio", "16:9"),
-                        "model_id": img_request.get("model_id", "gen4_image"),
+                        "model_id": img_request.get("model_id", "seedream-t2i"),
                     }
                 )
 

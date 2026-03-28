@@ -387,7 +387,7 @@ class StandaloneImageService:
                                 "prompt", request.get("description", "")
                             ),
                             "aspect_ratio": request.get("aspect_ratio", "16:9"),
-                            "model_id": request.get("model_id", "gen4_image"),
+                            "model_id": request.get("model_id", "seedream-t2i"),
                         }
                     )
 

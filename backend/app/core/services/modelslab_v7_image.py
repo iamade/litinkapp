@@ -732,7 +732,7 @@ class ModelsLabV7ImageService:
             if user_tier:
                 model_id = self._get_model_for_tier(user_tier)
             else:
-                model_id = "gen4_image"  # Fallback
+                model_id = self.tier_model_mapping["free"]  # Fallback to free tier default
 
             logger.info(
                 f"[ENVIRONMENT IMAGE] {mood} {time_of_day} environment: {environment_description[:50]}..."
@@ -821,7 +821,7 @@ class ModelsLabV7ImageService:
                         if model_id is None and user_tier:
                             model_id = self._get_model_for_tier(user_tier)
                         elif model_id is None:
-                            model_id = "gen4_image"  # Fallback
+                            model_id = self.tier_model_mapping["free"]  # Fallback to free tier default
 
                         logger.info(
                             f"[BATCH GENERATION] Using model: {model_id} for request {index} ({'tier-based' if user_tier else 'hardcoded'})"
@@ -886,7 +886,7 @@ class ModelsLabV7ImageService:
 
     def _get_model_for_style(self, style: str) -> str:
         """Get appropriate model ID for the given style"""
-        model_id = self.image_models.get(style, "gen4_image")
+        model_id = self.image_models.get(style, self.tier_model_mapping["free"])
         logger.info(
             f"[MODELSLAB V7 IMAGE] Style '{style}' mapped to model '{model_id}' (hardcoded mapping)"
         )
@@ -894,7 +894,7 @@ class ModelsLabV7ImageService:
 
     def _get_model_for_tier(self, user_tier: str) -> str:
         """Get appropriate model ID for the given user subscription tier"""
-        model_id = self.tier_model_mapping.get(user_tier, "gen4_image")
+        model_id = self.tier_model_mapping.get(user_tier, self.tier_model_mapping["free"])
         logger.info(
             f"[MODELSLAB V7 IMAGE] Tier '{user_tier}' mapped to model '{model_id}' (tier-based selection)"
         )
@@ -980,8 +980,12 @@ class ModelsLabV7ImageService:
         """Get available image generation models"""
 
         return {
-            "gen4_image": "Generation 4 Image Model (Recommended)",
-            "runway_image": "Runway Image Model (Artistic)",
+            "seedream-t2i": "Seedream T2I (Free Tier Default)",
+            "seedream-4": "Seedream 4 (Basic Tier)",
+            "imagen-4": "Imagen 4 (Standard Tier)",
+            "nano-banana-t2i": "Nano Banana T2I (Premium Tier)",
+            "seedream-4.5": "Seedream 4.5 (Professional Tier)",
+            "qwen-image-2512": "Qwen Image 2512 (Enterprise Tier)",
         }
 
     def get_available_aspect_ratios(self) -> Dict[str, str]:
@@ -1244,7 +1248,7 @@ class ModelsLabV7ImageService:
         """Get appropriate model ID for the given style"""
         # ✅ Switch to nano-banana for faster generation
         style_models = {
-            "realistic": "nano-banana",  # Changed from gen4_image
+            "realistic": "nano-banana",  # Nano Banana for fast generation
             "cinematic": "nano-banana",  # Much faster
             "animated": "nano-banana",
             "fantasy": "nano-banana",
