@@ -323,7 +323,7 @@ Based on the above scripts and the user's creative direction, provide your cinem
         file_contents: List[Dict[str, Any]],
         user_prompt: str,
         user_tier: str = "free",
-        max_tokens: int = 1000,
+        max_tokens: int = 2000,
     ) -> Dict[str, Any]:
         """
         Analyze uploaded files and generate guided response with app-specific options.
