@@ -155,12 +155,15 @@ export function AIConsultationModal({
   const [pendingCreditCost, setPendingCreditCost] = useState(1);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasAnalyzed = useRef(false);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
+    if (hasAnalyzed.current) return;
+    hasAnalyzed.current = true;
     analyzeFiles();
   }, []);
 
