@@ -4870,6 +4870,30 @@ class FileService:
                     session.add(book)
                     await session.commit()
 
+                # Auto-create empty PlotOverview so GET overview doesn't 404
+                try:
+                    from app.plots.models import PlotOverview
+
+                    existing_plot = await session.exec(
+                        select(PlotOverview).where(
+                            PlotOverview.book_id == book_uuid,
+                            PlotOverview.user_id == uuid.UUID(user_id),
+                        )
+                    )
+                    if not existing_plot.first():
+                        plot_overview = PlotOverview(
+                            book_id=book_uuid,
+                            user_id=uuid.UUID(user_id),
+                            logline="",
+                            themes=[],
+                            story_type=book.book_type if book else "entertainment",
+                        )
+                        session.add(plot_overview)
+                        await session.commit()
+                        yield "Created initial plot overview"
+                except Exception as plot_err:
+                    print(f"[STRUCTURE SAVE] Warning: could not create PlotOverview: {plot_err}")
+
                 print(
                     f"[STRUCTURE SAVE] ✅ Successfully saved structure for book {book_id}"
                 )
