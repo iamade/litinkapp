@@ -427,14 +427,14 @@ async def generate_character_images_optimized(
                     "style": style,
                     "status": "completed",
                     "sequence_order": i + 1,
-                    "model_id": result.get("model_used", "gen4_image"),
+                    "model_id": result.get("model_used", "seedream-t2i"),
                     "aspect_ratio": "3:4",
                     "service_provider": "modelslab_v7",
                     "generation_time_seconds": result.get("generation_time", 0),
                     "metadata": json.dumps(
                         {
                             "service": "modelslab_v7",
-                            "model_used": result.get("model_used", "gen4_image"),
+                            "model_used": result.get("model_used", "seedream-t2i"),
                             "generation_time": result.get("generation_time", 0),
                         }
                     ),
@@ -509,7 +509,7 @@ async def generate_character_images_optimized(
                 "error_message": str(e),
                 "sequence_order": i + 1,
                 "prompt": f"Character: {character}, {character_description}",
-                "model_id": "gen4_image",
+                "model_id": "seedream-t2i",
                 "aspect_ratio": "3:4",
                 "service_provider": "modelslab_v7",
                 "metadata": json.dumps({"service": "modelslab_v7", "error": str(e)}),
@@ -640,14 +640,14 @@ async def generate_scene_images_optimized(
                     "style": style,
                     "status": "completed",
                     "sequence_order": i + 1,
-                    "model_id": result.get("model_used", "gen4_image"),
+                    "model_id": result.get("model_used", "seedream-t2i"),
                     "aspect_ratio": "16:9",
                     "service_provider": "modelslab_v7",
                     "generation_time_seconds": result.get("generation_time", 0),
                     "metadata": json.dumps(
                         {
                             "service": "modelslab_v7",
-                            "model_used": result.get("model_used", "gen4_image"),
+                            "model_used": result.get("model_used", "seedream-t2i"),
                             "generation_time": result.get("generation_time", 0),
                         }
                     ),
@@ -723,7 +723,7 @@ async def generate_scene_images_optimized(
                 "status": "failed",
                 "error_message": str(e),
                 "sequence_order": i + 1,
-                "model_id": "gen4_image",
+                "model_id": "seedream-t2i",
                 "aspect_ratio": "16:9",
                 "service_provider": "modelslab_v7",
                 "metadata": json.dumps({"service": "modelslab_v7", "error": str(e)}),
@@ -929,7 +929,7 @@ async def async_generate_character_image_task(
 
             image_url = result.get("image_url")
             generation_time = result.get("generation_time", 0)
-            model_used = result.get("model_used", "gen4_image")
+            model_used = result.get("model_used", "seedream-t2i")
 
             # Update the image_generations record with the result
             update_query = text(
@@ -1308,7 +1308,7 @@ async def async_generate_scene_image_task(
 
             image_url = result.get("image_url")
             generation_time = result.get("generation_time", 0)
-            model_used = result.get("model_used", "gen4_image")
+            model_used = result.get("model_used", "seedream-t2i")
 
             if not image_url:
                 raise Exception("No image URL returned from ModelsLab service")

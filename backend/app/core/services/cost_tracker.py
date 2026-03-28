@@ -80,7 +80,7 @@ class CostTrackerService:
         # ===== IMAGE GENERATION MODELS (per generation) =====
         # Old models (keeping for backward compatibility)
         "runway_image": 0.05,
-        "gen4_image": 0.03,
+        "seedream-t2i": 0.03,
         # New Image Models (from pricing_new.md)
         # Direct API Models
         "hunyuan-image-3.0": 0.02,  # Hunyuan-Image-3.0 (cost-effective for free tier)
@@ -268,7 +268,7 @@ class CostTrackerService:
         intended_cost = 0
 
         for record in images:
-            model_used = record.model_id or "gen4_image"
+            model_used = record.model_id or "seedream-t2i"
             metadata = record.metadata or {}
 
             # Get actual cost
