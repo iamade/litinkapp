@@ -378,7 +378,7 @@ async def create_character_placeholder(
             plot_overview_id=plot_overview.id,
             name=character_name,
             entity_type=entity_type,
-            role="supporting" if entity_type == "character" else "object",
+            role="supporting" if entity_type == "character" else entity_type,
             physical_description="",
             personality="",
         )
@@ -792,7 +792,7 @@ async def create_project_character_placeholder(
             user_id=current_user.id,  # Required field
             name=character_name,
             entity_type=entity_type,
-            role="supporting" if entity_type == "character" else "object",
+            role="supporting" if entity_type == "character" else entity_type,
             physical_description="",
             personality="",
         )
