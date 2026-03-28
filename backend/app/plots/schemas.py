@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 from decimal import Decimal
@@ -53,6 +53,24 @@ class PlotOverviewBase(BaseModel):
     generation_cost: Optional[Decimal] = Field(None, description="Cost of generation")
     status: str = Field("pending", max_length=50, description="Current status")
     version: int = Field(1, description="Version number")
+
+    @model_validator(mode="before")
+    @classmethod
+    def truncate_long_fields(cls, data):
+        """Auto-truncate string fields that exceed their max_length.
+        LLM outputs sometimes return verbose descriptions instead of short labels."""
+        if isinstance(data, dict):
+            field_limits = {
+                "story_type": 100, "script_story_type": 100, "genre": 100,
+                "tone": 100, "audience": 100, "medium": 100, "format": 100,
+                "generation_method": 100, "model_used": 100, "vibe_style": 200,
+                "setting": 500, "logline": 1000, "status": 50,
+            }
+            for field, limit in field_limits.items():
+                val = data.get(field)
+                if isinstance(val, str) and len(val) > limit:
+                    data[field] = val[:limit - 3].rsplit(" ", 1)[0] + "..."
+        return data
 
 
 class PlotOverviewCreate(PlotOverviewBase):

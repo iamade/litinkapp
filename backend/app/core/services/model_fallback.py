@@ -79,7 +79,7 @@ class ModelFallbackManager:
             model_type = "primary" if i == 0 else f"fallback{i if i == 1 else '2'}"
 
             try:
-                logger.info(
+                logger.warning(
                     f"[FALLBACK] Attempting {model_type} model: {model} for {service_type}/{tier_normalized}"
                 )
 
@@ -172,14 +172,14 @@ class ModelFallbackManager:
                     )
                     break
                 elif is_rate_limit and is_free_tier:
-                    logger.info(
+                    logger.warning(
                         f"[FALLBACK] ℹ️ Rate limit on free model {model} - continuing to next fallback"
                     )
 
                 if i < len(models_to_try) - 1:
-                    backoff_time = 2**i
-                    logger.info(
-                        f"[FALLBACK] Waiting {backoff_time}s before trying next model"
+                    backoff_time = min(2**i, 3)  # Cap backoff at 3s for free tier
+                    logger.warning(
+                        f"[FALLBACK] Waiting {backoff_time}s before trying next model ({models_to_try[i+1]})"
                     )
                     await asyncio.sleep(backoff_time)
 

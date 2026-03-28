@@ -1469,6 +1469,12 @@ Return a JSON object with:
                 f"[PlotService] Generated creative_directive: {creative_directive[:100] if creative_directive else 'None'}..."
             )
 
+            # Truncate fields that may exceed schema max_length (100 chars)
+            def _trunc(val: str, max_len: int = 95) -> str:
+                if val and len(val) > max_len:
+                    return val[:max_len].rsplit(" ", 1)[0] + "..."
+                return val
+
             plot_overview = PlotOverview(
                 book_id=book_id,
                 user_id=user_id,
@@ -1476,13 +1482,13 @@ Return a JSON object with:
                 original_prompt=original_prompt,
                 creative_directive=creative_directive,  # NEW: Store combined directive
                 themes=themes_value,
-                story_type=plot_data.get("story_type") or "hero's journey",
-                script_story_type=plot_data.get("script_story_type")
+                story_type=_trunc(plot_data.get("story_type") or "hero's journey"),
+                script_story_type=_trunc(plot_data.get("script_story_type")
                 or plot_data.get("story_type")
-                or "hero's journey",
-                genre=plot_data.get("genre")
-                or book_context.get("book", {}).get("genre", "fiction"),
-                tone=plot_data.get("tone") or "hopeful",
+                or "hero's journey"),
+                genre=_trunc(plot_data.get("genre")
+                or book_context.get("book", {}).get("genre", "fiction")),
+                tone=_trunc(plot_data.get("tone") or "hopeful"),
                 audience=plot_data.get("audience") or "adult",
                 setting=plot_data.get("setting") or "Contemporary world",
                 medium=plot_data.get("medium"),
