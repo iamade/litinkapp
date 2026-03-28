@@ -133,40 +133,48 @@ class ModelFallbackManager:
                 )
                 last_error = e
 
-                # Check for rate limit or timeout errors - don't try other models
-                # Rate limits: switching models won't help with account-wide limits
+                # Check for rate limit or timeout errors
+                # For FREE tier models: rate limits are per-provider, so continue to next model
+                # For paid tiers: rate limits are account-wide, so stop fallback
                 # Timeouts: the image is likely still processing on ModelsLab's side
                 stop_fallback_indicators = [
-                    # Rate limit indicators
+                    # Timeout indicators - image is likely still processing
+                    "timed out",
+                    "timeout",
+                    "time out",
+                ]
+                rate_limit_indicators = [
                     "rate limit",
                     "rate_limit",
                     "ratelimit",
                     "quota exceeded",
                     "too many requests",
                     "429",
-                    # Timeout indicators - image is likely still processing
-                    "timed out",
-                    "timeout",
-                    "time out",
                     "exceeded",  # e.g., "max wait time exceeded"
                 ]
                 error_lower = error_msg.lower()
-                if any(
-                    indicator in error_lower for indicator in stop_fallback_indicators
-                ):
-                    # Determine the type of error for better logging
-                    is_timeout = any(
-                        t in error_lower for t in ["timed out", "timeout", "time out"]
+                is_timeout = any(
+                    t in error_lower for t in stop_fallback_indicators
+                )
+                is_rate_limit = any(
+                    indicator in error_lower for indicator in rate_limit_indicators
+                )
+                is_free_tier = tier_normalized == "free" or ":free" in model
+
+                if is_timeout:
+                    logger.warning(
+                        f"[FALLBACK] ⏱️ Timeout detected - stopping fallback (image may still be processing on provider)"
                     )
-                    if is_timeout:
-                        logger.warning(
-                            f"[FALLBACK] ⏱️ Timeout detected - stopping fallback (image may still be processing on provider)"
-                        )
-                    else:
-                        logger.warning(
-                            f"[FALLBACK] ⚠️ Rate limit detected - stopping fallback to preserve quota"
-                        )
                     break
+                elif is_rate_limit and not is_free_tier:
+                    logger.warning(
+                        f"[FALLBACK] ⚠️ Rate limit detected on paid model - stopping fallback to preserve quota"
+                    )
+                    break
+                elif is_rate_limit and is_free_tier:
+                    logger.info(
+                        f"[FALLBACK] ℹ️ Rate limit on free model {model} - continuing to next fallback"
+                    )
 
                 if i < len(models_to_try) - 1:
                     backoff_time = 2**i
@@ -257,39 +265,46 @@ class ModelFallbackManager:
                 )
                 last_error = e
 
-                # Check for rate limit or timeout errors - don't try other models
-                # Rate limits: switching models won't help with account-wide limits
-                # Timeouts: the image is likely still processing on ModelsLab's side
+                # Check for rate limit or timeout errors
+                # For FREE tier models: rate limits are per-provider, so continue to next model
+                # For paid tiers: rate limits are account-wide, so stop fallback
                 stop_fallback_indicators = [
-                    # Rate limit indicators
+                    "timed out",
+                    "timeout",
+                    "time out",
+                ]
+                rate_limit_indicators = [
                     "rate limit",
                     "rate_limit",
                     "ratelimit",
                     "quota exceeded",
                     "too many requests",
                     "429",
-                    # Timeout indicators - image is likely still processing
-                    "timed out",
-                    "timeout",
-                    "time out",
                     "exceeded",
                 ]
                 error_lower = error_msg.lower()
-                if any(
-                    indicator in error_lower for indicator in stop_fallback_indicators
-                ):
-                    is_timeout = any(
-                        t in error_lower for t in ["timed out", "timeout", "time out"]
+                is_timeout = any(
+                    t in error_lower for t in stop_fallback_indicators
+                )
+                is_rate_limit = any(
+                    indicator in error_lower for indicator in rate_limit_indicators
+                )
+                is_free_model = ":free" in model
+
+                if is_timeout:
+                    logger.warning(
+                        f"[FALLBACK] ⏱️ Timeout detected - stopping fallback (image may still be processing on provider)"
                     )
-                    if is_timeout:
-                        logger.warning(
-                            f"[FALLBACK] ⏱️ Timeout detected - stopping fallback (image may still be processing on provider)"
-                        )
-                    else:
-                        logger.warning(
-                            f"[FALLBACK] ⚠️ Rate limit detected - stopping fallback to preserve quota"
-                        )
                     break
+                elif is_rate_limit and not is_free_model:
+                    logger.warning(
+                        f"[FALLBACK] ⚠️ Rate limit detected on paid model - stopping fallback to preserve quota"
+                    )
+                    break
+                elif is_rate_limit and is_free_model:
+                    logger.info(
+                        f"[FALLBACK] ℹ️ Rate limit on free model {model} - continuing to next fallback"
+                    )
 
                 if i < len(models) - 1:
                     backoff_time = 2**i
