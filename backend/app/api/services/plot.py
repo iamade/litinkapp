@@ -100,16 +100,17 @@ class PlotService:
 
                 # CRITICAL FIX: Inject original_prompt back into generated_plot
                 # so it's available for _store_plot_overview to create creative_directive
-                if plot_data.original_prompt:
-                    generated_plot["original_prompt"] = plot_data.original_prompt
+                original_prompt = getattr(plot_data, 'original_prompt', None) or getattr(plot_data, 'prompt', None)
+                if original_prompt:
+                    generated_plot["original_prompt"] = original_prompt
                     # Also pre-construct creative_directive so _generate_characters can use it immediately
                     logline = generated_plot.get("logline", "")
                     if logline:
                         generated_plot["creative_directive"] = (
-                            f"{plot_data.original_prompt}\n\nStory Summary: {logline}"
+                            f"{original_prompt}\n\nStory Summary: {logline}"
                         )
                     else:
-                        generated_plot["creative_directive"] = plot_data.original_prompt
+                        generated_plot["creative_directive"] = original_prompt
 
                 # 4. Generate characters
                 generated_characters = await self._generate_characters(
