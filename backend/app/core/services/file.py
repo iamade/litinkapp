@@ -2060,7 +2060,7 @@ class FileService:
                         for line in first_lines:
                             line_stripped = line.strip()
                             # Check if it matches chapter pattern
-                            chapter_match = self._match_chapter_patterns(line_stripped)
+                            chapter_match = self.structure_detector._match_chapter_patterns(line_stripped)
                             if chapter_match:
                                 # Use the chapter pattern as title
                                 if chapter_match.get("title"):
