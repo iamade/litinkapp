@@ -417,6 +417,22 @@ async def generate_character_images_optimized(
                 if not image_url:
                     raise Exception("No image URL in V7 response")
 
+                # Persist image from CDN to our own S3 storage
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    import uuid as _uuid_mod
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else 'system',
+                        media_type='images',
+                        record_id=str(_uuid_mod.uuid4()),
+                        extension='png',
+                    )
+                    image_url = await storage.persist_from_url(image_url, s3_path, content_type='image/png')
+                    logger.info(f'[ImageTask] Persisted character image to S3: {s3_path}')
+                except Exception as persist_error:
+                    logger.error(f'[ImageTask] Failed to persist character image to S3: {persist_error}')
+
                 # Store in database
                 image_record_data = {
                     "video_generation_id": video_gen_id,
@@ -629,6 +645,22 @@ async def generate_scene_images_optimized(
 
                 if not image_url:
                     raise Exception("No image URL in V7 response")
+
+                # Persist image from CDN to our own S3 storage
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    import uuid as _uuid_mod
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else 'system',
+                        media_type='images',
+                        record_id=str(_uuid_mod.uuid4()),
+                        extension='png',
+                    )
+                    image_url = await storage.persist_from_url(image_url, s3_path, content_type='image/png')
+                    logger.info(f'[ImageTask] Persisted scene image to S3: {s3_path}')
+                except Exception as persist_error:
+                    logger.error(f'[ImageTask] Failed to persist scene image to S3: {persist_error}')
 
                 # Store in database
                 image_record_data = {
@@ -930,6 +962,24 @@ async def async_generate_character_image_task(
             image_url = result.get("image_url")
             generation_time = result.get("generation_time", 0)
             model_used = result.get("model_used", "seedream-t2i")
+
+            # Persist image from CDN to our own S3 storage
+            if image_url:
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    import uuid as _uuid_mod
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else 'system',
+                        media_type='images',
+                        record_id=str(_uuid_mod.uuid4()),
+                        extension='png',
+                    )
+                    image_url = await storage.persist_from_url(image_url, s3_path, content_type='image/png')
+                    logger.info(f'[CharacterImageTask] Persisted image to S3: {s3_path}')
+                except Exception as persist_error:
+                    logger.error(f'[CharacterImageTask] Failed to persist image to S3: {persist_error}')
+                    # Don't raise — keep the CDN URL as fallback
 
             # Update the image_generations record with the result
             update_query = text(
@@ -1312,6 +1362,23 @@ async def async_generate_scene_image_task(
 
             if not image_url:
                 raise Exception("No image URL returned from ModelsLab service")
+
+            # Persist image from CDN to our own S3 storage
+            try:
+                from app.core.services.storage import get_storage_service, S3StorageService
+                import uuid as _uuid_mod
+                storage = get_storage_service()
+                s3_path = S3StorageService.build_media_path(
+                    user_id=str(user_id) if user_id else 'system',
+                    media_type='images',
+                    record_id=str(_uuid_mod.uuid4()),
+                    extension='png',
+                )
+                image_url = await storage.persist_from_url(image_url, s3_path, content_type='image/png')
+                logger.info(f'[SceneImageTask] Persisted image to S3: {s3_path}')
+            except Exception as persist_error:
+                logger.error(f'[SceneImageTask] Failed to persist image to S3: {persist_error}')
+                # Don't raise — keep the CDN URL as fallback
 
             # Prepare metadata with scene info
             existing_metadata = {}

@@ -143,6 +143,40 @@ class S3StorageService:
             logger.error(f"Stream upload failed for {path}: {e}")
             raise
 
+    @staticmethod
+    def build_media_path(user_id: str, media_type: str, record_id: str, extension: str) -> str:
+        """Build a standardized S3 path for media files."""
+        return f"users/{user_id}/{media_type}/{record_id}.{extension}"
+
+    async def persist_from_url(self, source_url: str, dest_path: str, content_type: Optional[str] = None, max_retries: int = 3) -> str:
+        """Download from external URL and persist to our S3 storage."""
+        import httpx
+        import asyncio
+
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.get(source_url)
+                    response.raise_for_status()
+                    return await self.upload(response.content, dest_path, content_type=content_type)
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                if e.response.status_code == 404 and attempt < max_retries - 1:
+                    logger.warning(f"[persist_from_url] 404 for {source_url}, retry {attempt + 1}/{max_retries}")
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    logger.warning(f"[persist_from_url] Error for {source_url}, retry {attempt + 1}/{max_retries}: {e}")
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise
+
+        raise last_error  # type: ignore[misc]
+
     def _strip_url_prefix(self, path: str) -> str:
         """Strip full URL prefix from storage path, returning just the object key.
 
