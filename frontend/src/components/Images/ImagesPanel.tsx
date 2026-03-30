@@ -90,6 +90,8 @@ interface Scene {
 interface ChapterScript {
   id: string;
   script: string;
+  characters?: any[];
+  character_ids?: string[];
   scenes?: Scene[];
   scene_descriptions?: SceneDescription[];
   scene_order?: number[];
@@ -782,14 +784,33 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   // Get characters from selected script and enrich with plot overview data
   const characters = React.useMemo(() => {
     let baseCharacters: any[] = [];
+    const selectedScriptCharacterIds = (
+      selectedScript as { character_ids?: string[] } | null
+    )?.character_ids || [];
     
     // First priority: characters from the selected script
     if (typeof selectedScript === "object" && selectedScript !== null && "characters" in selectedScript) {
       const scriptCharacters = (selectedScript as { characters?: any[] }).characters || [];
       if (scriptCharacters.length > 0) {
         // Convert to normalized format and enrich with plot overview data
-        baseCharacters = scriptCharacters.map((char) => {
+        baseCharacters = scriptCharacters.map((char, idx) => {
           const charName = typeof char === 'string' ? char : char.name;
+          const scriptEntityType = typeof char === 'object' ? (char as any).entity_type : undefined;
+          const linkedCharacterId = selectedScriptCharacterIds[idx];
+
+          // If this script entry is explicitly linked to an object/location in plot overview, exclude it from Characters.
+          if (linkedCharacterId && plotOverview?.characters?.length) {
+            const linkedPlotChar = plotOverview.characters.find((pc: any) => pc.id === linkedCharacterId);
+            const linkedEntityType = linkedPlotChar?.entity_type;
+            if (linkedEntityType === 'object' || linkedEntityType === 'location') {
+              return null;
+            }
+          }
+
+          // Explicit object/location entries should never appear in Characters.
+          if (scriptEntityType === 'object' || scriptEntityType === 'location') {
+            return null;
+          }
 
           // Try to find matching character in plot overview for enriched data
           const plotChar = plotOverview?.characters?.find(pc => {
@@ -891,7 +912,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           return typeof char === 'string' 
             ? { name: char, originalName: char, displayName: char } 
             : { ...char, originalName: char.name, displayName: char.name };
-        });
+        }).filter(Boolean) as any[];
       }
     }
 
