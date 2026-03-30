@@ -148,22 +148,34 @@ class S3StorageService:
         """Build a standardized S3 path for media files."""
         return f"users/{user_id}/{media_type}/{record_id}.{extension}"
 
-    async def persist_from_url(self, source_url: str, dest_path: str, content_type: Optional[str] = None, max_retries: int = 3) -> str:
-        """Download from external URL and persist to our S3 storage."""
+    async def persist_from_url(self, source_url: str, dest_path: str, content_type: Optional[str] = None, timeout_seconds: int = 120, max_retries: int = 3) -> str:
+        """Download from external URL and persist to our S3 storage.
+
+        Streams the response into an in-memory buffer to avoid holding the
+        entire payload in the httpx response object, then uploads via
+        upload_stream for better memory efficiency on large files.
+        """
         import httpx
         import asyncio
+        import io
 
         last_error = None
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient(timeout=120.0) as client:
-                    response = await client.get(source_url)
-                    response.raise_for_status()
-                    return await self.upload(response.content, dest_path, content_type=content_type)
+                async with httpx.AsyncClient(timeout=float(timeout_seconds), follow_redirects=True) as client:
+                    async with client.stream("GET", source_url) as response:
+                        response.raise_for_status()
+                        buffer = io.BytesIO()
+                        async for chunk in response.aiter_bytes(chunk_size=8192):
+                            buffer.write(chunk)
+                        buffer.seek(0)
+                        return await self.upload_stream(buffer, dest_path, content_type=content_type)
             except httpx.HTTPStatusError as e:
                 last_error = e
-                if e.response.status_code == 404 and attempt < max_retries - 1:
-                    logger.warning(f"[persist_from_url] 404 for {source_url}, retry {attempt + 1}/{max_retries}")
+                status = e.response.status_code
+                is_transient = status == 429 or status >= 500 or status == 404
+                if is_transient and attempt < max_retries - 1:
+                    logger.warning(f"[persist_from_url] HTTP {status} for {source_url}, retry {attempt + 1}/{max_retries}")
                     await asyncio.sleep(2 ** attempt)
                     continue
                 raise
