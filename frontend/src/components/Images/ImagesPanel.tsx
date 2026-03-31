@@ -2308,7 +2308,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         }}
         sceneNumber={selectedSceneForGeneration?.sceneNumber || 0}
         initialDescription={selectedSceneForGeneration?.description || ''}
-        availableCharacters={[
+        availableCharacters={(() => {
+          const allEntities = [
             // Characters
             ...characters.map(c => ({
                 name: c.name,
@@ -2327,7 +2328,15 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 generationStatus: 'completed' as const,
                 entity_type: item.entity_type || 'object'
             }))
-        ]}
+          ];
+          const seen = new Set<string>();
+          return allEntities.filter(item => {
+            const key = item.id || item.name || '';
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+        })()}
         isGenerating={generatingScenes.has(selectedSceneForGeneration?.sceneNumber || -1)}
         parentSceneImageUrl={selectedSceneForGeneration?.referenceSceneImageUrl}
         referenceSceneOptions={selectedSceneForGeneration?.referenceSceneOptions || []}
