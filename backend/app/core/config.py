@@ -217,6 +217,11 @@ class Settings(BaseSettings):
     GOOGLE_AI_STUDIO_API_KEY: str = os.getenv("GOOGLE_AI_STUDIO_API_KEY", "")
     GOOGLE_AI_STUDIO_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
 
+    # Groq (fast inference provider)
+    # Get your API key from: https://console.groq.com/
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+
     # xAI Grok Video (prepared for future use)
     # Get your API key from: https://console.x.ai/
     GROK_API_KEY: str = os.getenv("GROK_API_KEY", "")
