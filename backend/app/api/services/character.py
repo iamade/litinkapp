@@ -1677,6 +1677,10 @@ Return a JSON array of matches sorted by confidence:
             "5. Need: Internal emotional need (1 sentence)",
             "6. Lie They Believe: False belief holding them back (1 sentence)",
             "7. Ghost (Past Trauma): Past wound or trauma affecting them (1 sentence)",
+            "8. Role: Character role in the story — one of: protagonist, antagonist, supporting, mentor, love_interest, comic_relief, narrator (1 word)",
+            "9. Accent: Speaking accent that fits the character's background — one of: neutral, nigerian, british, american, indian, australian, jamaican, french, german (1 word)",
+            "10. Voice Gender: male or female (1 word)",
+            '11. Voice Characteristics: Brief description of how the character sounds, e.g. "deep and authoritative", "warm and friendly", "sharp and commanding" (short phrase)',
             "",
             "RESPONSE FORMAT:",
             "Return ONLY a valid JSON object with these exact keys:",
@@ -1687,7 +1691,11 @@ Return a JSON array of matches sorted by confidence:
             '    "want": "string",',
             '    "need": "string",',
             '    "lie": "string",',
-            '    "ghost": "string"',
+            '    "ghost": "string",',
+            '    "role": "string",',
+            '    "accent": "string",',
+            '    "voice_gender": "string",',
+            '    "voice_characteristics": "string"',
             "}",
             "",
             "IMPORTANT: Keep descriptions concise but meaningful. Focus on details that make the character unique and interesting.",
@@ -1749,7 +1757,7 @@ Return a JSON array of matches sorted by confidence:
             # Validate all required fields are present
             result = {
                 "name": character_name,
-                "role": role or "supporting",
+                "role": character_data.get("role", role or "supporting"),
                 "physical_description": character_data.get("physical_description", ""),
                 "personality": character_data.get("personality", ""),
                 "character_arc": character_data.get("character_arc", ""),
@@ -1757,6 +1765,9 @@ Return a JSON array of matches sorted by confidence:
                 "need": character_data.get("need", ""),
                 "lie": character_data.get("lie", ""),
                 "ghost": character_data.get("ghost", ""),
+                "accent": character_data.get("accent", "neutral"),
+                "voice_gender": character_data.get("voice_gender", "auto"),
+                "voice_characteristics": character_data.get("voice_characteristics", ""),
             }
 
             logger.info(
@@ -1789,6 +1800,9 @@ Return a JSON array of matches sorted by confidence:
                 "need": self._extract_field_from_ai_text(ai_response, "need") or "",
                 "lie": self._extract_field_from_ai_text(ai_response, "lie") or "",
                 "ghost": self._extract_field_from_ai_text(ai_response, "ghost") or "",
+                "accent": self._extract_field_from_ai_text(ai_response, "accent") or "neutral",
+                "voice_gender": self._extract_field_from_ai_text(ai_response, "voice_gender") or "auto",
+                "voice_characteristics": self._extract_field_from_ai_text(ai_response, "voice_characteristics") or "",
             }
 
             extracted_count = sum(
