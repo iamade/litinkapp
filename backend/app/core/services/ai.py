@@ -12,49 +12,33 @@ from app.core.services.text_utils import (
     TextChunker,
     create_safe_openai_messages,
 )
+from app.core.services.provider_router import provider_router
+from app.core.model_config import get_model_config
+
+# Default model for AIService calls (free tier primary)
+_DEFAULT_MODEL = get_model_config("script", "free").primary
 
 
 class AIService:
-    """AI service for generating educational content with OpenAI and DeepSeek support"""
+    """AI service for generating educational content with unified provider routing"""
 
     def __init__(self):
-        # Initialize OpenAI client
-        self.openai_client = None
-        if settings.OPENAI_API_KEY:
-            self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-
-        # ✅ Initialize DeepSeek client
-        self.deepseek_client = None
-        if settings.DEEPSEEK_API_KEY:
-            self.deepseek_client = AsyncOpenAI(
-                api_key=settings.DEEPSEEK_API_KEY, base_url=settings.DEEPSEEK_BASE_URL
-            )
-
-        # Fallback: OpenRouter (used when DeepSeek/OpenAI keys are absent)
-        self.openrouter_client = None
-        if settings.OPENROUTER_API_KEY:
-            self.openrouter_client = AsyncOpenAI(
-                api_key=settings.OPENROUTER_API_KEY,
-                base_url=settings.OPENROUTER_BASE_URL,
-            )
-        # Default OpenRouter model for AIService fallback
-        self.openrouter_model = "openai/gpt-4o-mini"
-
-        # Set primary client: DeepSeek > OpenAI > OpenRouter
-        self.client = self.deepseek_client or self.openai_client or self.openrouter_client
-
-        # Set default models
-        self.openai_model = "gpt-3.5-turbo"
-        self.deepseek_model = settings.DEEPSEEK_MODEL
-        self.deepseek_reasoner_model = settings.DEEPSEEK_REASONER_MODEL
+        # Check if any provider is available via the router
+        self.client = (
+            provider_router.openrouter_client
+            or provider_router.google_client
+            or provider_router.groq_client
+        )
 
     def get_available_providers(self) -> List[str]:
         """Get list of available AI providers"""
         providers = []
-        if self.openai_client:
-            providers.append("openai")
-        if self.deepseek_client:
-            providers.append("deepseek")
+        if provider_router.openrouter_client:
+            providers.append("openrouter")
+        if provider_router.google_client:
+            providers.append("google")
+        if provider_router.groq_client:
+            providers.append("groq")
         return providers
 
     async def _make_completion(
@@ -64,35 +48,13 @@ class AIService:
         provider: str = "auto",
         **kwargs,
     ) -> Any:
-        """Make completion request with provider selection"""
+        """Make completion request via unified ProviderRouter.
 
-        # Auto-select provider and model
-        if provider == "auto":
-            if self.deepseek_client:
-                client = self.deepseek_client
-                model = model or self.deepseek_model
-            elif self.openai_client:
-                client = self.openai_client
-                model = model or self.openai_model
-            elif self.openrouter_client:
-                client = self.openrouter_client
-                model = model or self.openrouter_model
-            else:
-                raise ValueError("No AI providers available")
-        elif provider == "deepseek":
-            if not self.deepseek_client:
-                raise ValueError("DeepSeek not configured")
-            client = self.deepseek_client
-            model = model or self.deepseek_model
-        elif provider == "openai":
-            if not self.openai_client:
-                raise ValueError("OpenAI not configured")
-            client = self.openai_client
-            model = model or self.openai_model
-        else:
-            raise ValueError(f"Unknown provider: {provider}")
-
-        return await client.chat.completions.create(
+        The `provider` parameter is kept for backward compatibility but ignored —
+        routing is determined by the model prefix (google/, groq/, or OpenRouter).
+        """
+        model = model or _DEFAULT_MODEL
+        return await provider_router.chat_completion(
             model=model, messages=messages, **kwargs
         )
 
@@ -253,9 +215,7 @@ Ensure the entire output is a single valid JSON object.
                 self._make_completion(
                     messages=messages,
                     provider=provider,
-                    response_format=(
-                        {"type": "json_object"} if provider != "deepseek" else None
-                    ),  # DeepSeek might not support this
+                    response_format={"type": "json_object"},
                     temperature=0.3,
                 ),
                 timeout=settings.AI_TIMEOUT_SECONDS,  # Use configurable timeout
@@ -851,9 +811,7 @@ Return only the list of scene descriptions.
             response = await self._make_completion(
                 messages=messages,
                 provider=provider,
-                response_format=(
-                    {"type": "json_object"} if provider != "deepseek" else None
-                ),
+                response_format={"type": "json_object"},
                 temperature=0.5,  # Balanced creativity and adherence to context
                 max_tokens=8000,  # Increased for longer scripts with audio design
             )
