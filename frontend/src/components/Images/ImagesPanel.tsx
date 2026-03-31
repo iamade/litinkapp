@@ -2311,14 +2311,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         availableCharacters={(() => {
           const allEntities = [
             // Characters
-            ...characters.map(c => ({
-                name: c.name,
-                imageUrl: c.image_url || c.imageUrl || '',
-                id: c.id || c.name,
-                prompt: '',
-                generationStatus: 'completed' as const,
-                entity_type: c.entity_type || 'character'
-            })),
+            ...characters.map(c => {
+                const charKey = c.originalName || c.name;
+                const linkedImage = characterImages?.[charKey];
+                return {
+                    name: c.name,
+                    imageUrl: linkedImage?.imageUrl || c.image_url || c.imageUrl || '',
+                    id: c.id || c.name,
+                    prompt: linkedImage?.prompt || '',
+                    generationStatus: (linkedImage?.generationStatus || 'completed') as 'completed' | 'pending' | 'generating' | 'failed',
+                    entity_type: c.entity_type || 'character'
+                };
+            }),
             // Objects & Locations
             ...objectsAndLocations.map((item: any) => ({
                 name: item.name,

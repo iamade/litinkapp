@@ -183,6 +183,33 @@ export const useImageGeneration = (
             }
             return;
           }
+
+          // Handle character-type images (from linkCharacterImage or direct generation)
+          if (imageType === 'character' && characterName) {
+            // Only set if we don't already have an image for this character,
+            // or if this one is newer (sorted newest first, so first one wins)
+            if (!characterImagesMap[characterName]) {
+              let uiStatus: 'pending' | 'generating' | 'completed' | 'failed' = 'pending';
+              if (img.status === 'completed') {
+                uiStatus = 'completed';
+              } else if (img.status === 'failed') {
+                uiStatus = 'failed';
+              } else if (img.status === 'in_progress' || img.status === 'processing') {
+                uiStatus = 'generating';
+              }
+
+              characterImagesMap[characterName] = {
+                name: characterName,
+                imageUrl: url,
+                prompt: prompt,
+                generationStatus: uiStatus,
+                generatedAt: img.created_at,
+                id: img.id,
+                script_id: normalizedScriptId,
+              };
+            }
+            return;
+          }
           // Optionally ignore other types without logging noise
         });
       }
