@@ -8,6 +8,7 @@ from openai.types.chat import (
 from app.core.config import settings
 from app.core.model_config import ModelTier, SCRIPT_MODEL_CONFIG, get_model_config
 from app.core.services.model_fallback import fallback_manager
+from app.core.services.provider_router import provider_router
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,24 +16,12 @@ logger = logging.getLogger(__name__)
 
 class OpenRouterService:
     """
-    OpenRouter integration for intelligent model routing
-    Handles all LLM requests with automatic fallback and cost optimization
-    Uses centralized model configuration and fallback manager
+    Intelligent model routing with automatic fallback and cost optimization.
+    Uses ProviderRouter to route requests to the correct provider
+    (Google AI Studio, Groq, or OpenRouter) based on model prefix.
     """
 
     def __init__(self):
-        if not settings.OPENROUTER_API_KEY:
-            raise ValueError("OPENROUTER_API_KEY is required")
-
-        self.client = AsyncOpenAI(
-            api_key=settings.OPENROUTER_API_KEY,
-            base_url=settings.OPENROUTER_BASE_URL,
-            default_headers={
-                "HTTP-Referer": settings.FRONTEND_URL,  # Optional, for rankings
-                "X-Title": "LitinkAI",  # Optional, shows in OpenRouter dashboard
-            },
-        )
-
         # Initialize cost tracking
         self.cost_tracker = CostTracker()
 
@@ -99,9 +88,8 @@ class OpenRouterService:
             f"[OpenRouter] Generating {script_type} script with {model} for tier {tier_str}"
         )
 
-        # Make the API call
-        create_fn: Any = getattr(self.client.chat.completions, "create")
-        response = await create_fn(
+        # Make the API call via ProviderRouter (routes to correct provider by model prefix)
+        response = await provider_router.chat_completion(
             model=model,
             messages=messages,
             max_tokens=config.max_tokens if config.max_tokens else 4000,
@@ -425,8 +413,7 @@ What is it? You look worried.
     ) -> Dict[str, Any]:
         """Execute the actual analysis API call"""
         try:
-            create_fn: Any = getattr(self.client.chat.completions, "create")
-            response = await create_fn(
+            response = await provider_router.chat_completion(
                 model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -589,8 +576,10 @@ If expanding a specific section, seamlessly integrate new content so it reads as
         Get list of available models from OpenRouter
         """
         try:
-            # Use OpenAI-compatible client to get models
-            models_response = await self.client.models.list()
+            # Use OpenRouter client to list models
+            if not provider_router.openrouter_client:
+                return {"status": "error", "error": "OpenRouter not configured", "models": []}
+            models_response = await provider_router.openrouter_client.models.list()
 
             # Convert Model objects to dicts
             models = []

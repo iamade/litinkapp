@@ -9,6 +9,10 @@ import fitz  # PyMuPDF
 from app.core.config import settings
 import re
 from app.core.services.ai import AIService
+from app.core.model_config import get_model_config
+
+# Default model for file processing AI calls (free tier primary)
+_FILE_DEFAULT_MODEL = get_model_config("script", "free").primary
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.books.schemas import BookCreate, ChapterCreate, BookUpdate
 import tempfile
@@ -6209,7 +6213,7 @@ Chapters:
                     },
                     {"role": "user", "content": prompt},
                 ],
-                provider="auto",
+                model=_FILE_DEFAULT_MODEL,
                 max_tokens=4000,
                 temperature=0.1,
             )
@@ -6424,7 +6428,6 @@ Chapters:
             """
 
         try:
-            # ✅ FIX: Use new provider-based system
             response = await self.ai_service._make_completion(
                 messages=[
                     {
@@ -6433,7 +6436,7 @@ Chapters:
                     },
                     {"role": "user", "content": prompt},
                 ],
-                provider="auto",
+                model=_FILE_DEFAULT_MODEL,
                 max_tokens=4000,
                 temperature=0.1,
             )
@@ -6617,7 +6620,6 @@ Chapters:
             }}
             """
 
-            # ✅ FIX: Use new provider-based system
             response = await self.ai_service._make_completion(
                 messages=[
                     {
@@ -6626,7 +6628,7 @@ Chapters:
                     },
                     {"role": "user", "content": prompt},
                 ],
-                provider="auto",
+                model=_FILE_DEFAULT_MODEL,
                 max_tokens=4000,
                 temperature=0.1,
             )
@@ -6684,10 +6686,9 @@ Chapters:
             }}
             """
 
-            # ✅ FIX: Use new provider-based system
             response = await self.ai_service._make_completion(
                 messages=[{"role": "user", "content": prompt}],
-                provider="auto",
+                model=_FILE_DEFAULT_MODEL,
                 max_tokens=300,
                 temperature=0.1,
             )
@@ -6738,7 +6739,6 @@ Chapters:
         """
 
         try:
-            # ✅ FIX: Use new provider-based system
             response = await self.ai_service._make_completion(
                 messages=[
                     {
@@ -6747,7 +6747,7 @@ Chapters:
                     },
                     {"role": "user", "content": prompt},
                 ],
-                provider="auto",
+                model=_FILE_DEFAULT_MODEL,
                 max_tokens=4000,
                 temperature=0.1,
             )
@@ -6830,10 +6830,9 @@ Chapters:
         }}"""
 
         try:
-            # ✅ FIX: Use new provider-based system
             response = await self.ai_service._make_completion(
                 messages=[{"role": "user", "content": prompt}],
-                provider="auto",
+                model=_FILE_DEFAULT_MODEL,
                 max_tokens=2000,
                 temperature=0.1,
             )
