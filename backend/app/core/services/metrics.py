@@ -89,7 +89,7 @@ class MetricsService:
         fallback_count = sum(
             1
             for record in plots
-            if record.generation_method in ["fallback", "fallback2"]
+            if record.generation_method in ["fallback", "fallback2", "fallback3", "fallback4"]
         )
 
         return {
@@ -117,7 +117,7 @@ class MetricsService:
             1
             for record in images
             if (record.metadata or {}).get("model_tier_used")
-            in ["fallback", "fallback2"]
+            in ["fallback", "fallback2", "fallback3", "fallback4"]
         )
 
         return {
@@ -144,7 +144,7 @@ class MetricsService:
             1
             for record in segments
             if (record.metadata or {}).get("model_tier_used")
-            in ["fallback", "fallback2"]
+            in ["fallback", "fallback2", "fallback3", "fallback4"]
         )
 
         return {
@@ -172,7 +172,7 @@ class MetricsService:
             1
             for record in audios
             if (record.metadata or {}).get("model_tier_used")
-            in ["fallback", "fallback2"]
+            in ["fallback", "fallback2", "fallback3", "fallback4"]
         )
 
         return {

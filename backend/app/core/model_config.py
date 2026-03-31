@@ -23,6 +23,7 @@ class ModelConfig:
     fallback3: Optional[str] = (
         None  # Added for additional fallback (Veo 3 direct, Grok AI)
     )
+    fallback4: Optional[str] = None  # 5th option — cross-provider safety net
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     cost_per_1k_input: Optional[float] = None
@@ -33,9 +34,11 @@ class ModelConfig:
 # All models accessed via OpenRouter for reliable connectivity and fallback handling
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="meta-llama/llama-3.3-70b-instruct:free",  # FREE, 131K ctx, battle-tested
-        fallback="stepfun/step-3.5-flash:free",  # FREE, 1M ctx, strong reasoning MoE
-        fallback2="deepseek/deepseek-chat",  # $0.55/1M, 164K ctx, reliable paid backup
+        primary="qwen/qwen3.6-plus-preview:free",  # FREE, 1M ctx, newest, strong JSON compliance
+        fallback="meta-llama/llama-3.3-70b-instruct:free",  # FREE, 66K ctx, battle-tested
+        fallback2="stepfun/step-3.5-flash:free",  # FREE, 1M ctx, strong reasoning MoE
+        fallback3="deepseek/deepseek-chat",  # $0.55/1M, 164K ctx, reliable paid backup
+        fallback4="google/gemini-2.5-flash",  # Google AI Studio, FREE tier, 1M ctx safety net
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.0,
@@ -45,6 +48,7 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         primary="qwen/qwen3.5-flash-02-23",  # $0.33/1M, 1M ctx, best value
         fallback="mistralai/mistral-small-2603",  # $0.75/1M, 262K ctx, reliable
         fallback2="openai/gpt-5.4-nano",  # $1.45/1M, 400K ctx, OpenAI quality
+        fallback4="google/gemini-2.5-flash",  # Google via OpenRouter ~$0.10/1M, cheap safety net
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.00014,
