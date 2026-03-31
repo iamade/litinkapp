@@ -64,6 +64,10 @@ class ModelFallbackManager:
             models_to_try.append(config.fallback)
         if config.fallback2:
             models_to_try.append(config.fallback2)
+        if config.fallback3:
+            models_to_try.append(config.fallback3)
+        if getattr(config, "fallback4", None):
+            models_to_try.append(config.fallback4)
 
         attempted_models = []
         last_error = None
@@ -76,7 +80,7 @@ class ModelFallbackManager:
                 )
                 continue
 
-            model_type = "primary" if i == 0 else f"fallback{i if i == 1 else '2'}"
+            model_type = "primary" if i == 0 else f"fallback{i}"
 
             try:
                 logger.warning(

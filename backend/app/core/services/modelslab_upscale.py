@@ -301,6 +301,10 @@ class ModelsLabUpscaleService:
             models_to_try.append(config.fallback)
         if config.fallback2:
             models_to_try.append(config.fallback2)
+        if config.fallback3:
+            models_to_try.append(config.fallback3)
+        if getattr(config, "fallback4", None):
+            models_to_try.append(config.fallback4)
 
         last_error = None
         for model_id in models_to_try:
