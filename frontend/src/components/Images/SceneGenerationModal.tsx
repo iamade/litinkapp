@@ -159,6 +159,18 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
     }
   };
 
+  // Deduplicate + filter characters (must be before early return to satisfy Rules of Hooks)
+  const filteredCharacters = React.useMemo(() => {
+    const seen = new Set<string>();
+    return availableCharacters.filter(char => {
+      if (!char.name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+      const key = char.id || char.imageUrl || char.name || '';
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [availableCharacters, searchTerm]);
+
   if (!isOpen) return null;
 
   const toggleCharacterSelection = (characterId: string | undefined) => {
@@ -178,10 +190,6 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
     }
     setSelectedCharacterIds(newSelected);
   };
-
-  const filteredCharacters = availableCharacters.filter(char => 
-    char.name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   const selectedReference = referenceSceneOptions.find(option => option.imageUrl === parentSceneImageUrl);
 
