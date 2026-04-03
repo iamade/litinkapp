@@ -4,6 +4,7 @@ import { usePlotGeneration } from "../../hooks/usePlotGeneration";
 import CharacterCard from "./CharacterCard";
 import { userService } from "../../services/userService";
 import { toast } from "react-hot-toast";
+import ProtectedImage from '../Common/ProtectedImage';
 
 interface PlotOverviewPanelProps {
   bookId: string;
@@ -1738,23 +1739,26 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
 
       {/* Image Viewer Modal */}
       {showImageModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-4">
-          <div className="bg-white rounded-lg max-w-4xl max-h-[90vh] w-full overflow-auto">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h3 className="text-lg font-semibold">Character Image</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
+          <div className="bg-gray-900 rounded-2xl max-w-5xl max-h-[92vh] w-full overflow-hidden border border-white/10 shadow-2xl">
+            <div className="flex justify-between items-center p-4 border-b border-white/10">
+              <h3 className="text-sm font-semibold text-white">Character Image Preview</h3>
               <button
                 onClick={() => setShowImageModal(null)}
-                className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
+                className="text-gray-400 hover:text-gray-200 text-2xl font-bold"
               >
                 ×
               </button>
             </div>
-            <div className="p-4 flex justify-center">
-              <img
+            <div className="p-4 flex justify-center bg-black">
+              <ProtectedImage
                 src={showImageModal}
                 alt="Character"
-                className="max-w-full max-h-[70vh] object-contain rounded"
+                className="max-w-full max-h-[72vh] object-contain rounded-lg"
               />
+            </div>
+            <div className="px-4 py-3 border-t border-white/10 text-xs text-gray-400">
+              Preview displays the backend-returned asset (watermark is embedded by backend for protected tiers).
             </div>
           </div>
         </div>

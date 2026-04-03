@@ -42,8 +42,10 @@ from app.audio.schemas import (
     AudioReassignResponse,
 )
 from app.books.models import Book, Chapter
+from app.plots.models import PlotOverview, Character
 from app.videos.models import ImageGeneration, AudioGeneration, Script, AudioExport
 from app.api.services.subscription import SubscriptionManager
+from app.subscriptions.models import SubscriptionTier
 from app.auth.models import User
 from app.projects.models import Project, Artifact
 from app.credits.dependencies import require_credits
@@ -417,6 +419,78 @@ async def list_chapter_images(
                     img_data["metadata"] = {}
 
                 chapter_images.append(ImageRecord(**img_data))
+
+        # Also include character images from PlotOverview/Characters tables
+        # Get the chapter to find book_id
+        chapter_result = await session.exec(
+            select(Chapter).where(Chapter.id == chapter_id)
+        )
+        chapter = chapter_result.first()
+
+        if chapter and chapter.book_id:
+            # Find PlotOverview for this book
+            plot_result = await session.exec(
+                select(PlotOverview).where(PlotOverview.book_id == chapter.book_id)
+            )
+            plot_overview = plot_result.first()
+
+            if plot_overview:
+                # Get characters with images linked to this plot overview
+                char_result = await session.exec(
+                    select(Character).where(
+                        Character.plot_overview_id == plot_overview.id,
+                        Character.image_url.isnot(None),  # type: ignore
+                    )
+                )
+                characters = char_result.all()
+
+                # Collect existing character names from ImageGeneration results to de-duplicate
+                existing_character_names = {
+                    img.character_name
+                    for img in chapter_images
+                    if img.character_name
+                }
+
+                for char in characters:
+                    if char.name in existing_character_names:
+                        continue
+
+                    chapter_images.append(
+                        ImageRecord(
+                            id=str(char.id),
+                            user_id=str(char.user_id),
+                            image_type="character",
+                            scene_description=None,
+                            character_name=char.name,
+                            image_url=char.image_url,
+                            thumbnail_url=None,
+                            image_prompt=char.image_generation_prompt,
+                            script_id=None,
+                            chapter_id=chapter_id,
+                            scene_number=None,
+                            shot_index=0,
+                            retry_count=0,
+                            status=char.image_generation_status or "completed",
+                            metadata=char.image_metadata or {},
+                            created_at=char.created_at.isoformat()
+                            if hasattr(char, "created_at") and char.created_at
+                            else datetime.utcnow().isoformat(),
+                        )
+                    )
+
+        # Tier-aware URL selection: paid users see clean previews, free see watermarked
+        sub_manager = SubscriptionManager(session)
+        user_tier = await sub_manager.get_user_tier(current_user.id)
+        is_paid = user_tier != SubscriptionTier.FREE
+
+        if is_paid:
+            for img in chapter_images:
+                metadata = img.metadata or {}
+                clean_url = metadata.get("clean_url")
+                if clean_url and img.image_url:
+                    # Swap: paid users see clean image; watermarked URL preserved for downloads
+                    img.watermarked_image_url = img.image_url
+                    img.image_url = clean_url
 
         return ChapterImagesResponse(
             chapter_id=chapter_id,

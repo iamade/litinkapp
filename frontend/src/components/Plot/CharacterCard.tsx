@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { userService } from '../../services/userService';
+import ProtectedImage from '../Common/ProtectedImage';
 
 interface Character {
   id: string;
@@ -32,10 +33,14 @@ interface Character {
   lie?: string;
   ghost?: string;
   image_url?: string;
+  watermarked_image_url?: string;
+  watermarked_url?: string;
   entity_type?: 'character' | 'object' | 'location';
   images?: Array<{
     id: string;
     image_url: string;
+    watermarked_image_url?: string;
+    watermarked_url?: string;
     created_at: string;
     status: string;
   }>;
@@ -82,17 +87,23 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
   const [showDeleteImageModal, setShowDeleteImageModal] = useState(false);
 
   const isObject = character.entity_type === 'object' || character.entity_type === 'location';
+  const resolveImageUrl = (img?: { watermarked_image_url?: string; watermarked_url?: string; image_url?: string } | null) =>
+    img?.watermarked_image_url || img?.watermarked_url || img?.image_url || '';
   
   // Carousel Logic
   const validImages = React.useMemo(() => {
-    const images = character.images?.filter(img => img.status === 'completed' && img.image_url) || [];
+    const images = (character.images?.filter(img => img.status === 'completed' && !!resolveImageUrl(img)) || []).map((img) => ({
+      ...img,
+      image_url: resolveImageUrl(img)
+    }));
     // If no history but we have a main image, treat it as the only image
-    if (images.length === 0 && character.image_url) {
-        return [{ id: 'legacy', image_url: character.image_url, created_at: '', status: 'completed' }];
+    const currentDefaultImage = resolveImageUrl(character);
+    if (images.length === 0 && currentDefaultImage) {
+        return [{ id: 'legacy', image_url: currentDefaultImage, created_at: '', status: 'completed' }];
     }
     // Sort by created_at desc
     return images.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [character.images, character.image_url]);
+  }, [character.images, character.image_url, character.watermarked_image_url, character.watermarked_url]);
 
   const currentImage = validImages[currentImageIndex] || validImages[0];
   const hasMultipleImages = validImages.length > 1;
@@ -109,7 +120,7 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
 
   const handleSetDefaultImage = async (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (!currentImage || currentImage.image_url === character.image_url) return;
+      if (!currentImage || currentImage.image_url === resolveImageUrl(character)) return;
       
       try {
           if (onSetDefaultImage) {
@@ -351,7 +362,7 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
           </div>
         ) : currentImage ? (
           <>
-            <img
+            <ProtectedImage
               src={currentImage.image_url}
               alt={character.name}
               className="w-full h-full object-cover transition-opacity duration-300"
@@ -394,7 +405,7 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
               </button>
               
               {/* Set as Default (if not already) */}
-              {currentImage.image_url !== character.image_url && (
+              {currentImage.image_url !== resolveImageUrl(character) && (
                   <button
                     onClick={handleSetDefaultImage}
                     className="p-1.5 bg-black bg-opacity-50 text-yellow-400 rounded-md hover:bg-opacity-70 transition-all"

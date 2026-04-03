@@ -287,7 +287,7 @@ export default function SubscriptionPage() {
                 </div>
               </div>
               <a
-                href="mailto:sales@litink.ai?subject=Enterprise%20Plan%20Inquiry"
+                href="mailto:contact@peopleprotocol.ca?subject=Enterprise%20Plan%20Inquiry"
                 className="flex-shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-xl font-semibold transition-all transform hover:scale-[1.02] shadow-lg"
               >
                 Contact Sales
@@ -358,7 +358,7 @@ export default function SubscriptionPage() {
             Need help choosing the right plan?
           </p>
           <a
-            href="mailto:support@litink.ai"
+            href="mailto:contact@peopleprotocol.ca"
             className="inline-flex items-center gap-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg font-medium hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
           >
             <CreditCard className="h-4 w-4" />

@@ -30,6 +30,7 @@ from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.core.config import settings
 from app.core.services.storage import storage_service
+from app.api.services.subscription import SubscriptionManager
 import json
 import os
 import mimetypes
@@ -297,13 +298,21 @@ async def get_merge_status(
 @router.get("/{merge_id}/download")
 async def download_merge_result(
     merge_id: str,
+    remove_watermark: bool = False,
     session: AsyncSession = Depends(get_session),
     current_user: dict = Depends(get_current_active_user),
 ):
-    """Download the completed merge result"""
+    """
+    Download the completed merge result.
+
+    Query params:
+        remove_watermark (bool): If true, serves the clean (unwatermarked) version.
+            Only available for paid tiers (Basic+). Free tier gets 403.
+    """
     try:
         print(
-            f"[MERGE DOWNLOAD] Downloading merge result for merge_id: {merge_id}, user: {current_user.get('id')}"
+            f"[MERGE DOWNLOAD] Downloading merge result for merge_id: {merge_id}, "
+            f"user: {current_user.get('id')}, remove_watermark: {remove_watermark}"
         )
 
         # Validate merge_id format
@@ -332,8 +341,28 @@ async def download_merge_result(
                 detail=f"Merge operation is not completed. Current status: {merge_op.merge_status}",
             )
 
-        # Get output file URL
-        output_file_url = merge_op.output_file_url
+        # Check download limits + tier permissions (Free tier blocked, watermark toggle enforced)
+        manager = SubscriptionManager(session)
+        download_check = await manager.check_and_record_download(
+            uuid.UUID(current_user["id"]),
+            merge_id=merge_id,
+            resource_type="merge",
+            remove_watermark=remove_watermark,
+        )
+        if not download_check["can_download"]:
+            raise HTTPException(
+                status_code=403,
+                detail=download_check["message"],
+            )
+
+        # Determine which file to serve: clean or watermarked
+        serve_clean = download_check.get("serve_clean", False)
+
+        if serve_clean and merge_op.clean_file_url:
+            output_file_url = merge_op.clean_file_url
+        else:
+            output_file_url = merge_op.output_file_url
+
         if not output_file_url:
             raise HTTPException(
                 status_code=404,

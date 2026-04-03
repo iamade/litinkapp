@@ -140,9 +140,13 @@ export default function SubscriptionTierCard({
     featureList.push(`${features.max_resolution} resolution`);
   }
 
-  // Watermark
-  if (features?.watermark === false) {
-    featureList.push("No watermark");
+  // Watermark + download policy (updated)
+  if (tier.tier === "free") {
+    featureList.push("Watermark on by default");
+    featureList.push("No individual asset downloads");
+  } else {
+    featureList.push("Watermark on by default");
+    featureList.push("Remove watermark at download");
   }
 
   // Books

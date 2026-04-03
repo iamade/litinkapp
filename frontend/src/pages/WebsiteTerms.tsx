@@ -207,8 +207,8 @@ export default function WebsiteTerms() {
               <p>Alberta, Canada</p>
               <p>
                 Email:{" "}
-                <a href="mailto:legal@litink.ai" className="text-purple-600 dark:text-purple-400 hover:underline">
-                  legal@litink.ai
+                <a href="mailto:contact@peopleprotocol.ca" className="text-purple-600 dark:text-purple-400 hover:underline">
+                  contact@peopleprotocol.ca
                 </a>
               </p>
               <p>

@@ -7,6 +7,7 @@ import requests
 from typing import Dict, Any, List, Optional, Tuple
 from app.core.database import async_session, engine
 from app.core.services.file import FileService
+from app.core.services.watermark import apply_watermark, check_has_watermark, apply_watermark_sync
 import json
 from app.merges.schemas import MergeQualityTier, FFmpegParameters, MergeInputFile
 from app.videos.models import VideoGeneration, VideoSegment
@@ -272,9 +273,12 @@ async def async_merge_audio_video_for_generation(video_generation_id: str):
                 f"- Key scene shots available: {len([s for s in scene_videos if s.get('key_scene_shot_url')])}"
             )
 
+            # Check if user requires watermark
+            has_watermark = await check_has_watermark(str(video_gen.user_id), session)
+
             # Merge audio and video
             merge_result = await merge_audio_video_scenes(
-                video_generation_id, scene_videos, audio_files
+                video_generation_id, scene_videos, audio_files, watermark=has_watermark
             )
 
             if not merge_result:
@@ -290,10 +294,13 @@ async def async_merge_audio_video_for_generation(video_generation_id: str):
                 final_video_url, quality_versions, merge_statistics, video_generation_id
             )
 
+            clean_video_url = merge_result.get("clean_video_url")
+
             video_gen.video_url = final_video_url
             video_gen.generation_status = "completed"
             video_gen.merge_data = {
                 "final_video_url": final_video_url,
+                "clean_video_url": clean_video_url,
                 "merge_statistics": merge_statistics,
                 "processing_details": merge_result.get("processing_details", {}),
                 "quality_versions": quality_versions,
@@ -386,6 +393,7 @@ async def merge_audio_video_scenes(
     video_generation_id: str,
     scene_videos: List[Dict[str, Any]],
     audio_files: Dict[str, Any],
+    watermark: bool = False,
 ) -> Dict[str, Any]:
     """Merge audio and video for all scenes"""
 
@@ -460,7 +468,7 @@ async def merge_audio_video_scenes(
         print(
             f"[FINAL MERGE] Concatenating {len(merged_scenes)} scenes into final video"
         )
-        final_result = await concatenate_final_video(merged_scenes, video_generation_id)
+        final_result = await concatenate_final_video(merged_scenes, video_generation_id, watermark=watermark)
 
         # Calculate statistics
         total_duration = sum([scene.get("duration", 0) for scene in merged_scenes])
@@ -1027,7 +1035,7 @@ async def reencode_video(
 
 
 async def concatenate_final_video(
-    merged_scenes: List[Dict[str, Any]], video_generation_id: str
+    merged_scenes: List[Dict[str, Any]], video_generation_id: str, watermark: bool = False
 ) -> Dict[str, Any]:
     """Concatenate all merged scenes into final video with advanced editing features"""
 
@@ -1143,14 +1151,29 @@ async def concatenate_final_video(
                 temp_dir, f"final_video_{MergeQualityTier.WEB.value}.mp4"
             )
 
+            # Always upload the clean (unwatermarked) version first
+            file_service = FileService()
+            clean_output = final_output
+            clean_video_url = await file_service.upload_file(
+                clean_output, f"final_videos/{video_generation_id}/final_video_clean.mp4"
+            )
+
+            # Apply watermark — always on by default for all tiers
+            if watermark:
+                watermarked_output = os.path.join(temp_dir, "final_video_watermarked.mp4")
+                if apply_watermark_sync(final_output, watermarked_output):
+                    final_output = watermarked_output
+                    print("[FINAL CONCAT] Watermark applied to final video")
+                else:
+                    raise Exception("Embedded watermark application failed for final video")
+
             processing_time = time.time() - start_time
 
             # Get file size
             file_size_bytes = os.path.getsize(final_output)
             file_size_mb = file_size_bytes / (1024 * 1024)
 
-            # Upload final video and quality versions
-            file_service = FileService()
+            # Upload watermarked version as the primary final video
             final_video_url = await file_service.upload_file(
                 final_output, f"final_videos/{video_generation_id}/final_video.mp4"
             )
@@ -1176,6 +1199,7 @@ async def concatenate_final_video(
 
             return {
                 "final_video_url": final_video_url,
+                "clean_video_url": clean_video_url,
                 "file_size_mb": file_size_mb,
                 "processing_time": processing_time,
                 "quality_versions": quality_versions,
@@ -1287,6 +1311,9 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
                 "merge_name": merge_record.get("merge_name", f"Merge {merge_id}"),
             }
 
+            # Check if user requires watermark
+            has_watermark = await check_has_watermark(user_id, session)
+
             # Update progress: Starting
             await update_merge_progress(
                 merge_id, 5.0, "Initializing merge operation", session=session
@@ -1294,17 +1321,18 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
 
             # Process the manual merge
             result = await perform_manual_merge(
-                merge_data, user_id, merge_id, session=session
+                merge_data, user_id, merge_id, session=session, watermark=has_watermark
             )
 
-            # Update database with final result
+            # Update database with final result (including clean_file_url)
             final_update_query = text(
                 """
-                UPDATE merge_operations 
-                SET merge_status = :status, 
-                    progress = :progress, 
-                    output_file_url = :output_url, 
-                    processing_stats = :stats, 
+                UPDATE merge_operations
+                SET merge_status = :status,
+                    progress = :progress,
+                    output_file_url = :output_url,
+                    clean_file_url = :clean_url,
+                    processing_stats = :stats,
                     updated_at = NOW()
                 WHERE id = :id
             """
@@ -1322,6 +1350,7 @@ async def async_process_manual_merge(merge_id: str, user_id: str):
                     "status": "COMPLETED",
                     "progress": 100,
                     "output_url": result.get("final_url"),
+                    "clean_url": result.get("clean_url"),
                     "stats": json.dumps(stats),
                     "id": merge_id,
                 },
@@ -1396,6 +1425,7 @@ async def perform_manual_merge(
     user_id: str,
     merge_id: str = None,
     session: AsyncSession = None,
+    watermark: bool = False,
 ) -> Dict[str, Any]:
     """Perform the actual manual merge operation"""
 
@@ -1474,8 +1504,24 @@ async def perform_manual_merge(
                     session=session,
                 )
 
-            # Upload final result
+            # Upload clean (unwatermarked) version first
             file_service = FileService()
+            clean_output = merged_output
+            clean_url = await file_service.upload_file(
+                clean_output,
+                f"manual_merges/{user_id}/{merge_name.replace(' ', '_')}_clean.{output_format}",
+            )
+
+            # Apply watermark — always on by default for all tiers
+            if watermark:
+                watermarked_path = os.path.join(temp_dir, f"watermarked_output.{output_format}")
+                if apply_watermark_sync(merged_output, watermarked_path):
+                    merged_output = watermarked_path
+                    print("[MANUAL MERGE] Watermark applied")
+                else:
+                    raise Exception("Embedded watermark application failed for manual merge output")
+
+            # Upload watermarked version as primary
             final_url = await file_service.upload_file(
                 merged_output,
                 f"manual_merges/{user_id}/{merge_name.replace(' ', '_')}.{output_format}",
@@ -1493,13 +1539,14 @@ async def perform_manual_merge(
                     merge_id,
                     100.0,
                     "Upload complete",
-                    {"final_url": final_url, "file_size_mb": file_size_mb},
+                    {"final_url": final_url, "clean_url": clean_url, "file_size_mb": file_size_mb},
                     session=session,
                 )
 
             return {
                 "success": True,
                 "final_url": final_url,
+                "clean_url": clean_url,
                 "file_size_mb": file_size_mb,
                 "quality_tier": quality_tier.value,
                 "output_format": output_format,

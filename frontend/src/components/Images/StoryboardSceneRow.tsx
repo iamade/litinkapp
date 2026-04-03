@@ -18,6 +18,7 @@ import {
   useSortable
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import ProtectedImage from '../Common/ProtectedImage';
 
 interface StoryboardSceneRowProps {
   sceneNumber: number;
@@ -94,7 +95,7 @@ const SortableImageCard = ({
             {/* Image Container */}
             <div className="aspect-video bg-gray-200 relative rounded-t-lg overflow-hidden pointer-events-none">
                  {/* pointer-events-none on content prevents dragging issues, but we re-enable for buttons */}
-                 <img
+                 <ProtectedImage
                     src={image.imageUrl}
                     alt={image.prompt}
                     className={`w-full h-full object-cover ${isExcluded ? 'grayscale' : ''}`}

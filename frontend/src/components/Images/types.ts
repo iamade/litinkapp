@@ -2,6 +2,7 @@
 export interface SceneImage {
   sceneNumber: number;
   imageUrl: string;
+  watermarkedImageUrl?: string;
   prompt: string;
   characters: string[];
   generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
@@ -14,6 +15,7 @@ export interface SceneImage {
 export interface CharacterImage {
   name: string;
   imageUrl: string;
+  watermarkedImageUrl?: string;
   prompt: string;
   generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
   generatedAt?: string;
