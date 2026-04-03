@@ -108,8 +108,8 @@ export default function TermsOfService() {
             </p>
             <p>
               You must notify us immediately at{" "}
-              <a href="mailto:security@litink.ai" className="text-purple-600 dark:text-purple-400 hover:underline">
-                security@litink.ai
+              <a href="mailto:contact@peopleprotocol.ca" className="text-purple-600 dark:text-purple-400 hover:underline">
+                contact@peopleprotocol.ca
               </a>{" "}
               if you suspect unauthorized access to your account. We are not
               liable for any loss arising from unauthorized use of your account
@@ -129,22 +129,22 @@ export default function TermsOfService() {
             <p>The Service is offered through the following plans:</p>
             <ul className="list-disc list-inside space-y-1 ml-4">
               <li>
-                <strong>Free:</strong> Limited access with restricted features
-                and credit allocation.
+                <strong>Free:</strong> Limited access with 100 credits, watermarked outputs, and restricted features.
               </li>
               <li>
-                <strong>Creator ($29/month):</strong> Full platform access with
-                monthly credit allocation and standard features.
+                <strong>Basic ($29/month):</strong> 1,500 credits/month, 720p resolution, watermark removal at download.
               </li>
               <li>
-                <strong>Studio ($99/month):</strong> Enhanced access with
-                increased credit allocation, priority processing, and advanced
-                features.
+                <strong>Standard ($79/month):</strong> 5,000 credits/month, 1080p resolution, AI model selection, voice cloning, priority processing.
               </li>
               <li>
-                <strong>Enterprise (custom pricing):</strong> Tailored solutions
-                with custom credit allocations, dedicated support, and SLA
-                agreements.
+                <strong>Premium ($199/month):</strong> 15,000 credits/month, 4K resolution, API access, priority processing.
+              </li>
+              <li>
+                <strong>Professional ($499/month):</strong> 50,000 credits/month, 4K resolution, unlimited uploads, dedicated support.
+              </li>
+              <li>
+                <strong>Enterprise (custom pricing):</strong> Tailored solutions with unlimited credits, 8K resolution, dedicated support, and SLA agreements.
               </li>
             </ul>
             <p>
@@ -189,8 +189,8 @@ export default function TermsOfService() {
               All payments are non-refundable except where required by applicable
               law (including Alberta consumer protection law). If you believe you
               are entitled to a refund, contact{" "}
-              <a href="mailto:billing@litink.ai" className="text-purple-600 dark:text-purple-400 hover:underline">
-                billing@litink.ai
+              <a href="mailto:contact@peopleprotocol.ca" className="text-purple-600 dark:text-purple-400 hover:underline">
+                contact@peopleprotocol.ca
               </a>
               .
             </p>
@@ -401,8 +401,8 @@ export default function TermsOfService() {
             <p>
               You may opt out of any data usage for model training at any time
               through your account settings or by contacting us at{" "}
-              <a href="mailto:privacy@litink.ai" className="text-purple-600 dark:text-purple-400 hover:underline">
-                privacy@litink.ai
+              <a href="mailto:contact@peopleprotocol.ca" className="text-purple-600 dark:text-purple-400 hover:underline">
+                contact@peopleprotocol.ca
               </a>
               . Opting out will not affect your ability to use the Service. For
               full details on data handling, see our{" "}
@@ -552,8 +552,8 @@ export default function TermsOfService() {
               <p>Alberta, Canada</p>
               <p>
                 Email:{" "}
-                <a href="mailto:legal@litink.ai" className="text-purple-600 dark:text-purple-400 hover:underline">
-                  legal@litink.ai
+                <a href="mailto:contact@peopleprotocol.ca" className="text-purple-600 dark:text-purple-400 hover:underline">
+                  contact@peopleprotocol.ca
                 </a>
               </p>
               <p>
