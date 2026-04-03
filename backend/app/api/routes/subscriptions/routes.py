@@ -220,6 +220,43 @@ async def get_subscription_tiers(session: AsyncSession = Depends(get_session)):
     #     raise HTTPException(status_code=500, detail="Failed to get subscription tiers")
 
 
+@router.get("/watermark-status")
+async def get_watermark_status(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Check watermark status for the current user.
+
+    All tiers have watermark ON by default. Paid tiers (Basic+) can
+    choose to remove watermark at the point of download.
+    """
+    manager = SubscriptionManager(session)
+    tier = await manager.get_user_tier(current_user.id)
+    tier_limits = manager.TIER_LIMITS.get(tier, manager.TIER_LIMITS[SubscriptionTier.FREE])
+
+    return {
+        "has_watermark": True,  # Always true — watermark is on by default for all tiers
+        "can_remove_watermark": tier_limits.get("can_remove_watermark", False),
+        "tier": tier.value,
+    }
+
+
+@router.get("/download-status")
+async def get_download_status(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get the current user's download status including today's count and limits"""
+    try:
+        manager = SubscriptionManager(session)
+        status = await manager.get_download_status(current_user.id)
+        return status
+    except Exception as e:
+        print(f"[SubscriptionsAPI] Error getting download status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get download status")
+
+
 @router.post("/cancel", response_model=SubscriptionCancelResponse)
 async def cancel_subscription(
     cancel_data: SubscriptionCancelRequest = SubscriptionCancelRequest(),

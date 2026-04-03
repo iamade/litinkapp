@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { X, Volume2, Loader2 } from 'lucide-react';
 import { SceneImage } from '../Images/types';
+import ProtectedImage from '../Common/ProtectedImage';
 
 interface DialogueLine {
   character: string;
@@ -110,7 +111,7 @@ const SceneGalleryModal: React.FC<SceneGalleryModalProps> = ({
           {/* Left: Image */}
           <div className="flex-1 bg-black flex items-center justify-center p-4 min-h-[260px]">
             {displayImage ? (
-              <img
+              <ProtectedImage
                 src={displayImage.imageUrl}
                 alt={`Scene ${sceneNumber}`}
                 className="max-w-full max-h-[55vh] object-contain rounded-lg shadow-2xl"

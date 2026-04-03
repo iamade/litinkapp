@@ -8,6 +8,7 @@ import { useCreditBalance } from '../../hooks/useCreditBalance';
 import { estimateScriptCredits } from '../../lib/creditCosts';
 import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 import { toast } from 'react-hot-toast';
+import ProtectedImage from '../Common/ProtectedImage';
 
 interface SceneDescription {
   scene_number: number;
@@ -821,7 +822,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
                     </span>
                     
                     {linkedPlotChar?.image_url && (
-                      <img 
+                      <ProtectedImage 
                         src={linkedPlotChar.image_url} 
                         alt={linkedPlotChar.name}
                         className="w-5 h-5 rounded-full object-cover ml-1"

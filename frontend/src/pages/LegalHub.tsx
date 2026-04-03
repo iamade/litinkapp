@@ -100,10 +100,10 @@ export default function LegalHub() {
           <p>
             Questions about our legal documents?{" "}
             <a
-              href="mailto:legal@litink.ai"
+              href="mailto:contact@peopleprotocol.ca"
               className="text-purple-600 dark:text-purple-400 hover:underline"
             >
-              legal@litink.ai
+              contact@peopleprotocol.ca
             </a>
           </p>
           <p className="mt-2">Last updated: March 23, 2026</p>

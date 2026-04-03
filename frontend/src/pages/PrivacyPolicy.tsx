@@ -277,16 +277,16 @@ export default function PrivacyPolicy() {
               You have the right to opt out of having your content used for AI
               model training at any time. You can manage this in your account
               settings or by emailing{" "}
-              <a href="mailto:privacy@litink.ai" className="text-purple-600 dark:text-purple-400 hover:underline">
-                privacy@litink.ai
+              <a href="mailto:contact@peopleprotocol.ca" className="text-purple-600 dark:text-purple-400 hover:underline">
+                contact@peopleprotocol.ca
               </a>
               .
             </p>
 
             <p className="mt-4">
               To exercise any of these rights, contact us at{" "}
-              <a href="mailto:privacy@litink.ai" className="text-purple-600 dark:text-purple-400 hover:underline">
-                privacy@litink.ai
+              <a href="mailto:contact@peopleprotocol.ca" className="text-purple-600 dark:text-purple-400 hover:underline">
+                contact@peopleprotocol.ca
               </a>
               . We will respond to all requests within 30 days (or as required
               by applicable law).
@@ -393,8 +393,8 @@ export default function PrivacyPolicy() {
               information from a child under 18, we will take steps to delete
               that information promptly. If you believe a child under 18 has
               provided us with personal information, please contact us at{" "}
-              <a href="mailto:privacy@litink.ai" className="text-purple-600 dark:text-purple-400 hover:underline">
-                privacy@litink.ai
+              <a href="mailto:contact@peopleprotocol.ca" className="text-purple-600 dark:text-purple-400 hover:underline">
+                contact@peopleprotocol.ca
               </a>
               .
             </p>
@@ -435,8 +435,8 @@ export default function PrivacyPolicy() {
               <p>Alberta, Canada</p>
               <p>
                 Privacy inquiries:{" "}
-                <a href="mailto:privacy@litink.ai" className="text-purple-600 dark:text-purple-400 hover:underline">
-                  privacy@litink.ai
+                <a href="mailto:contact@peopleprotocol.ca" className="text-purple-600 dark:text-purple-400 hover:underline">
+                  contact@peopleprotocol.ca
                 </a>
               </p>
               <p>

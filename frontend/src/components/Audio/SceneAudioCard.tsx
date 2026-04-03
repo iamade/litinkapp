@@ -15,6 +15,7 @@ import {
 import { SceneImage } from '../Images/types';
 import { toast } from 'react-hot-toast';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
+import ProtectedImage from '../Common/ProtectedImage';
 
 interface SceneAudioCardProps {
   sceneNumber: number;
@@ -157,7 +158,7 @@ const SceneAudioCard: React.FC<SceneAudioCardProps> = ({
           )}
           {validImages.length > 0 ? (
             <>
-              <img 
+              <ProtectedImage 
                 src={currentImage?.imageUrl} 
                 alt={`Scene ${sceneNumber}`}
                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"

@@ -1,5 +1,5 @@
 // src/components/Video/VideoProductionPanel.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import {
   Video,
@@ -19,6 +19,11 @@ import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 import { useCreditBalance } from '../../hooks/useCreditBalance';
 import { DEFAULT_VIDEO_SECONDS_PER_SHOT, estimateVideoCreditsFromShots } from '../../lib/creditCosts';
 import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
+import {
+  subscriptionService,
+  WatermarkStatusResponse,
+  DownloadStatusResponse
+} from '../../services/subscriptionService';
 
 interface SceneDescription {
   scene_number: number;
@@ -74,6 +79,38 @@ interface VideoProductionPanelProps {
   onDeleteGeneration?: (genId: string) => void; // Callback to delete a failed generation
   onNavigateToTab?: (tab: string) => void; // Navigate to another tab (e.g. 'images')
 }
+
+const TIER_ORDER = ['free', 'basic', 'pro', 'premium', 'professional', 'enterprise'] as const;
+const DEFAULT_TIER: typeof TIER_ORDER[number] = 'free';
+type DownloadQuality = 'low' | 'medium' | 'high' | 'ultra';
+
+const QUALITY_OPTIONS: Array<{ quality: DownloadQuality; label: string }> = [
+  { quality: 'low', label: 'Low Quality (480p)' },
+  { quality: 'medium', label: 'Medium Quality (720p)' },
+  { quality: 'high', label: 'High Quality (1080p)' },
+  { quality: 'ultra', label: 'Ultra Quality (4K)' }
+];
+
+const formatTierName = (tier?: string): string => {
+  if (!tier) return 'Premium';
+  return tier.charAt(0).toUpperCase() + tier.slice(1);
+};
+
+const getNextTier = (tier?: string): string => {
+  const current = (tier || DEFAULT_TIER).toLowerCase();
+  const currentIndex = TIER_ORDER.indexOf(current as typeof TIER_ORDER[number]);
+  if (currentIndex === -1 || currentIndex >= TIER_ORDER.length - 1) {
+    return 'premium';
+  }
+  return TIER_ORDER[currentIndex + 1];
+};
+
+const getFallbackAllowedQualities = (tier?: string): DownloadQuality[] => {
+  const normalizedTier = (tier || DEFAULT_TIER).toLowerCase();
+  if (normalizedTier === 'enterprise' || normalizedTier === 'professional') return ['medium', 'high', 'ultra'];
+  if (normalizedTier === 'pro' || normalizedTier === 'premium') return ['medium', 'high'];
+  return ['medium'];
+};
 
 const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   chapterId,
@@ -339,6 +376,65 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     setShowInsufficientCreditsModal(true);
   };
 
+
+  const [watermarkStatus, setWatermarkStatus] = useState<WatermarkStatusResponse | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<DownloadStatusResponse | null>(null);
+  const [isSubscriptionStatusLoading, setIsSubscriptionStatusLoading] = useState(false);
+
+  const refreshWatermarkStatus = useCallback(async () => {
+    try {
+      const status = await subscriptionService.getWatermarkStatus();
+      setWatermarkStatus(status);
+    } catch (error) {
+      setWatermarkStatus(null);
+    }
+  }, []);
+
+  const refreshDownloadStatus = useCallback(async () => {
+    try {
+      const status = await subscriptionService.getDownloadStatus();
+      setDownloadStatus(status);
+    } catch (error) {
+      setDownloadStatus(null);
+    }
+  }, []);
+
+  const refreshSubscriptionStatuses = useCallback(async () => {
+    setIsSubscriptionStatusLoading(true);
+    await Promise.allSettled([refreshWatermarkStatus(), refreshDownloadStatus()]);
+    setIsSubscriptionStatusLoading(false);
+  }, [refreshWatermarkStatus, refreshDownloadStatus]);
+
+  useEffect(() => {
+    refreshSubscriptionStatuses();
+  }, [refreshSubscriptionStatuses, selectedScriptId]);
+
+  const currentTier = (downloadStatus?.tier || watermarkStatus?.tier || DEFAULT_TIER).toLowerCase();
+  const allowedQualities = React.useMemo(() => {
+    const backendAllowed = (downloadStatus?.allowed_qualities || [])
+      .filter((quality): quality is DownloadQuality => quality === 'low' || quality === 'medium' || quality === 'high' || quality === 'ultra');
+
+    if (backendAllowed.length > 0) {
+      return QUALITY_OPTIONS.filter(option => backendAllowed.includes(option.quality));
+    }
+
+    const fallbackAllowed = getFallbackAllowedQualities(currentTier);
+    return QUALITY_OPTIONS.filter(option => fallbackAllowed.includes(option.quality));
+  }, [downloadStatus?.allowed_qualities, currentTier]);
+
+  const canDownload = downloadStatus?.can_download ?? true;
+  const downloadLimitReached = downloadStatus ? !downloadStatus.can_download : false;
+  const nextTierForDownloads = formatTierName(downloadStatus?.upgrade_tier || getNextTier(currentTier));
+  const shouldShowWatermarkBadge = true; // Updated policy: preview watermark is visible by default for all tiers.
+  const downloadUsageText = React.useMemo(() => {
+    if (!downloadStatus) return null;
+    const used = downloadStatus.downloads_used_today ?? 0;
+    const remaining = downloadStatus.downloads_remaining_today ?? 0;
+    const limit = downloadStatus.daily_download_limit;
+    const limitText = limit === 'unlimited' ? 'Unlimited' : String(limit);
+    return `${remaining}/${limitText} downloads remaining today (${used} used)`;
+  }, [downloadStatus]);
+
   const handleGenerateSelected = () => {
     if (creditBalance < selectedVideoCost) {
       openInsufficientCreditsModal(selectedVideoCost);
@@ -439,8 +535,19 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   };
 
 
-  const handleDownload = (quality?: 'low' | 'medium' | 'high' | 'ultra') => {
-    downloadVideo(quality);
+  const handleDownload = async (quality?: DownloadQuality) => {
+    if (!canDownload) {
+      toast.error(`Daily download limit reached. Upgrade to ${nextTierForDownloads} for more downloads.`);
+      return;
+    }
+
+    if (quality && !allowedQualities.some(option => option.quality === quality)) {
+      toast.error('Your subscription does not allow this quality.');
+      return;
+    }
+
+    await downloadVideo(quality);
+    await refreshDownloadStatus();
   };
 
 
@@ -669,47 +776,62 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
               </button>
               <div className="relative group">
                 <button
-                  disabled={controlsDisabled}
+                  disabled={controlsDisabled || downloadLimitReached || allowedQualities.length === 0}
                   className="flex items-center space-x-2 px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:bg-gray-400"
                 >
                   <Download className="w-3 h-3" />
                   <span>Download</span>
                 </button>
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
-                  <button
-                    onClick={() => handleDownload('low')}
-                    className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50"
-                  >
-                    Low Quality (480p)
-                  </button>
-                  <button
-                    onClick={() => handleDownload('medium')}
-                    className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50"
-                  >
-                    Medium Quality (720p)
-                  </button>
-                  <button
-                    onClick={() => handleDownload('high')}
-                    className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50"
-                  >
-                    High Quality (1080p)
-                  </button>
-                  <button
-                    onClick={() => handleDownload('ultra')}
-                    className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50"
-                  >
-                    Ultra Quality (4K)
-                  </button>
-                </div>
+                {!downloadLimitReached && allowedQualities.length > 0 && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">
+                    {allowedQualities.map((option) => (
+                      <button
+                        key={option.quality}
+                        onClick={() => handleDownload(option.quality)}
+                        className="block w-full text-left px-4 py-2 text-sm hover:bg-gray-50"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
-          <video
-            src={videoProduction.finalVideoUrl}
-            controls
-            className="w-full rounded-lg"
-          />
+          {(downloadUsageText || downloadLimitReached || shouldShowWatermarkBadge || isSubscriptionStatusLoading) && (
+            <div className="mb-3 space-y-2">
+              {isSubscriptionStatusLoading && (
+                <p className="text-xs text-gray-500">Checking subscription status...</p>
+              )}
+              {downloadUsageText && (
+                <p className="text-xs text-gray-600">{downloadUsageText}</p>
+              )}
+              {downloadLimitReached && (
+                <p className="text-xs text-amber-700">
+                  Daily download limit reached. Upgrade to {nextTierForDownloads} for more downloads.
+                </p>
+              )}
+              {shouldShowWatermarkBadge && (
+                <p className="text-xs text-indigo-600">
+                  Watermark is shown in previews by default. Paid tiers can remove it when downloading.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="relative">
+            {shouldShowWatermarkBadge && (
+              <span className="absolute top-3 left-3 z-10 px-2 py-1 text-xs font-semibold rounded bg-black/75 text-white">
+                Watermarked
+              </span>
+            )}
+            <video
+              src={videoProduction.finalVideoUrl}
+              controls
+              className="w-full rounded-lg"
+            />
+          </div>
         </div>
       )}
 

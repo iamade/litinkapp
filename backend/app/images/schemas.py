@@ -75,6 +75,7 @@ class ImageRecord(BaseModel):
     scene_description: Optional[str] = None
     character_name: Optional[str] = None
     image_url: Optional[str] = None
+    watermarked_image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     image_prompt: Optional[str] = None
     script_id: Optional[str] = None

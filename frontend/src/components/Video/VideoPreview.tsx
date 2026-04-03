@@ -4,6 +4,7 @@ import { VideoScene } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 import DeleteGenerationModal from './DeleteGenerationModal';
+import ProtectedImage from '../Common/ProtectedImage';
 
 
 interface SceneDescription {
@@ -562,7 +563,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
               >
                  <div className="w-full aspect-video bg-gray-200 dark:bg-gray-700 rounded overflow-hidden relative">
                     {scene.imageUrl ? (
-                      <img src={scene.imageUrl} alt={`Scene ${scene.sceneNumber}`} className="w-full h-full object-cover" />
+                      <ProtectedImage src={scene.imageUrl} alt={`Scene ${scene.sceneNumber}`} className="w-full h-full object-cover" />
                     ) : (
                       <div className="flex items-center justify-center w-full h-full text-gray-400">
                         <span className="text-xs">No img</span>
@@ -812,7 +813,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
                     {/* Thumbnail — use source_image if available, else show a placeholder */}
                     <div className="aspect-video bg-gray-800 relative">
                       {sv?.source_image ? (
-                        <img src={sv.source_image} alt="" className="w-full h-full object-cover" />
+                        <ProtectedImage src={sv.source_image} alt="" className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
                           <Play className="w-6 h-6 text-gray-500" />
@@ -975,7 +976,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = (props) => {
         ) : (
           /* Priority 2: Image URL (fallback from video or primary) */
           currentScene.imageUrl ? (
-            <img
+            <ProtectedImage
               src={currentScene.imageUrl}
               alt={`Scene ${currentScene.sceneNumber}`}
               className="w-full h-full object-cover"

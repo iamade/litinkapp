@@ -6,6 +6,11 @@ from datetime import datetime
 from sqlmodel import select, col, desc
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.services.modelslab_v7_image import ModelsLabV7ImageService
+from app.core.services.storage import S3StorageService, get_storage_service
+from app.core.services.watermark import (
+    persist_image_with_both_versions,
+    persist_image_with_embedded_watermark,
+)
 from app.api.services.subscription import SubscriptionManager
 from app.videos.models import ImageGeneration
 
@@ -968,10 +973,53 @@ class StandaloneImageService:
                 "model_used": generation_result.get("model_used"),
             }
 
+            # Persist both watermarked and clean copies to storage.
+            # Watermarked URL becomes the canonical image_url; clean URL is stored
+            # in meta.clean_url so the API can serve it to paid-tier users.
+            provider_image_url = generation_result.get("image_url")
+            final_image_url = provider_image_url
+            if provider_image_url:
+                storage = get_storage_service()
+                wm_s3_path = S3StorageService.build_media_path(
+                    user_id=str(record.user_id),
+                    media_type="images",
+                    record_id=str(uuid.uuid4()),
+                    extension="png",
+                )
+                clean_s3_path = S3StorageService.build_media_path(
+                    user_id=str(record.user_id),
+                    media_type="images",
+                    record_id=str(uuid.uuid4()),
+                    extension="png",
+                )
+                try:
+                    final_image_url, clean_url = (
+                        await persist_image_with_both_versions(
+                            provider_image_url,
+                            wm_s3_path,
+                            clean_s3_path,
+                            storage,
+                            content_type="image/png",
+                        )
+                    )
+                    merged_metadata["clean_url"] = clean_url
+                except Exception as e:
+                    logger.warning(
+                        f"[StandaloneImageService] Dual-persist failed, falling back to watermarked-only: {e}"
+                    )
+                    final_image_url = await persist_image_with_embedded_watermark(
+                        provider_image_url,
+                        wm_s3_path,
+                        storage,
+                        content_type="image/png",
+                    )
+                # Ensure callers of generate_* methods receive the persisted watermarked URL.
+                generation_result["image_url"] = final_image_url
+
             # Update fields
             record.status = "completed"
             record.image_prompt = prompt_used
-            record.image_url = generation_result.get("image_url")
+            record.image_url = final_image_url
             record.thumbnail_url = generation_result.get("thumbnail_url")
             record.generation_time_seconds = generation_result.get("generation_time")
             record.meta = merged_metadata

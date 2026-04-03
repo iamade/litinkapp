@@ -4,6 +4,7 @@ import { X, Search, Sparkles, Box, MapPin, Wand2, Loader2, RotateCcw } from 'luc
 import { CharacterImage } from './types';
 import { userService } from '../../services/userService';
 import { toast } from 'react-hot-toast';
+import ProtectedImage from '../Common/ProtectedImage';
 
 // Tier-based character reference limits
 const TIER_CHARACTER_LIMITS: Record<string, number> = {
@@ -159,6 +160,18 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
     }
   };
 
+  // Deduplicate + filter characters (must be before early return to satisfy Rules of Hooks)
+  const filteredCharacters = React.useMemo(() => {
+    const seen = new Set<string>();
+    return availableCharacters.filter(char => {
+      if (!char.name?.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+      const key = char.id || char.imageUrl || char.name || '';
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [availableCharacters, searchTerm]);
+
   if (!isOpen) return null;
 
   const toggleCharacterSelection = (characterId: string | undefined) => {
@@ -178,10 +191,6 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
     }
     setSelectedCharacterIds(newSelected);
   };
-
-  const filteredCharacters = availableCharacters.filter(char => 
-    char.name?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   const selectedReference = referenceSceneOptions.find(option => option.imageUrl === parentSceneImageUrl);
 
@@ -269,7 +278,7 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
             </div>
             {parentSceneImageUrl && (
               <div className="relative rounded-lg overflow-hidden border border-gray-700 w-48 h-28">
-                <img
+                <ProtectedImage
                   src={parentSceneImageUrl}
                   alt="Selected reference scene"
                   className="w-full h-full object-cover"
@@ -443,7 +452,7 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
                         : 'border-transparent hover:border-gray-600'}
                     `}
                   >
-                    <img 
+                    <ProtectedImage 
                       src={char.imageUrl || ''} 
                       alt={char.name || 'Character'} 
                       className="w-full h-full object-cover"

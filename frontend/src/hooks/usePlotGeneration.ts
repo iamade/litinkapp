@@ -101,7 +101,21 @@ export const usePlotGeneration = (
       } else {
         result = await userService.getPlotOverview(bookOrProjectId);
       }
-      setPlotOverview(result);
+      // Prefer backend-watermarked image variants for all preview surfaces.
+      const normalizeCharacterImage = (character: any) => ({
+        ...character,
+        image_url:
+          character?.watermarked_image_url ||
+          character?.watermarked_url ||
+          character?.image_url,
+      });
+      const normalizedResult = {
+        ...result,
+        characters: Array.isArray(result?.characters)
+          ? result.characters.map(normalizeCharacterImage)
+          : result?.characters,
+      };
+      setPlotOverview(normalizedResult);
     } catch (error: any) {
       // Check if it's a 404 (no data found) - treat as success
       if (error.message?.includes('404') || error.message?.includes('Not found')) {

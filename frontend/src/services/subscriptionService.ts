@@ -71,6 +71,22 @@ export interface SubscriptionCancelResponse {
   current_period_end?: number;
 }
 
+export interface WatermarkStatusResponse {
+  tier: "free" | "basic" | "pro" | "premium" | "professional" | "enterprise";
+  has_watermark: boolean;
+  upgrade_tier?: "basic" | "pro" | "premium" | "professional" | "enterprise";
+}
+
+export interface DownloadStatusResponse {
+  tier: "free" | "basic" | "pro" | "premium" | "professional" | "enterprise";
+  can_download: boolean;
+  downloads_used_today: number;
+  daily_download_limit: number | "unlimited";
+  downloads_remaining_today: number;
+  allowed_qualities?: Array<"low" | "medium" | "high" | "ultra" | "web" | "custom">;
+  upgrade_tier?: "basic" | "pro" | "premium" | "professional" | "enterprise";
+}
+
 export const subscriptionService = {
   // Get current user's subscription
   getCurrentSubscription: async (): Promise<UserSubscription> => {
@@ -90,6 +106,16 @@ export const subscriptionService = {
   // Get available subscription tiers
   getSubscriptionTiers: async (): Promise<SubscriptionTier[]> => {
     return apiClient.get<SubscriptionTier[]>("/subscriptions/tiers");
+  },
+
+  // Get watermark status for current user
+  getWatermarkStatus: async (): Promise<WatermarkStatusResponse> => {
+    return apiClient.get<WatermarkStatusResponse>("/subscriptions/watermark-status");
+  },
+
+  // Get download status for current user
+  getDownloadStatus: async (): Promise<DownloadStatusResponse> => {
+    return apiClient.get<DownloadStatusResponse>("/subscriptions/download-status");
   },
 
   // Cancel subscription

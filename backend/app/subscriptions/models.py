@@ -130,6 +130,36 @@ class SubscriptionHistory(SQLModel, table=True):
     )
 
 
+class UserDownload(SQLModel, table=True):
+    """Tracks user downloads for enforcing daily download limits."""
+
+    __tablename__ = "user_downloads"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    user_id: uuid.UUID = Field(
+        sa_column=Column(pg.UUID(as_uuid=True), nullable=False, index=True)
+    )
+    merge_id: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True))
+    )
+    resource_type: str = Field(default="merge")  # "merge", "video", etc.
+    downloaded_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+
+
 class UsageLog(SQLModel, table=True):
     __tablename__ = "usage_logs"
 

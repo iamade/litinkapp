@@ -36,6 +36,11 @@ import {
   MergePreviewRequest
 } from '../../types/merge';
 import type { VideoScene, EditorSettings } from '../../types/videoProduction';
+import {
+  subscriptionService,
+  WatermarkStatusResponse,
+  DownloadStatusResponse
+} from '../../services/subscriptionService';
 
 interface MergePanelProps {
   chapterId?: string;
@@ -58,6 +63,44 @@ interface AudioTrack {
   volume: number;
   locked: boolean;
 }
+
+
+const TIER_ORDER = ['free', 'basic', 'pro', 'premium', 'professional', 'enterprise'] as const;
+const DEFAULT_TIER: typeof TIER_ORDER[number] = 'free';
+
+type DownloadQuality = 'low' | 'medium' | 'high' | 'ultra' | 'web' | 'custom';
+
+type MergeQualityOption = {
+  value: MergeQualityTier;
+  label: string;
+  accepts: DownloadQuality[];
+};
+
+const MERGE_QUALITY_OPTIONS: MergeQualityOption[] = [
+  { value: MergeQualityTier.WEB, label: 'Web (480p)', accepts: ['low', 'web'] },
+  { value: MergeQualityTier.MEDIUM, label: 'Medium (720p)', accepts: ['medium'] },
+  { value: MergeQualityTier.HIGH, label: 'High (1080p)', accepts: ['high', 'ultra'] },
+  { value: MergeQualityTier.CUSTOM, label: 'Custom', accepts: ['custom', 'ultra'] }
+];
+
+const formatTierName = (tier?: string): string => {
+  if (!tier) return 'Premium';
+  return tier.charAt(0).toUpperCase() + tier.slice(1);
+};
+
+const getNextTier = (tier?: string): string => {
+  const current = (tier || DEFAULT_TIER).toLowerCase();
+  const currentIndex = TIER_ORDER.indexOf(current as typeof TIER_ORDER[number]);
+  if (currentIndex === -1 || currentIndex >= TIER_ORDER.length - 1) return 'premium';
+  return TIER_ORDER[currentIndex + 1];
+};
+
+const getFallbackAllowedDownloadQualities = (tier?: string): DownloadQuality[] => {
+  const normalizedTier = (tier || DEFAULT_TIER).toLowerCase();
+  if (normalizedTier === 'enterprise' || normalizedTier === 'professional') return ['medium', 'high', 'ultra', 'custom'];
+  if (normalizedTier === 'pro' || normalizedTier === 'premium') return ['medium', 'high'];
+  return ['medium'];
+};
 
 const MergePanel: React.FC<MergePanelProps> = ({
   videoGenerations = [],
@@ -96,6 +139,67 @@ const MergePanel: React.FC<MergePanelProps> = ({
   // Preview and timeline state
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+
+
+  const [watermarkStatus, setWatermarkStatus] = useState<WatermarkStatusResponse | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<DownloadStatusResponse | null>(null);
+  const [isSubscriptionStatusLoading, setIsSubscriptionStatusLoading] = useState(false);
+
+  const refreshWatermarkStatus = useCallback(async () => {
+    try {
+      const status = await subscriptionService.getWatermarkStatus();
+      setWatermarkStatus(status);
+    } catch (error) {
+      setWatermarkStatus(null);
+    }
+  }, []);
+
+  const refreshDownloadStatus = useCallback(async () => {
+    try {
+      const status = await subscriptionService.getDownloadStatus();
+      setDownloadStatus(status);
+    } catch (error) {
+      setDownloadStatus(null);
+    }
+  }, []);
+
+  const refreshSubscriptionStatuses = useCallback(async () => {
+    setIsSubscriptionStatusLoading(true);
+    await Promise.allSettled([refreshWatermarkStatus(), refreshDownloadStatus()]);
+    setIsSubscriptionStatusLoading(false);
+  }, [refreshWatermarkStatus, refreshDownloadStatus]);
+
+  useEffect(() => {
+    refreshSubscriptionStatuses();
+  }, [refreshSubscriptionStatuses, userTier]);
+
+  const currentTier = (downloadStatus?.tier || watermarkStatus?.tier || userTier || DEFAULT_TIER).toLowerCase();
+  const allowedDownloadQualities = React.useMemo(() => {
+    const backendAllowed = (downloadStatus?.allowed_qualities || [])
+      .filter((quality): quality is DownloadQuality => (
+        quality === 'low' || quality === 'medium' || quality === 'high' || quality === 'ultra' || quality === 'web' || quality === 'custom'
+      ));
+
+    if (backendAllowed.length > 0) return backendAllowed;
+    return getFallbackAllowedDownloadQualities(currentTier);
+  }, [downloadStatus?.allowed_qualities, currentTier]);
+
+  const allowedMergeQualities = React.useMemo(() => {
+    return MERGE_QUALITY_OPTIONS.filter(option => option.accepts.some(q => allowedDownloadQualities.includes(q)));
+  }, [allowedDownloadQualities]);
+
+  const canDownload = downloadStatus?.can_download ?? true;
+  const downloadLimitReached = downloadStatus ? !downloadStatus.can_download : false;
+  const nextTierForDownloads = formatTierName(downloadStatus?.upgrade_tier || getNextTier(currentTier));
+  const shouldShowWatermarkBadge = true; // Updated policy: preview watermark is visible by default for all tiers.
+  const downloadUsageText = React.useMemo(() => {
+    if (!downloadStatus) return null;
+    const used = downloadStatus.downloads_used_today ?? 0;
+    const remaining = downloadStatus.downloads_remaining_today ?? 0;
+    const limit = downloadStatus.daily_download_limit;
+    const limitText = limit === 'unlimited' ? 'Unlimited' : String(limit);
+    return `${remaining}/${limitText} downloads remaining today (${used} used)`;
+  }, [downloadStatus]);
 
   // Auto-populate from video generations and audio files
   useEffect(() => {
@@ -343,6 +447,13 @@ const MergePanel: React.FC<MergePanelProps> = ({
 
     await mergeOps.generatePreview(params);
   }, [inputFiles, qualityTier, customFFmpeg, ffmpegParams, mergeOps]);
+
+
+  useEffect(() => {
+    if (!allowedMergeQualities.some(option => option.value === qualityTier)) {
+      setQualityTier(allowedMergeQualities[0]?.value || MergeQualityTier.MEDIUM);
+    }
+  }, [allowedMergeQualities, qualityTier]);
 
   const videoCount = inputFiles.filter(f => f.type === 'video').length;
   const primaryAudioCount = audioTracks.filter(t => t.locked).length;
@@ -701,10 +812,9 @@ const MergePanel: React.FC<MergePanelProps> = ({
                     onChange={(e) => setQualityTier(e.target.value as MergeQualityTier)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
-                    <option value={MergeQualityTier.WEB}>Web (480p)</option>
-                    <option value={MergeQualityTier.MEDIUM}>Medium (720p)</option>
-                    <option value={MergeQualityTier.HIGH}>High (1080p)</option>
-                    <option value={MergeQualityTier.CUSTOM}>Custom</option>
+                    {allowedMergeQualities.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -880,14 +990,21 @@ const MergePanel: React.FC<MergePanelProps> = ({
               {/* Video Preview */}
               <div className="bg-black rounded-lg overflow-hidden shadow-lg">
                 {mergeOps.currentPreview?.preview_url ? (
-                  <video
-                    src={mergeOps.currentPreview.preview_url}
-                    controls
-                    className="w-full h-auto max-h-96"
-                    onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-                    onPlay={() => setIsPlaying(true)}
-                    onPause={() => setIsPlaying(false)}
-                  />
+                  <div className="relative">
+                    {shouldShowWatermarkBadge && (
+                      <span className="absolute top-3 left-3 z-10 px-2 py-1 text-xs font-semibold rounded bg-black/75 text-white">
+                        Watermarked
+                      </span>
+                    )}
+                    <video
+                      src={mergeOps.currentPreview.preview_url}
+                      controls
+                      className="w-full h-auto max-h-96"
+                      onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                      onPlay={() => setIsPlaying(true)}
+                      onPause={() => setIsPlaying(false)}
+                    />
+                  </div>
                 ) : (
                   <div className="flex items-center justify-center h-48 text-gray-400">
                     <div className="text-center">
@@ -902,6 +1019,18 @@ const MergePanel: React.FC<MergePanelProps> = ({
                   </div>
                 )}
               </div>
+
+              {(shouldShowWatermarkBadge || isSubscriptionStatusLoading) && (
+                <div className="p-3 border border-indigo-300/40 dark:border-indigo-700/40 bg-indigo-50/80 dark:bg-indigo-900/20 rounded-lg">
+                  {isSubscriptionStatusLoading ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Checking subscription status...</p>
+                  ) : (
+                    <p className="text-xs text-indigo-700 dark:text-indigo-300">
+                      Watermark is shown in previews by default. Paid tiers can remove it when downloading.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Timeline Scrubber */}
               {mergeOps.currentPreview?.preview_url && (
@@ -956,8 +1085,16 @@ const MergePanel: React.FC<MergePanelProps> = ({
                 <span>View</span>
               </button>
               <button
-                onClick={() => mergeOps.downloadMergeResult(mergeOps.currentMerge!.id)}
-                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors"
+                onClick={async () => {
+                  if (!canDownload) {
+                    toast.error(`Daily download limit reached. Upgrade to ${nextTierForDownloads} for more downloads.`);
+                    return;
+                  }
+                  await mergeOps.downloadMergeResult(mergeOps.currentMerge!.id);
+                  await refreshDownloadStatus();
+                }}
+                disabled={downloadLimitReached}
+                className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
                 title="Download merged video file"
               >
                 <Download className="w-4 h-4" />
@@ -967,7 +1104,12 @@ const MergePanel: React.FC<MergePanelProps> = ({
           </div>
 
           {/* Video Preview */}
-          <div className="mb-4">
+          <div className="mb-4 relative">
+            {shouldShowWatermarkBadge && (
+              <span className="absolute top-3 left-3 z-10 px-2 py-1 text-xs font-semibold rounded bg-black/75 text-white">
+                Watermarked
+              </span>
+            )}
             <video
               src={mergeOps.currentMerge.output_url}
               controls
@@ -987,6 +1129,23 @@ const MergePanel: React.FC<MergePanelProps> = ({
           </div>
 
           {/* Action Buttons */}
+          {(downloadUsageText || downloadLimitReached || shouldShowWatermarkBadge || isSubscriptionStatusLoading) && (
+            <div className="mb-3 space-y-1">
+              {isSubscriptionStatusLoading && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">Checking subscription status...</p>
+              )}
+              {downloadUsageText && (
+                <p className="text-xs text-gray-600 dark:text-gray-300">{downloadUsageText}</p>
+              )}
+              {downloadLimitReached && (
+                <p className="text-xs text-amber-700 dark:text-amber-300">Daily download limit reached. Upgrade to {nextTierForDownloads} for more downloads.</p>
+              )}
+              {shouldShowWatermarkBadge && (
+                <p className="text-xs text-indigo-700 dark:text-indigo-300">Watermark is shown in previews by default. Paid tiers can remove it when downloading.</p>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
             <button
               onClick={() => mergeOps.reset()}

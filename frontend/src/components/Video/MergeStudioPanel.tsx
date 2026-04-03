@@ -4,6 +4,7 @@ import { Save, Video, ArrowUp, ArrowDown, CheckCircle2 } from 'lucide-react';
 import { useVideoProduction } from '../../hooks/useVideoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import ProtectedImage from '../Common/ProtectedImage';
 
 interface MergeStudioPanelProps {
   chapterId: string;
@@ -273,7 +274,7 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
                     preload="metadata"
                   />
                 ) : (
-                  <img src={scene.imageUrl} alt={`Scene ${scene.sceneNumber}`} className="h-full w-full object-cover" />
+                  <ProtectedImage src={scene.imageUrl} alt={`Scene ${scene.sceneNumber}`} className="h-full w-full object-cover" />
                 )}
               </div>
 
