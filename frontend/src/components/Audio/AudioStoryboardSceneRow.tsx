@@ -1,6 +1,7 @@
 import React from 'react';
 import { SceneImage } from '../../hooks/useImageGeneration';
 import { Maximize2, Star, X, Music, Loader2, Check, Volume2 } from 'lucide-react';
+import ProtectedImage from '../Common/ProtectedImage';
 
 interface AudioStoryboardSceneRowProps {
   sceneNumber: number;
@@ -45,7 +46,7 @@ const AudioImageCard = ({
     >
       {/* Image Container */}
       <div className="aspect-video bg-gray-200 relative rounded-t-lg overflow-hidden">
-        <img
+        <ProtectedImage
           src={image.imageUrl}
           alt={image.prompt}
           className={`w-full h-full object-cover ${isExcluded ? 'grayscale' : ''}`}

@@ -6,6 +6,7 @@ import { dispatchCreditsRefresh } from '../lib/credits';
 export interface SceneImage {
   sceneNumber: number;
   imageUrl: string;
+  watermarkedImageUrl?: string;
   prompt: string;
   characters: string[];
   generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
@@ -20,6 +21,7 @@ export interface SceneImage {
 interface CharacterImage {
   name: string;
   imageUrl: string;
+  watermarkedImageUrl?: string;
   prompt: string;
   generationStatus: 'pending' | 'generating' | 'completed' | 'failed';
   generatedAt?: string;
@@ -51,6 +53,15 @@ export const useImageGeneration = (
 
   const inflightRef = useRef<string | null>(null);
   const isMountedRef = useRef(true);
+
+  const resolvePreviewAssetUrl = (
+    record: { image_url?: string; watermarked_image_url?: string; watermarked_url?: string } | null | undefined,
+    metadata?: { image_url?: string; watermarked_image_url?: string; watermarked_url?: string } | null
+  ): string => {
+    // Backend is authoritative: image_url is tier-appropriate (clean for paid, watermarked for free).
+    if (!record && !metadata) return '';
+    return record?.image_url || metadata?.image_url || '';
+  };
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -107,9 +118,9 @@ export const useImageGeneration = (
           return dateB - dateA;
         });
 
-        sortedImages.forEach((img: { id: string; image_url?: string; image_type?: string; character_name?: string; scene_number?: number; scene_description?: string; image_prompt?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string; shot_index?: number }; status?: string; created_at?: string; script_id?: string; scriptId?: string; shot_index?: number }) => {
+        sortedImages.forEach((img: { id: string; image_url?: string; watermarked_image_url?: string; watermarked_url?: string; image_type?: string; character_name?: string; scene_number?: number; scene_description?: string; image_prompt?: string; metadata?: { image_type?: string; scene_number?: number; character_name?: string; image_prompt?: string; shot_index?: number; image_url?: string; watermarked_image_url?: string; watermarked_url?: string }; status?: string; created_at?: string; script_id?: string; scriptId?: string; shot_index?: number }) => {
           const metadata = img.metadata ?? {};
-          const url = img.image_url ?? "";
+          const url = resolvePreviewAssetUrl(img, metadata);
           const imageType = img.image_type || metadata.image_type;
           const characterName = img.character_name || metadata.character_name;
           // Read scene_number from root level first, then fall back to metadata
@@ -161,6 +172,7 @@ export const useImageGeneration = (
             sceneImagesMap[sceneKey].push({
               sceneNumber: sn,
               imageUrl: url,
+              watermarkedImageUrl: (img as any).watermarked_image_url || undefined,
               prompt: prompt,
               characters: [],
               generationStatus: uiStatus,
@@ -201,6 +213,7 @@ export const useImageGeneration = (
               characterImagesMap[characterName] = {
                 name: characterName,
                 imageUrl: url,
+                watermarkedImageUrl: (img as any).watermarked_image_url || undefined,
                 prompt: prompt,
                 generationStatus: uiStatus,
                 generatedAt: img.created_at,
@@ -541,7 +554,8 @@ export const useImageGeneration = (
       try {
         const status = await userService.getSceneImageStatus(chapterId, sceneNumber);
 
-        if (status.status === 'completed' && status.image_url) {
+        const resolvedStatusUrl = resolvePreviewAssetUrl(status as any);
+        if (status.status === 'completed' && resolvedStatusUrl) {
           // Update scene image with completed data
           setSceneImages((prev) => {
             const sceneKey = Number(sceneNumber);
@@ -553,7 +567,7 @@ export const useImageGeneration = (
             if (existingIndex >= 0) {
                  updatedImages[existingIndex] = {
                     ...updatedImages[existingIndex],
-                    imageUrl: status.image_url!,
+                    imageUrl: resolvedStatusUrl,
                     generationStatus: 'completed',
                     id: recordId,
                     prompt: status.prompt || ''
@@ -564,7 +578,7 @@ export const useImageGeneration = (
                 if (genIndex >= 0) {
                      updatedImages[genIndex] = {
                         ...updatedImages[genIndex],
-                        imageUrl: status.image_url!,
+                        imageUrl: resolvedStatusUrl,
                         generationStatus: 'completed',
                         id: recordId,
                         prompt: status.prompt || ''
@@ -573,7 +587,7 @@ export const useImageGeneration = (
                     // Just prepend
                      updatedImages = [{
                         sceneNumber,
-                        imageUrl: status.image_url!,
+                        imageUrl: resolvedStatusUrl,
                         prompt: status.prompt || '',
                         characters: [],
                         generationStatus: 'completed',
@@ -761,13 +775,14 @@ export const useImageGeneration = (
       try {
         const status = await userService.getImageGenerationStatus(chapterId, recordId);
 
-        if (status.status === 'completed' && status.image_url) {
+        const resolvedStatusUrl = resolvePreviewAssetUrl(status as any);
+        if (status.status === 'completed' && resolvedStatusUrl) {
           // Update character image with completed data
           setCharacterImages((prev) => ({
             ...prev,
             [characterName]: {
               name: characterName,
-              imageUrl: status.image_url!,
+              imageUrl: resolvedStatusUrl,
               prompt: status.prompt || '',
               generationStatus: 'completed',
               generatedAt: new Date().toISOString(),

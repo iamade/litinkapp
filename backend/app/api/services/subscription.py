@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.core.services.stripe import stripe_service
 from app.subscriptions.models import (
     UserSubscription,
+    UserDownload,
     SubscriptionTier,
     SubscriptionStatus,
     UsageLog,
@@ -38,6 +39,8 @@ class SubscriptionManager:
             "max_video_duration": 300,  # 5 minutes
             "max_resolution": "720p",
             "watermark": True,
+            "can_remove_watermark": False,
+            "can_download": False,
             "priority": 0,
             "support": "community",
             "api_access": False,
@@ -59,7 +62,9 @@ class SubscriptionManager:
             "chapters_per_book": "unlimited",
             "max_video_duration": 900,  # 15 minutes
             "max_resolution": "720p",
-            "watermark": False,
+            "watermark": True,
+            "can_remove_watermark": True,
+            "can_download": True,
             "priority": 1,
             "support": "email",
             "api_access": False,
@@ -81,7 +86,9 @@ class SubscriptionManager:
             "chapters_per_book": "unlimited",
             "max_video_duration": 1800,  # 30 minutes
             "max_resolution": "1080p",
-            "watermark": False,
+            "watermark": True,
+            "can_remove_watermark": True,
+            "can_download": True,
             "priority": 2,
             "support": "priority_email",
             "api_access": False,
@@ -103,7 +110,9 @@ class SubscriptionManager:
             "chapters_per_book": "unlimited",
             "max_video_duration": 3600,  # 60 minutes
             "max_resolution": "4K",
-            "watermark": False,
+            "watermark": True,
+            "can_remove_watermark": True,
+            "can_download": True,
             "priority": 3,
             "support": "priority_email",
             "api_access": True,
@@ -125,7 +134,9 @@ class SubscriptionManager:
             "chapters_per_book": "unlimited",
             "max_video_duration": 5400,  # 90 minutes
             "max_resolution": "4K",
-            "watermark": False,
+            "watermark": True,
+            "can_remove_watermark": True,
+            "can_download": True,
             "priority": 4,
             "support": "dedicated_rep",
             "api_access": True,
@@ -147,7 +158,9 @@ class SubscriptionManager:
             "chapters_per_book": "unlimited",
             "max_video_duration": "unlimited",
             "max_resolution": "8K",
-            "watermark": False,
+            "watermark": True,
+            "can_remove_watermark": True,
+            "can_download": True,
             "priority": 5,
             "support": "24/7_dedicated",
             "api_access": True,
@@ -156,6 +169,39 @@ class SubscriptionManager:
             "price_monthly": 0,  # Custom pricing
             "display_name": "Enterprise",
             "description": "For large organizations",
+        },
+    }
+
+    TIER_DOWNLOAD_LIMITS = {
+        SubscriptionTier.FREE: {
+            "daily_downloads": 0,
+            "max_resolution": "720p",
+            "formats": ["mp4"],
+        },
+        SubscriptionTier.BASIC: {
+            "daily_downloads": 5,
+            "max_resolution": "720p",
+            "formats": ["mp4"],
+        },
+        SubscriptionTier.PRO: {
+            "daily_downloads": 15,
+            "max_resolution": "1080p",
+            "formats": ["mp4", "webm"],
+        },
+        SubscriptionTier.PREMIUM: {
+            "daily_downloads": 50,
+            "max_resolution": "1080p",
+            "formats": ["mp4", "webm", "mov"],
+        },
+        SubscriptionTier.PROFESSIONAL: {
+            "daily_downloads": -1,  # unlimited
+            "max_resolution": "4k",
+            "formats": ["mp4", "webm", "mov"],
+        },
+        SubscriptionTier.ENTERPRISE: {
+            "daily_downloads": -1,  # unlimited
+            "max_resolution": "4k",
+            "formats": ["mp4", "webm", "mov"],
         },
     }
 
@@ -181,8 +227,10 @@ class SubscriptionManager:
                 )
             if limits.get("max_resolution"):
                 feature_highlights.append(f"{limits['max_resolution']} resolution")
-            if not limits.get("watermark"):
-                feature_highlights.append("No watermark")
+            if limits.get("can_remove_watermark"):
+                feature_highlights.append("Remove watermark at download")
+            if limits.get("can_download"):
+                feature_highlights.append("Download videos")
             if limits.get("voice_cloning"):
                 feature_highlights.append("Voice cloning")
             if limits.get("model_selection"):
@@ -198,6 +246,8 @@ class SubscriptionManager:
                     "monthly_price": limits["price_monthly"],
                     "video_quality": limits.get("max_resolution", "720p"),
                     "has_watermark": limits.get("watermark", True),
+                    "can_remove_watermark": limits.get("can_remove_watermark", False),
+                    "can_download": limits.get("can_download", False),
                     "max_video_duration": limits.get("max_video_duration"),
                     "monthly_video_limit": limits.get("videos_per_month", 0),
                     "priority_processing": limits.get("priority", 0) >= 2,
@@ -464,7 +514,7 @@ class SubscriptionManager:
                     stripe_subscription_id=session_data["subscription"],
                     monthly_video_limit=tier_limits["videos_per_month"],
                     video_quality=tier_limits.get("max_resolution", "720p"),
-                    has_watermark=tier_limits.get("watermark", False),
+                    has_watermark=True,  # Watermark ON by default for all tiers
                     current_period_start=datetime.now(),
                     current_period_end=datetime.now() + timedelta(days=30),
                 )
@@ -553,4 +603,102 @@ class SubscriptionManager:
             ],  # Fixed: key is "video" not "videos"
             "videos_limit": usage_check["limits"].get("videos_per_month"),
             "videos_remaining": usage_check["videos_remaining"],
+        }
+
+    async def get_download_status(self, user_id: uuid.UUID) -> Dict[str, Any]:
+        """
+        Get current download status for a user including today's count and limits.
+        """
+        tier = await self.get_user_tier(user_id)
+        tier_limits = self.TIER_LIMITS.get(tier, self.TIER_LIMITS[SubscriptionTier.FREE])
+        download_limits = self.TIER_DOWNLOAD_LIMITS.get(
+            tier, self.TIER_DOWNLOAD_LIMITS[SubscriptionTier.FREE]
+        )
+        daily_limit = download_limits["daily_downloads"]
+
+        # Free tier cannot download individual assets at all
+        can_download_assets = tier_limits.get("can_download", False)
+        can_remove_watermark = tier_limits.get("can_remove_watermark", False)
+
+        # Count today's downloads
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        stmt = select(UserDownload).where(
+            UserDownload.user_id == user_id,
+            UserDownload.downloaded_at >= today_start,
+        )
+        result = await self.session.exec(stmt)
+        downloads_today = len(result.all())
+
+        is_unlimited = daily_limit == -1
+        within_daily_limit = is_unlimited or downloads_today < daily_limit
+        can_download = can_download_assets and within_daily_limit
+
+        return {
+            "downloads_today": downloads_today,
+            "daily_limit": daily_limit,
+            "can_download": can_download,
+            "can_download_assets": can_download_assets,
+            "can_remove_watermark": can_remove_watermark,
+            "tier": tier.value,
+            "allowed_formats": download_limits["formats"],
+            "max_resolution": download_limits["max_resolution"],
+        }
+
+    async def check_and_record_download(
+        self,
+        user_id: uuid.UUID,
+        merge_id: str = None,
+        resource_type: str = "merge",
+        remove_watermark: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Check if user can download and record the download if allowed.
+        Returns status dict with can_download flag, message, and serve_clean indicator.
+        """
+        status = await self.get_download_status(user_id)
+
+        # Free tier cannot download individual assets
+        if not status["can_download_assets"]:
+            return {
+                "can_download": False,
+                "message": "Individual asset downloads are not available on the Free plan. Upgrade to Basic or higher to download your videos.",
+                "downloads_today": status["downloads_today"],
+                "daily_limit": status["daily_limit"],
+            }
+
+        if not status["can_download"]:
+            return {
+                "can_download": False,
+                "message": f"Daily download limit reached ({status['daily_limit']} downloads/day). Upgrade your plan for more downloads.",
+                "downloads_today": status["downloads_today"],
+                "daily_limit": status["daily_limit"],
+            }
+
+        # Determine whether to serve the clean (unwatermarked) version
+        serve_clean = False
+        if remove_watermark:
+            if status["can_remove_watermark"]:
+                serve_clean = True
+            else:
+                return {
+                    "can_download": False,
+                    "message": "Watermark removal is not available on the Free plan. Upgrade to Basic or higher to download without watermark.",
+                    "downloads_today": status["downloads_today"],
+                    "daily_limit": status["daily_limit"],
+                }
+
+        # Record the download
+        download = UserDownload(
+            user_id=user_id,
+            merge_id=uuid.UUID(merge_id) if merge_id else None,
+            resource_type=resource_type,
+        )
+        self.session.add(download)
+        await self.session.commit()
+
+        return {
+            "can_download": True,
+            "serve_clean": serve_clean,
+            "downloads_today": status["downloads_today"] + 1,
+            "daily_limit": status["daily_limit"],
         }

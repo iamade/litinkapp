@@ -45,6 +45,7 @@ from app.books.models import Book, Chapter
 from app.plots.models import PlotOverview, Character
 from app.videos.models import ImageGeneration, AudioGeneration, Script, AudioExport
 from app.api.services.subscription import SubscriptionManager
+from app.subscriptions.models import SubscriptionTier
 from app.auth.models import User
 from app.projects.models import Project, Artifact
 from app.credits.dependencies import require_credits
@@ -476,6 +477,20 @@ async def list_chapter_images(
                             else datetime.utcnow().isoformat(),
                         )
                     )
+
+        # Tier-aware URL selection: paid users see clean previews, free see watermarked
+        sub_manager = SubscriptionManager(session)
+        user_tier = await sub_manager.get_user_tier(current_user.id)
+        is_paid = user_tier != SubscriptionTier.FREE
+
+        if is_paid:
+            for img in chapter_images:
+                metadata = img.metadata or {}
+                clean_url = metadata.get("clean_url")
+                if clean_url and img.image_url:
+                    # Swap: paid users see clean image; watermarked URL preserved for downloads
+                    img.watermarked_image_url = img.image_url
+                    img.image_url = clean_url
 
         return ChapterImagesResponse(
             chapter_id=chapter_id,

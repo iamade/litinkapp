@@ -10,6 +10,10 @@ import uuid as _uuid
 from app.core.services.pipeline import PipelineManager, PipelineStep
 from app.core.services.modelslab_v7_image import ModelsLabV7ImageService
 from app.core.services.standalone_image import StandaloneImageService
+from app.core.services.watermark import (
+    persist_image_with_both_versions,
+    persist_image_with_embedded_watermark,
+)
 from app.api.services.subscription import SubscriptionManager
 from sqlmodel import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -428,10 +432,13 @@ async def generate_character_images_optimized(
                         record_id=str(_uuid_mod.uuid4()),
                         extension='png',
                     )
-                    image_url = await storage.persist_from_url(image_url, s3_path, content_type='image/png')
-                    logger.info(f'[ImageTask] Persisted character image to S3: {s3_path}')
+                    image_url = await persist_image_with_embedded_watermark(
+                        image_url, s3_path, storage, content_type="image/png"
+                    )
+                    logger.info(f"[ImageTask] Persisted watermarked character image to S3: {s3_path}")
                 except Exception as persist_error:
-                    logger.error(f'[ImageTask] Failed to persist character image to S3: {persist_error}')
+                    logger.error(f"[ImageTask] Failed to persist watermarked character image: {persist_error}")
+                    raise
 
                 # Store in database
                 image_record_data = {
@@ -657,10 +664,13 @@ async def generate_scene_images_optimized(
                         record_id=str(_uuid_mod.uuid4()),
                         extension='png',
                     )
-                    image_url = await storage.persist_from_url(image_url, s3_path, content_type='image/png')
-                    logger.info(f'[ImageTask] Persisted scene image to S3: {s3_path}')
+                    image_url = await persist_image_with_embedded_watermark(
+                        image_url, s3_path, storage, content_type="image/png"
+                    )
+                    logger.info(f"[ImageTask] Persisted watermarked scene image to S3: {s3_path}")
                 except Exception as persist_error:
-                    logger.error(f'[ImageTask] Failed to persist scene image to S3: {persist_error}')
+                    logger.error(f"[ImageTask] Failed to persist watermarked scene image: {persist_error}")
+                    raise
 
                 # Store in database
                 image_record_data = {
@@ -963,23 +973,9 @@ async def async_generate_character_image_task(
             generation_time = result.get("generation_time", 0)
             model_used = result.get("model_used", "seedream-t2i")
 
-            # Persist image from CDN to our own S3 storage
-            if image_url:
-                try:
-                    from app.core.services.storage import get_storage_service, S3StorageService
-                    import uuid as _uuid_mod
-                    storage = get_storage_service()
-                    s3_path = S3StorageService.build_media_path(
-                        user_id=str(user_id) if user_id else 'system',
-                        media_type='images',
-                        record_id=str(_uuid_mod.uuid4()),
-                        extension='png',
-                    )
-                    image_url = await storage.persist_from_url(image_url, s3_path, content_type='image/png')
-                    logger.info(f'[CharacterImageTask] Persisted image to S3: {s3_path}')
-                except Exception as persist_error:
-                    logger.error(f'[CharacterImageTask] Failed to persist image to S3: {persist_error}')
-                    # Don't raise — keep the CDN URL as fallback
+            # Save URL for metadata traceability. Standalone service now persists
+            # embedded-watermarked image assets before returning.
+            original_cdn_url = image_url
 
             # Update the image_generations record with the result
             update_query = text(
@@ -1012,6 +1008,7 @@ async def async_generate_character_image_task(
             # If character_id provided, also update the characters table
             if character_id and image_url:
                 try:
+                    from datetime import datetime, timezone
                     image_metadata = {
                         "model_used": model_used,
                         "generation_time": generation_time,
@@ -1020,6 +1017,8 @@ async def async_generate_character_image_task(
                         "service": "modelslab_v7",
                         "task_id": task_id,
                         "image_generation_record_id": record_id,
+                        "cdn_url": original_cdn_url,
+                        "cdn_created_at": datetime.now(timezone.utc).isoformat(),
                     }
 
                     char_update_query = text(
@@ -1341,6 +1340,43 @@ async def async_generate_scene_image_task(
                     f"[SceneImageTask] Using {len(final_character_urls)} total character references (Resolved: {len(resolved_character_urls)}, Direct: {len(character_image_urls) if character_image_urls else 0})"
                 )
 
+            # For local dev, prefer CDN URLs over MinIO URLs since ModelsLab can't reach localhost
+            from app.core.config import settings as app_settings
+            if getattr(app_settings, 'USE_MINIO', False) and final_character_urls:
+                try:
+                    cdn_fallback_urls = []
+                    for url in final_character_urls:
+                        if 'localhost' in url or 'minio' in url:
+                            cdn_query = text("""
+                                SELECT image_metadata->>'cdn_url' as cdn_url,
+                                       image_metadata->>'cdn_created_at' as cdn_created_at
+                                FROM characters
+                                WHERE image_url = :url
+                                AND image_metadata->>'cdn_url' IS NOT NULL
+                                LIMIT 1
+                            """)
+                            cdn_result = await session.execute(cdn_query, {"url": url})
+                            cdn_row = cdn_result.first()
+                            if cdn_row and cdn_row.cdn_url:
+                                from datetime import datetime, timezone, timedelta
+                                try:
+                                    created = datetime.fromisoformat(cdn_row.cdn_created_at)
+                                    if datetime.now(timezone.utc) - created < timedelta(days=13):
+                                        cdn_fallback_urls.append(cdn_row.cdn_url)
+                                        logger.info(f"[SceneImageTask] Using CDN fallback URL for local dev")
+                                        continue
+                                except Exception:
+                                    pass
+                            cdn_fallback_urls.append(url)
+                        else:
+                            cdn_fallback_urls.append(url)
+
+                    if cdn_fallback_urls != final_character_urls:
+                        logger.info(f"[SceneImageTask] Replaced local URLs with CDN fallbacks for dev")
+                        final_character_urls = cdn_fallback_urls
+                except Exception as cdn_error:
+                    logger.warning(f"[SceneImageTask] CDN fallback lookup failed: {cdn_error}")
+
             image_service = ModelsLabV7ImageService()
             result = await image_service.generate_scene_image(
                 scene_description=final_description,
@@ -1363,22 +1399,38 @@ async def async_generate_scene_image_task(
             if not image_url:
                 raise Exception("No image URL returned from ModelsLab service")
 
-            # Persist image from CDN to our own S3 storage
+            # Persist both watermarked and clean copies to S3 storage
+            clean_url = None
             try:
                 from app.core.services.storage import get_storage_service, S3StorageService
                 import uuid as _uuid_mod
                 storage = get_storage_service()
-                s3_path = S3StorageService.build_media_path(
+                wm_s3_path = S3StorageService.build_media_path(
                     user_id=str(user_id) if user_id else 'system',
                     media_type='images',
                     record_id=str(_uuid_mod.uuid4()),
                     extension='png',
                 )
-                image_url = await storage.persist_from_url(image_url, s3_path, content_type='image/png')
-                logger.info(f'[SceneImageTask] Persisted image to S3: {s3_path}')
+                clean_s3_path = S3StorageService.build_media_path(
+                    user_id=str(user_id) if user_id else 'system',
+                    media_type='images',
+                    record_id=str(_uuid_mod.uuid4()),
+                    extension='png',
+                )
+                try:
+                    image_url, clean_url = await persist_image_with_both_versions(
+                        image_url, wm_s3_path, clean_s3_path, storage, content_type="image/png"
+                    )
+                    logger.info(f"[SceneImageTask] Persisted watermarked + clean images to S3")
+                except Exception:
+                    # Fallback to watermarked-only
+                    image_url = await persist_image_with_embedded_watermark(
+                        image_url, wm_s3_path, storage, content_type="image/png"
+                    )
+                    logger.info(f"[SceneImageTask] Persisted watermarked image to S3 (clean fallback failed)")
             except Exception as persist_error:
-                logger.error(f'[SceneImageTask] Failed to persist image to S3: {persist_error}')
-                # Don't raise — keep the CDN URL as fallback
+                logger.error(f"[SceneImageTask] Failed to persist image to S3: {persist_error}")
+                raise
 
             # Prepare metadata with scene info
             existing_metadata = {}
@@ -1407,6 +1459,8 @@ async def async_generate_scene_image_task(
                 "style": style or "cinematic",
                 "aspect_ratio": aspect_ratio or "16:9",
             }
+            if clean_url:
+                merged_metadata["clean_url"] = clean_url
 
             # Update record with success data using transaction
             try:

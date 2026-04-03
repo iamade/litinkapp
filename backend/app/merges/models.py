@@ -43,6 +43,7 @@ class MergeOperation(SQLModel, table=True):
     merge_name: Optional[str] = Field(default=None)
 
     output_file_url: Optional[str] = Field(default=None)
+    clean_file_url: Optional[str] = Field(default=None)  # Unwatermarked version for paid-tier downloads
     preview_url: Optional[str] = Field(default=None)
     error_message: Optional[str] = Field(default=None)
 

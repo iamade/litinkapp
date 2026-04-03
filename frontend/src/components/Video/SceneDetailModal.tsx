@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { X, Play, Pause, Video, Volume2, Music, Wind, Headphones, Mic, FileText, Loader2 } from 'lucide-react';
 import { VideoScene } from '../../types/videoProduction';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+import ProtectedImage from '../Common/ProtectedImage';
 
 interface SceneDetailModalProps {
   scene: VideoScene;
@@ -230,7 +231,7 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
             {/* Image */}
             <div className="bg-black flex items-center justify-center min-h-[200px] md:min-h-[260px] p-4">
               {scene.imageUrl ? (
-                <img
+                <ProtectedImage
                   src={scene.imageUrl}
                   alt={`Scene ${scene.sceneNumber}`}
                   className="max-w-full max-h-[240px] object-contain shadow-lg rounded"

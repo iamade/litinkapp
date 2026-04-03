@@ -22,6 +22,7 @@ import type { VideoScene, Transition } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 import { SceneDetailModal } from './SceneDetailModal';
+import ProtectedImage from '../Common/ProtectedImage';
 
 // Define ChapterScript interface locally to avoid import issues
 interface ChapterScript {
@@ -208,7 +209,7 @@ const SceneCard: React.FC<{
           </div>
           
           {scene.thumbnailUrl || scene.imageUrl ? (
-            <img
+            <ProtectedImage
               src={scene.thumbnailUrl || scene.imageUrl}
               alt={`Scene ${scene.sceneNumber}`}
               className="w-full h-full object-cover"

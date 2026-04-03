@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Check, User, Box, MapPin } from 'lucide-react';
+import ProtectedImage from '../Common/ProtectedImage';
 
 export interface PlotCharacter {
   id: string;
@@ -123,7 +124,7 @@ const CharacterDropdown: React.FC<CharacterDropdownProps> = ({
                   className="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
                 >
                   {char.image_url ? (
-                    <img 
+                    <ProtectedImage 
                       src={char.image_url} 
                       alt={char.name}
                       className="w-6 h-6 rounded-full object-cover"

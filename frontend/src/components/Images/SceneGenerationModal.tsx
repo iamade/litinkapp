@@ -4,6 +4,7 @@ import { X, Search, Sparkles, Box, MapPin, Wand2, Loader2, RotateCcw } from 'luc
 import { CharacterImage } from './types';
 import { userService } from '../../services/userService';
 import { toast } from 'react-hot-toast';
+import ProtectedImage from '../Common/ProtectedImage';
 
 // Tier-based character reference limits
 const TIER_CHARACTER_LIMITS: Record<string, number> = {
@@ -277,7 +278,7 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
             </div>
             {parentSceneImageUrl && (
               <div className="relative rounded-lg overflow-hidden border border-gray-700 w-48 h-28">
-                <img
+                <ProtectedImage
                   src={parentSceneImageUrl}
                   alt="Selected reference scene"
                   className="w-full h-full object-cover"
@@ -451,7 +452,7 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
                         : 'border-transparent hover:border-gray-600'}
                     `}
                   >
-                    <img 
+                    <ProtectedImage 
                       src={char.imageUrl || ''} 
                       alt={char.name || 'Character'} 
                       className="w-full h-full object-cover"

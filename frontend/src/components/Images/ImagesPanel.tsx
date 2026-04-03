@@ -19,7 +19,8 @@ import {
   Box,
   ChevronDown,
   ChevronRight,
-  Unlink2
+  Unlink2,
+  Lock
 } from 'lucide-react';
 import { userService } from '../../services/userService';
 import { Tables } from '../../types/supabase';
@@ -54,6 +55,12 @@ import SceneGenerationModal from './SceneGenerationModal';
 import { StoryboardSceneRow } from './StoryboardSceneRow';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
+import ProtectedImage from '../Common/ProtectedImage';
+import {
+  subscriptionService,
+  DownloadStatusResponse,
+  WatermarkStatusResponse
+} from '../../services/subscriptionService';
 
 const SortableStoryboardRow = ({ id, ...props }: any) => {
   const {
@@ -101,7 +108,17 @@ interface ImagesPanelProps {
   chapterId: string;
   chapterTitle: string;
   selectedScript: unknown;
-  plotOverview: { characters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string; image_url?: string }> } | null;
+  plotOverview: {
+    characters?: Array<{
+      name: string;
+      role?: string;
+      physical_description?: string;
+      personality?: string;
+      image_url?: string;
+      watermarked_image_url?: string;
+      watermarked_url?: string;
+    }>;
+  } | null;
   onRefreshPlotOverview?: () => void | Promise<void>;
   userTier?: string; // User subscription tier for character reference limits
 }
@@ -147,6 +164,14 @@ const parseScriptScenes = (scriptText: string): string[] => {
     return extractedScenes;
 };
 
+const resolveWatermarkedAssetUrl = (
+  asset?: { watermarked_image_url?: string; watermarked_url?: string; image_url?: string; imageUrl?: string } | null
+): string => {
+  // Backend is authoritative: image_url is tier-appropriate (clean for paid, watermarked for free).
+  if (!asset) return '';
+  return asset.image_url || asset.imageUrl || '';
+};
+
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
   chapterId,
   chapterTitle,
@@ -181,6 +206,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [selectedImage, setSelectedImage] = useState<{
     url: string;
+    watermarkedUrl?: string;
     description?: string;
     sceneNumber?: number;
     dialogue?: Array<{character: string; text: string}>;
@@ -208,6 +234,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         isSuggestedShot?: boolean;
         shotIndex?: number;
     } | null>(null);
+  const [watermarkStatus, setWatermarkStatus] = useState<WatermarkStatusResponse | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<DownloadStatusResponse | null>(null);
+  const [isSubscriptionStatusLoading, setIsSubscriptionStatusLoading] = useState(true);
 
   // Filter excluded characters (Set for .has() method)
   const [excludedCharacters] = useState<Set<string>>(new Set());
@@ -532,6 +561,32 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     return () => clearTimeout(timeoutId);
   }, [storyboardDirty, chapterId, selectedScriptId, getStoryboardConfig, markStoryboardClean]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSubscriptionStatus = async () => {
+      setIsSubscriptionStatusLoading(true);
+      try {
+        const [wmStatus, dlStatus] = await Promise.all([
+          subscriptionService.getWatermarkStatus().catch(() => null),
+          subscriptionService.getDownloadStatus().catch(() => null),
+        ]);
+        if (cancelled) return;
+        setWatermarkStatus(wmStatus);
+        setDownloadStatus(dlStatus);
+      } finally {
+        if (!cancelled) {
+          setIsSubscriptionStatusLoading(false);
+        }
+      }
+    };
+
+    loadSubscriptionStatus();
+    return () => {
+      cancelled = true;
+    };
+  }, [userTier]);
+
   // Sync storyboard images to StoryboardContext for Video tab consumption
   const storyboardContext = useStoryboardOptional();
   
@@ -613,10 +668,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
   // Disable actions during switching
   const isDisabled = isSwitching;
-
-
-  
-
+  const normalizedTier = (downloadStatus?.tier || watermarkStatus?.tier || userTier || 'free').toLowerCase();
+  const isFreeTier = normalizedTier === 'free';
+  const canDownloadIndividualAssets = !isFreeTier && (downloadStatus?.can_download ?? true);
+  const downloadLockMessage = isFreeTier
+    ? 'Upgrade to Basic or higher to download individual assets.'
+    : 'Daily download limit reached for your current plan. Upgrade for more downloads.';
 
   // Get dialogue moments (suggested shots) from selected script
   // Extract from API response or parse from script text
@@ -1685,8 +1742,10 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                         }
                       }
                       
+                      const matchedImg = images.find((img: SceneImage) => img.imageUrl === url);
                       setSelectedImage({
                         url,
+                        watermarkedUrl: matchedImg?.watermarkedImageUrl || url,
                         sceneNumber: scene.scene_number || idx + 1,
                         description: imgDescription || scene.visual_description || scene.description,
                         dialogue: matchedDialogue,
@@ -1775,7 +1834,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 let characterImage = filteredCharacterImages?.[characterKey];
 
                 // If no script-specific image, check if plot overview has an image
-                const plotImageUrl = typeof character === "object" && character.image_url ? character.image_url : null;
+                const plotImageUrl = typeof character === "object" ? resolveWatermarkedAssetUrl(character as any) : '';
 
                   // Check if this is a derived/fallback image
                   const isFallbackImage = !characterImage && !!plotImageUrl;
@@ -1801,7 +1860,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     generationDisabledReason={undefined}
                     viewMode={viewMode}
                     fromPlotOverview={!!plotImageUrl && !filteredCharacterImages?.[characterKey]}
-                    plotCharacters={plotOverview?.characters || []}
+                    plotCharacters={
+                      (plotOverview?.characters || []).map((plotCharacter) => ({
+                        ...plotCharacter,
+                        image_url: resolveWatermarkedAssetUrl(plotCharacter as any),
+                      }))
+                    }
                     onGenerate={async (selectedPlotCharName) => {
                       if (!selectedPlotCharName) {
                         toast.error('Select a plot character to match first.');
@@ -1814,7 +1878,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                         return;
                       }
 
-                      if (!plotChar.image_url) {
+                      const plotCharImageUrl = resolveWatermarkedAssetUrl(plotChar as any);
+                      if (!plotCharImageUrl) {
                         toast.error(`"${selectedPlotCharName}" has no plot image to link yet.`);
                         return;
                       }
@@ -1822,7 +1887,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       const prompt = `${plotChar.physical_description || ''}. ${plotChar.personality || ''}. ${plotChar.role || ''}`.trim();
                       setCharacterImage(characterKey, {
                         name: characterKey,
-                        imageUrl: plotChar.image_url,
+                        imageUrl: plotCharImageUrl,
                         prompt,
                         generationStatus: 'completed',
                         generatedAt: new Date().toISOString(),
@@ -1832,11 +1897,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       try {
                         await userService.linkCharacterImage(chapterId, {
                           character_name: characterKey,
-                          image_url: plotChar.image_url,
+                          image_url: plotCharImageUrl,
                           script_id: selectedScriptId ?? undefined,
                           prompt
                         });
                         toast.success(`Matched with ${selectedPlotCharName}`);
+                        await loadImages();
                       } catch (error) {
                         console.error('Failed to persist character image:', error);
                         toast.error('Image displayed but not saved. Please try again.');
@@ -1855,7 +1921,16 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       }
                     }}
                     onDelete={() => deleteImage('character', characterKey)}
-                    onView={() => setSelectedImage({ url: characterImage?.imageUrl || '' })}
+                    onView={() =>
+                      setSelectedImage({
+                        url: characterImage?.imageUrl || '',
+                        watermarkedUrl: characterImage?.watermarkedImageUrl || characterImage?.imageUrl || '',
+                        description:
+                          typeof character === 'object'
+                            ? `${character.physical_description || ''}`.trim() || undefined
+                            : undefined,
+                      })
+                    }
                     onUnlink={characterImage?.imageUrl ? async () => {
                       // Clear only the local match; this should never trigger generation UI.
                       setCharacterImage(characterKey, {
@@ -1908,7 +1983,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                   const itemKey = item.originalName || item.name;
                   const displayName = item.displayName || item.name;
                   const itemImage = characterImages?.[itemKey];
-                  const plotImageUrl = item.image_url || null;
+                  const plotImageUrl = resolveWatermarkedAssetUrl(item as any);
                   const isFallbackImage = !itemImage && !!plotImageUrl;
 
                   let finalImage = itemImage;
@@ -1932,7 +2007,12 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       generationDisabledReason={undefined}
                       viewMode={viewMode}
                       fromPlotOverview={!!plotImageUrl && !itemImage}
-                      plotCharacters={plotOverview?.characters || []}
+                      plotCharacters={
+                        (plotOverview?.characters || []).map((character) => ({
+                          ...character,
+                          image_url: resolveWatermarkedAssetUrl(character as any),
+                        }))
+                      }
                       onGenerate={() => {
                         const description = item.physical_description 
                           || `Detailed image of ${displayName}, ${item.entity_type === 'location' ? 'scenic environment' : 'object design'}`;
@@ -1948,7 +2028,13 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                         }
                       }}
                       onDelete={() => deleteImage('character', itemKey)}
-                      onView={() => setSelectedImage({ url: finalImage?.imageUrl || '' })}
+                      onView={() =>
+                        setSelectedImage({
+                          url: finalImage?.imageUrl || '',
+                          watermarkedUrl: finalImage?.watermarkedImageUrl || finalImage?.imageUrl || '',
+                          description: typeof item === 'object' ? item.physical_description : undefined,
+                        })
+                      }
                       onUnlink={finalImage?.imageUrl ? async () => {
                         setCharacterImage(itemKey, {
                           name: itemKey,
@@ -2146,8 +2232,10 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                         }
                       }
 
+                      const matchedImg = images.find((img: SceneImage) => img.imageUrl === url);
                       setSelectedImage({
                         url,
+                        watermarkedUrl: matchedImg?.watermarkedImageUrl || url,
                         sceneNumber: sceneNum,
                         description: imgDescription || description,
                         dialogue: matchedDialogue,
@@ -2200,11 +2288,16 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       {selectedImage && (
         <ImageViewerModal
           imageUrl={selectedImage.url}
+          watermarkedImageUrl={selectedImage.watermarkedUrl}
           onClose={() => setSelectedImage(null)}
           description={selectedImage.description}
           sceneNumber={selectedImage.sceneNumber}
           dialogue={selectedImage.dialogue}
           expression={selectedImage.expression}
+          canDownload={canDownloadIndividualAssets}
+          isFreeTier={isFreeTier}
+          downloadLockMessage={downloadLockMessage}
+          isSubscriptionStatusLoading={isSubscriptionStatusLoading}
         />
       )}
 
@@ -2269,7 +2362,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 // 1. Gather URLs from characters selected in the modal (from plot overview)
                 const selectedCharUrls: string[] = characters
                     .filter(c => charIds.includes(c.id || c.name))
-                    .map(c => c.image_url || c.imageUrl || '')
+                    .map(c => resolveWatermarkedAssetUrl(c as any))
                     .filter(url => url && url.length > 0);
                 
                 // 2. Also include any generated character images from this script
@@ -2314,9 +2407,14 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             ...characters.map(c => {
                 const charKey = c.originalName || c.name;
                 const linkedImage = characterImages?.[charKey];
+                const plotImageUrl = resolveWatermarkedAssetUrl(c as any);
+                const hasScriptSpecificLinkedImage = !!(selectedScriptId && linkedImage?.script_id === selectedScriptId);
+                const resolvedImageUrl = hasScriptSpecificLinkedImage
+                  ? (linkedImage?.imageUrl || plotImageUrl || '')
+                  : (plotImageUrl || linkedImage?.imageUrl || '');
                 return {
                     name: c.name,
-                    imageUrl: linkedImage?.imageUrl || c.image_url || c.imageUrl || '',
+                    imageUrl: resolvedImageUrl,
                     id: c.id || c.name,
                     prompt: linkedImage?.prompt || '',
                     generationStatus: (linkedImage?.generationStatus || 'completed') as 'completed' | 'pending' | 'generating' | 'failed',
@@ -2326,7 +2424,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             // Objects & Locations
             ...objectsAndLocations.map((item: any) => ({
                 name: item.name,
-                imageUrl: item.image_url || '',
+                imageUrl: resolveWatermarkedAssetUrl(item as any),
                 id: item.id || item.name,
                 prompt: '',
                 generationStatus: 'completed' as const,
@@ -2452,6 +2550,7 @@ const SceneImageCard: React.FC<SceneImageCardProps> = ({
           status={displayStatus}
           alt={`Scene ${scene.scene_number} - Image ${currentIndex + 1}`}
           size="large"
+          onClick={() => currentImage?.imageUrl && onView(currentImage.imageUrl, currentImage?.prompt || scene.visual_description || scene.description || '', (currentImage as any)?.shot_index)}
         />
 
         <div className="absolute top-2 left-2 flex items-center space-x-2">
@@ -2628,7 +2727,15 @@ interface CharacterImageCardProps {
   generationDisabledReason?: string;
   viewMode: 'grid' | 'list';
   fromPlotOverview?: boolean;
-  plotCharacters?: Array<{ name: string; role?: string; physical_description?: string; personality?: string; image_url?: string }>;
+  plotCharacters?: Array<{
+    name: string;
+    role?: string;
+    physical_description?: string;
+    personality?: string;
+    image_url?: string;
+    watermarked_image_url?: string;
+    watermarked_url?: string;
+  }>;
   onGenerate: (selectedPlotCharName?: string) => void;
   onRegenerate: () => void;
   onDelete: () => void;
@@ -2670,6 +2777,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
               status={characterImage?.generationStatus}
               alt={characterName}
               size="small"
+              onClick={() => characterImage?.imageUrl && onView()}
             />
           </div>
 
@@ -2724,15 +2832,8 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
           status={characterImage?.generationStatus}
           alt={characterName}
           size="large"
+          onClick={() => characterImage?.imageUrl && onView()}
         />
-
-        {fromPlotOverview && characterImage?.imageUrl && (
-          <div className="absolute top-2 left-2">
-            <span className="px-2 py-1 bg-green-600 text-white text-xs rounded shadow-lg">
-              From Plot Overview
-            </span>
-          </div>
-        )}
 
         <div className="absolute top-2 right-2">
           <ImageActions
@@ -2753,6 +2854,9 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
 
       <div className="p-4">
         <h5 className="font-medium text-gray-900 mb-1">{characterName}</h5>
+        {fromPlotOverview && characterImage?.imageUrl && (
+          <p className="text-xs text-green-700 mb-2">Using Plot Overview image</p>
+        )}
 
         {/* Character Selector for matching with Plot Overview */}
         {plotCharacters && plotCharacters.length > 0 && !fromPlotOverview && (
@@ -2791,7 +2895,7 @@ const CharacterImageCard: React.FC<CharacterImageCardProps> = ({
                   <div className="mt-2 p-2 bg-white rounded border border-gray-200">
                     <div className="flex items-start space-x-2">
                       {selectedPlotCharDetails.image_url && (
-                        <img
+                        <ProtectedImage
                           src={selectedPlotCharDetails.image_url}
                           alt={selectedPlotCharDetails.name}
                           className="w-12 h-12 object-cover rounded"
@@ -2848,6 +2952,7 @@ interface ImageThumbnailProps {
   status?: string;
   alt: string;
   size: 'small' | 'large';
+  onClick?: () => void;
 }
 
 const ImageThumbnail: React.FC<ImageThumbnailProps> = ({ 
@@ -2855,7 +2960,8 @@ const ImageThumbnail: React.FC<ImageThumbnailProps> = ({
   isGenerating, 
   status,
   alt, 
-  size 
+  size,
+  onClick
 }) => {
   const sizeClasses = size === 'small' 
     ? 'w-16 h-16' 
@@ -2888,11 +2994,14 @@ const ImageThumbnail: React.FC<ImageThumbnailProps> = ({
 
   if (imageUrl) {
     return (
-      <img
-        src={imageUrl}
-        alt={alt}
-        className={`${sizeClasses} object-cover rounded-md`}
-      />
+      <div className="relative w-full h-full">
+        <ProtectedImage
+          src={imageUrl}
+          alt={alt}
+          onClick={onClick}
+          className={`${sizeClasses} object-cover rounded-md ${onClick ? 'cursor-zoom-in' : ''}`}
+        />
+      </div>
     );
   }
 
@@ -3056,15 +3165,63 @@ const ImageActions: React.FC<ImageActionsProps> = ({
 // Image Viewer Modal
 interface ImageViewerModalProps {
   imageUrl: string;
+  watermarkedImageUrl?: string;
   onClose: () => void;
   description?: string;
   sceneNumber?: number;
   dialogue?: Array<{character: string; text: string}>;
   expression?: Array<{character: string; action: string}>;
+  canDownload: boolean;
+  isFreeTier: boolean;
+  downloadLockMessage: string;
+  isSubscriptionStatusLoading?: boolean;
 }
 
-const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose, description, sceneNumber, dialogue, expression }) => {
+const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
+  imageUrl,
+  watermarkedImageUrl,
+  onClose,
+  description,
+  sceneNumber,
+  dialogue,
+  expression,
+  canDownload,
+  isFreeTier,
+  downloadLockMessage,
+  isSubscriptionStatusLoading = false
+}) => {
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
+  const [includeWatermark, setIncludeWatermark] = useState(true);
+
   if (!imageUrl) return null;
+
+  const triggerDownload = (downloadUrl: string) => {
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = sceneNumber ? `scene-${sceneNumber}.png` : 'litink-image.png';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleConfirmDownload = () => {
+    if (!canDownload) return;
+
+    if (includeWatermark) {
+      // Use watermarked version if available, otherwise fall back to display URL
+      triggerDownload(watermarkedImageUrl || imageUrl);
+      toast.success('Downloading image with watermark...');
+    } else {
+      // Display URL is already clean for paid users (backend handles tier-aware URLs)
+      triggerDownload(imageUrl);
+      toast.success('Downloading clean image...');
+    }
+    setShowDownloadDialog(false);
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
@@ -3087,8 +3244,8 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose, 
         {/* Body */}
         <div className="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
           {/* Image */}
-          <div className="flex-1 bg-black flex items-center justify-center p-4 min-h-[240px]">
-            <img
+          <div className="relative flex-1 bg-black flex items-center justify-center p-4 min-h-[240px]">
+            <ProtectedImage
               src={imageUrl}
               alt={sceneNumber ? `Scene ${sceneNumber}` : 'Generated image'}
               className="max-w-full max-h-[60vh] object-contain rounded-lg shadow-2xl"
@@ -3141,23 +3298,85 @@ const ImageViewerModal: React.FC<ImageViewerModalProps> = ({ imageUrl, onClose, 
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-white/10 flex justify-end gap-2">
-          <a
-            href={imageUrl}
-            download
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
+        <div className="px-5 py-3 border-t border-white/10 flex justify-between gap-2">
+          <div className="text-xs text-gray-400 flex items-center">
+            {isSubscriptionStatusLoading
+              ? 'Checking download permissions...'
+              : isFreeTier
+                ? 'Downloads are locked on Free.'
+                : 'Preview uses backend-embedded watermark by default.'}
+          </div>
+          <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowDownloadDialog(true)}
+            disabled={isSubscriptionStatusLoading}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-colors"
           >
-            <Download className="w-4 h-4" />
-            <span>Download</span>
-          </a>
+            {canDownload ? <Download className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+            <span>{canDownload ? 'Download' : 'Locked'}</span>
+          </button>
           <button onClick={onClose} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded-lg transition-colors">
             Close
           </button>
+          </div>
         </div>
       </div>
+
+      {showDownloadDialog && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="w-full max-w-md bg-gray-900 border border-white/10 rounded-xl p-5 shadow-2xl">
+            <h4 className="text-white font-semibold text-sm mb-2">Download Image</h4>
+            {canDownload ? (
+              <>
+                <p className="text-xs text-gray-300 mb-4">
+                  Preview uses backend-embedded watermark. Paid tiers can remove it for this download.
+                </p>
+                <label className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/5 border border-white/10 mb-4">
+                  <span className="text-sm text-gray-100">Keep watermark</span>
+                  <input
+                    type="checkbox"
+                    checked={includeWatermark}
+                    onChange={(e) => setIncludeWatermark(e.target.checked)}
+                    className="h-4 w-4 accent-blue-500"
+                  />
+                </label>
+              </>
+            ) : (
+              <div className="mb-4 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2">
+                <p className="text-sm text-amber-200">{downloadLockMessage}</p>
+                {isFreeTier && (
+                  <a href="/subscription" className="inline-block text-xs text-amber-300 underline mt-1">
+                    View plans and upgrade
+                  </a>
+                )}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDownloadDialog(false)}
+                className="px-3 py-2 text-sm rounded-lg bg-gray-700 text-white hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDownload}
+                disabled={!canDownload}
+                className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
+              >
+                {canDownload ? 'Download' : 'Locked'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-};// Confirmation Modal Component
+};
+
+// Confirmation Modal Component
 interface ConfirmationModalProps {
   isOpen: boolean;
   onClose: () => void;
