@@ -1265,8 +1265,11 @@ async def async_generate_scene_image_task(
             # custom_prompt should enhance the description (e.g., "Lighting mood: natural")
             # NOT replace the actual scene content from the book
             if is_suggested_shot:
-                # Suggested shots should maintain same background, only change pose/expression
-                final_description = f"Cinematic film still, {scene_description}"
+                # Suggested shots: frontend now sends rich descriptions with setting,
+                # emotion, and continuity anchors. Avoid double-wrapping with
+                # "Cinematic film still" — the ModelsLab service adds style modifiers.
+                # Just append I2I preservation + no-text instructions.
+                final_description = scene_description
                 final_description += ". MAINTAIN EXACT SAME BACKGROUND AND ENVIRONMENT"
                 final_description += (
                     ". Only change character pose, expression, and camera angle"
