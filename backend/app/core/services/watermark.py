@@ -25,16 +25,6 @@ WATERMARK_ASSET_PATH = os.path.join(
 )
 
 
-def _assert_source_is_image_content_type(source_url: str, content_type_header: Optional[str]) -> None:
-    actual_content_type = (content_type_header or '').split(';', 1)[0].strip().lower()
-    if not actual_content_type:
-        return
-    if not actual_content_type.startswith('image/'):
-        raise ValueError(
-            f"Invalid source Content-Type for image persistence ({source_url}): {actual_content_type}"
-        )
-
-
 def _probe_video_dimensions(media_path: str) -> Optional[Tuple[int, int]]:
     """Return width/height of first video stream using ffprobe."""
     cmd = [
@@ -64,18 +54,19 @@ def _probe_video_dimensions(media_path: str) -> Optional[Tuple[int, int]]:
 
 def _embedded_overlay_filter(width: int, height: int) -> str:
     """
-    Build a subtle bottom-right corner watermark overlay.
-    Single placement, low opacity — noticeable but not intrusive.
+    Build a prominent multi-overlay diagonal watermark filter.
+    This avoids tiny corner labels and embeds across the image/video surface.
     """
-    # Scale watermark to ~15% of image width, min 80px for readability
-    scaled_w = max(80, int(width * 0.15))
-    # Margin from edge: ~2% of image dimensions
-    margin_x = max(8, int(width * 0.02))
-    margin_y = max(8, int(height * 0.02))
+    scaled_w = max(220, int(width * 0.72))
+    rotation_radians = round(math.radians(28), 4)
     return (
-        f"[1:v]format=rgba,colorchannelmixer=aa=0.18,"
-        f"scale={scaled_w}:-1[wm];"
-        f"[0:v][wm]overlay=W-w-{margin_x}:H-h-{margin_y}[outv]"
+        f"[1:v]format=rgba,colorchannelmixer=aa=0.24,"
+        f"scale={scaled_w}:-1,"
+        f"rotate={rotation_radians}:c=none:ow=rotw(iw):oh=roth(ih)[wm];"
+        f"[wm]split=3[wm1][wm2][wm3];"
+        f"[0:v][wm1]overlay=(W-w)/2:(H-h)/2[tmp1];"
+        f"[tmp1][wm2]overlay=(W-w)/2-W*0.30:(H-h)/2-H*0.24[tmp2];"
+        f"[tmp2][wm3]overlay=(W-w)/2+W*0.30:(H-h)/2+H*0.24[outv]"
     )
 
 
@@ -207,10 +198,6 @@ async def persist_image_with_embedded_watermark(
         ) as client:
             async with client.stream("GET", source_url) as response:
                 response.raise_for_status()
-                _assert_source_is_image_content_type(
-                    source_url,
-                    response.headers.get("content-type"),
-                )
                 with open(input_path, "wb") as f:
                     async for chunk in response.aiter_bytes(chunk_size=8192):
                         f.write(chunk)
@@ -238,10 +225,6 @@ async def persist_clean_image(
         ) as client:
             async with client.stream("GET", source_url) as response:
                 response.raise_for_status()
-                _assert_source_is_image_content_type(
-                    source_url,
-                    response.headers.get("content-type"),
-                )
                 with open(input_path, "wb") as f:
                     async for chunk in response.aiter_bytes(chunk_size=8192):
                         f.write(chunk)
@@ -275,10 +258,6 @@ async def persist_image_with_both_versions(
         ) as client:
             async with client.stream("GET", source_url) as response:
                 response.raise_for_status()
-                _assert_source_is_image_content_type(
-                    source_url,
-                    response.headers.get("content-type"),
-                )
                 with open(input_path, "wb") as f:
                     async for chunk in response.aiter_bytes(chunk_size=8192):
                         f.write(chunk)
