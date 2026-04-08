@@ -461,15 +461,10 @@ Return only the factual narration script.
 """
 
     def _extract_characters_from_script(self, script: str) -> List[str]:
-        """Extract character names from the generated script"""
+        """Extract likely character speaker names from the generated script."""
         try:
-            # Look for character names in ALL CAPS (screenplay format)
             import re
 
-            character_pattern = r"\b[A-Z][A-Z\s]+\b"
-            potential_characters = re.findall(character_pattern, script)
-
-            # Filter out common non-character words and clean up
             non_characters = {
                 "SCENE",
                 "INT",
@@ -481,7 +476,6 @@ Return only the factual narration script.
                 "CONTINUOUS",
                 "LATER",
                 "MOMENTS",
-                "LATER",
                 "FADE",
                 "CUT",
                 "DISSOLVE",
@@ -505,27 +499,54 @@ Return only the factual narration script.
                 "WHICH",
                 "WHOSE",
                 "WHOM",
+                "NARRATOR",
             }
 
-            characters = []
-            for char in potential_characters:
-                char_clean = char.strip()
-                if (
-                    len(char_clean) > 2
-                    and char_clean not in non_characters
-                    and not char_clean.isdigit()
-                    and char_clean not in characters
-                ):
-                    characters.append(char_clean)
+            def normalize_character_name(name: str) -> str:
+                cleaned = re.sub(r"\s+", " ", name).strip(" :\t\n\r\"'")
+                cleaned = re.sub(r"\([^)]*\)", "", cleaned).strip()
+                return cleaned
 
-            # If no characters found in CAPS, try to extract from dialogue
-            if not characters:
-                # Look for dialogue patterns and extract speaker names
-                dialogue_pattern = r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*):\s*["\']'
-                dialogue_characters = re.findall(dialogue_pattern, script)
-                characters = list(set(dialogue_characters))
+            def is_valid_character_name(name: str) -> bool:
+                if not name:
+                    return False
+                upper_name = name.upper().strip()
+                if upper_name in non_characters:
+                    return False
+                if name.isdigit():
+                    return False
+                words = [w for w in re.split(r"\s+", name) if w]
+                if not words or len(words) > 4:
+                    return False
+                for word in words:
+                    bare = word.rstrip(".:-")
+                    if bare.lower() in {"int", "ext", "scene", "cut", "fade", "dissolve"}:
+                        return False
+                    if not re.match(r"^[A-Z][A-Za-z'\.-]*$", bare):
+                        return False
+                return True
 
-            return characters[:10]  # Limit to 10 characters
+            def add_name(result: List[str], candidate: str) -> None:
+                normalized = normalize_character_name(candidate)
+                if normalized and is_valid_character_name(normalized) and normalized not in result:
+                    result.append(normalized)
+
+            characters: List[str] = []
+
+            dialogue_patterns = [
+                r'(?m)^\s*([A-Z][A-Za-z\.\'-]*(?:\s+[A-Z][A-Za-z\.\'-]*){0,3})\s*:\s*.+$',
+                r'(?m)^\s*([A-Z][A-Z\.\'-]*(?:\s+[A-Z][A-Z\.\'-]*){0,3})\s*$\n\s*[^\n]+',
+            ]
+
+            for pattern in dialogue_patterns:
+                for match in re.findall(pattern, script):
+                    add_name(characters, match.title() if match.isupper() else match)
+
+            character_pattern = r'(?m)^\s*([A-Z][A-Z\.\'-]*(?:\s+[A-Z][A-Z\.\'-]*){0,3})\s*$'
+            for match in re.findall(character_pattern, script):
+                add_name(characters, match.title())
+
+            return characters[:10]
 
         except Exception as e:
             print(f"Error extracting characters: {e}")

@@ -135,57 +135,9 @@ def parse_scene_descriptions(analysis_result: str) -> list:
 def extract_characters(
     character_details: str, script_style: str = "cinematic_movie"
 ) -> list:
-    """Extract character names from character analysis with improved logic and script style filtering"""
+    """Extract likely character names for frontend character pills."""
     characters = []
 
-    # Look for patterns like "Character Name: description" or "Name - role"
-    character_patterns = [
-        r"^([A-Z][a-zA-Z\s]+?)\s*:\s*.+$",  # Name: description
-        r"^([A-Z][a-zA-Z\s]+?)\s*-\s*.+$",  # Name - role
-        r"^([A-Z][a-zA-Z\s]+?)\s*\([^)]+\)",  # Name (role)
-    ]
-
-    lines = character_details.split("\n")
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-
-        for pattern in character_patterns:
-            match = re.match(pattern, line, re.MULTILINE)
-            if match:
-                char_name = match.group(1).strip()
-                # Clean up the name (remove extra spaces, titles, etc.)
-                char_name = re.sub(r"\s+", " ", char_name)
-                if len(char_name) > 1 and char_name not in characters:
-                    characters.append(char_name)
-                break
-
-    # Fallback: extract capitalized words if no structured characters found
-    if not characters:
-        potential_chars = re.findall(r"\b[A-Z][a-zA-Z]+\b", character_details)
-        # Filter out common non-character words
-        exclude_words = {
-            "The",
-            "And",
-            "But",
-            "For",
-            "Are",
-            "With",
-            "This",
-            "That",
-            "From",
-            "They",
-            "Will",
-            "Have",
-            "Been",
-            "One",
-            "Two",
-            "Three",
-        }
-        characters = [char for char in potential_chars if char not in exclude_words]
-
-    # Filter out invalid character names (pronouns and generic terms)
     invalid_names = {
         "he",
         "she",
@@ -225,25 +177,102 @@ def extract_characters(
         "brother",
         "sister",
         "cousin",
+        "narrator",
+        "voice",
+        "speaker",
+        "announcer",
     }
-    characters = [char for char in characters if char.lower() not in invalid_names]
 
-    # Filter characters based on script style for frontend selection
+    exclude_words = {
+        "The",
+        "And",
+        "But",
+        "For",
+        "Are",
+        "With",
+        "This",
+        "That",
+        "From",
+        "They",
+        "Will",
+        "Have",
+        "Been",
+        "One",
+        "Two",
+        "Three",
+        "Scene",
+        "Cut",
+        "Fade",
+        "Dissolve",
+    }
+
+    def normalize_name(name: str) -> str:
+        cleaned = re.sub(r"\([^)]*\)", "", name)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" :-\t\n\r\"'")
+        return cleaned
+
+    def is_valid_name(name: str) -> bool:
+        if not name:
+            return False
+        if name.lower() in invalid_names:
+            return False
+        words = [w for w in name.split() if w]
+        if not words or len(words) > 4:
+            return False
+        for word in words:
+            bare = word.rstrip('.:-')
+            if bare.lower() in {"cut", "to", "fade", "scene", "int", "ext", "dissolve"}:
+                return False
+            if not re.match(r"^[A-Z][A-Za-z'\.-]*$", word):
+                return False
+        return True
+
+    def add_character(name: str) -> None:
+        normalized = normalize_name(name)
+        if (
+            normalized
+            and normalized not in exclude_words
+            and is_valid_name(normalized)
+            and normalized not in characters
+        ):
+            characters.append(normalized)
+
+    character_patterns = [
+        r"^([A-Z][a-zA-Z\.\'-]+(?:\s+[A-Z][a-zA-Z\.\'-]+){0,3})\s*:\s*.+$",
+        r"^([A-Z][a-zA-Z\.\'-]+(?:\s+[A-Z][a-zA-Z\.\'-]+){0,3})\s*-\s*.+$",
+        r"^([A-Z][a-zA-Z\.\'-]+(?:\s+[A-Z][a-zA-Z\.\'-]+){0,3})\s*\([^)]+\)",
+    ]
+
+    lines = character_details.split("\n")
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        for pattern in character_patterns:
+            match = re.match(pattern, line, re.MULTILINE)
+            if match:
+                add_character(match.group(1).strip())
+                break
+
+    if not characters:
+        potential_chars = re.findall(
+            r"\b[A-Z][a-zA-Z\.\'-]+(?:\s+[A-Z][a-zA-Z\.\'-]+){0,3}\b",
+            character_details,
+        )
+        for char in potential_chars:
+            if char not in exclude_words:
+                add_character(char)
+
     if script_style == "cinematic_narration":
-        # For narration scripts, exclude narrator-like entities that aren't speaking characters
         narrator_indicators = ["narrator", "voice", "speaker", "announcer"]
-        filtered_characters = []
-        for char in characters:
-            char_lower = char.lower()
-            # Exclude if it contains narrator indicators
-            if not any(indicator in char_lower for indicator in narrator_indicators):
-                filtered_characters.append(char)
-        characters = filtered_characters
+        characters = [
+            char
+            for char in characters
+            if not any(indicator in char.lower() for indicator in narrator_indicators)
+        ]
 
-    # Remove duplicates and limit
-    characters = list(set(characters))[:10]  # Increased limit to 10
-
-    return characters
+    return characters[:10]
 
 
 def validate_script_style(script_style: str) -> str:
