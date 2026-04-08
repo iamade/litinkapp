@@ -1,10 +1,7 @@
 from __future__ import annotations
 import os
-import re
-import hashlib
 from typing import Optional, BinaryIO
 from pathlib import Path
-from urllib.parse import urlparse
 from app.core.config import settings
 import boto3
 from botocore.client import Config
@@ -23,16 +20,6 @@ class S3StorageService:
 
     This is memory-efficient as it streams files rather than loading them entirely into memory.
     """
-    ALLOWED_CONTENT_TYPE_PREFIXES = ("image/", "video/", "audio/", "text/")
-    ALLOWED_CONTENT_TYPES = {
-        "application/pdf",
-        "application/json",
-        "application/octet-stream",
-        "application/zip",
-        "application/x-zip-compressed",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    }
 
     def __init__(self):
         self.use_minio = settings.USE_MINIO  # Set in config based on environment
@@ -110,7 +97,6 @@ class S3StorageService:
         try:
             extra_args = {}
             if content_type:
-                self._validate_content_type(content_type)
                 extra_args["ContentType"] = content_type
 
             # Upload using put_object (memory-efficient for bytes)
@@ -142,7 +128,6 @@ class S3StorageService:
         try:
             extra_args = {}
             if content_type:
-                self._validate_content_type(content_type)
                 extra_args["ContentType"] = content_type
 
             self.client.upload_fileobj(
@@ -159,41 +144,6 @@ class S3StorageService:
             raise
 
     @staticmethod
-    def _base_content_type(content_type: Optional[str]) -> Optional[str]:
-        if not content_type:
-            return None
-        return content_type.split(";", 1)[0].strip().lower()
-
-    @classmethod
-    def _is_compatible_content_type(cls, expected: Optional[str], actual: Optional[str]) -> bool:
-        expected_base = cls._base_content_type(expected)
-        actual_base = cls._base_content_type(actual)
-
-        if not expected_base or not actual_base:
-            return True
-
-        if expected_base == actual_base:
-            return True
-
-        expected_family = expected_base.split("/", 1)[0]
-        actual_family = actual_base.split("/", 1)[0]
-        return expected_family == actual_family
-
-    @classmethod
-    def _validate_content_type(cls, content_type: str) -> None:
-        normalized = cls._base_content_type(content_type)
-        if not normalized:
-            raise ValueError("Missing Content-Type for upload")
-
-        if normalized in cls.ALLOWED_CONTENT_TYPES:
-            return
-
-        if any(normalized.startswith(prefix) for prefix in cls.ALLOWED_CONTENT_TYPE_PREFIXES):
-            return
-
-        raise ValueError(f"Unsupported Content-Type for upload: {normalized}")
-
-    @staticmethod
     def build_media_path(
         user_id: str,
         media_type: str,
@@ -201,20 +151,11 @@ class S3StorageService:
         extension: str,
         scope_id: Optional[str] = None,
     ) -> str:
-        """Build a standardized S3 path for media files with optional scope partitioning."""
+        """Build a standardized S3 path for media files."""
         ext = extension.lstrip(".")
-        safe_scope = None
         if scope_id:
-            raw_scope = str(scope_id)
-            safe_scope_base = re.sub(r"[^a-zA-Z0-9_-]+", "-", raw_scope).strip("-")[:48]
-            scope_hash = hashlib.sha1(raw_scope.encode("utf-8")).hexdigest()[:10]
-            safe_scope = f"{safe_scope_base}-{scope_hash}" if safe_scope_base else scope_hash
-
-        base_path = f"users/{user_id}/{media_type}"
-        if safe_scope:
-            base_path = f"{base_path}/scope-{safe_scope}"
-
-        return f"{base_path}/{record_id}.{ext}"
+            return f"users/{user_id}/{media_type}/scope-{scope_id}/{record_id}.{ext}"
+        return f"users/{user_id}/{media_type}/{record_id}.{ext}"
 
     async def persist_from_url(self, source_url: str, dest_path: str, content_type: Optional[str] = None, timeout_seconds: int = 120, max_retries: int = 3) -> str:
         """Download from external URL and persist to our S3 storage.
@@ -233,33 +174,15 @@ class S3StorageService:
                 async with httpx.AsyncClient(timeout=float(timeout_seconds), follow_redirects=True) as client:
                     async with client.stream("GET", source_url) as response:
                         response.raise_for_status()
-                        source_content_type = self._base_content_type(response.headers.get("content-type"))
-
-                        if content_type and not self._is_compatible_content_type(content_type, source_content_type):
-                            raise ValueError(
-                                f"Content-Type mismatch for {source_url}: expected {content_type}, got {source_content_type or 'unknown'}"
-                            )
-
-                        resolved_content_type = content_type or source_content_type
                         buffer = io.BytesIO()
                         async for chunk in response.aiter_bytes(chunk_size=8192):
                             buffer.write(chunk)
                         buffer.seek(0)
-                        return await self.upload_stream(
-                            buffer,
-                            dest_path,
-                            content_type=resolved_content_type,
-                        )
+                        return await self.upload_stream(buffer, dest_path, content_type=content_type)
             except httpx.HTTPStatusError as e:
                 last_error = e
                 status = e.response.status_code
-                if status == 404:
-                    logger.error(
-                        "[persist_from_url] Permanent 404 for %s (likely purged source); not retrying",
-                        source_url,
-                    )
-                    raise
-                is_transient = status == 429 or status >= 500
+                is_transient = status == 429 or status >= 500 or status == 404
                 if is_transient and attempt < max_retries - 1:
                     logger.warning(f"[persist_from_url] HTTP {status} for {source_url}, retry {attempt + 1}/{max_retries}")
                     await asyncio.sleep(2 ** attempt)
@@ -285,10 +208,6 @@ class S3StorageService:
         if not path or not path.startswith(("http://", "https://")):
             return path
 
-        parsed = urlparse(path)
-        if not parsed.path:
-            return path
-
         # Build expected prefix based on storage backend
         if self.use_minio:
             prefix = f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/"
@@ -300,11 +219,11 @@ class S3StorageService:
         if path.startswith(prefix):
             return path[len(prefix):]
 
-        # Strict fallback: only strip when URL path starts with /{bucket}/
-        # to avoid cross-project/cross-endpoint key collisions.
-        bucket_prefix = f"/{self.bucket_name}/"
-        if parsed.path.startswith(bucket_prefix):
-            return parsed.path[len(bucket_prefix):]
+        # Fallback: find /{bucket_name}/ anywhere in the URL
+        bucket_marker = f"/{self.bucket_name}/"
+        idx = path.find(bucket_marker)
+        if idx != -1:
+            return path[idx + len(bucket_marker):]
 
         return path
 
@@ -324,8 +243,13 @@ class S3StorageService:
         if self.use_minio:
             return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
         elif settings.S3_ENDPOINT:
-            # Supabase Storage or other S3-compatible with custom endpoint
-            return f"{settings.S3_ENDPOINT}/{self.bucket_name}/{path}"
+            # Supabase public buckets require object/public URLs, not the S3 API path.
+            base = (
+                settings.S3_ENDPOINT.replace("/storage/v1/s3", "/storage/v1/object/public")
+                if "/storage/v1/s3" in settings.S3_ENDPOINT
+                else settings.S3_ENDPOINT
+            )
+            return f"{base}/{self.bucket_name}/{path}"
         else:
             # AWS S3 public URL
             return f"https://{self.bucket_name}.s3.{settings.S3_REGION}.amazonaws.com/{path}"
