@@ -144,9 +144,18 @@ class S3StorageService:
             raise
 
     @staticmethod
-    def build_media_path(user_id: str, media_type: str, record_id: str, extension: str) -> str:
+    def build_media_path(
+        user_id: str,
+        media_type: str,
+        record_id: str,
+        extension: str,
+        scope_id: Optional[str] = None,
+    ) -> str:
         """Build a standardized S3 path for media files."""
-        return f"users/{user_id}/{media_type}/{record_id}.{extension}"
+        ext = extension.lstrip(".")
+        if scope_id:
+            return f"users/{user_id}/{media_type}/scope-{scope_id}/{record_id}.{ext}"
+        return f"users/{user_id}/{media_type}/{record_id}.{ext}"
 
     async def persist_from_url(self, source_url: str, dest_path: str, content_type: Optional[str] = None, timeout_seconds: int = 120, max_retries: int = 3) -> str:
         """Download from external URL and persist to our S3 storage.
@@ -234,8 +243,13 @@ class S3StorageService:
         if self.use_minio:
             return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
         elif settings.S3_ENDPOINT:
-            # Supabase Storage or other S3-compatible with custom endpoint
-            return f"{settings.S3_ENDPOINT}/{self.bucket_name}/{path}"
+            # Supabase public buckets require object/public URLs, not the S3 API path.
+            base = (
+                settings.S3_ENDPOINT.replace("/storage/v1/s3", "/storage/v1/object/public")
+                if "/storage/v1/s3" in settings.S3_ENDPOINT
+                else settings.S3_ENDPOINT
+            )
+            return f"{base}/{self.bucket_name}/{path}"
         else:
             # AWS S3 public URL
             return f"https://{self.bucket_name}.s3.{settings.S3_REGION}.amazonaws.com/{path}"
