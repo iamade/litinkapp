@@ -704,7 +704,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     
     // Action descriptors for pose/expression variety
     const ACTIONS_FOR_DIALOGUE = [
-      'speaking with emotion',
+      'speaking with intensity',
       'reacting expressively',
       'leaning forward intently',
       'gesturing while talking',
@@ -712,6 +712,63 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       'looking directly ahead',
       'turning slightly'
     ];
+
+    // Emotion mapping from common parenthetical directions
+    const EMOTION_MAP: Record<string, string> = {
+      'whispering': 'hushed, secretive tone, leaning in close',
+      'whispers': 'hushed, secretive tone, leaning in close',
+      'angrily': 'tense, confrontational expression, jaw clenched',
+      'angry': 'tense, confrontational expression, jaw clenched',
+      'shouting': 'mouth open wide, aggressive posture, veins visible',
+      'yelling': 'mouth open wide, aggressive posture',
+      'crying': 'tears on cheeks, red eyes, trembling',
+      'sobbing': 'tears streaming, shoulders shaking, grief-stricken',
+      'laughing': 'genuine smile, eyes crinkled with amusement',
+      'sarcastically': 'slight smirk, one eyebrow raised, knowing look',
+      'sarcastic': 'slight smirk, one eyebrow raised, knowing look',
+      'coldly': 'icy stare, emotionless face, rigid posture',
+      'cold': 'icy stare, emotionless face, rigid posture',
+      'nervously': 'fidgeting, avoiding eye contact, tense shoulders',
+      'nervous': 'fidgeting, avoiding eye contact, tense shoulders',
+      'sadly': 'downcast eyes, slumped shoulders, melancholy expression',
+      'pleading': 'desperate eyes, hands clasped, imploring expression',
+      'threatening': 'menacing stare, looming posture, dangerous calm',
+      'quietly': 'subdued, measured delivery, restrained emotion',
+      'excitedly': 'wide eyes, animated gestures, barely contained energy',
+      'fearfully': 'wide eyes, backing away, trembling',
+      'confused': 'furrowed brow, head tilted, uncertain expression',
+      'disgusted': 'nose wrinkled, lip curled, recoiling slightly',
+      'resigned': 'weary expression, shoulders dropped, accepting defeat',
+      'triumphant': 'chin raised, confident smile, victorious posture',
+      'hesitant': 'uncertain pause, lips parted, conflicted expression',
+    };
+
+    // Map time of day to lighting description
+    const TIME_LIGHTING_MAP: Record<string, string> = {
+      'night': 'dark atmospheric lighting, moonlight and shadows',
+      'evening': 'warm golden hour light fading to dusk',
+      'morning': 'soft early morning light, gentle shadows',
+      'dawn': 'pale pre-dawn light, cool blue tones',
+      'dusk': 'fading warm light, long purple shadows',
+      'day': 'natural daylight, clear illumination',
+      'afternoon': 'bright afternoon sun, defined shadows',
+      'sunset': 'rich golden-orange light, dramatic long shadows',
+      'sunrise': 'warm pink and gold light breaking through',
+    };
+
+    // Infer emotional tone from dialogue text when no parenthetical exists
+    const inferEmotionFromDialogue = (text: string): string => {
+      const lower = text.toLowerCase();
+      if (lower.includes('!') && (lower.includes('no') || lower.includes('stop') || lower.includes('never'))) return 'intense, forceful expression';
+      if (lower.includes('?') && lower.includes('why')) return 'questioning, searching expression';
+      if (lower.includes('please') || lower.includes('beg')) return 'earnest, pleading expression';
+      if (lower.includes('kill') || lower.includes('destroy') || lower.includes('die')) return 'dark, grave expression';
+      if (lower.includes('love') || lower.includes('dear') || lower.includes('darling')) return 'tender, warm expression';
+      if (lower.includes('sorry') || lower.includes('forgive')) return 'remorseful, pained expression';
+      if (lower.includes('!')) return 'emphatic, animated expression';
+      if (lower.includes('?')) return 'inquisitive, curious expression';
+      return 'engaged, present expression';
+    };
     
     // Camera direction patterns from script (e.g., "(CLOSE-UP)" "(WIDE SHOT)")
     const CAMERA_DIRECTION_PATTERNS: Record<string, string> = {
@@ -761,17 +818,21 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     let currentCharacter: string | null = null;
     let momentIndex = 0; // Track index to rotate through shot types
     let lastDetectedCameraDirection: string | null = null; // Track camera direction from action lines
-    
+    let currentLocation = ''; // INT./EXT. header for scene setting
+    let currentTimeOfDay = ''; // Time of day extracted from location header
+    let currentLighting = ''; // Lighting description derived from time of day
+    let currentSceneAction = ''; // Most recent action/description line for environment context
+
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
-      
+
       // Check for camera direction in this line
       const detectedDirection = extractCameraDirection(trimmed);
       if (detectedDirection) {
         lastDetectedCameraDirection = detectedDirection;
       }
-      
+
       // Detect scene headers (ACT I - SCENE 1) - capture full header for unique key
       const sceneMatch = trimmed.match(/^(\*?\*?ACT\s+[IVX0-9]+\s*-?\s*SCENE\s+\d+(?:\.\d+)?)\*?\*?/i);
       if (sceneMatch) {
@@ -779,9 +840,26 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         currentSceneKey = sceneMatch[1].replace(/\*/g, '').trim().toUpperCase();
         currentCharacter = null;
         lastDetectedCameraDirection = null; // Reset for new scene
+        currentLocation = '';
+        currentTimeOfDay = '';
+        currentLighting = '';
+        currentSceneAction = '';
         continue;
       }
-      
+
+      // Capture INT./EXT. location headers for scene setting context
+      const locationMatch = trimmed.match(/^(?:\*?\*?)?((?:INT\.|EXT\.)[^\n*]+)/i);
+      if (locationMatch) {
+        currentLocation = locationMatch[1].replace(/\*/g, '').trim();
+        // Extract time of day from location header (e.g., "INT. CORRIDOR - NIGHT")
+        const timeMatch = currentLocation.match(/\b(MORNING|AFTERNOON|EVENING|NIGHT|DAY|DAWN|DUSK|SUNSET|SUNRISE)\b/i);
+        if (timeMatch) {
+          currentTimeOfDay = timeMatch[1].toLowerCase();
+          currentLighting = TIME_LIGHTING_MAP[currentTimeOfDay] || '';
+        }
+        continue;
+      }
+
       // Detect character names (ALL CAPS, 1-30 chars)
       if (
         trimmed === trimmed.toUpperCase() &&
@@ -796,7 +874,18 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         currentCharacter = trimmed.replace("(CONT'D)", '').replace('(V.O.)', '').trim();
         continue;
       }
-      
+
+      // Capture action/description lines (non-dialogue, non-character) for scene context
+      // These are typically lowercase narrative lines describing what's happening
+      if (!currentCharacter && currentSceneKey && trimmed.length > 15 && trimmed !== trimmed.toUpperCase()) {
+        currentSceneAction = trimmed.slice(0, 120);
+      }
+
+      // Build setting context string for shot descriptions
+      const settingContext = currentLocation ? `Setting: ${currentLocation}.` : '';
+      const lightingContext = currentLighting ? `Lighting: ${currentLighting}.` : '';
+      const environmentContext = currentSceneAction ? `Environment: ${currentSceneAction}.` : '';
+
       // Capture action cues (parentheticals) - use the actual action from script
       if (currentCharacter && currentSceneKey && trimmed.startsWith('(') && trimmed.endsWith(')')) {
         const action = trimmed.slice(1, -1).trim();
@@ -804,10 +893,13 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           if (!moments[currentSceneKey]) moments[currentSceneKey] = [];
           // Use detected camera direction or fall back to rotation
           const shotType = lastDetectedCameraDirection || SHOT_TYPES[momentIndex % SHOT_TYPES.length];
+          // Map parenthetical to rich emotional description
+          const emotionKey = action.toLowerCase().split(/[\s,;]+/)[0];
+          const emotionalContext = EMOTION_MAP[emotionKey] || action;
           moments[currentSceneKey].push({
             character: currentCharacter,
             action: action,
-            shot_description: `${shotType} ${currentCharacter} ${action}, same background and environment`,
+            shot_description: `${shotType} ${currentCharacter} ${emotionalContext}. ${settingContext} ${lightingContext} ${environmentContext} Same background, lighting, and environment as key scene image.`.replace(/\s+/g, ' ').trim(),
             moment_type: 'action',
             has_camera_direction: !!lastDetectedCameraDirection
           });
@@ -821,11 +913,14 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         // Use detected camera direction or fall back to rotation
         const shotType = lastDetectedCameraDirection || SHOT_TYPES[momentIndex % SHOT_TYPES.length];
         const actionDesc = ACTIONS_FOR_DIALOGUE[momentIndex % ACTIONS_FOR_DIALOGUE.length];
+        const dialoguePreview = trimmed.slice(0, 80) + (trimmed.length > 80 ? '...' : '');
+        // Infer emotional tone from the dialogue content
+        const emotionalContext = inferEmotionFromDialogue(trimmed);
         moments[currentSceneKey].push({
           character: currentCharacter,
           action: actionDesc,
-          dialogue_preview: trimmed.slice(0, 50) + (trimmed.length > 50 ? '...' : ''),
-          shot_description: `${shotType} ${currentCharacter} ${actionDesc}, same background and environment`,
+          dialogue_preview: dialoguePreview,
+          shot_description: `${shotType} ${currentCharacter} ${actionDesc}, ${emotionalContext}. ${settingContext} ${lightingContext} ${environmentContext} Character is saying: "${dialoguePreview}". Same background, lighting, and environment as key scene image.`.replace(/\s+/g, ' ').trim(),
           moment_type: 'dialogue',
           has_camera_direction: !!lastDetectedCameraDirection
         });
@@ -1489,6 +1584,58 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       `[CAMERA] ${cameraDirection}`,
       `[CONSTRAINTS] ${negativePromptTokens} Maintain same clothing and lighting as reference image.`
     ].join('\n');
+  };
+
+  // Build scene context string for AI Enhance in the modal
+  const buildSceneContext = (sceneNumber: number): string => {
+    const script = selectedScript as ChapterScript;
+    const scriptText = script?.script || '';
+    if (!scriptText) return '';
+
+    // Find the matching scene from parsed scenes
+    const scene = scenes.find(s => s.scene_number === sceneNumber);
+    if (!scene) return '';
+
+    // Extract full scene text from the raw script
+    const scenePattern = /(\*?\*?ACT\s+[IVX]+\s*-?\s*SCENE\s+(\d+(?:\.\d+)?)\*?\*?)/gi;
+    const matches = [...scriptText.matchAll(scenePattern)];
+    const sceneIdx = scenes.indexOf(scene);
+    if (sceneIdx >= 0 && sceneIdx < matches.length) {
+      const startIdx = matches[sceneIdx].index!;
+      const endIdx = sceneIdx < matches.length - 1 ? matches[sceneIdx + 1].index! : scriptText.length;
+      const fullSceneText = scriptText.substring(startIdx, endIdx).trim();
+
+      // Build context: location + first ~600 chars of scene text + character names
+      const parts: string[] = [];
+      if (scene.location) parts.push(`Location: ${scene.location}`);
+      if (scene.header) parts.push(`Scene: ${scene.header}`);
+
+      // Extract character names from the scene text (ALL CAPS lines)
+      const sceneLines = fullSceneText.split('\n');
+      const charsInScene = new Set<string>();
+      for (const line of sceneLines) {
+        const t = line.trim();
+        if (t === t.toUpperCase() && t.length > 1 && t.length <= 30 &&
+            !t.startsWith('INT.') && !t.startsWith('EXT.') &&
+            !t.startsWith('ACT') && !t.startsWith('SCENE') &&
+            !t.startsWith('FADE') && !t.startsWith('CUT')) {
+          charsInScene.add(t.replace("(CONT'D)", '').replace('(V.O.)', '').trim());
+        }
+      }
+      if (charsInScene.size > 0) {
+        parts.push(`Characters in scene: ${[...charsInScene].join(', ')}`);
+      }
+
+      // Include trimmed scene text for full context
+      parts.push(`Script text:\n${fullSceneText.substring(0, 800)}`);
+      return parts.join('\n');
+    }
+
+    // Fallback: use parsed scene data
+    const parts: string[] = [];
+    if (scene.location) parts.push(`Location: ${scene.location}`);
+    if (scene.description) parts.push(`Description: ${scene.description}`);
+    return parts.join('\n');
   };
 
   // Handle opening the generation modal
@@ -2446,6 +2593,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           setSelectedSceneForGeneration(prev => prev ? { ...prev, referenceSceneImageUrl: imageUrl } : prev);
         }}
         isSuggestedShot={selectedSceneForGeneration?.isSuggestedShot}
+        sceneContext={selectedSceneForGeneration ? buildSceneContext(selectedSceneForGeneration.sceneNumber) : undefined}
         userTier={userTier}
         estimatedCreditCost={perImageCost}
         insufficientCreditsMessage={singleImageInsufficientReason || undefined}

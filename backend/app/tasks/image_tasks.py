@@ -22,6 +22,22 @@ from sqlalchemy import text
 logger = logging.getLogger(__name__)
 
 
+def _is_permanent_cdn_not_found(error_details: str) -> bool:
+    """Identify CDN purge/not-found errors that should never be retried."""
+    normalized = (error_details or "").lower()
+    if "404" not in normalized:
+        return False
+
+    not_found_signals = [
+        "not found",
+        "httpstatuserror",
+        "client error '404'",
+        "cdn",
+        "modelslab",
+    ]
+    return any(signal in normalized for signal in not_found_signals)
+
+
 @celery_app.task(bind=True)
 def generate_all_images_for_video(self, video_generation_id: str):
     """Main task to generate all images for a video generation with pipeline support"""
@@ -431,6 +447,7 @@ async def generate_character_images_optimized(
                         media_type='images',
                         record_id=str(_uuid_mod.uuid4()),
                         extension='png',
+                        scope_id=str(video_gen_id),
                     )
                     image_url = await persist_image_with_embedded_watermark(
                         image_url, s3_path, storage, content_type="image/png"
@@ -663,6 +680,7 @@ async def generate_scene_images_optimized(
                         media_type='images',
                         record_id=str(_uuid_mod.uuid4()),
                         extension='png',
+                        scope_id=str(video_gen_id),
                     )
                     image_url = await persist_image_with_embedded_watermark(
                         image_url, s3_path, storage, content_type="image/png"
@@ -1265,8 +1283,11 @@ async def async_generate_scene_image_task(
             # custom_prompt should enhance the description (e.g., "Lighting mood: natural")
             # NOT replace the actual scene content from the book
             if is_suggested_shot:
-                # Suggested shots should maintain same background, only change pose/expression
-                final_description = f"Cinematic film still, {scene_description}"
+                # Suggested shots: frontend now sends rich descriptions with setting,
+                # emotion, and continuity anchors. Avoid double-wrapping with
+                # "Cinematic film still" — the ModelsLab service adds style modifiers.
+                # Just append I2I preservation + no-text instructions.
+                final_description = scene_description
                 final_description += ". MAINTAIN EXACT SAME BACKGROUND AND ENVIRONMENT"
                 final_description += (
                     ". Only change character pose, expression, and camera angle"
@@ -1405,17 +1426,20 @@ async def async_generate_scene_image_task(
                 from app.core.services.storage import get_storage_service, S3StorageService
                 import uuid as _uuid_mod
                 storage = get_storage_service()
+                image_scope = str(script_id or chapter_id or 'global')
                 wm_s3_path = S3StorageService.build_media_path(
                     user_id=str(user_id) if user_id else 'system',
                     media_type='images',
                     record_id=str(_uuid_mod.uuid4()),
                     extension='png',
+                    scope_id=image_scope,
                 )
                 clean_s3_path = S3StorageService.build_media_path(
                     user_id=str(user_id) if user_id else 'system',
                     media_type='images',
                     record_id=str(_uuid_mod.uuid4()),
                     extension='png',
+                    scope_id=image_scope,
                 )
                 try:
                     image_url, clean_url = await persist_image_with_both_versions(
@@ -1527,21 +1551,27 @@ async def async_generate_scene_image_task(
             logger.error(f"[SceneImageTask] {error_message}")
 
             # Determine if error is retryable
-            retryable_keywords = [
-                "timeout",
-                "connection",
-                "network",
-                "rate limit",
-                "service unavailable",
-                "temporary",
-                "retry",
-                "429",
-                "503",
-                "504",
-            ]
-            is_retryable = any(
-                keyword in error_details.lower() for keyword in retryable_keywords
-            )
+            if _is_permanent_cdn_not_found(error_details):
+                logger.warning(
+                    "[SceneImageTask] Detected permanent CDN 404 for source asset; skipping retries"
+                )
+                is_retryable = False
+            else:
+                retryable_keywords = [
+                    "timeout",
+                    "connection",
+                    "network",
+                    "rate limit",
+                    "service unavailable",
+                    "temporary",
+                    "retry",
+                    "429",
+                    "503",
+                    "504",
+                ]
+                is_retryable = any(
+                    keyword in error_details.lower() for keyword in retryable_keywords
+                )
 
             # Determine error code if available
             error_code = "UNKNOWN_ERROR"

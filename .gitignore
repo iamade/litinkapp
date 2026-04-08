@@ -49,3 +49,11 @@ backend/CODEDISCUSS.md
 *.pyc
 architecture
 feature-prompt.md
+
+# Claude/AI workspace files
+.claude/
+CLAUDE.md
+CODE_REVIEW*.md
+
+# Presentation files (not code)
+*.pptx
