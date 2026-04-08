@@ -3,12 +3,17 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 from typing import List, Optional
 
+from app.core.logging import get_logger
+
+logger = get_logger()
+
 from app.plots.schemas import (
     CharacterResponse,
     CharacterUpdate,
     CharacterCreate,
     CharacterArchetypeResponse,
     ImageGenerationRequest,
+    BatchImageGenerationRequest,
 )
 from app.api.services.character import CharacterService
 from app.api.services.subscription import SubscriptionManager
@@ -382,6 +387,111 @@ async def generate_character_image(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to queue character image generation: {str(e)}",
+        )
+
+
+@router.post("/batch-generate-images")
+async def batch_generate_character_images(
+    request: BatchImageGenerationRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: dict = Depends(get_current_active_user),
+):
+    """
+    Queue character portrait generation for multiple characters in a single request.
+
+    Accepts up to 20 characters. Each character image generation is queued independently
+    as a Celery task. Credits are deducted per-character at the CHARACTER_IMAGE_GEN rate.
+
+    - **items**: List of {character_id, prompt?, style?, aspect_ratio?} objects
+
+    Returns a batch summary with per-character results (task_id, record_id, status).
+    """
+    try:
+        character_service = CharacterService(session)
+        credit_service = CreditService(session)
+
+        total_cost = len(request.items) * CHARACTER_IMAGE_GEN
+
+        # Reserve credits for the entire batch upfront
+        try:
+            reservation_id = await credit_service.reserve_credits(
+                user_id=current_user.id,
+                amount=total_cost,
+                operation_type=OperationType.CHARACTER_IMAGE_GEN,
+                ref_id=str(uuid.uuid4()),
+                meta={"batch_size": len(request.items)},
+            )
+            await session.commit()
+        except ValueError:
+            balance = await credit_service.get_effective_balance(current_user.id)
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "message": "Insufficient credits for batch image generation",
+                    "balance": balance,
+                    "required": total_cost,
+                    "batch_size": len(request.items),
+                    "cost_per_item": CHARACTER_IMAGE_GEN,
+                },
+            )
+
+        results = []
+        succeeded = 0
+        failed = 0
+
+        for item in request.items:
+            try:
+                result = await character_service.generate_character_image(
+                    character_id=item.character_id,
+                    user_id=current_user.id,
+                    custom_prompt=item.prompt,
+                    style=item.style or "realistic",
+                    aspect_ratio=item.aspect_ratio or "3:4",
+                )
+                results.append({
+                    "character_id": item.character_id,
+                    "task_id": result.get("task_id"),
+                    "record_id": result.get("record_id"),
+                    "status": result.get("status", "queued"),
+                    "message": result.get("message", "Image generation queued"),
+                })
+                succeeded += 1
+            except Exception as item_error:
+                logger.warning(
+                    f"[BatchImageGen] Failed for character {item.character_id}: {str(item_error)}"
+                )
+                results.append({
+                    "character_id": item.character_id,
+                    "task_id": None,
+                    "record_id": None,
+                    "status": "failed",
+                    "message": str(item_error),
+                })
+                failed += 1
+
+        # Confirm deduction only for succeeded items
+        actual_cost = succeeded * CHARACTER_IMAGE_GEN
+        if actual_cost > 0:
+            await credit_service.confirm_deduction(reservation_id, actual_cost)
+        else:
+            await credit_service.release_reservation(reservation_id)
+        await session.commit()
+
+        return {
+            "message": f"Batch image generation completed: {succeeded} succeeded, {failed} failed",
+            "total_requested": len(request.items),
+            "succeeded": succeeded,
+            "failed": failed,
+            "credits_deducted": actual_cost,
+            "results": results,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process batch image generation: {str(e)}",
         )
 
 
