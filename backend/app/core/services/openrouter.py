@@ -1,4 +1,5 @@
 from typing import Dict, Any, Optional, List
+import re
 import httpx
 from openai import AsyncOpenAI
 from openai.types.chat import (
@@ -330,10 +331,18 @@ What is it? You look worried.
         user_tier: ModelTier,
         analysis_type: str = "summary",
         max_tokens: Optional[int] = None,
+        system_prompt_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Analyze content for various purposes (summary, keywords, difficulty, etc.)
         Uses fallback manager for automatic retry on rate limits.
+
+        Args:
+            system_prompt_override: If provided, use this as the system prompt instead of
+                the default for the analysis_type. The content parameter is then used
+                as the user message directly. This allows callers (e.g. consultation)
+                to supply their own system prompt while still benefiting from the
+                fallback chain.
         """
         tier_str = (
             user_tier.value if isinstance(user_tier, ModelTier) else str(user_tier)
@@ -345,8 +354,13 @@ What is it? You look worried.
             logger.warning(f"No config for tier {tier_str}, using FREE tier defaults")
             config = get_model_config("script", "free")
 
-        # Special handling for plot generation, character creation, and universe analysis
-        if analysis_type in [
+        # If caller provides its own system prompt, honour it and use content as user msg
+        if system_prompt_override is not None:
+            system_prompt = system_prompt_override
+            user_message = content
+            max_tokens = max_tokens if max_tokens is not None else (config.max_tokens if config.max_tokens else 4000)
+            temperature = 0.7
+        elif analysis_type in [
             "plot_overview",
             "plot_generation",
             "characters",
@@ -453,6 +467,14 @@ What is it? You look worried.
             if not result_content:
                 logger.warning(f"[OpenRouter] Model {model} returned empty/None content for {analysis_type}")
                 raise Exception(f"Model {model} returned empty response for {analysis_type}")
+
+            # Strip <think>...</think> reasoning tags from reasoning models (KAN-181)
+            # Some free-tier reasoning models (stepfun, qwen) wrap output in thinking tags
+            # and may return ONLY thinking with no actual content
+            result_content = re.sub(r'<think[^>]*>.*?</think>', '', result_content, flags=re.DOTALL).strip()
+            if not result_content:
+                logger.warning(f"[OpenRouter] Model {model} returned only thinking tags (no actual content) for {analysis_type}")
+                raise Exception(f"Model {model} returned thinking-only response for {analysis_type}")
 
             return {
                 "status": "success",
