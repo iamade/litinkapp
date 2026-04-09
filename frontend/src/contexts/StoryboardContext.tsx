@@ -183,6 +183,66 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
         });
         setImageOrderBySceneState(orderMap);
 
+        // 4. Fetch audio for this script if context is still empty
+        const hasExistingAudio = Object.keys(sceneAudioMap).length > 0;
+        if (!hasExistingAudio) {
+          try {
+            const audioRes = await userService.getChapterAudio(stableSelectedChapterId, selectedScriptId);
+            if (controller.signal.aborted) return;
+
+            const audioFiles = audioRes?.audio_files ?? [];
+            const filteredAudio = audioFiles.filter((file: any) => {
+              const normalizedScriptId = file.script_id ?? file.scriptId;
+              return normalizedScriptId === selectedScriptId || !normalizedScriptId;
+            });
+
+            const groupedAudio: Record<number, AudioFile[]> = {};
+            filteredAudio.forEach((file: any) => {
+              const metadata = file.metadata || file.audio_metadata || {};
+              const rawScene = metadata?.scene ?? file.scene_id ?? file.scene_number ?? null;
+              let sceneNumber = 1;
+              if (typeof rawScene === 'number') {
+                sceneNumber = Math.floor(rawScene);
+              } else if (typeof rawScene === 'string') {
+                const cleaned = rawScene.replace(/^scene_/i, '');
+                const parsed = parseFloat(cleaned);
+                if (!isNaN(parsed)) sceneNumber = Math.floor(parsed);
+              }
+
+              let type: AudioFile['type'] = 'narration';
+              const audioType = file.audio_type || file.type;
+              if (audioType === 'narrator') type = 'narration';
+              else if (audioType === 'character') type = 'dialogue';
+              else if (audioType === 'music' || audioType === 'background_music') type = 'music';
+              else if (audioType === 'sound_effects' || audioType === 'sfx') type = 'effects';
+              else if (audioType === 'ambiance' || audioType === 'ambient') type = 'ambiance';
+
+              const mapped: AudioFile = {
+                id: file.id,
+                type,
+                sceneNumber,
+                shotType: metadata?.shot_type,
+                shotIndex: typeof metadata?.shot_index === 'number' ? metadata.shot_index : undefined,
+                url: file.url ?? file.audio_url,
+                duration: file.duration ?? file.duration_seconds,
+                character: file.character_name ?? metadata?.character_name,
+                status: file.generation_status ?? file.status,
+                text_content: file.text_content,
+                text_prompt: file.text_prompt,
+              };
+
+              if (!groupedAudio[sceneNumber]) groupedAudio[sceneNumber] = [];
+              groupedAudio[sceneNumber].push(mapped);
+            });
+
+            setSceneAudioMap(prev => Object.keys(prev).length === 0 ? groupedAudio : prev);
+          } catch (audioErr: any) {
+            if (audioErr.name !== 'AbortError') {
+              console.error('[StoryboardContext] Failed to fetch audio data:', audioErr);
+            }
+          }
+        }
+
       } catch (err: any) {
         if (err.name !== 'AbortError') {
           console.error('[StoryboardContext] Failed to fetch storyboard data:', err);
