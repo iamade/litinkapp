@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 from typing import List, Optional
@@ -486,7 +487,7 @@ async def batch_generate_character_images(
             "completed_count": succeeded,
             "total_count": len(request.items),
             "results": results,
-            "created_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.utcnow().isoformat() + "Z",
         }
         await redis_client.set(f"batch:{batch_id}", batch_payload, expire=3600)
 
@@ -519,11 +520,6 @@ async def get_character_batch_status(
         batch = await redis_client.get(f"batch:{batch_id}")
         if not batch:
             raise HTTPException(status_code=404, detail="Batch status not found")
-
-        results = batch.get("results", [])
-        user_character_ids = {str(item.get("character_id")) for item in results if item.get("character_id")}
-        if not user_character_ids:
-            return BatchStatusResponse(**batch)
 
         return BatchStatusResponse(**batch)
     except HTTPException:
