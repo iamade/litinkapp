@@ -222,9 +222,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY: Optional[str] = None
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
 
-    # Ollama Cloud API
-    OLLAMA_CLOUD_API_KEY: Optional[str] = None
-    OLLAMA_CLOUD_BASE_URL: str = "https://api.ohmyllama.com/v1"
+    # Ollama API
+    OLLAMA_API_KEY: Optional[str] = None
+    OLLAMA_BASE_URL: str = "https://ollama.com/v1"
 
     # xAI Grok Video (prepared for future use)
     # Get your API key from: https://console.x.ai/

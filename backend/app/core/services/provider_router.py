@@ -27,10 +27,10 @@ class ProviderRouter:
 
         # Ollama Cloud API (for ollama/ prefixed models)
         self.ollama_client = None
-        if settings.OLLAMA_CLOUD_API_KEY:
+        if settings.OLLAMA_API_KEY:
             self.ollama_client = AsyncOpenAI(
-                api_key=settings.OLLAMA_CLOUD_API_KEY,
-                base_url=settings.OLLAMA_CLOUD_BASE_URL,
+                api_key=settings.OLLAMA_API_KEY,
+                base_url=settings.OLLAMA_BASE_URL,
             )
 
         # Google AI Studio (direct, for google/ prefixed models)
