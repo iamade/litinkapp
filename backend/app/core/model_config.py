@@ -34,11 +34,11 @@ class ModelConfig:
 # Models routed via ProviderRouter: google/ → Google AI Studio, groq/ → Groq, else → OpenRouter
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="google/gemini-2.5-flash",  # Google AI Studio FREE direct — most reliable (KAN-181)
-        fallback="groq/llama-3.3-70b-versatile",  # Groq FREE direct, 30 RPM, blazing fast
-        fallback2="qwen/qwen3.6-plus-preview:free",  # OpenRouter FREE, 1M ctx, strong JSON
-        fallback3="mistralai/mistral-small-3.1-24b-instruct:free",  # OpenRouter FREE, reliable small model
-        fallback4=None,  # Removed stepfun (thinking-only); 4-model chain sufficient
+        primary="ollama/gemma4",  # Ollama Cloud API (KAN-181 revision)
+        fallback="google/gemini-2.5-flash",  # Google AI Studio FREE direct
+        fallback2="groq/llama-3.3-70b-versatile",  # Groq FREE direct, 30 RPM
+        fallback3="mistralai/mistral-small-3.1-24b-instruct:free",  # OpenRouter FREE, reliable
+        fallback4=None,
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.0,

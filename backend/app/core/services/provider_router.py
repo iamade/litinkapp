@@ -10,6 +10,7 @@ class ProviderRouter:
     """Routes model requests to the correct provider based on model prefix.
 
     Routing rules:
+        ollama/  → Ollama Cloud API (strip prefix)
         google/  → Google AI Studio (strip prefix)
         groq/    → Groq (strip prefix)
         *        → OpenRouter (keep full model string)
@@ -22,6 +23,14 @@ class ProviderRouter:
             self.openrouter_client = AsyncOpenAI(
                 api_key=settings.OPENROUTER_API_KEY,
                 base_url=settings.OPENROUTER_BASE_URL,
+            )
+
+        # Ollama Cloud API (for ollama/ prefixed models)
+        self.ollama_client = None
+        if settings.OLLAMA_CLOUD_API_KEY:
+            self.ollama_client = AsyncOpenAI(
+                api_key=settings.OLLAMA_CLOUD_API_KEY,
+                base_url=settings.OLLAMA_CLOUD_BASE_URL,
             )
 
         # Google AI Studio (direct, for google/ prefixed models)
@@ -42,6 +51,11 @@ class ProviderRouter:
 
     def get_client_and_model(self, model: str) -> Tuple[AsyncOpenAI, str]:
         """Returns (client, resolved_model) based on model prefix."""
+        if model.startswith("ollama/") and self.ollama_client:
+            resolved = model[len("ollama/"):]
+            logger.info(f"[ProviderRouter] Routing {model} → Ollama Cloud as {resolved}")
+            return self.ollama_client, resolved
+
         if model.startswith("google/") and self.google_client:
             resolved = model[len("google/"):]
             logger.info(f"[ProviderRouter] Routing {model} → Google AI Studio as {resolved}")
