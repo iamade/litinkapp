@@ -200,8 +200,24 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     }
   }, [stableSelectedChapterId, selectedScriptId, scenes, loadImages]);
 
-  // Local selection state for audio file cards
+  // Local selection state for audio file cards. Keep it mirrored into
+  // StoryboardContext so the Video tab can auto-fetch the current Audio tab selection.
   const [selectedAudioFiles, setSelectedAudioFiles] = useState<Set<string>>(new Set());
+
+  const updateSelectedAudioFiles = React.useCallback((updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    setSelectedAudioFiles(prev => {
+      const next = updater instanceof Set ? updater : updater(prev);
+      const normalized = next instanceof Set ? next : new Set(next);
+
+      if (storyboardContext) {
+        storyboardContext.importFromAudioPanel({
+          selectedAudioIds: new Set(normalized),
+        });
+      }
+
+      return normalized;
+    });
+  }, [storyboardContext]);
 
   // Gallery Modal State
   const [galleryState, setGalleryState] = useState<{
@@ -351,9 +367,28 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   // Sync audio files to context when they update
   // Using ref to track previous state and avoid infinite loops
   const prevAudioSyncRef = React.useRef<string>('');
+
+  // Rehydrate local audio selection from shared storyboard state when returning to the Audio tab
+  useEffect(() => {
+    if (!storyboardContext) return;
+
+    setSelectedAudioFiles(prev => {
+      const next = new Set(storyboardContext.selectedAudioIds || []);
+      if (prev.size === next.size && Array.from(prev).every(id => next.has(id))) {
+        return prev;
+      }
+      return next;
+    });
+  }, [storyboardContext, storyboardContext?.selectedAudioIds]);
   
   useEffect(() => {
-    if (!storyboardContext || !files || files.length === 0) return;
+    if (!storyboardContext) return;
+
+    if (!files || files.length === 0) {
+      prevAudioSyncRef.current = '';
+      storyboardContext.importFromAudioPanel({ sceneAudioMap: {} });
+      return;
+    }
     
     // Group audio files by scene number
     const audioByScene: Record<number, any[]> = {};
@@ -900,7 +935,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
           currentTime={currentTime}
           onTimeUpdate={setCurrentTime}
           onAudioSelect={(audioId) => {
-            setSelectedAudioFiles(prev => {
+            updateSelectedAudioFiles(prev => {
               const newSet = new Set(prev);
               if (newSet.has(audioId)) {
                 newSet.delete(audioId);
@@ -1157,7 +1192,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                   file={file}
                   isSelected={selectedAudioFiles.has(file.id)}
                   onSelect={() => {
-                    setSelectedAudioFiles(prev => {
+                    updateSelectedAudioFiles(prev => {
                       const newSet = new Set(prev);
                       if (newSet.has(file.id)) {
                         newSet.delete(file.id);
@@ -1203,7 +1238,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                     }
                     
                     // Also remove from local selection state
-                    setSelectedAudioFiles(prev => {
+                    updateSelectedAudioFiles(prev => {
                       const newSet = new Set(prev);
                       newSet.delete(file.id);
                       return newSet;
