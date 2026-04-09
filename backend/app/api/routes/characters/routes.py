@@ -22,6 +22,8 @@ from app.core.auth import get_current_active_user
 from app.credits.dependencies import require_credits
 from app.credits.constants import OperationType, CHARACTER_IMAGE_GEN, CHARACTER_GEN, TEXT_GEN
 from app.credits.service import CreditService
+from app.images.schemas import BatchStatusResponse
+from app.core.services.redis import redis_client
 
 router = APIRouter()
 
@@ -435,6 +437,7 @@ async def batch_generate_character_images(
                 },
             )
 
+        batch_id = str(uuid.uuid4())
         results = []
         succeeded = 0
         failed = 0
@@ -477,8 +480,19 @@ async def batch_generate_character_images(
             await credit_service.release_reservation(reservation_id)
         await session.commit()
 
+        batch_payload = {
+            "batch_id": batch_id,
+            "status": "completed" if failed == 0 else ("failed" if succeeded == 0 else "partial"),
+            "completed_count": succeeded,
+            "total_count": len(request.items),
+            "results": results,
+            "created_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        }
+        await redis_client.set(f"batch:{batch_id}", batch_payload, expire=3600)
+
         return {
             "message": f"Batch image generation completed: {succeeded} succeeded, {failed} failed",
+            "batch_id": batch_id,
             "total_requested": len(request.items),
             "succeeded": succeeded,
             "failed": failed,
@@ -493,6 +507,30 @@ async def batch_generate_character_images(
             status_code=500,
             detail=f"Failed to process batch image generation: {str(e)}",
         )
+
+
+@router.get("/batch-status/{batch_id}", response_model=BatchStatusResponse)
+async def get_character_batch_status(
+    batch_id: str,
+    current_user: dict = Depends(get_current_active_user),
+):
+    """Get batch image generation status from Redis-backed cache."""
+    try:
+        batch = await redis_client.get(f"batch:{batch_id}")
+        if not batch:
+            raise HTTPException(status_code=404, detail="Batch status not found")
+
+        results = batch.get("results", [])
+        user_character_ids = {str(item.get("character_id")) for item in results if item.get("character_id")}
+        if not user_character_ids:
+            return BatchStatusResponse(**batch)
+
+        return BatchStatusResponse(**batch)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[BatchImageGen] Failed to fetch batch status {batch_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch batch status")
 
 
 @router.get("/{character_id}/image-status")
