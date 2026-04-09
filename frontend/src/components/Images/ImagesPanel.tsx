@@ -220,6 +220,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
   const [selectedSceneForGeneration, setSelectedSceneForGeneration] = useState<{
         sceneNumber: number;
         description: string;
+        sceneCharacters?: string[];
         isRegenerate?: boolean;
         parentSceneImageUrl?: string;
         referenceSceneImageUrl?: string;
@@ -283,7 +284,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
     const script = selectedScript as ChapterScript; // Use the ChapterScript interface
     const scriptText = script.script || '';
-    const parsedScenes: { scene_number: number; visual_description: string; description: string; header: string; location: string }[] = [];
+    const parsedScenes: { scene_number: number; visual_description: string; description: string; header: string; location: string; characters: string[] }[] = [];
 
     // First try to parse scenes from structured scenes array
     if (script.scenes && Array.isArray(script.scenes) && script.scenes.length > 0) {
@@ -292,7 +293,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         visual_description: scene.visual_description || scene.description || '',
         description: scene.description || scene.visual_description || '',
         header: scene.header || `Scene ${idx + 1}`,
-        location: scene.location || ''
+        location: scene.location || '',
+        characters: Array.isArray(scene.characters) ? scene.characters : []
       }));
     }
 
@@ -324,7 +326,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           visual_description: content || location || `Scene ${idx + 1}`,
           description: content || location || `Scene ${idx + 1}`,
           header: match[0].replace(/\*/g, '').trim(),
-          location: location
+          location: location,
+          characters: []
         });
       });
 
@@ -351,7 +354,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           visual_description: content || location,
           description: content || location,
           header: `Scene ${idx + 1}`,
-          location: location
+          location: location,
+          characters: []
         });
       });
 
@@ -373,7 +377,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             visual_description: scene.visual_description || scene.description || '',
             description: scene.description || scene.visual_description || '',
             header: `Scene ${idx + 1}`,
-            location: ''
+            location: '',
+            characters: Array.isArray((scene as any).characters) ? (scene as any).characters : []
           };
         }
 
@@ -383,7 +388,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             visual_description: scene,
             description: scene,
             header: `Scene ${idx + 1}`,
-            location: ''
+            location: '',
+            characters: []
           };
         }
 
@@ -392,7 +398,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           visual_description: String(scene),
           description: String(scene),
           header: `Scene ${idx + 1}`,
-          location: ''
+          location: '',
+          characters: []
         };
       });
     }
@@ -1493,6 +1500,40 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
   // Handle opening the generation modal
   // parentSceneImageUrl: URL of the parent scene's generated image (for suggested shots consistency)
+  const extractMentionedEntitiesFromScene = React.useCallback((scene: any, description: string): string[] => {
+    const normalized = (value?: string) => (value || '').trim().toLowerCase().replace(/[.,]/g, '');
+    const sceneText = `${scene?.description || ''} ${scene?.visual_description || ''} ${description || ''}`.toLowerCase();
+
+    const explicitSceneCharacters = Array.isArray(scene?.characters)
+      ? scene.characters.filter((name: unknown): name is string => typeof name === 'string' && !!name.trim())
+      : [];
+
+    const candidateNames = [
+      ...characters.map((char) => char.displayName || char.originalName || char.name).filter(Boolean),
+      ...Object.keys(characterImages || {}),
+      ...((plotOverview?.characters || []).map((char: any) => char?.name).filter(Boolean))
+    ] as string[];
+
+    const seen = new Set<string>();
+    const dedupedCandidates = candidateNames.filter((name) => {
+      const key = normalized(name);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const mentionedCandidates = dedupedCandidates.filter((name) => {
+      const rawName = name.trim();
+      if (!rawName) return false;
+      const escaped = rawName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const flexiblePattern = escaped.replace(/\s+/g, '\\s+');
+      const regex = new RegExp(`(^|[^a-z0-9])${flexiblePattern}([^a-z0-9]|$)`, 'i');
+      return regex.test(sceneText);
+    });
+
+    return Array.from(new Set([...explicitSceneCharacters, ...mentionedCandidates]));
+  }, [characters, characterImages, plotOverview?.characters]);
+
   const handleGenerateSceneImage = (
     sceneNumber: number, 
     isRef = false,
@@ -1502,6 +1543,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     shotIndex?: number
   ) => {
     const referenceSceneOptions = getReferenceSceneOptions(sceneNumber);
+    const currentScene = scenes.find(scene => scene.scene_number === sceneNumber);
 
     const previousSceneCandidates = referenceSceneOptions
       .filter(option => option.sceneNumber === sceneNumber - 1)
@@ -1516,6 +1558,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     setSelectedSceneForGeneration({
       sceneNumber,
       description: currentDescription,
+      sceneCharacters: extractMentionedEntitiesFromScene(currentScene, currentDescription),
       isRegenerate: isRef,
       parentSceneImageUrl,
       referenceSceneImageUrl: defaultReferenceSceneImageUrl,
@@ -2402,8 +2445,8 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
         sceneNumber={selectedSceneForGeneration?.sceneNumber || 0}
         initialDescription={selectedSceneForGeneration?.description || ''}
         availableCharacters={(() => {
+          const normalizeName = (value?: string) => (value || '').trim().toLowerCase();
           const allEntities = [
-            // Characters
             ...characters.map(c => {
                 const charKey = c.originalName || c.name;
                 const linkedImage = characterImages?.[charKey];
@@ -2421,7 +2464,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     entity_type: c.entity_type || 'character'
                 };
             }),
-            // Objects & Locations
             ...objectsAndLocations.map((item: any) => ({
                 name: item.name,
                 imageUrl: resolveWatermarkedAssetUrl(item as any),
@@ -2431,13 +2473,55 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 entity_type: item.entity_type || 'object'
             }))
           ];
-          const seen = new Set<string>();
-          return allEntities.filter(item => {
-            const key = item.id || item.name || '';
-            if (!key || seen.has(key)) return false;
-            seen.add(key);
-            return true;
-          });
+
+          const dedupeEntities = (items: any[]) => {
+            const seen = new Set<string>();
+            return items.filter(item => {
+              const key = String(item.id || normalizeName(item.name));
+              if (!key || seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+          };
+
+          const mentionedNames = selectedSceneForGeneration?.sceneCharacters || [];
+          const mentionedEntities = mentionedNames
+            .map((name) => {
+              const normalizedMention = normalizeName(name);
+              const exactOrCloseMatch = allEntities.find(item => {
+                const normalizedItemName = normalizeName(item.name);
+                return normalizedItemName === normalizedMention
+                  || normalizedItemName.startsWith(normalizedMention)
+                  || normalizedMention.startsWith(normalizedItemName);
+              });
+
+              if (exactOrCloseMatch) return exactOrCloseMatch;
+
+              const generatedMatch = Object.entries(characterImages || {}).find(([key]) => {
+                const normalizedKey = normalizeName(key);
+                return normalizedKey === normalizedMention
+                  || normalizedKey.startsWith(normalizedMention)
+                  || normalizedMention.startsWith(normalizedKey);
+              });
+
+              if (!generatedMatch) return null;
+
+              const [generatedName, generatedImage] = generatedMatch;
+              return {
+                name,
+                imageUrl: generatedImage?.imageUrl || '',
+                id: generatedImage?.id || generatedName,
+                prompt: generatedImage?.prompt || '',
+                generationStatus: (generatedImage?.generationStatus || 'completed') as 'completed' | 'pending' | 'generating' | 'failed',
+                entity_type: 'character' as const
+              };
+            })
+            .filter(Boolean);
+
+          const prioritizedIds = new Set(mentionedEntities.map((item: any) => String(item.id || normalizeName(item.name))));
+          const remainingEntities = allEntities.filter(item => !prioritizedIds.has(String(item.id || normalizeName(item.name))));
+
+          return dedupeEntities([...mentionedEntities, ...remainingEntities]);
         })()}
         isGenerating={generatingScenes.has(selectedSceneForGeneration?.sceneNumber || -1)}
         parentSceneImageUrl={selectedSceneForGeneration?.referenceSceneImageUrl}
