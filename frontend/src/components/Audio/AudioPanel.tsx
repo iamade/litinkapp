@@ -200,6 +200,10 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     }
   }, [stableSelectedChapterId, selectedScriptId, scenes, loadImages]);
 
+  // Sync state to StoryboardContext for Video tab consumption
+  // NOTE: Audio tab ONLY syncs audio files - images come from Images tab storyboard
+  const storyboardContext = useStoryboardOptional();
+
   // Local selection state for audio file cards. Keep it mirrored into
   // StoryboardContext so the Video tab can auto-fetch the current Audio tab selection.
   const [selectedAudioFiles, setSelectedAudioFiles] = useState<Set<string>>(new Set());
@@ -359,10 +363,6 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     // For now, return 0 as default
     return 0;
   };
-
-  // Sync state to StoryboardContext for Video tab consumption
-  // NOTE: Audio tab ONLY syncs audio files - images come from Images tab storyboard
-  const storyboardContext = useStoryboardOptional();
 
   // Sync audio files to context when they update
   // Using ref to track previous state and avoid infinite loops
