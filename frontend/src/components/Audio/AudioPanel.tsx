@@ -384,43 +384,35 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   useEffect(() => {
     if (!storyboardContext) return;
 
-    if (!files || files.length === 0) {
-      prevAudioSyncRef.current = '';
-      storyboardContext.importFromAudioPanel({ sceneAudioMap: {} });
-      return;
-    }
-    
-    // Group audio files by scene number
     const audioByScene: Record<number, any[]> = {};
-    files.forEach((file: AudioFile) => {
-      const sceneNum = file.sceneNumber || 1;
-      if (!audioByScene[sceneNum]) {
-        audioByScene[sceneNum] = [];
-      }
-      audioByScene[sceneNum].push({
-        id: file.id,
-        type: file.type,
-        sceneNumber: sceneNum,
-        shotType: file.shotType, // Include shot type for filtering
-        shotIndex: file.shotIndex, // Include shot index for per-shot audio
-        url: file.url,
-        duration: file.duration,
-        character: file.character,
-        status: file.status,
-        text_content: file.text_content,  // Add text content for display
-        text_prompt: file.text_prompt,    // Add text prompt for display
+
+    if (files && files.length > 0) {
+      files.forEach((file: AudioFile) => {
+        const sceneNum = file.sceneNumber || 1;
+        if (!audioByScene[sceneNum]) {
+          audioByScene[sceneNum] = [];
+        }
+        audioByScene[sceneNum].push({
+          id: file.id,
+          type: file.type,
+          sceneNumber: sceneNum,
+          shotType: file.shotType,
+          shotIndex: file.shotIndex,
+          url: file.url,
+          duration: file.duration,
+          character: file.character,
+          status: file.status,
+          text_content: file.text_content,
+          text_prompt: file.text_prompt,
+        });
       });
-    });
-    
-    // Only update if data has changed (prevent infinite loop)
+    }
+
     const newSyncKey = JSON.stringify(audioByScene);
     if (prevAudioSyncRef.current === newSyncKey) return;
     prevAudioSyncRef.current = newSyncKey;
-    
-    // Update context with audio for each scene
-    Object.entries(audioByScene).forEach(([sceneNum, audioFiles]) => {
-      storyboardContext.setSceneAudio(parseInt(sceneNum), audioFiles);
-    });
+
+    storyboardContext.importFromAudioPanel({ sceneAudioMap: audioByScene });
   }, [storyboardContext, files]);
 
   // Load/refresh on script/chapter/version change
