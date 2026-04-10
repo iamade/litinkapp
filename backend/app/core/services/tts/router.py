@@ -73,8 +73,8 @@ class TTSRouter:
     async def list_voices(self, user_tier: str, model: Optional[str] = None, **kwargs: Any) -> List[VoiceOption]:
         config = get_model_config("tts", user_tier)
         resolved_model = model or (config.primary if config else "elevenlabs/eleven_turbo_v2")
-        provider = self.get_provider_for_model(resolved_model)
-        return await provider.list_voices(**kwargs)
+        provider_name, _ = self._parse_model(resolved_model)
+        return await self.providers[provider_name].list_voices(**kwargs)
 
     def get_cost_estimate(self, text: str, user_tier: str, model: Optional[str] = None, **kwargs: Any) -> float:
         config = get_model_config("tts", user_tier)
