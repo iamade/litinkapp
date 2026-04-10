@@ -1935,6 +1935,10 @@ def generate_chapter_audio_task(
 
             # Choose service based on user tier and audio type
             use_tts_router = audio_type in ["narrator", "character"]
+            service_used = None
+            original_cdn_url = None
+            resolved_voice_id = voice_id or "21m00Tcm4TlvDq8ikWAM"
+            resolved_model_id = None
 
             if use_tts_router:
                 tts_config = get_model_config("tts", user_tier)
@@ -1944,7 +1948,7 @@ def generate_chapter_audio_task(
                 tts_result = await tts_router.synthesize(
                     text=text_content,
                     user_tier=user_tier,
-                    voice_id=voice_id or "21m00Tcm4TlvDq8ikWAM",
+                    voice_id=resolved_voice_id,
                     model=requested_tts_model,
                     user_id=user_id,
                     emotion=emotion,
@@ -1954,7 +1958,16 @@ def generate_chapter_audio_task(
                 if tts_result.get("status") != "success" or not tts_result.get("audio_url"):
                     raise Exception(tts_result.get("error") or "Failed to generate audio with TTS router")
 
-                audio_url = tts_result["audio_url"]
+                original_cdn_url = tts_result["audio_url"]
+                audio_url = original_cdn_url
+                resolved_voice_id = tts_result.get("voice_id") or resolved_voice_id
+                resolved_model_id = (
+                    tts_result.get("model_used")
+                    or tts_result.get("model")
+                    or requested_tts_model
+                )
+                service_used = tts_result.get("provider") or "tts_router"
+                audio_duration = tts_result.get("duration_seconds")
                 try:
                     from app.core.services.storage import get_storage_service, S3StorageService
                     import uuid as _uuid_mod
@@ -1970,7 +1983,6 @@ def generate_chapter_audio_task(
                 except Exception as persist_error:
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
-                audio_duration = None
             else:
                 # Use ModelsLab for non-TTS audio types
                 audio_service = ModelsLabV7AudioService()
@@ -1988,6 +2000,8 @@ def generate_chapter_audio_task(
                     audio_url = result.get("audio_url")
                     # Persist audio from CDN to our own S3 storage
                     original_cdn_url = audio_url
+                    service_used = "modelslab"
+                    resolved_model_id = result.get("model_used") or result.get("model") or "modelslab"
                     try:
                         from app.core.services.storage import get_storage_service, S3StorageService
                         import uuid as _uuid_mod
@@ -2024,20 +2038,17 @@ def generate_chapter_audio_task(
                         audio_record.chapter_id = (
                             uuid.UUID(chapter_id) if chapter_id else None
                         )
-                        audio_record.model_id = (
-                            "elevenlabs" if use_elevenlabs else "modelslab"
-                        )
-                        audio_record.metadata = {
+                        audio_record.model_id = resolved_model_id
+                        audio_record.voice_id = resolved_voice_id
+                        audio_record.audio_metadata = {
                             "chapter_id": chapter_id,
                             "scene_number": scene_number,
                             "audio_type": audio_type,
-                            "voice_id": voice_id,
+                            "voice_id": resolved_voice_id,
                             "emotion": emotion,
                             "speed": speed,
                             "original_cdn_url": original_cdn_url,
-                            "service_used": (
-                                "elevenlabs" if use_elevenlabs else "modelslab"
-                            ),
+                            "service_used": service_used,
                         }
                         session.add(audio_record)
                         await session.commit()
