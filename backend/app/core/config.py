@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # AI Services
     OPENAI_API_KEY: Optional[str] = None
     ELEVENLABS_API_KEY: Optional[str] = None
+    GOOGLE_TTS_API_KEY: Optional[str] = None
+    FISH_SPEECH_API_KEY: Optional[str] = None
+    KOKORO_API_KEY: Optional[str] = None
+    CHATTERBOX_API_KEY: Optional[str] = None
     TAVUS_API_KEY: Optional[str] = None
     PLOTDRIVE_API_KEY: Optional[str] = None
 
