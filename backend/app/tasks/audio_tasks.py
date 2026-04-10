@@ -14,6 +14,7 @@ from sqlmodel import select
 import uuid
 from app.core.model_config import get_model_config, ModelConfig
 from app.core.services.elevenlabs import ElevenLabsService
+from app.core.services.tts import tts_router
 from contextlib import asynccontextmanager
 from celery.utils.log import get_task_logger
 
@@ -1933,57 +1934,48 @@ def generate_chapter_audio_task(
             print(f"[DEBUG] User tier: {user_tier}")
 
             # Choose service based on user tier and audio type
-            use_elevenlabs = user_tier == "pro" and audio_type in [
-                "narrator",
-                "character",
-            ]
+            use_tts_router = audio_type in ["narrator", "character"]
 
-            if use_elevenlabs:
-                # Use ElevenLabs for voice generation (pro users only)
-                async with session_scope() as session:
-                    audio_service = ElevenLabsService()
-                    result = audio_service.generate_enhanced_speech(
-                        text=text_content,
-                        voice_id=voice_id or "21m00Tcm4TlvDq8ikWAM",
-                        user_id=user_id,
-                        emotion=emotion,
-                        speed=speed,
+            if use_tts_router:
+                tts_config = get_model_config("tts", user_tier)
+                requested_tts_model = (
+                    tts_config.primary if tts_config else "elevenlabs/eleven_turbo_v2"
+                )
+                tts_result = await tts_router.synthesize(
+                    text=text_content,
+                    user_tier=user_tier,
+                    voice_id=voice_id or "21m00Tcm4TlvDq8ikWAM",
+                    model=requested_tts_model,
+                    user_id=user_id,
+                    emotion=emotion,
+                    speed=speed,
+                )
+
+                if tts_result.get("status") != "success" or not tts_result.get("audio_url"):
+                    raise Exception(tts_result.get("error") or "Failed to generate audio with TTS router")
+
+                audio_url = tts_result["audio_url"]
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    import uuid as _uuid_mod
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else 'system',
+                        media_type='audio',
+                        record_id=str(_uuid_mod.uuid4()),
+                        extension='mp3',
                     )
-
-                    if result and result.get("audio_url"):
-                        audio_url = result["audio_url"]
-                        # Persist audio from CDN to our own S3 storage
-                        original_cdn_url = audio_url
-                        try:
-                            from app.core.services.storage import get_storage_service, S3StorageService
-                            import uuid as _uuid_mod
-                            storage = get_storage_service()
-                            s3_path = S3StorageService.build_media_path(
-                                user_id=str(user_id) if user_id else 'system',
-                                media_type='audio',
-                                record_id=str(_uuid_mod.uuid4()),
-                                extension='mp3',
-                            )
-                            audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
-                            logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
-                        except Exception as persist_error:
-                            logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
-                            raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
-                        audio_duration = None
-                    else:
-                        raise Exception("Failed to generate audio with ElevenLabs")
+                    audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                    logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
+                except Exception as persist_error:
+                    logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
+                    raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+                audio_duration = None
             else:
-                # Use ModelsLab for all audio types
+                # Use ModelsLab for non-TTS audio types
                 audio_service = ModelsLabV7AudioService()
 
-                if audio_type in ["narrator", "character"]:
-                    result = await audio_service.generate_tts_audio(
-                        text=text_content,
-                        voice_id=voice_id or "en-US-Neural2-D",
-                        model_id="eleven_multilingual_v2",
-                        speed=speed,
-                    )
-                elif audio_type == "music":
+                if audio_type == "music":
                     result = await audio_service.generate_sound_effect(
                         description=text_content, duration=duration or 30.0
                     )
