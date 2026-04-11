@@ -34,11 +34,11 @@ class ModelConfig:
 # Models routed via ProviderRouter: google/ → Google AI Studio, groq/ → Groq, else → OpenRouter
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="qwen/qwen3.6-plus-preview:free",  # OpenRouter FREE, 1M ctx, strong JSON
-        fallback="groq/llama-3.3-70b-versatile",  # Groq FREE direct, 30 RPM, blazing fast
-        fallback2="meta-llama/llama-3.3-70b-instruct:free",  # OpenRouter FREE, 66K ctx
-        fallback3="stepfun/step-3.5-flash:free",  # OpenRouter FREE, 1M ctx, reasoning MoE
-        fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE direct, 1M ctx safety net
+        primary="ollama/gemma4",  # Ollama Cloud API (KAN-181 revision)
+        fallback="google/gemini-2.5-flash",  # Google AI Studio FREE direct
+        fallback2="groq/llama-3.3-70b-versatile",  # Groq FREE direct, 30 RPM
+        fallback3="mistralai/mistral-small-3.1-24b-instruct:free",  # OpenRouter FREE, reliable
+        fallback4=None,
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.0,
@@ -327,6 +327,45 @@ AUDIO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 }
 
 
+TTS_TIER_CONFIG: Dict[ModelTier, ModelConfig] = {
+    ModelTier.FREE: ModelConfig(
+        primary="elevenlabs/eleven_turbo_v2",
+        fallback="openai/tts-1",
+        fallback2="google/text-to-speech",
+    ),
+    ModelTier.BASIC: ModelConfig(
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="google/text-to-speech",
+    ),
+    ModelTier.STANDARD: ModelConfig(
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="google/text-to-speech",
+        fallback3="fish-speech/default",
+    ),
+    ModelTier.PREMIUM: ModelConfig(
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="google/text-to-speech",
+        fallback3="fish-speech/default",
+    ),
+    ModelTier.PROFESSIONAL: ModelConfig(
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="fish-speech/default",
+        fallback3="google/text-to-speech",
+    ),
+    ModelTier.ENTERPRISE: ModelConfig(
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="fish-speech/default",
+        fallback3="google/text-to-speech",
+        fallback4="kokoro/default",
+    ),
+}
+
+
 # Image Upscaling Strategy (ModelsLab V6 API)
 # Tier-based model selection for super resolution
 # Higher tiers get higher quality upscaling with fallback options
@@ -373,6 +412,7 @@ def get_model_config(service_type: str, tier: str) -> Optional[ModelConfig]:
             "image": IMAGE_MODEL_CONFIG,
             "video": VIDEO_MODEL_CONFIG,
             "audio": AUDIO_MODEL_CONFIG,
+            "tts": TTS_TIER_CONFIG,
             "upscale": UPSCALE_MODEL_CONFIG,
         }
 
@@ -396,6 +436,7 @@ def validate_model_configs():
         image_config = IMAGE_MODEL_CONFIG.get(tier)
         video_config = VIDEO_MODEL_CONFIG.get(tier)
         audio_config = AUDIO_MODEL_CONFIG.get(tier)
+        tts_config = TTS_TIER_CONFIG.get(tier)
 
         if not script_config:
             logger.error(f"Missing script config for tier: {tier.value}")
@@ -409,6 +450,8 @@ def validate_model_configs():
             logger.error(f"Missing video config for tier: {tier.value}")
         if not audio_config:
             logger.error(f"Missing audio config for tier: {tier.value}")
+        if not tts_config:
+            logger.error(f"Missing tts config for tier: {tier.value}")
 
     logger.info("Model configuration validation complete")
 

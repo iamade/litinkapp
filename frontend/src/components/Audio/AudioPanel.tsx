@@ -200,8 +200,28 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     }
   }, [stableSelectedChapterId, selectedScriptId, scenes, loadImages]);
 
-  // Local selection state for audio file cards
+  // Sync state to StoryboardContext for Video tab consumption
+  // NOTE: Audio tab ONLY syncs audio files - images come from Images tab storyboard
+  const storyboardContext = useStoryboardOptional();
+
+  // Local selection state for audio file cards. Keep it mirrored into
+  // StoryboardContext so the Video tab can auto-fetch the current Audio tab selection.
   const [selectedAudioFiles, setSelectedAudioFiles] = useState<Set<string>>(new Set());
+
+  const updateSelectedAudioFiles = React.useCallback((updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    setSelectedAudioFiles(prev => {
+      const next = updater instanceof Set ? updater : updater(prev);
+      const normalized = next instanceof Set ? next : new Set(next);
+
+      if (storyboardContext) {
+        storyboardContext.importFromAudioPanel({
+          selectedAudioIds: new Set(normalized),
+        });
+      }
+
+      return normalized;
+    });
+  }, [storyboardContext]);
 
   // Gallery Modal State
   const [galleryState, setGalleryState] = useState<{
@@ -344,48 +364,55 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     return 0;
   };
 
-  // Sync state to StoryboardContext for Video tab consumption
-  // NOTE: Audio tab ONLY syncs audio files - images come from Images tab storyboard
-  const storyboardContext = useStoryboardOptional();
-
   // Sync audio files to context when they update
   // Using ref to track previous state and avoid infinite loops
   const prevAudioSyncRef = React.useRef<string>('');
+
+  // Rehydrate local audio selection from shared storyboard state when returning to the Audio tab
+  useEffect(() => {
+    if (!storyboardContext) return;
+
+    setSelectedAudioFiles(prev => {
+      const next = new Set(storyboardContext.selectedAudioIds || []);
+      if (prev.size === next.size && Array.from(prev).every(id => next.has(id))) {
+        return prev;
+      }
+      return next;
+    });
+  }, [storyboardContext, storyboardContext?.selectedAudioIds]);
   
   useEffect(() => {
-    if (!storyboardContext || !files || files.length === 0) return;
-    
-    // Group audio files by scene number
+    if (!storyboardContext) return;
+
     const audioByScene: Record<number, any[]> = {};
-    files.forEach((file: AudioFile) => {
-      const sceneNum = file.sceneNumber || 1;
-      if (!audioByScene[sceneNum]) {
-        audioByScene[sceneNum] = [];
-      }
-      audioByScene[sceneNum].push({
-        id: file.id,
-        type: file.type,
-        sceneNumber: sceneNum,
-        shotType: file.shotType, // Include shot type for filtering
-        shotIndex: file.shotIndex, // Include shot index for per-shot audio
-        url: file.url,
-        duration: file.duration,
-        character: file.character,
-        status: file.status,
-        text_content: file.text_content,  // Add text content for display
-        text_prompt: file.text_prompt,    // Add text prompt for display
+
+    if (files && files.length > 0) {
+      files.forEach((file: AudioFile) => {
+        const sceneNum = file.sceneNumber || 1;
+        if (!audioByScene[sceneNum]) {
+          audioByScene[sceneNum] = [];
+        }
+        audioByScene[sceneNum].push({
+          id: file.id,
+          type: file.type,
+          sceneNumber: sceneNum,
+          shotType: file.shotType,
+          shotIndex: file.shotIndex,
+          url: file.url,
+          duration: file.duration,
+          character: file.character,
+          status: file.status,
+          text_content: file.text_content,
+          text_prompt: file.text_prompt,
+        });
       });
-    });
-    
-    // Only update if data has changed (prevent infinite loop)
+    }
+
     const newSyncKey = JSON.stringify(audioByScene);
     if (prevAudioSyncRef.current === newSyncKey) return;
     prevAudioSyncRef.current = newSyncKey;
-    
-    // Update context with audio for each scene
-    Object.entries(audioByScene).forEach(([sceneNum, audioFiles]) => {
-      storyboardContext.setSceneAudio(parseInt(sceneNum), audioFiles);
-    });
+
+    storyboardContext.importFromAudioPanel({ sceneAudioMap: audioByScene });
   }, [storyboardContext, files]);
 
   // Load/refresh on script/chapter/version change
@@ -900,7 +927,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
           currentTime={currentTime}
           onTimeUpdate={setCurrentTime}
           onAudioSelect={(audioId) => {
-            setSelectedAudioFiles(prev => {
+            updateSelectedAudioFiles(prev => {
               const newSet = new Set(prev);
               if (newSet.has(audioId)) {
                 newSet.delete(audioId);
@@ -1157,7 +1184,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                   file={file}
                   isSelected={selectedAudioFiles.has(file.id)}
                   onSelect={() => {
-                    setSelectedAudioFiles(prev => {
+                    updateSelectedAudioFiles(prev => {
                       const newSet = new Set(prev);
                       if (newSet.has(file.id)) {
                         newSet.delete(file.id);
@@ -1203,7 +1230,7 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                     }
                     
                     // Also remove from local selection state
-                    setSelectedAudioFiles(prev => {
+                    updateSelectedAudioFiles(prev => {
                       const newSet = new Set(prev);
                       newSet.delete(file.id);
                       return newSet;

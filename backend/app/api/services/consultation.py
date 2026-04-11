@@ -431,10 +431,11 @@ Respond with your analysis in the JSON format specified."""
 
         try:
             response = await self.openrouter.analyze_content(
-                content=f"{system_prompt}\n\n---\n\n{user_message}",
+                content=user_message,
                 user_tier=tier_enum,
                 analysis_type="cinematic_universe_analysis",
                 max_tokens=max_tokens,
+                system_prompt_override=system_prompt,
             )
 
             result_text = response.get("result") or ""
@@ -569,10 +570,11 @@ Respond helpfully and guide them toward their creative goal.{nudge}"""
 
         try:
             response = await self.openrouter.analyze_content(
-                content=f"{system_prompt}\n\n---\n\n{user_message}",
+                content=user_message,
                 user_tier=tier_enum,
                 analysis_type="cinematic_universe_analysis",
                 max_tokens=max_tokens,
+                system_prompt_override=system_prompt,
             )
 
             result_text = response.get("result") or ""

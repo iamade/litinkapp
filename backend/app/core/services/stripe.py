@@ -27,7 +27,7 @@ class StripeService:
                 "price_id": getattr(settings, "STRIPE_BASIC_PRICE_ID", None),
             },
             "pro": {
-                "name": "Pro",
+                "name": "Standard",
                 "price_id": getattr(settings, "STRIPE_PRO_PRICE_ID", None),
             },
         }

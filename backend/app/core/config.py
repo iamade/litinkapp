@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     # AI Services
     OPENAI_API_KEY: Optional[str] = None
     ELEVENLABS_API_KEY: Optional[str] = None
+    GOOGLE_TTS_API_KEY: Optional[str] = None
+    FISH_SPEECH_API_KEY: Optional[str] = None
+    KOKORO_API_KEY: Optional[str] = None
+    CHATTERBOX_API_KEY: Optional[str] = None
     TAVUS_API_KEY: Optional[str] = None
     PLOTDRIVE_API_KEY: Optional[str] = None
 
@@ -221,6 +225,10 @@ class Settings(BaseSettings):
     # Get your API key from: https://console.groq.com/
     GROQ_API_KEY: Optional[str] = None
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+
+    # Ollama API
+    OLLAMA_API_KEY: Optional[str] = None
+    OLLAMA_BASE_URL: str = "https://ollama.com/v1"
 
     # xAI Grok Video (prepared for future use)
     # Get your API key from: https://console.x.ai/

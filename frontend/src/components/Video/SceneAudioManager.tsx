@@ -71,7 +71,7 @@ export const SceneAudioManager: React.FC<SceneAudioManagerProps> = ({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div className="bg-blue-50 text-blue-800 text-sm p-3 rounded-md mb-4">
-             Select one audio file to include in video generation. Only 1 audio can be used per generation.
+             Select the audio files you want the Video tab to use. Your choices sync back to the Audio tab and are passed through to video generation.
           </div>
 
           {!audioFiles.length && (
@@ -153,7 +153,7 @@ export const SceneAudioManager: React.FC<SceneAudioManagerProps> = ({
         {/* Footer */}
         <div className="p-4 border-t bg-gray-50 flex items-center justify-between">
           <span className="text-sm text-gray-600">
-            {audioFiles.filter(a => isAudioSelected(a.id)).length} of 1 audio selected (max 1 per generation)
+            {audioFiles.filter(a => isAudioSelected(a.id)).length} audio file(s) selected
           </span>
           <button
             onClick={onClose}

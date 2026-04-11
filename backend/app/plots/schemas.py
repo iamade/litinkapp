@@ -422,3 +422,28 @@ class ImageGenerationRequest(BaseModel):
         max_length=10,
         description="Image aspect ratio (3:4 for portrait, 16:9 for landscape)",
     )
+
+
+class BatchImageGenerationItem(BaseModel):
+    """A single character in a batch image generation request."""
+    character_id: str = Field(..., description="ID of the character for image generation")
+    prompt: Optional[str] = Field(
+        None, max_length=1000, description="Custom prompt for image generation"
+    )
+    style: Optional[str] = Field(
+        "realistic",
+        max_length=100,
+        description="Desired art style (realistic, cinematic, animated, fantasy)",
+    )
+    aspect_ratio: Optional[str] = Field(
+        "3:4",
+        max_length=10,
+        description="Image aspect ratio (3:4 for portrait, 16:9 for landscape)",
+    )
+
+
+class BatchImageGenerationRequest(BaseModel):
+    """Request body for batch character image generation."""
+    items: List[BatchImageGenerationItem] = Field(
+        ..., min_length=1, max_length=20, description="List of characters to generate images for (max 20)"
+    )
