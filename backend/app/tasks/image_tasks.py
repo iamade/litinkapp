@@ -431,6 +431,7 @@ async def generate_character_images_optimized(
                         media_type='images',
                         record_id=str(_uuid_mod.uuid4()),
                         extension='png',
+                        scope_id=str(video_gen_id),
                     )
                     image_url = await persist_image_with_embedded_watermark(
                         image_url, s3_path, storage, content_type="image/png"
@@ -663,6 +664,7 @@ async def generate_scene_images_optimized(
                         media_type='images',
                         record_id=str(_uuid_mod.uuid4()),
                         extension='png',
+                        scope_id=str(video_gen_id),
                     )
                     image_url = await persist_image_with_embedded_watermark(
                         image_url, s3_path, storage, content_type="image/png"
@@ -1405,17 +1407,20 @@ async def async_generate_scene_image_task(
                 from app.core.services.storage import get_storage_service, S3StorageService
                 import uuid as _uuid_mod
                 storage = get_storage_service()
+                image_scope = str(script_id or chapter_id or 'global')
                 wm_s3_path = S3StorageService.build_media_path(
                     user_id=str(user_id) if user_id else 'system',
                     media_type='images',
                     record_id=str(_uuid_mod.uuid4()),
                     extension='png',
+                    scope_id=image_scope,
                 )
                 clean_s3_path = S3StorageService.build_media_path(
                     user_id=str(user_id) if user_id else 'system',
                     media_type='images',
                     record_id=str(_uuid_mod.uuid4()),
                     extension='png',
+                    scope_id=image_scope,
                 )
                 try:
                     image_url, clean_url = await persist_image_with_both_versions(

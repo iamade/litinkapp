@@ -1,5 +1,7 @@
 from __future__ import annotations
 import os
+import re
+import hashlib
 from typing import Optional, BinaryIO
 from pathlib import Path
 from app.core.config import settings
@@ -151,11 +153,20 @@ class S3StorageService:
         extension: str,
         scope_id: Optional[str] = None,
     ) -> str:
-        """Build a standardized S3 path for media files."""
+        """Build a standardized S3 path for media files with optional scope partitioning."""
         ext = extension.lstrip(".")
+        safe_scope = None
         if scope_id:
-            return f"users/{user_id}/{media_type}/scope-{scope_id}/{record_id}.{ext}"
-        return f"users/{user_id}/{media_type}/{record_id}.{ext}"
+            raw_scope = str(scope_id)
+            safe_scope_base = re.sub(r"[^a-zA-Z0-9_-]+", "-", raw_scope).strip("-")[:48]
+            scope_hash = hashlib.sha1(raw_scope.encode("utf-8")).hexdigest()[:10]
+            safe_scope = f"{safe_scope_base}-{scope_hash}" if safe_scope_base else scope_hash
+
+        base_path = f"users/{user_id}/{media_type}"
+        if safe_scope:
+            base_path = f"{base_path}/scope-{safe_scope}"
+
+        return f"{base_path}/{record_id}.{ext}"
 
     async def persist_from_url(self, source_url: str, dest_path: str, content_type: Optional[str] = None, timeout_seconds: int = 120, max_retries: int = 3) -> str:
         """Download from external URL and persist to our S3 storage.
