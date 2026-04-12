@@ -1996,6 +1996,134 @@ class FileService:
 
         return False, ""
 
+    @staticmethod
+    def _is_chapter_like(title: str) -> bool:
+        """Check if a title matches a standard chapter numbering pattern.
+
+        Matches patterns like:
+        - CHAPTER 1, Chapter 1, CHAPTER I, Chapter XX
+        - Ch. 1, CH.1, ch 1
+        - Chapter 1. Title, CHAPTER I: Title
+        """
+        t = title.strip()
+        # Standard numbered chapter patterns
+        if re.match(
+            r"(?i)^(chapter|ch\.?|chap\.?)\s*(\d+|[ivxlcdm]+)[\s.:\-\u2013\u2014]",
+            t,
+        ) or re.match(
+            r"(?i)^(chapter|ch\.?|chap\.?)\s*(\d+|[ivxlcdm]+)$",
+            t,
+        ):
+            return True
+        # Common numbered patterns: just a number followed by a title
+        if re.match(r"^\d{1,3}[\.\s]\s*\S", t):
+            return True
+        return False
+
+    def _filter_front_back_matter_structural(
+        self, chapters: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Remove front matter (before first real chapter) and back matter
+        (after last real chapter) using structural detection, not hardcoded
+        title lists.
+
+        Strategy:
+        1. Find the first and last items whose titles match a chapter pattern.
+        2. Everything before first = front matter -> drop.
+        3. Everything after last = back matter -> drop.
+        4. Items between first and last that do NOT match a chapter pattern
+           are kept (they may be interludes, intermezzi, etc.).
+        5. Known generic boilerplate (Gutenberg license, copyright) is also
+           dropped even if it lands between chapters.
+        6. Renumber remaining chapters sequentially.
+        """
+        if not chapters:
+            return chapters
+
+        # --- Step 1: Find indices of real numbered chapters ---
+        chapter_indices = []
+        for i, ch in enumerate(chapters):
+            if self._is_chapter_like(ch.get("title", "")):
+                chapter_indices.append(i)
+
+        # If no numbered chapters found, fall back to the original list
+        # (maybe this book uses section titles instead of chapters)
+        if len(chapter_indices) < 2:
+            print(
+                f"[EPUB-STRUCTURAL] Fewer than 2 numbered chapters found ({len(chapter_indices)}), "
+                "skipping structural front/back filter"
+            )
+            return chapters
+
+        first_chapter_idx = chapter_indices[0]
+        last_chapter_idx = chapter_indices[-1]
+
+        print(
+            f"[EPUB-STRUCTURAL] First numbered chapter at index {first_chapter_idx}: "
+            f"'{chapters[first_chapter_idx].get('title', '')}'"
+        )
+        print(
+            f"[EPUB-STRUCTURAL] Last numbered chapter at index {last_chapter_idx}: "
+            f"'{chapters[last_chapter_idx].get('title', '')}'"
+        )
+
+        # --- Step 2: Generic boilerplate patterns (always drop) ---
+        GENERIC_BOILERPLATE = [
+            r"(?i)project.?gutenberg",
+            r"(?i)\\blicense\\b",
+            r"(?i)\\bcopyright\\b",
+            r"(?i)produced by.*(?:project gutenberg|distributed proof)",
+            r"(?i)start of (?:the )?project gutenberg",
+            r"(?i)end of (?:the )?project gutenberg",
+            r"(?i)small print",
+        ]
+
+        def _is_generic_boilerplate(title: str) -> bool:
+            for pat in GENERIC_BOILERPLATE:
+                if re.search(pat, title):
+                    return True
+            return False
+
+        # --- Step 3: Build filtered list ---
+        filtered = []
+        dropped_front = 0
+        dropped_back = 0
+        dropped_boiler = 0
+
+        for i, ch in enumerate(chapters):
+            title = ch.get("title", "")
+
+            # Drop generic boilerplate regardless of position
+            if _is_generic_boilerplate(title):
+                dropped_boiler += 1
+                print(f"[EPUB-STRUCTURAL] Dropping boilerplate: '{title[:60]}'")
+                continue
+
+            # Drop everything before first numbered chapter (front matter)
+            if i < first_chapter_idx:
+                dropped_front += 1
+                print(f"[EPUB-STRUCTURAL] Dropping front matter: '{title[:60]}'")
+                continue
+
+            # Drop everything after last numbered chapter (back matter)
+            if i > last_chapter_idx:
+                dropped_back += 1
+                print(f"[EPUB-STRUCTURAL] Dropping back matter: '{title[:60]}'")
+                continue
+
+            filtered.append(ch)
+
+        # --- Step 4: Renumber ---
+        for i, ch in enumerate(filtered, 1):
+            ch["number"] = str(i)
+
+        print(
+            f"[EPUB-STRUCTURAL] Filtered: {len(chapters)} -> {len(filtered)} chapters "
+            f"(dropped {dropped_front} front, {dropped_back} back, {dropped_boiler} boilerplate)"
+        )
+
+        return filtered
+
     def _split_spine_item_by_headings(self, soup, item_idx: int) -> List[Dict[str, Any]]:
         """Split a single spine item into sub-chapters by heading elements.
 
@@ -2202,6 +2330,9 @@ class FileService:
                         "type": "chapter",
                     })
                     print(f"[EPUB] ✓ Added chapter {chapter_number}: {title}")
+
+            # --- Dynamic front/back matter filter (structural) ---
+            chapters = self._filter_front_back_matter_structural(chapters)
 
             print(
                 f"[EPUB] Extracted {len(chapters)} chapters from spine (skipped {skipped_count} short items)"
