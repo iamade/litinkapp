@@ -1,10 +1,11 @@
 // src/contexts/StoryboardContext.tsx
 // Shared state for storyboard selections across Audio and Video tabs
+// KAN-143: Self-managing — subscribes to SCRIPT_CHANGED events to prevent cross-script data bleeding
 
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef, ReactNode } from 'react';
 import { useScriptSelection } from './ScriptSelectionContext';
 import { userService } from '../services/userService';
-import { projectService } from '../services/projectService';
+import { projectService, StoryboardConfig } from '../services/projectService';
 
 // Types for scene-audio linking
 interface SceneImage {
@@ -50,6 +51,10 @@ interface StoryboardState {
   
   // Image order for each scene
   imageOrderByScene: Record<number, string[]>;
+
+  // Lifecycle status for script-scoped storyboard loading
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  error: string | null;
 }
 
 interface StoryboardContextValue extends StoryboardState {
@@ -85,56 +90,285 @@ interface StoryboardContextValue extends StoryboardState {
 
 const StoryboardContext = createContext<StoryboardContextValue | null>(null);
 
+// Helper: map raw audio files to AudioFile objects grouped by scene
+function mapAudioFiles(rawFiles: any[], scriptId: string): Record<number, AudioFile[]> {
+  const filteredAudio = rawFiles.filter((file: any) => {
+    const normalizedScriptId = file.script_id ?? file.scriptId;
+    return normalizedScriptId === scriptId || !normalizedScriptId;
+  });
+
+  const groupedAudio: Record<number, AudioFile[]> = {};
+  filteredAudio.forEach((file: any) => {
+    const metadata = file.metadata || file.audio_metadata || {};
+    const rawScene = metadata?.scene ?? file.scene_id ?? file.scene_number ?? null;
+    let sceneNumber = 1;
+    if (typeof rawScene === 'number') {
+      sceneNumber = Math.floor(rawScene);
+    } else if (typeof rawScene === 'string') {
+      const cleaned = rawScene.replace(/^scene_/i, '');
+      const parsed = parseFloat(cleaned);
+      if (!isNaN(parsed)) sceneNumber = Math.floor(parsed);
+    }
+
+    let type: AudioFile['type'] = 'narration';
+    const audioType = file.audio_type || file.type;
+    if (audioType === 'narrator') type = 'narration';
+    else if (audioType === 'character') type = 'dialogue';
+    else if (audioType === 'music' || audioType === 'background_music') type = 'music';
+    else if (audioType === 'sound_effects' || audioType === 'sfx') type = 'effects';
+    else if (audioType === 'ambiance' || audioType === 'ambient') type = 'ambiance';
+
+    const mapped: AudioFile = {
+      id: file.id,
+      type,
+      sceneNumber,
+      shotType: metadata?.shot_type,
+      shotIndex: typeof metadata?.shot_index === 'number' ? metadata.shot_index : undefined,
+      url: file.url ?? file.audio_url,
+      duration: file.duration ?? file.duration_seconds,
+      character: file.character_name ?? metadata?.character_name,
+      status: file.generation_status ?? file.status,
+      text_content: file.text_content,
+      text_prompt: file.text_prompt,
+    };
+
+    if (!groupedAudio[sceneNumber]) groupedAudio[sceneNumber] = [];
+    groupedAudio[sceneNumber].push(mapped);
+  });
+
+  return groupedAudio;
+}
+
 export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const { selectedScriptId, stableSelectedChapterId } = useScriptSelection();
+  const {
+    selectedScriptId,
+    stableSelectedChapterId,
+    storyboardDirty,
+    isSwitching,
+    getStoryboardConfig,
+    loadStoryboardConfig,
+    markStoryboardClean,
+    subscribe,
+  } = useScriptSelection();
 
   const [selectedSceneImages, setSelectedSceneImagesState] = useState<Record<number, string>>({});
   const [excludedImageIds, setExcludedImageIds] = useState<Set<string>>(new Set());
   const [sceneAudioMap, setSceneAudioMap] = useState<Record<number, AudioFile[]>>({});
   const [sceneImagesMap, setSceneImagesMap] = useState<Record<number, SceneImage[]>>({});
   const [imageOrderByScene, setImageOrderBySceneState] = useState<Record<number, string[]>>({});
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [error, setError] = useState<string | null>(null);
 
   const [audioAssignments, setAudioAssignments] = useState<Record<string, { sceneNumber: number; shotIndex: number }>>({});
   const [selectedAudioIds, setSelectedAudioIds] = useState<Set<string>>(new Set());
 
-  // Auto-fetch storyboard data when script changes
-  const prevScriptRef = useRef<string | null | undefined>(undefined);
+  // Refs for script-change subscription lifecycle
+  const scriptChangeAbortRef = useRef<AbortController | null>(null);
+  const lastLoadedKeyRef = useRef<string | null>(null);
+  const storyboardSnapshotRef = useRef<{
+    chapterId: string | null;
+    scriptId: string | null;
+    storyboardDirty: boolean;
+    config: StoryboardConfig;
+  }>({
+    chapterId: stableSelectedChapterId,
+    scriptId: selectedScriptId,
+    storyboardDirty,
+    config: getStoryboardConfig(),
+  });
 
-  useEffect(() => {
-    if (!selectedScriptId || !stableSelectedChapterId) return;
-    if (prevScriptRef.current === selectedScriptId) return;
-
-    prevScriptRef.current = selectedScriptId;
-
-    // Clear stale data immediately
-    setSceneImagesMap({});
+  // Bulk operations (defined early — needed by useEffect hooks below)
+  const resetStoryboard = useCallback(() => {
     setSelectedSceneImagesState({});
     setExcludedImageIds(new Set());
     setSceneAudioMap({});
+    setSceneImagesMap({});
     setImageOrderBySceneState({});
     setAudioAssignments({});
     setSelectedAudioIds(new Set());
+  }, []);
+
+  // Keep snapshot ref up to date (but not during switching)
+  useEffect(() => {
+    if (isSwitching) return;
+    storyboardSnapshotRef.current = {
+      chapterId: stableSelectedChapterId,
+      scriptId: selectedScriptId,
+      storyboardDirty,
+      config: getStoryboardConfig(),
+    };
+  }, [stableSelectedChapterId, selectedScriptId, storyboardDirty, getStoryboardConfig, isSwitching]);
+
+  // Subscribe to SCRIPT_CHANGED events from ScriptSelectionContext
+  // This handles cross-script data bleeding by auto-resetting + auto-saving
+  useEffect(() => {
+    const unsubscribe = subscribe((evt, payload) => {
+      if (evt !== 'SCRIPT_CHANGED') return;
+
+      const nextChapterId = payload.next.chapterId ?? stableSelectedChapterId;
+      const nextScriptId = payload.next.script_id;
+      const nextLoadKey = nextChapterId && nextScriptId ? `${nextChapterId}:${nextScriptId}` : null;
+      lastLoadedKeyRef.current = nextLoadKey;
+
+      const snapshot = storyboardSnapshotRef.current;
+      const prevChapterId = payload.prev.chapterId ?? snapshot.chapterId;
+      const prevScriptId = payload.prev.script_id ?? snapshot.scriptId;
+
+      const run = async () => {
+        // Auto-save dirty storyboard before switching away
+        if (snapshot.storyboardDirty && prevChapterId && prevScriptId) {
+          try {
+            await projectService.saveStoryboardConfig(prevChapterId, prevScriptId, snapshot.config);
+            markStoryboardClean();
+          } catch (saveErr) {
+            console.error('Failed to auto-save storyboard before script switch:', saveErr);
+          }
+        }
+
+        if (!nextChapterId || !nextScriptId) {
+          scriptChangeAbortRef.current?.abort();
+          resetStoryboard();
+          setStatus('idle');
+          setError(null);
+          return;
+        }
+
+        // Reset and reload for new script
+        setStatus('loading');
+        setError(null);
+        resetStoryboard();
+
+        const controller = new AbortController();
+        scriptChangeAbortRef.current = controller;
+
+        try {
+          // Fetch images
+          const imagesRes = await userService.getChapterImages(nextChapterId);
+          if (controller.signal.aborted) return;
+
+          const allImages = imagesRes.images || [];
+          const scriptImages = allImages.filter((img: any) => {
+            const normalizedScriptId = img.script_id ?? img.scriptId;
+            return normalizedScriptId === nextScriptId && img.image_type === 'scene';
+          });
+
+          // Fetch storyboard config
+          let config: { key_scene_images?: Record<string, string>; deselected_images?: string[]; image_order?: Record<string, string[]> } = {};
+          try {
+            config = await projectService.getStoryboardConfig(nextChapterId, nextScriptId);
+          } catch {
+            // config may not exist yet
+          }
+          if (controller.signal.aborted) return;
+
+          loadStoryboardConfig(config);
+
+          const keySceneImages: Record<string, string> = config?.key_scene_images || {};
+          const deselectedImages: string[] = config?.deselected_images || [];
+          const imageOrder: Record<string, string[]> = config?.image_order || {};
+
+          // Group by scene number
+          const grouped: Record<number, SceneImage[]> = {};
+          scriptImages.forEach((img: any) => {
+            const sceneNum = img.scene_number ?? img.metadata?.scene_number ?? 1;
+            const sn = Number(sceneNum);
+            if (!grouped[sn]) grouped[sn] = [];
+            const isKey = keySceneImages[String(sn)] === img.id;
+            grouped[sn].push({
+              id: img.id,
+              url: img.image_url || '',
+              sceneNumber: sn,
+              shotType: isKey ? 'key_scene' : 'suggested_shot',
+              shotIndex: img.shot_index ?? img.metadata?.shot_index ?? grouped[sn].length,
+            });
+          });
+          setSceneImagesMap(grouped);
+
+          // Apply config state
+          const selected: Record<number, string> = {};
+          Object.entries(keySceneImages).forEach(([sceneNum, imageId]) => {
+            const img = scriptImages.find((i: any) => i.id === imageId);
+            if (img) selected[parseInt(sceneNum)] = img.image_url || '';
+          });
+          setSelectedSceneImagesState(selected);
+          setExcludedImageIds(new Set(deselectedImages));
+
+          const orderMap: Record<number, string[]> = {};
+          Object.entries(imageOrder).forEach(([sceneNum, ids]) => {
+            orderMap[parseInt(sceneNum)] = ids;
+          });
+          setImageOrderBySceneState(orderMap);
+
+          // Fetch audio
+          try {
+            const audioRes = await userService.getChapterAudio(nextChapterId, nextScriptId);
+            if (controller.signal.aborted) return;
+            setSceneAudioMap(mapAudioFiles(audioRes?.audio_files ?? [], nextScriptId));
+          } catch (audioErr: any) {
+            if (audioErr.name !== 'AbortError') {
+              console.error('[StoryboardContext] Failed to fetch audio data:', audioErr);
+            }
+          }
+
+          if (!controller.signal.aborted) {
+            setStatus('ready');
+          }
+        } catch (err: any) {
+          if (err.name === 'AbortError') return;
+          const message = err instanceof Error ? err.message : 'Failed to load storyboard';
+          setError(message);
+          setStatus('error');
+        }
+      };
+
+      void run();
+    });
+
+    return () => {
+      unsubscribe();
+      scriptChangeAbortRef.current?.abort();
+    };
+  }, [subscribe, stableSelectedChapterId, loadStoryboardConfig, markStoryboardClean, resetStoryboard]);
+
+  // Initial load: fetch storyboard data on mount when script is already selected
+  useEffect(() => {
+    if (!stableSelectedChapterId || !selectedScriptId) {
+      scriptChangeAbortRef.current?.abort();
+      resetStoryboard();
+      setStatus('idle');
+      setError(null);
+      lastLoadedKeyRef.current = null;
+      return;
+    }
+
+    const loadKey = `${stableSelectedChapterId}:${selectedScriptId}`;
+    if (lastLoadedKeyRef.current === loadKey) return;
+    lastLoadedKeyRef.current = loadKey;
 
     const controller = new AbortController();
+    scriptChangeAbortRef.current = controller;
+
+    setStatus('loading');
+    setError(null);
 
     (async () => {
       try {
-        // 1. Fetch all images for the chapter
+        // Fetch images
         const chapterImagesRes = await userService.getChapterImages(stableSelectedChapterId);
         if (controller.signal.aborted) return;
 
         const allImages = chapterImagesRes.images || [];
 
-        // 2. Fetch storyboard config for this script
+        // Fetch storyboard config
         let storyboardConfig: { key_scene_images?: Record<string, string>; deselected_images?: string[]; image_order?: Record<string, string[]> } = {};
         try {
           storyboardConfig = await projectService.getStoryboardConfig(stableSelectedChapterId, selectedScriptId);
         } catch {
-          // config may not exist yet — use defaults
+          // config may not exist yet
         }
         if (controller.signal.aborted) return;
 
-        // 3. Filter images for this script
+        // Filter images for this script
         const scriptImages = allImages.filter((img: any) => {
           const normalizedScriptId = img.script_id ?? img.scriptId;
           return normalizedScriptId === selectedScriptId && img.image_type === 'scene';
@@ -160,15 +394,9 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
           });
         });
 
-        // Apply grouped images to context
-        Object.entries(grouped).forEach(([sceneNum, images]) => {
-          setSceneImagesMap(prev => ({ ...prev, [parseInt(sceneNum)]: images }));
-        });
-
-        // Set excluded images
+        setSceneImagesMap(grouped);
         setExcludedImageIds(new Set(deselectedImages));
 
-        // Set selected scene images (key scenes)
         const selected: Record<number, string> = {};
         Object.entries(keySceneImages).forEach(([sceneNum, imageId]) => {
           const img = scriptImages.find((i: any) => i.id === imageId);
@@ -176,82 +404,35 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
         });
         setSelectedSceneImagesState(selected);
 
-        // Set image order
         const orderMap: Record<number, string[]> = {};
         Object.entries(imageOrder).forEach(([sceneNum, ids]) => {
           orderMap[parseInt(sceneNum)] = ids;
         });
         setImageOrderBySceneState(orderMap);
 
-        // 4. Fetch audio for this script if context is still empty
-        const hasExistingAudio = Object.keys(sceneAudioMap).length > 0;
-        if (!hasExistingAudio) {
-          try {
-            const audioRes = await userService.getChapterAudio(stableSelectedChapterId, selectedScriptId);
-            if (controller.signal.aborted) return;
-
-            const audioFiles = audioRes?.audio_files ?? [];
-            const filteredAudio = audioFiles.filter((file: any) => {
-              const normalizedScriptId = file.script_id ?? file.scriptId;
-              return normalizedScriptId === selectedScriptId || !normalizedScriptId;
-            });
-
-            const groupedAudio: Record<number, AudioFile[]> = {};
-            filteredAudio.forEach((file: any) => {
-              const metadata = file.metadata || file.audio_metadata || {};
-              const rawScene = metadata?.scene ?? file.scene_id ?? file.scene_number ?? null;
-              let sceneNumber = 1;
-              if (typeof rawScene === 'number') {
-                sceneNumber = Math.floor(rawScene);
-              } else if (typeof rawScene === 'string') {
-                const cleaned = rawScene.replace(/^scene_/i, '');
-                const parsed = parseFloat(cleaned);
-                if (!isNaN(parsed)) sceneNumber = Math.floor(parsed);
-              }
-
-              let type: AudioFile['type'] = 'narration';
-              const audioType = file.audio_type || file.type;
-              if (audioType === 'narrator') type = 'narration';
-              else if (audioType === 'character') type = 'dialogue';
-              else if (audioType === 'music' || audioType === 'background_music') type = 'music';
-              else if (audioType === 'sound_effects' || audioType === 'sfx') type = 'effects';
-              else if (audioType === 'ambiance' || audioType === 'ambient') type = 'ambiance';
-
-              const mapped: AudioFile = {
-                id: file.id,
-                type,
-                sceneNumber,
-                shotType: metadata?.shot_type,
-                shotIndex: typeof metadata?.shot_index === 'number' ? metadata.shot_index : undefined,
-                url: file.url ?? file.audio_url,
-                duration: file.duration ?? file.duration_seconds,
-                character: file.character_name ?? metadata?.character_name,
-                status: file.generation_status ?? file.status,
-                text_content: file.text_content,
-                text_prompt: file.text_prompt,
-              };
-
-              if (!groupedAudio[sceneNumber]) groupedAudio[sceneNumber] = [];
-              groupedAudio[sceneNumber].push(mapped);
-            });
-
-            setSceneAudioMap(prev => Object.keys(prev).length === 0 ? groupedAudio : prev);
-          } catch (audioErr: any) {
-            if (audioErr.name !== 'AbortError') {
-              console.error('[StoryboardContext] Failed to fetch audio data:', audioErr);
-            }
+        // Fetch audio
+        try {
+          const audioRes = await userService.getChapterAudio(stableSelectedChapterId, selectedScriptId);
+          if (controller.signal.aborted) return;
+          setSceneAudioMap(mapAudioFiles(audioRes?.audio_files ?? [], selectedScriptId));
+        } catch (audioErr: any) {
+          if (audioErr.name !== 'AbortError') {
+            console.error('[StoryboardContext] Failed to fetch audio data:', audioErr);
           }
         }
 
+        setStatus('ready');
       } catch (err: any) {
-        if (err.name !== 'AbortError') {
-          console.error('[StoryboardContext] Failed to fetch storyboard data:', err);
-        }
+        if (err.name === 'AbortError') return;
+        const message = err instanceof Error ? err.message : 'Failed to load storyboard state';
+        console.error('[StoryboardContext] Failed to fetch storyboard data:', err);
+        setError(message);
+        setStatus('error');
       }
     })();
 
     return () => controller.abort();
-  }, [selectedScriptId, stableSelectedChapterId]);
+  }, [stableSelectedChapterId, selectedScriptId, loadStoryboardConfig, resetStoryboard]);
 
   // Actions
   const setSelectedSceneImage = useCallback((sceneNumber: number, imageUrl: string | null) => {
@@ -391,17 +572,6 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
     return selectedSceneImages[sceneNumber] || null;
   }, [selectedSceneImages]);
 
-  // Bulk operations
-  const resetStoryboard = useCallback(() => {
-    setSelectedSceneImagesState({});
-    setExcludedImageIds(new Set());
-    setSceneAudioMap({});
-    setSceneImagesMap({});
-    setImageOrderBySceneState({});
-    setAudioAssignments({});
-    setSelectedAudioIds(new Set());
-  }, []);
-
   const importFromAudioPanel = useCallback((data: Partial<StoryboardState>) => {
     if (data.selectedSceneImages) setSelectedSceneImagesState(data.selectedSceneImages);
     if (data.excludedImageIds) setExcludedImageIds(data.excludedImageIds);
@@ -420,6 +590,8 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
     imageOrderByScene,
     audioAssignments,
     selectedAudioIds,
+    status,
+    error,
     setSelectedSceneImage,
     excludeImage,
     includeImage,
@@ -447,6 +619,8 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
     imageOrderByScene,
     audioAssignments,
     selectedAudioIds,
+    status,
+    error,
     setSelectedSceneImage,
     excludeImage,
     includeImage,
