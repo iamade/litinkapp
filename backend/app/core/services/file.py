@@ -611,7 +611,7 @@ class BookStructureDetector:
                 chapter_number = int(number_match.group(1))
 
                 # FIX: Be more restrictive about chapter numbers
-                if chapter_number > 100:  # Skip obviously wrong numbers
+                if chapter_number > 200:  # Skip obviously wrong numbers (was 100, raised for large books like Moby-Dick)
                     continue
 
                 # Look for title in the next few lines
@@ -656,8 +656,8 @@ class BookStructureDetector:
                     and self._has_substantial_following_content(
                         lines, title_line_num, min_lines=8
                     )
-                    and chapter_number <= 50
-                ):  # Reasonable chapter count limit
+                    and chapter_number <= 150
+                ):  # Reasonable chapter count limit (was 50, raised for large books)
 
                     full_title = f"Chapter {chapter_number}: {chapter_title}"
                     chapter_headers.append(
