@@ -4,7 +4,6 @@ from app.core.logging import get_logger
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.auth.schema import AccountStatusSchema, EmailVerificationRequestSchema
-from app.auth.utils import create_activation_token
 from app.core.services.activation_email import send_activation_email
 
 from app.api.services.user_auth import user_auth_service
@@ -98,7 +97,7 @@ async def resend_activation_link(
                 },
             )
             
-        activation_token = create_activation_token(user.id)
+        activation_token = await user_auth_service.issue_activation_token(user, session)
         await send_activation_email(user.email, activation_token)
         
         return{

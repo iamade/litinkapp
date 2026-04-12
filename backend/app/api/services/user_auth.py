@@ -11,7 +11,8 @@ from app.auth.utils import (
     generate_password_hash,
     generate_display_name,
     verify_password,
-    create_activation_token,
+    build_activation_token_record,
+    hash_activation_token,
     generate_otp,
 )
 from datetime import datetime, timedelta, timezone
@@ -197,6 +198,18 @@ class UserAuthService:
     # ---------------------------
     # Registration and activation
     # ---------------------------
+    async def issue_activation_token(
+        self,
+        user: User,
+        session: AsyncSession,
+    ) -> str:
+        raw_token, token_hash, expires_at = build_activation_token_record()
+        user.activation_token_hash = token_hash
+        user.activation_token_expires_at = expires_at
+        await session.commit()
+        await session.refresh(user)
+        return raw_token
+
     async def create_user(
         self,
         user_data: UserCreateSchema,
@@ -231,7 +244,7 @@ class UserAuthService:
         session.add(free_tier_grant)
         await session.commit()
 
-        activation_token = create_activation_token(new_user.id)
+        activation_token = await self.issue_activation_token(new_user, session)
         try:
             await send_activation_email(new_user.email, activation_token)
             logger.info(f"Activation email sent to {new_user.email}")
@@ -242,29 +255,24 @@ class UserAuthService:
             )
         return new_user
 
+
     async def activate_user_account(
         self,
         token: str,
         session: AsyncSession,
     ) -> User:
         try:
-            payload = jwt.decode(
-                token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
-            )
-
-            if payload.get("type") != "activation":
-                raise ValueError("Invalid token type")
-
-            user_id = uuid.UUID(payload["id"])
-
-            user = await self.get_user_by_id(user_id, session, include_inactive=True)
+            token_hash = hash_activation_token(token)
+            statement = select(User).where(User.activation_token_hash == token_hash)
+            result = await session.exec(statement)
+            user = result.first()
 
             if not user:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "status": "error",
-                        "message": "User not found",
+                        "message": "Invalid activation token",
                     },
                 )
             if user.is_active:
@@ -276,32 +284,28 @@ class UserAuthService:
                     },
                 )
 
+            expires_at = user.activation_token_expires_at
+            if not expires_at or expires_at <= datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "status": "error",
+                        "message": "Activation token expired",
+                    },
+                )
+
             await self.reset_user_state(user, session, log_action=True)
 
             user.is_active = True
             user.account_status = AccountStatusSchema.ACTIVE
+            user.activation_token_hash = None
+            user.activation_token_expires_at = None
 
             await session.commit()
             await session.refresh(user)
 
             return user
 
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "status": "error",
-                    "message": "Activation token expired",
-                },
-            )
-        except jwt.InvalidTokenError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "status": "error",
-                    "message": "Invalid activation token",
-                },
-            )
         except HTTPException as http_ex:
             raise http_ex
         except Exception as e:

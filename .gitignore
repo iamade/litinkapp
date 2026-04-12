@@ -49,3 +49,13 @@ backend/CODEDISCUSS.md
 *.pyc
 architecture
 feature-prompt.md
+
+# Vite temp files
+vite.config.*.timestamp-*
+
+# Claude workspace
+.claude/
+
+# AI tool files
+CLAUDE.md
+frontend/SKILL.md

@@ -1,7 +1,8 @@
 import random
+import hashlib
+import secrets
 import string
 import uuid
-from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -70,18 +71,23 @@ def generate_display_name() -> str:
     return f"{adjective}_{noun}_{suffix}"
 
 
-def create_activation_token(id: uuid.UUID) -> str:
-    payload = {
-        "id": str(id),
-        "type": "activation",
-        "exp": datetime.now(timezone.utc)
-        + timedelta(minutes=settings.ACTIVATION_TOKEN_EXPIRATION_MINUTES),
-        "iat": datetime.now(timezone.utc),
-    }
+def hash_activation_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
-    return jwt.encode(
-        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+
+def create_activation_token() -> str:
+    """Generate an opaque activation token for email links."""
+    return secrets.token_urlsafe(32)
+
+
+def build_activation_token_record() -> tuple[str, str, datetime]:
+    """Return (raw_token, token_hash, expires_at)."""
+    raw_token = create_activation_token()
+    token_hash = hash_activation_token(raw_token)
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.ACTIVATION_TOKEN_EXPIRATION_MINUTES
     )
+    return raw_token, token_hash, expires_at
 
 
 def create_jwt_token(id: uuid.UUID, type: str = settings.COOKIE_ACCESS_NAME) -> str:
