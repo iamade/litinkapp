@@ -38,6 +38,21 @@ services:
       retries: 5
     restart: unless-stopped
 
+  redis:
+    image: redis:7.0-alpine
+    container_name: litink-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - litink-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -51,6 +66,8 @@ services:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - ./backend/app:/app/app
@@ -75,3 +92,4 @@ services:
 volumes:
   litink-pgdata:
   litink-minio-data:
+  litink-redis-data:
