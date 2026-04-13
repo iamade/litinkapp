@@ -5784,6 +5784,29 @@ Chapters:
                 f"chapters with < 500 chars content"
             )
 
+        # Step 3b: Filter front/back matter (copyright, title page, imprint, etc.)
+        # This was only applied in the EPUB path — now covers structure detection fallback too
+        pre_fb_count = len(extracted_chapters)
+        filtered_chapters = []
+        for ch in extracted_chapters:
+            title = ch.get("title", "")
+            word_count = len(ch.get("content", "").split())
+            should_drop, drop_reason = self._is_front_back_matter(
+                title, "", word_count  # no href available in fallback path
+            )
+            if should_drop:
+                print(
+                    f"[CHAPTER EXTRACTION] Dropping front/back matter: '{title}' — {drop_reason}"
+                )
+            else:
+                filtered_chapters.append(ch)
+        extracted_chapters = filtered_chapters
+        if len(extracted_chapters) < pre_fb_count:
+            print(
+                f"[CHAPTER EXTRACTION] Filtered {pre_fb_count - len(extracted_chapters)} "
+                f"front/back matter items"
+            )
+
         # Step 4: Filter if too many chapters found
         if len(extracted_chapters) > 20:
             final_chapters = await self._ai_filter_real_chapters(
