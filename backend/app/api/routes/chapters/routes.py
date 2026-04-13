@@ -92,7 +92,7 @@ async def verify_chapter_access(
 
         if project:
             # Check access permissions for project
-            if str(project.user_id) != user_id:
+            if str(project.user_id) != str(user_id):
                 raise HTTPException(
                     status_code=403, detail="Not authorized to access this project"
                 )
@@ -1172,7 +1172,7 @@ async def get_image_generation_status(
             )
 
         # Verify the record belongs to the current user
-        if str(image_record.user_id) != current_user.id:
+        if str(image_record.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this image generation"
             )
@@ -1802,7 +1802,7 @@ async def get_audio_generation_status(
             )
 
         # Verify the record belongs to the current user
-        if str(audio_record.user_id) != current_user.id:
+        if str(audio_record.user_id) != str(current_user.id):
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this audio generation"
             )

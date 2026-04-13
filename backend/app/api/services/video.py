@@ -1147,14 +1147,18 @@ This concludes our discussion of {chapter_title}. Remember to review the key con
             return chapter_content[:500] + "..."
 
     async def _generate_entertainment_script(
-        self, chapter_content: str, rag_context: Dict[str, Any], script_style: str
+        self,
+        chapter_content: str,
+        chapter_title: str,
+        book_title: str,
+        video_style: str,
     ) -> Dict[str, Any]:
         """Generate entertainment script using OpenAI"""
         try:
-            # Use RAG context to enhance script generation
-            context_text = rag_context.get("total_context", chapter_content)
+            # Build context from chapter/book metadata
+            context_text = f"Book: {book_title}\nChapter: {chapter_title}\n\n{chapter_content}"
 
-            if script_style == "screenplay":
+            if video_style == "screenplay":
                 prompt = f"""
 Generate a screenplay-style script for a video adaptation of this chapter content.
 Focus on dialogue and character interactions.

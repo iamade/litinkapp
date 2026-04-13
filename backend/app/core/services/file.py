@@ -611,7 +611,7 @@ class BookStructureDetector:
                 chapter_number = int(number_match.group(1))
 
                 # FIX: Be more restrictive about chapter numbers
-                if chapter_number > 100:  # Skip obviously wrong numbers
+                if chapter_number > 200:  # Skip obviously wrong numbers (was 100, raised for large books like Moby-Dick)
                     continue
 
                 # Look for title in the next few lines
@@ -656,8 +656,8 @@ class BookStructureDetector:
                     and self._has_substantial_following_content(
                         lines, title_line_num, min_lines=8
                     )
-                    and chapter_number <= 50
-                ):  # Reasonable chapter count limit
+                    and chapter_number <= 150
+                ):  # Reasonable chapter count limit (was 50, raised for large books)
 
                     full_title = f"Chapter {chapter_number}: {chapter_title}"
                     chapter_headers.append(
@@ -1996,6 +1996,198 @@ class FileService:
 
         return False, ""
 
+    @staticmethod
+    def _is_chapter_like(title: str) -> bool:
+        """Check if a title matches a standard chapter numbering pattern.
+
+        Matches patterns like:
+        - CHAPTER 1, Chapter 1, CHAPTER I, Chapter XX
+        - Ch. 1, CH.1, ch 1
+        - Chapter 1. Title, CHAPTER I: Title
+        """
+        t = title.strip()
+        # Standard numbered chapter patterns
+        if re.match(
+            r"(?i)^(chapter|ch\.?|chap\.?)\s*(\d+|[ivxlcdm]+)[\s.:\-\u2013\u2014]",
+            t,
+        ) or re.match(
+            r"(?i)^(chapter|ch\.?|chap\.?)\s*(\d+|[ivxlcdm]+)$",
+            t,
+        ):
+            return True
+        # Common numbered patterns: just a number followed by a title
+        if re.match(r"^\d{1,3}[\.\s]\s*\S", t):
+            return True
+        return False
+
+    def _filter_front_back_matter_structural(
+        self, chapters: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Remove front matter (before first real chapter) and back matter
+        (after last real chapter) using structural detection, not hardcoded
+        title lists.
+
+        Strategy:
+        1. Find the first and last items whose titles match a chapter pattern.
+        2. Everything before first = front matter -> drop.
+        3. Everything after last = back matter -> drop.
+        4. Items between first and last that do NOT match a chapter pattern
+           are kept (they may be interludes, intermezzi, etc.).
+        5. Known generic boilerplate (Gutenberg license, copyright) is also
+           dropped even if it lands between chapters.
+        6. Renumber remaining chapters sequentially.
+        """
+        if not chapters:
+            return chapters
+
+        # --- Step 1: Find indices of real numbered chapters ---
+        chapter_indices = []
+        for i, ch in enumerate(chapters):
+            if self._is_chapter_like(ch.get("title", "")):
+                chapter_indices.append(i)
+
+        # If no numbered chapters found, fall back to the original list
+        # (maybe this book uses section titles instead of chapters)
+        if len(chapter_indices) < 2:
+            print(
+                f"[EPUB-STRUCTURAL] Fewer than 2 numbered chapters found ({len(chapter_indices)}), "
+                "skipping structural front/back filter"
+            )
+            return chapters
+
+        first_chapter_idx = chapter_indices[0]
+        last_chapter_idx = chapter_indices[-1]
+
+        print(
+            f"[EPUB-STRUCTURAL] First numbered chapter at index {first_chapter_idx}: "
+            f"'{chapters[first_chapter_idx].get('title', '')}'"
+        )
+        print(
+            f"[EPUB-STRUCTURAL] Last numbered chapter at index {last_chapter_idx}: "
+            f"'{chapters[last_chapter_idx].get('title', '')}'"
+        )
+
+        # --- Step 2: Generic boilerplate patterns (always drop) ---
+        GENERIC_BOILERPLATE = [
+            r"(?i)project.?gutenberg",
+            r"(?i)\\blicense\\b",
+            r"(?i)\\bcopyright\\b",
+            r"(?i)produced by.*(?:project gutenberg|distributed proof)",
+            r"(?i)start of (?:the )?project gutenberg",
+            r"(?i)end of (?:the )?project gutenberg",
+            r"(?i)small print",
+        ]
+
+        def _is_generic_boilerplate(title: str) -> bool:
+            for pat in GENERIC_BOILERPLATE:
+                if re.search(pat, title):
+                    return True
+            return False
+
+        # --- Step 3: Build filtered list ---
+        filtered = []
+        dropped_front = 0
+        dropped_back = 0
+        dropped_boiler = 0
+
+        for i, ch in enumerate(chapters):
+            title = ch.get("title", "")
+
+            # Drop generic boilerplate regardless of position
+            if _is_generic_boilerplate(title):
+                dropped_boiler += 1
+                print(f"[EPUB-STRUCTURAL] Dropping boilerplate: '{title[:60]}'")
+                continue
+
+            # Drop everything before first numbered chapter (front matter)
+            if i < first_chapter_idx:
+                dropped_front += 1
+                print(f"[EPUB-STRUCTURAL] Dropping front matter: '{title[:60]}'")
+                continue
+
+            # Drop everything after last numbered chapter (back matter)
+            if i > last_chapter_idx:
+                dropped_back += 1
+                print(f"[EPUB-STRUCTURAL] Dropping back matter: '{title[:60]}'")
+                continue
+
+            filtered.append(ch)
+
+        # --- Step 4: Renumber ---
+        for i, ch in enumerate(filtered, 1):
+            ch["number"] = str(i)
+
+        print(
+            f"[EPUB-STRUCTURAL] Filtered: {len(chapters)} -> {len(filtered)} chapters "
+            f"(dropped {dropped_front} front, {dropped_back} back, {dropped_boiler} boilerplate)"
+        )
+
+        return filtered
+
+    def _split_spine_item_by_headings(self, soup, item_idx: int) -> List[Dict[str, Any]]:
+        """Split a single spine item into sub-chapters by heading elements.
+
+        Many EPUBs bundle multiple chapters into one spine item (e.g., 10-15 chapters
+        per HTML file). This method splits them by <h1>, <h2>, or <h3> headings.
+
+        Returns a list of dicts with 'title' and 'soup_fragment' keys.
+        """
+        sub_chapters = []
+
+        # Find all heading elements
+        headings = soup.find_all(["h1", "h2", "h3", "h4"])
+
+        if len(headings) < 2:
+            # 0 or 1 heading — this item is a single chapter (or no chapter)
+            return None  # Signal to use original single-chapter logic
+
+        # Split content between headings
+        for i, heading in enumerate(headings):
+            heading_text = heading.get_text().strip()
+            if not heading_text:
+                continue
+
+            # Collect all siblings until the next heading of same or higher level
+            content_elements = []
+            sibling = heading.next_sibling
+            heading_level = int(heading.name[1])  # h1=1, h2=2, etc.
+
+            while sibling:
+                if hasattr(sibling, 'name') and sibling.name in ["h1", "h2", "h3", "h4"]:
+                    sibling_level = int(sibling.name[1])
+                    # Stop at same or higher level heading
+                    if sibling_level <= heading_level:
+                        break
+                content_elements.append(sibling)
+                sibling = sibling.next_sibling
+
+            # Build content text from elements
+            content_parts = []
+            for elem in content_elements:
+                if isinstance(elem, str):
+                    text = elem.strip()
+                    if text:
+                        content_parts.append(text)
+                elif hasattr(elem, 'get_text'):
+                    # Skip nested headings that are sub-sections
+                    if elem.name in ["script", "style"]:
+                        continue
+                    text = elem.get_text().strip()
+                    if text:
+                        content_parts.append(text)
+
+            content_text = "\n".join(content_parts)
+
+            sub_chapters.append({
+                "title": heading_text,
+                "content": content_text,
+            })
+
+        if len(sub_chapters) >= 2:
+            print(f"[EPUB] Item {item_idx}: Split into {len(sub_chapters)} sub-chapters by headings")
+            return sub_chapters
+        return None  # Not enough sub-chapters, use original logic
+
     def extract_epub_chapters(self, file_path: str) -> List[Dict[str, Any]]:
         """Extract chapters from EPUB file using its built-in structure"""
         try:
@@ -2027,6 +2219,43 @@ class FileService:
                     for script in soup(["script", "style"]):
                         script.decompose()
 
+                    # Try to split bundled chapters by headings first
+                    sub_chapters = self._split_spine_item_by_headings(soup, idx)
+
+                    if sub_chapters is not None:
+                        # Spine item contains multiple chapters — process each
+                        item_href = item.get_name() if hasattr(item, "get_name") else ""
+                        for sub in sub_chapters:
+                            sub_title = sub["title"]
+                            sub_content = sub["content"]
+                            sub_word_count = len(sub_content.split())
+
+                            # Skip if too short
+                            if len(sub_content.strip()) < 100:
+                                skipped_count += 1
+                                print(f"[EPUB] Skipping sub-chapter '{sub_title}': too short")
+                                continue
+
+                            # Filter front/back matter
+                            should_drop, drop_reason = self._is_front_back_matter(
+                                sub_title, item_href, sub_word_count
+                            )
+                            if should_drop:
+                                skipped_count += 1
+                                print(f"[EPUB] Skipping sub-chapter '{sub_title}': {drop_reason}")
+                                continue
+
+                            chapter_number += 1
+                            chapters.append({
+                                "number": str(chapter_number),
+                                "title": sub_title,
+                                "content": sub_content,
+                                "type": "chapter",
+                            })
+                            print(f"[EPUB] ✓ Added chapter {chapter_number}: {sub_title}")
+                        continue  # Move to next spine item
+
+                    # Fall through to original single-chapter logic
                     # Get text content
                     text = soup.get_text()
 
@@ -2041,7 +2270,6 @@ class FileService:
                     print(f"[EPUB] Item {idx}: content length = {content_length}")
 
                     # Skip if content is too short (likely not a real chapter)
-                    # Lowered threshold from 200 to 100 to catch more chapters
                     if content_length < 100:
                         skipped_count += 1
                         print(
@@ -2063,20 +2291,15 @@ class FileService:
                         first_lines = clean_text.split("\n")[:5]
                         for line in first_lines:
                             line_stripped = line.strip()
-                            # Check if it matches chapter pattern
                             chapter_match = self.structure_detector._match_chapter_patterns(line_stripped)
                             if chapter_match:
-                                # Use the chapter pattern as title
                                 if chapter_match.get("title"):
                                     title = f"Chapter {chapter_match['number']}: {chapter_match['title']}"
                                 else:
                                     title = f"Chapter {chapter_match['number']}"
                                 print(f"[EPUB] Found chapter pattern: {title}")
                                 break
-                            # Otherwise check if it looks like a title
-                            elif 5 < len(
-                                line_stripped
-                            ) < 100 and not line_stripped.endswith("."):
+                            elif 5 < len(line_stripped) < 100 and not line_stripped.endswith("."):
                                 title = line_stripped
                                 print(f"[EPUB] Using first line as title: {title}")
                                 break
@@ -2097,20 +2320,19 @@ class FileService:
                     if should_drop:
                         chapter_number -= 1
                         skipped_count += 1
-                        print(
-                            f"[EPUB] Skipping item {idx} '{title}': {drop_reason}"
-                        )
+                        print(f"[EPUB] Skipping item {idx} '{title}': {drop_reason}")
                         continue
 
-                    chapters.append(
-                        {
-                            "number": str(chapter_number),
-                            "title": title,
-                            "content": clean_text,
-                            "type": "chapter",
-                        }
-                    )
+                    chapters.append({
+                        "number": str(chapter_number),
+                        "title": title,
+                        "content": clean_text,
+                        "type": "chapter",
+                    })
                     print(f"[EPUB] ✓ Added chapter {chapter_number}: {title}")
+
+            # --- Dynamic front/back matter filter (structural) ---
+            chapters = self._filter_front_back_matter_structural(chapters)
 
             print(
                 f"[EPUB] Extracted {len(chapters)} chapters from spine (skipped {skipped_count} short items)"
