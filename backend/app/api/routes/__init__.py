@@ -19,6 +19,7 @@ from .user_profile.onboarding import router as onboarding_router
 from app.promo.routes import router as promo_router
 from app.credits.routes import router as credits_router
 from app.audiobooks.routes import router as audiobooks_router
+from app.trailers.routes import router as trailers_router
 
 api_router = APIRouter()
 
@@ -53,3 +54,4 @@ api_router.include_router(onboarding_router)
 api_router.include_router(promo_router, tags=["promo"])
 api_router.include_router(credits_router, tags=["credits"])
 api_router.include_router(audiobooks_router, prefix="/listen", tags=["audiobooks"])
+api_router.include_router(trailers_router, tags=["trailers"])
