@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useVideoProduction } from '../../hooks/useVideoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
+import { useAudioGeneration, type AudioFile } from '../../hooks/useAudioGeneration';
 import SceneTimeline from './SceneTimeline';
 import EditorSettingsPanel from './EditorSettingsPanel';
 import VideoPreview from './VideoPreview';
@@ -130,9 +131,21 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
 }) => {
   const {
     selectedScriptId,
+    stableSelectedChapterId,
     isSwitching
   } = useScriptSelection();
   const { balance: creditBalance } = useCreditBalance({ enabled: !!selectedScriptId });
+
+  // KAN-142: Independent audio fetch - don't rely on Audio tab's cache state
+  // This ensures Video tab always has fresh audio data on load
+  const {
+    files: fetchedAudioFiles,
+    isLoading: isLoadingAudio,
+    loadAudio: refetchAudio,
+  } = useAudioGeneration({
+    chapterId: stableSelectedChapterId,
+    scriptId: selectedScriptId,
+  });
 
   const storyboardContext = useStoryboardOptional();
   
@@ -225,6 +238,22 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     [filteredSceneData]
   );
 
+  // KAN-142: Merge fetched audio with prop audio
+  // Prefer fetched audio (fresh from API) but fall back to prop if fetch incomplete
+  const effectiveAudioFiles = React.useMemo(() => {
+    // Extract URLs from fetched AudioFile[] objects
+    const fetchedUrls = (fetchedAudioFiles ?? [])
+      .map((f: AudioFile) => f.url)
+      .filter((url: string | undefined): url is string => !!url);
+    
+    // If we have fresh fetched audio, use it
+    if (fetchedUrls.length > 0) {
+      return fetchedUrls;
+    }
+    // Otherwise fall back to prop audioFiles (may be stale if Audio tab not visited)
+    return audioFiles;
+  }, [fetchedAudioFiles, audioFiles]);
+
   // Move hooks before any conditional returns
   const {
     videoProduction,
@@ -245,7 +274,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     scriptId: selectedScriptId || undefined,
     imageUrls: filteredImageUrls,
     sceneMetadata: filteredSceneData, // Pass scene data with shotType/shotIndex
-    audioFiles
+    audioFiles: effectiveAudioFiles
   });
 
   // Enrich scenes with generation status and video URLs from videoGenerations
