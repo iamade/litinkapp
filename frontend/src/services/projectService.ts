@@ -26,6 +26,9 @@ export interface Project {
     music_mood?: string;
     aspect_ratio?: string;
   };
+  // Upload processing status for background jobs
+  upload_status?: 'pending' | 'processing' | 'completed' | 'failed';
+  upload_error?: string;
 }
 
 export interface IntentAnalysisResult {
