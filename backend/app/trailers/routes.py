@@ -27,7 +27,7 @@ from app.trailers.schemas import (
     TrailerGenerateResponse,
 )
 from app.trailers.service import TrailerSceneService, TrailerGenerationService
-from app.user.models import User
+from app.auth.models import User
 
 logger = logging.getLogger(__name__)
 
