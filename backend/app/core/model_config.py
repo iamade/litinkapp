@@ -30,15 +30,15 @@ class ModelConfig:
     cost_per_1k_output: Optional[float] = None
 
 
-# Text & Script Generation Strategy
-# Models routed via ProviderRouter: google/ → Google AI Studio, groq/ → Groq, else → OpenRouter
+# Text & Script Generation Strategy (LMSYS Creative Writing Leaderboard-based)
+# Primary: Ollama Cloud (KAN-181) | Fallbacks: OpenRouter free-tier models
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
         primary="gemma4:31b-cloud",  # Ollama Cloud API (KAN-181 fix)
-        fallback="google/gemini-2.5-flash",  # Google AI Studio FREE direct
-        fallback2="groq/llama-3.3-70b-versatile",  # Groq FREE direct, 30 RPM
-        fallback3="mistralai/mistral-small-3.1-24b-instruct:free",  # OpenRouter FREE, reliable
-        fallback4=None,
+        fallback="meta-llama/llama-3.3-70b-instruct:free",  # OpenRouter FREE, 66K ctx, battle-tested
+        fallback2="stepfun/step-3.5-flash:free",  # OpenRouter FREE, 1M ctx, strong reasoning MoE
+        fallback3="deepseek/deepseek-chat",  # OpenRouter $0.55/1M, 164K ctx, reliable paid backup
+        fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.0,
@@ -48,8 +48,7 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         primary="qwen/qwen3.5-flash-02-23",  # OpenRouter $0.33/1M, 1M ctx, best value
         fallback="mistralai/mistral-small-2603",  # OpenRouter $0.75/1M, 262K ctx, reliable
         fallback2="openai/gpt-5.4-nano",  # OpenRouter $1.45/1M, 400K ctx, OpenAI quality
-        fallback3="groq/llama-3.3-70b-versatile",  # Groq FREE direct, fast fallback
-        fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE direct, 1M ctx safety net
+        fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.00014,
