@@ -1,17 +1,21 @@
 """add trailer tables
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: t1r2a3i4l5er
 Revises: z3b4c5d6e7f8
 Create Date: 2026-04-13 14:10:00.000000
 
 KAN-149: Trailer Engine — AI scene selection service
+
+Hotfix: Renamed revision from a1b2c3d4e5f6 to t1r2a3i4l5er to resolve
+Alembic CycleDetected error caused by duplicate revision ID collision
+with a1b2c3d4e5f6_add_chapter_to_artifact_type_enum.py.
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql as pg
 
 # revision identifiers, used by Alembic.
-revision = 'a1b2c3d4e5f6'
+revision = 't1r2a3i4l5er'
 down_revision = 'z3b4c5d6e7f8'
 branch_labels = None
 depends_on = None
