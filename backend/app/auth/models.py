@@ -23,6 +23,10 @@ class User(UserBaseSchema, table=True):
     last_failed_login: datetime | None = Field(
         default=None, sa_column=Column(pg.TIMESTAMP(timezone=True))
     )
+    activation_token_hash: Optional[str] = Field(default=None, index=True, max_length=128)
+    activation_token_expires_at: datetime | None = Field(
+        default=None, sa_column=Column(pg.TIMESTAMP(timezone=True), nullable=True)
+    )
     # otp: str = Field(max_length=6, default="")
     # otp_expiry_time: Optional[datetime] = None
     created_at: datetime = Field(

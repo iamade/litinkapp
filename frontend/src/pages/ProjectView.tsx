@@ -300,6 +300,12 @@ const ProjectView: React.FC = () => {
           .sort((a: any, b: any) => (a.content.chapter_number || 0) - (b.content.chapter_number || 0));
         if (chapters.length > 0) {
           setSelectedChapter(chapters[0]);
+          // Sync chapter selection with ScriptSelectionContext so
+          // sub-tabs (Script, Images, Audio, Video, Merge) can
+          // resolve selectedScriptId correctly on initial load.
+          // Without this, the context keeps selectedChapterId=null
+          // which causes downstream panels to render blank.
+          selectChapter(chapters[0].id, { reason: 'navigation' });
         }
       }
     } catch (error) {
@@ -342,6 +348,8 @@ const ProjectView: React.FC = () => {
       // Set the virtual chapter as selected
       if (virtualChapter) {
         setSelectedChapter(virtualChapter);
+        // Sync with ScriptSelectionContext for prompt-only projects
+        selectChapter(virtualChapter.id, { reason: 'navigation' });
       }
     }
   }, [loading, isPromptOnlyProject, isWorkflowMode, virtualChapter]);

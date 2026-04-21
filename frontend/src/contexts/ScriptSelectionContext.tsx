@@ -124,11 +124,17 @@ export const ScriptSelectionProvider: React.FC<React.PropsWithChildren> = ({ chi
       const reason = opts?.reason ?? 'user';
       const nextVersion = prev.versionToken + 1;
       const next: ScriptSelectionState = {
-        ...prev,
+        selectedScriptId: null,
         selectedChapterId: nextChapterId,
-        lastValidChapterId: nextChapterId ?? prev.lastValidChapterId, // Update lastValid on non-null
         selectedSegmentId: null,
         versionToken: nextVersion,
+        isSwitching: prev.isSwitching,
+        lastValidChapterId: nextChapterId ?? prev.lastValidChapterId,
+        selectedSceneImages: {},
+        keySceneImages: {},
+        deselectedImages: new Set<string>(),
+        imageOrderByScene: {},
+        storyboardDirty: false,
       };
       queueMicrotask(() => {
         emit('CHAPTER_CHANGED', {

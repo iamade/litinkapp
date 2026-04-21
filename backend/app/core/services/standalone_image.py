@@ -293,7 +293,7 @@ class StandaloneImageService:
         """
         from app.api.services.character import CharacterService
 
-        character_service = CharacterService(self.db)
+        character_service = CharacterService(self.session)
         character = await character_service.get_character_by_id(character_id, user_id)
         if character and character.image_url:
             return character.image_url
@@ -980,17 +980,20 @@ class StandaloneImageService:
             final_image_url = provider_image_url
             if provider_image_url:
                 storage = get_storage_service()
+                image_scope = str(record.script_id or record.chapter_id or record.video_generation_id or 'global')
                 wm_s3_path = S3StorageService.build_media_path(
                     user_id=str(record.user_id),
                     media_type="images",
                     record_id=str(uuid.uuid4()),
                     extension="png",
+                    scope_id=image_scope,
                 )
                 clean_s3_path = S3StorageService.build_media_path(
                     user_id=str(record.user_id),
                     media_type="images",
                     record_id=str(uuid.uuid4()),
                     extension="png",
+                    scope_id=image_scope,
                 )
                 try:
                     final_image_url, clean_url = (

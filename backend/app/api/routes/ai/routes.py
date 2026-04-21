@@ -3717,53 +3717,42 @@ Script to analyze:
         print(f"[DEBUG] Extracted {len(dialogue_moments)} dialogue moments from script")
 
         # ✅ Generate character analysis using OpenRouter
-        character_analysis_result = await openrouter_service.analyze_content(
-            content=f"Extract and describe all characters mentioned in this script. Format as 'Character Name: [brief description/role]':\n\n{script}",
-            user_tier=user_model_tier,
-            analysis_type="characters",
-        )
-
+        # KAN-230 FIX: Extract character names from SCRIPT dialogue speakers, NOT character_details
+        # Primary method: Parse script for dialogue patterns (was previously fallback)
+        print(f"[DEBUG] Extracting character names directly from script dialogue")
         characters = []
-        character_details = ""
-        if character_analysis_result.get("status") == "success":
-            character_details = character_analysis_result.get("result", "")
-            # Extract character names with improved logic, filtered by script style
-            characters = extract_characters(character_details, script_style)
+        script_lines = script.split("\n")
+        potential_characters = set()
 
-        # ✅ FALLBACK: If no characters found from AI analysis, extract directly from script
-        if not characters or len(characters) == 0:
-            print(
-                f"[DEBUG] No characters from AI analysis, extracting directly from script"
-            )
-            # Extract character names from dialogue - lines that are all caps followed by dialogue
-            script_lines = script.split("\n")
-            potential_characters = set()
-
-            for i, line in enumerate(script_lines):
-                line_stripped = line.strip()
-                # Look for character names: ALL CAPS lines that are not scene headers
-                if (
-                    line_stripped
-                    and line_stripped.isupper()
-                    and not line_stripped.startswith(
-                        ("INT.", "EXT.", "SCENE", "ACT", "FADE", "CUT TO")
-                    )
-                    and not any(x in line_stripped for x in ["**", ":", "NARRATOR ("])
+        for i, line in enumerate(script_lines):
+            line_stripped = line.strip()
+            # Look for character names: ALL CAPS lines that are not scene headers
+            # This parses dialogue speakers from the script itself
+            if (
+                line_stripped
+                and line_stripped.isupper()
+                and not line_stripped.startswith(
+                    ("INT.", "EXT.", "SCENE", "ACT", "FADE", "CUT TO", "DISSOLVE")
+                )
+                and not any(x in line_stripped for x in ["**", ":", "NARRATOR ("])
+            ):
+                # Clean up the character name
+                char_name = line_stripped.strip("*").strip()
+                # Remove parenthetical descriptions like "(V.O.)" or "(mocking)"
+                char_name = re.sub(r"\([^)]+\)", "", char_name).strip()
+                # Only add if it looks like a valid name (2-30 chars, contains letters)
+                if 2 <= len(char_name) <= 30 and any(
+                    c.isalpha() for c in char_name
                 ):
-                    # Clean up the character name
-                    char_name = line_stripped.strip("*").strip()
-                    # Remove parenthetical descriptions like "(V.O.)" or "(mocking)"
-                    char_name = re.sub(r"\([^)]+\)", "", char_name).strip()
-                    # Only add if it looks like a valid name (2-30 chars, contains letters)
-                    if 2 <= len(char_name) <= 30 and any(
-                        c.isalpha() for c in char_name
-                    ):
-                        potential_characters.add(char_name.title())
+                    potential_characters.add(char_name.title())
 
-            characters = list(potential_characters)[:15]  # Limit to 15 characters
-            print(
-                f"[DEBUG] Extracted {len(characters)} characters directly from script: {characters}"
-            )
+        characters = list(potential_characters)[:15]  # Limit to 15 characters
+        print(
+            f"[DEBUG] Extracted {len(characters)} characters from script dialogue: {characters}"
+        )
+        
+        # character_details is NOT used for pill extraction (KAN-230 fix)
+        character_details = ""
 
         # Generate default script name if not provided
         if not script_name:
