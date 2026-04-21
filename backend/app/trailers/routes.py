@@ -15,8 +15,8 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_async_session
-from app.api.routes.auth import get_current_user
+from app.core.database import get_session
+from app.core.auth import get_current_user
 from app.trailers.models import TrailerGeneration, TrailerScene, TrailerStatus
 from app.trailers.schemas import (
     TrailerAnalyzeRequest,
@@ -27,7 +27,7 @@ from app.trailers.schemas import (
     TrailerGenerateResponse,
 )
 from app.trailers.service import TrailerSceneService, TrailerGenerationService
-from app.user.models import User
+from app.auth.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/v1/trailers", tags=["trailers"])
 @router.post("/analyze", response_model=TrailerAnalyzeResponse)
 async def analyze_project_for_trailer(
     request: TrailerAnalyzeRequest,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -117,7 +117,7 @@ async def analyze_project_for_trailer(
 @router.get("/{trailer_id}", response_model=TrailerStatusResponse)
 async def get_trailer_status(
     trailer_id: UUID,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -170,7 +170,7 @@ async def get_trailer_status(
 @router.get("/{trailer_id}/scenes")
 async def get_trailer_scenes(
     trailer_id: UUID,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -214,7 +214,7 @@ async def get_trailer_scenes(
 async def regenerate_scene_selection(
     trailer_id: UUID,
     request: TrailerAnalyzeRequest,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     """
