@@ -1,11 +1,14 @@
 """add audiobooks and audiobook_chapters tables
 
 Revision ID: a4b5c6d7e8f9
-Revises: z3b4c5d6e7f8
+Revises: t1r2a3i4l5er
 Create Date: 2026-04-11
 
 Adds audiobooks and audiobook_chapters tables for the
 audiobook generation service (KAN-176).
+
+Hotfix: Re-chained down_revision from z3b4c5d6e7f8 to t1r2a3i4l5er
+(trailer tables) to resolve Alembic CycleDetected error.
 """
 
 from typing import Sequence, Union
@@ -16,7 +19,7 @@ from sqlalchemy.dialects import postgresql as pg
 
 # revision identifiers, used by Alembic.
 revision: str = "a4b5c6d7e8f9"
-down_revision: Union[str, Sequence[str], None] = "z3b4c5d6e7f8"
+down_revision: Union[str, Sequence[str], None] = "t1r2a3i4l5er"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
