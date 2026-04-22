@@ -31,7 +31,7 @@ class ModelConfig:
 
 
 # Text & Script Generation Strategy (LMSYS Creative Writing Leaderboard-based)
-# Primary: Ollama Cloud (KAN-181) | Fallbacks: Ollama models (KAN-238 OpenRouter removal)
+# Primary: Ollama Cloud (KAN-181) | Fallbacks: Ollama Cloud models
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
         primary="gemma4:31b-cloud",  # Ollama Cloud API (KAN-181 fix)
@@ -47,7 +47,7 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.BASIC: ModelConfig(
         primary="deepseek-r1:14b",  # Ollama, 14B params, reasoning-focused (KAN-238)
         fallback="llama3.1:70b",  # Ollama, 70B params, high quality fallback (KAN-238)
-        fallback2="openai/gpt-5.4-nano",  # OpenRouter $1.45/1M, 400K ctx, OpenAI quality
+        fallback2="mistral:7b",  # Ollama, 7B params, lightweight fallback (KAN-238)
         fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
         max_tokens=4000,
         temperature=0.7,
