@@ -1246,16 +1246,18 @@ async def generate_scene_videos(
                 # KAN-166: Fix duration validation — audio_duration <= 0 means unknown duration
                 # Previously, `audio_duration > 0` guard caused audio with unknown duration to
                 # bypass min/max validation entirely, passing 0s audio to the video API.
-                if audio_duration <= 0 and audio_url_available := scene_audio.get("audio_url"):
-                    # Unknown duration — probe the file to get actual duration
-                    try:
-                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
-                        probed = await probe_audio_duration_from_url(scene_audio.get("audio_url"))
-                        if probed and probed > 0:
-                            audio_duration = probed
-                            print(f"[SCENE AUDIO] {scene_id}: KAN-166 probed duration={audio_duration}s")
-                    except Exception as probe_err:
-                        print(f"[SCENE AUDIO] {scene_id}: KAN-166 duration probe failed: {probe_err}")
+                if audio_duration <= 0:
+                    audio_url_available = scene_audio.get("audio_url")
+                    if audio_url_available:
+                        # Unknown duration — probe the file to get actual duration
+                        try:
+                            from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                            probed = await probe_audio_duration_from_url(scene_audio.get("audio_url"))
+                            if probed and probed > 0:
+                                audio_duration = probed
+                                print(f"[SCENE AUDIO] {scene_id}: KAN-166 probed duration={audio_duration}s")
+                        except Exception as probe_err:
+                            print(f"[SCENE AUDIO] {scene_id}: KAN-166 duration probe failed: {probe_err}")
 
                 if max_audio and audio_duration > 0 and audio_duration > max_audio:
                     print(
