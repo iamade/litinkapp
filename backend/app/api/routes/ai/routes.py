@@ -890,10 +890,12 @@ async def generate_entertainment_video(
                 )
             ]
 
-            # Reject audio files that are too short — ModelsLab requires >= 5 seconds.
+            # KAN-166 integration fix: Reject audio files that are too short for video rendering.
+            # ModelsLab requires >= 5 seconds. However, duration_seconds=0 means unknown duration
+            # (probe failed or not yet run) — don't reject those, let video_tasks handle probing.
             short_audio = [
                 r for r in audio_records
-                if (r.duration_seconds or 0) < 5
+                if r.duration_seconds is not None and r.duration_seconds > 0 and r.duration_seconds < 5
             ]
             if short_audio:
                 short_ids = [str(r.id) for r in short_audio]
@@ -932,7 +934,15 @@ async def generate_entertainment_video(
             if audio_records:
                 for audio_record in audio_records:
                     audio_type = audio_record.audio_type or "narrator"
-                    scene_number = audio_record.sequence_order or 0
+                    # KAN-165 integration fix: Derive scene_number from scene_id (e.g. "scene_2" → 2),
+                    # NOT from sequence_order (which is just a sequential index within audio type).
+                    # Falls back to audio_metadata.scene, then sequence_order.
+                    from app.videos.association_integrity import parse_scene_id as _parse_scene_id
+                    scene_number = _parse_scene_id(audio_record.scene_id)
+                    if scene_number is None and audio_record.audio_metadata:
+                        scene_number = audio_record.audio_metadata.get("scene")
+                    if scene_number is None:
+                        scene_number = audio_record.sequence_order or 0
                     # Map database fields to format expected by find_scene_audio
                     # find_scene_audio checks: audio.get("scene") and audio.get("audio_url")
                     audio_data = {

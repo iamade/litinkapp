@@ -136,9 +136,11 @@ def is_audio_record_in_context(
     if not allowed_set:
         return True
 
-    scene_number = getattr(audio_record, "sequence_order", None)
+    # KAN-165 integration fix: Try scene_id first (e.g. "scene_2" → 2),
+    # since sequence_order is just a sequential index within audio type, NOT the scene number.
+    scene_number = parse_scene_id(getattr(audio_record, "scene_id", None))
     if scene_number is None:
-        scene_number = parse_scene_id(getattr(audio_record, "scene_id", None))
+        scene_number = getattr(audio_record, "sequence_order", None)
 
     try:
         if scene_number is None:
