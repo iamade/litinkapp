@@ -767,7 +767,7 @@ async def generate_narrator_audio(
                             result = {
                                 "status": "success",
                                 "audio_url": fallback_result.get("audio_url"),
-                                "audio_time": 0,  # Duration might need calculation or be missing
+                                "audio_time": 0,  # KAN-166: Duration probed after persist below
                                 "model_used": "direct_eleven_multilingual_v2",
                                 "service": "elevenlabs_direct",
                             }
@@ -811,6 +811,18 @@ async def generate_narrator_audio(
                 except Exception as persist_error:
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+
+                # KAN-166: If API didn't report duration (fallback paths return audio_time:0),
+                # probe the actual audio file to get real duration
+                if duration <= 0 and audio_url:
+                    try:
+                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                        probed = await probe_audio_duration_from_url(audio_url)
+                        if probed and probed > 0:
+                            duration = probed
+                            print(f"[NARRATOR AUDIO] KAN-166: Probed actual duration: {duration}s")
+                    except Exception as probe_err:
+                        print(f"[NARRATOR AUDIO] KAN-166: Duration probe failed: {probe_err}")
             else:
                 raise Exception(
                     f"V7 Audio generation failed: {result.get('error', 'Unknown error')}"
@@ -1409,6 +1421,18 @@ async def generate_character_audio(
                 except Exception as persist_error:
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+
+                # KAN-166: If API didn't report duration (fallback paths return audio_time:0),
+                # probe the actual audio file to get real duration
+                if duration <= 0 and audio_url:
+                    try:
+                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                        probed = await probe_audio_duration_from_url(audio_url)
+                        if probed and probed > 0:
+                            duration = probed
+                            print(f"[CHARACTER AUDIO] KAN-166: Probed actual duration: {duration}s")
+                    except Exception as probe_err:
+                        print(f"[CHARACTER AUDIO] KAN-166: Duration probe failed: {probe_err}")
             else:
                 raise Exception(
                     f"V7 Audio generation failed: {result.get('error', 'Unknown error')}"
@@ -1644,6 +1668,17 @@ async def generate_sound_effects_audio(
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
 
+                # KAN-166: If API didn't report duration, probe actual file
+                if duration <= 0 and audio_url:
+                    try:
+                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                        probed = await probe_audio_duration_from_url(audio_url)
+                        if probed and probed > 0:
+                            duration = probed
+                            print(f"[SOUND EFFECTS] KAN-166: Probed actual duration: {duration}s")
+                    except Exception as probe_err:
+                        print(f"[SOUND EFFECTS] KAN-166: Duration probe failed: {probe_err}")
+
                 # Using passed script_id
 
                 # Store in database
@@ -1775,6 +1810,17 @@ async def generate_background_music(
                 except Exception as persist_error:
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+
+                # KAN-166: If API didn't report duration, probe actual file
+                if duration <= 0 and audio_url:
+                    try:
+                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                        probed = await probe_audio_duration_from_url(audio_url)
+                        if probed and probed > 0:
+                            duration = probed
+                            print(f"[BACKGROUND MUSIC] KAN-166: Probed actual duration: {duration}s")
+                    except Exception as probe_err:
+                        print(f"[BACKGROUND MUSIC] KAN-166: Duration probe failed: {probe_err}")
 
                 # Using passed script_id
 
