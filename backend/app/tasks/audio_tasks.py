@@ -1679,11 +1679,15 @@ async def generate_sound_effects_audio(
 
                     effects_results.append(
                         {
+                            "id": str(audio_record.id),
                             "effect_id": i + 1,
                             "audio_url": audio_url,
                             "description": effect["description"],
                             "duration": duration,
-                            "db_id": str(audio_record.id),
+                            "scene": scene_id,
+                            "scene_number": scene_id,  # KAN-165: explicit scene_number for find_scene_audio
+                            "shot_type": shot_type,
+                            "shot_index": shot_index,
                         }
                     )
 
@@ -1811,6 +1815,7 @@ async def generate_background_music(
                         {
                             "id": str(audio_record.id),
                             "scene": music_cue["scene"],
+                            "scene_number": music_cue["scene"],  # KAN-165: explicit scene_number for find_scene_audio
                             "audio_url": audio_url,
                             "description": music_cue["description"],
                             "duration": duration,

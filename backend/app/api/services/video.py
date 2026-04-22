@@ -280,17 +280,21 @@ class VideoService:
         return dialogues
 
     async def extract_dialogue_per_scene(
-        self, script: str, scene_descriptions: List[Dict[str, Any]], user_id: str = None
+        self, script: str, scene_descriptions: List[Dict[str, Any]], user_id: str = None, characters: List[str] = None
     ) -> Dict[str, Any]:
         """Extract character dialogue for each scene and generate audio"""
         try:
             from app.core.services.script_parser import ScriptParser
 
+            # KAN-165 FIX: Use provided characters or fall back to empty list.
+            # Previously hardcoded [] meant no character lines were ever detected.
+            characters_list = characters if characters is not None else []
+
             # Parse script to extract dialogue components
             script_parser = ScriptParser()
             parsed_audio = script_parser.parse_script_for_audio(
                 script=script,
-                characters=[],  # Will be extracted from script
+                characters=characters_list,  # KAN-165: pass actual characters for per-scene matching
                 scene_descriptions=scene_descriptions,
                 script_style="cinematic_movie",
             )
@@ -355,6 +359,7 @@ class VideoService:
                                 "text": dialogue["text"],
                                 "audio_url": audio_url,
                                 "scene": scene_num,
+                                "scene_number": scene_num,  # KAN-165: explicit scene_number for find_scene_audio
                                 "character_profile": character_profile,
                             }
                         )
