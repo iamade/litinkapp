@@ -23,6 +23,7 @@ VIDEO_AVATAR_GEN = 5    # per avatar video (expensive)
 SCENE_IMAGE_GEN = 1     # per scene image
 CHARACTER_IMAGE_GEN = 1 # per character image
 ENHANCED_SPEECH = 1     # per enhanced speech
+CHAPTER_GEN = 2         # per chapter generation
 
 
 class OperationType(str, Enum):
@@ -45,3 +46,4 @@ class OperationType(str, Enum):
     SCENE_IMAGE_GEN = "scene_image_gen"
     CHARACTER_IMAGE_GEN = "character_image_gen"
     ENHANCED_SPEECH = "enhanced_speech"
+    CHAPTER_GEN = "chapter_gen"

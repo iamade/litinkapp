@@ -52,6 +52,10 @@ from app.books.schemas import (
 from app.core.services.ai import AIService
 from app.core.services.file import FileService
 from app.core.config import settings
+from app.credits.dependencies import require_credits
+from app.credits.constants import OperationType, CHAPTER_GEN
+from app.credits.service import CreditService
+import uuid
 
 
 class BookStatus(str, Enum):
@@ -580,6 +584,7 @@ async def create_chapter(
     chapter_data: ChapterCreate,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_author),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.CHAPTER_GEN, CHAPTER_GEN)),
 ):
     """Create a new chapter"""
     try:
@@ -595,56 +600,58 @@ async def create_chapter(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
             )
 
-        # Generate AI content for the chapter
-        ai_service = AIService()
-        ai_content = await ai_service.generate_chapter_ai_elements(
-            chapter_data.content, book.book_type, book.difficulty
-        )
+        # Generate AI content for the chapter (credit-gated)
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, CHAPTER_GEN):
+            ai_service = AIService()
+            ai_content = await ai_service.generate_chapter_ai_elements(
+                chapter_data.content, book.book_type, book.difficulty
+            )
 
-        # Insert chapter
-        chapter = Chapter(
-            book_id=uuid.UUID(book_id),
-            title=chapter_data.title,
-            content=chapter_data.content,
-            chapter_number=chapter_data.chapter_number,
-            # ai_generated_content is not in Chapter model?
-            # Let's check Chapter model in app/books/models.py
-            # It has: title, content, chapter_number, summary, duration, section_id
-            # It DOES NOT have ai_generated_content.
-            # Maybe it should be stored in summary or content?
-            # Or maybe the model needs update.
-            # The original code: chapter_insert["ai_generated_content"] = ai_content
-            # If the Supabase table has it, I should add it to the model.
-            # But for now I will skip it or put it in summary if appropriate, but summary is string.
-            # ai_content is likely a dict or string.
-            # I will assume for now we drop it or it's not critical, OR I should add it to the model.
-            # Given I can't easily change the model right now without another migration,
-            # and I want to proceed, I will omit it for now but log a TODO.
-            # Wait, if I omit it, the feature might break.
-            # Let's assume ai_content goes into summary if it's a summary.
-            # But generate_chapter_ai_elements likely returns more than just summary.
-            # I'll check if I can add it to the model later.
-            # For now, I'll proceed without it to unblock.
-        )
-        # Assuming ai_content is not critical for basic functionality or I'll fix it in a follow-up.
+            # Insert chapter
+            chapter = Chapter(
+                book_id=uuid.UUID(book_id),
+                title=chapter_data.title,
+                content=chapter_data.content,
+                chapter_number=chapter_data.chapter_number,
+                # ai_generated_content is not in Chapter model?
+                # Let's check Chapter model in app/books/models.py
+                # It has: title, content, chapter_number, summary, duration, section_id
+                # It DOES NOT have ai_generated_content.
+                # Maybe it should be stored in summary or content?
+                # Or maybe the model needs update.
+                # The original code: chapter_insert["ai_generated_content"] = ai_content
+                # If the Supabase table has it, I should add it to the model.
+                # But for now I will skip it or put it in summary if appropriate, but summary is string.
+                # ai_content is likely a dict or string.
+                # I will assume for now we drop it or it's not critical, OR I should add it to the model.
+                # Given I can't easily change the model right now without another migration,
+                # and I want to proceed, I will omit it for now but log a TODO.
+                # Wait, if I omit it, the feature might break.
+                # Let's assume ai_content goes into summary if it's a summary.
+                # But generate_chapter_ai_elements likely returns more than just summary.
+                # I'll check if I can add it to the model later.
+                # For now, I'll proceed without it to unblock.
+            )
+            # Assuming ai_content is not critical for basic functionality or I'll fix it in a follow-up.
 
-        session.add(chapter)
-        await session.commit()
-        await session.refresh(chapter)
+            session.add(chapter)
+            await session.commit()
+            await session.refresh(chapter)
 
-        # Update book chapter count
-        # We can count chapters efficiently
-        stmt = (
-            select(func.count()).select_from(Chapter).where(Chapter.book_id == book_id)
-        )
-        result = await session.exec(stmt)
-        count = result.one()
+            # Update book chapter count
+            # We can count chapters efficiently
+            stmt = (
+                select(func.count()).select_from(Chapter).where(Chapter.book_id == book_id)
+            )
+            result = await session.exec(stmt)
+            count = result.one()
 
-        book.total_chapters = count
-        session.add(book)
-        await session.commit()
+            book.total_chapters = count
+            session.add(book)
+            await session.commit()
 
-        return chapter
+            return chapter
 
     except HTTPException:
         raise
@@ -1056,6 +1063,7 @@ async def regenerate_chapters(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
     ai_service: AIService = Depends(AIService),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.CHAPTER_GEN, CHAPTER_GEN)),
 ):
     """Regenerates chapters for a book and returns them for review."""
     # 1. Fetch the book and verify ownership
@@ -1106,14 +1114,16 @@ async def regenerate_chapters(
     session.add(book)
     await session.commit()
 
-    # 3. Regenerate chapters
-    ai_chapters = await ai_service.generate_chapters_from_content(
-        content, book.book_type
-    )
-    chapters = [
-        {"title": ch.get("title", ""), "content": ch.get("content", "")}
-        for ch in ai_chapters
-    ]
+    # 3. Regenerate chapters (credit-gated)
+    credit_service = CreditService(session)
+    async with credit_service.credit_transaction(reservation_id, CHAPTER_GEN):
+        ai_chapters = await ai_service.generate_chapters_from_content(
+            content, book.book_type
+        )
+        chapters = [
+            {"title": ch.get("title", ""), "content": ch.get("content", "")}
+            for ch in ai_chapters
+        ]
 
     # 4. Return book with draft chapters for review
     book_dict = book.model_dump()
