@@ -362,3 +362,291 @@ class TrailerGenerationService:
             .order_by(TrailerScene.scene_number)
         )
         return list(result.scalars().all())
+
+    # ============================================================
+    # KAN-150: Trailer Script + Narration Generation
+    # ============================================================
+
+    async def generate_trailer_script_and_narration(
+        self,
+        trailer_id: uuid.UUID,
+        include_narration: bool = True,
+        narration_voice: str = "male_deep",
+        title_cards: Optional[Dict[str, Any]] = None,
+    ) -> TrailerGeneration:
+        """KAN-150: Generate trailer script and optional narration audio.
+
+        Pipeline step: SCENES_SELECTED → SCRIPT_GENERATING → SCRIPT_READY
+                                               → AUDIO_GENERATING → AUDIO_READY
+
+        1. Fetch selected scenes from KAN-149 analysis
+        2. Use AI to generate a coherent trailer script tying scenes together
+        3. Extract narration text from the script
+        4. If include_narration=True, generate narration audio via ElevenLabs
+        5. Update TrailerGeneration record with script, narration_text, audio_url
+        """
+        logger.info(f"[KAN-150] Starting script+ narration for trailer {trailer_id}")
+
+        # 1. Fetch the trailer generation record
+        trailer = await self.get_trailer_status(trailer_id)
+        if not trailer:
+            raise ValueError(f"Trailer generation {trailer_id} not found")
+
+        if trailer.status not in (TrailerStatus.SCENES_SELECTED, TrailerStatus.SCRIPT_READY):
+            raise ValueError(
+                f"Cannot generate script: status is {trailer.status.value}, "
+                f"expected scenes_selected or script_ready"
+            )
+
+        # 2. Fetch selected scenes
+        scenes = await self.get_selected_scenes(trailer_id)
+        if not scenes:
+            raise ValueError(f"No selected scenes found for trailer {trailer_id}")
+
+        try:
+            # === PHASE 1: Script Generation ===
+            trailer.status = TrailerStatus.SCRIPT_GENERATING
+            await self.session.commit()
+
+            script_result = await self._generate_trailer_script(
+                scenes=scenes,
+                tone=trailer.tone,
+                style=trailer.style,
+                target_duration=trailer.target_duration_seconds,
+                title_cards=title_cards,
+            )
+
+            trailer.trailer_script = script_result["script"]
+            trailer.narration_text = script_result["narration_text"]
+            trailer.status = TrailerStatus.SCRIPT_READY
+            await self.session.commit()
+            logger.info(
+                f"[KAN-150] Script generated for trailer {trailer_id}, "
+                f"narration length={len(script_result.get('narration_text', '') or '')} chars"
+            )
+
+            # === PHASE 2: Narration Audio Generation ===
+            if include_narration and trailer.narration_text:
+                trailer.status = TrailerStatus.AUDIO_GENERATING
+                await self.session.commit()
+
+                narration_url = await self._generate_narration_audio(
+                    narration_text=trailer.narration_text,
+                    voice=narration_voice,
+                    user_id=trailer.user_id,
+                )
+
+                if narration_url:
+                    trailer.narration_audio_url = narration_url
+                    trailer.status = TrailerStatus.AUDIO_READY
+                    logger.info(f"[KAN-150] Narration audio generated: {narration_url}")
+                else:
+                    # Script is ready even if audio fails
+                    trailer.status = TrailerStatus.SCRIPT_READY
+                    logger.warning(f"[KAN-150] Narration audio generation failed, script still available")
+
+                await self.session.commit()
+
+            await self.session.refresh(trailer)
+            return trailer
+
+        except Exception as e:
+            logger.error(f"[KAN-150] Script/narration generation failed: {e}")
+            trailer.status = TrailerStatus.FAILED
+            trailer.error_message = str(e)
+            await self.session.commit()
+            raise
+
+    async def _generate_trailer_script(
+        self,
+        scenes: List[TrailerScene],
+        tone: str,
+        style: str,
+        target_duration: int,
+        title_cards: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Use AI to generate a trailer script from selected scenes.
+
+        Returns:
+            {
+                "script": str,       # Full trailer script (JSON string)
+                "narration_text": str # Clean narration text for TTS
+            }
+        """
+        # Build scene descriptions for the AI prompt
+        scene_descriptions = []
+        for i, scene in enumerate(scenes):
+            desc = (
+                f"Scene {i+1}: {scene.scene_title or 'Untitled'}\n"
+                f"  Description: {scene.scene_description or 'No description'}\n"
+                f"  Duration: {scene.duration_seconds:.1f}s\n"
+                f"  Scores: action={scene.action_score:.2f}, emotional={scene.emotional_score:.2f}, "
+                f"visual={scene.visual_score:.2f}, narrative={scene.narrative_score:.2f}"
+            )
+            scene_descriptions.append(desc)
+
+        scenes_text = "\n".join(scene_descriptions)
+
+        # Build title card context
+        title_card_text = ""
+        if title_cards:
+            parts = []
+            if title_cards.get("series_name"):
+                parts.append(f'Series/Book: "{title_cards["series_name"]}"')
+            if title_cards.get("tagline"):
+                parts.append(f'Tagline: "{title_cards["tagline"]}"')
+            if title_cards.get("cta_text"):
+                parts.append(f'Call-to-action: "{title_cards["cta_text"]}"')
+            if parts:
+                title_card_text = "\nTitle cards to include:\n" + "\n".join(f"  - {p}" for p in parts)
+
+        system_prompt = f"""You are a professional film trailer scriptwriter. Create a compelling trailer script from the selected scenes.
+
+Tone: {tone}
+Style: {style}
+Target total duration: {target_duration} seconds
+
+Your script must include:
+1. A JSON "script" object with a scene_sequence array, each entry having:
+   - scene_number (int)
+   - narration (str or null if no narration for this scene)
+   - visual_description (str, overriding/enhancing the scene's visual)
+   - duration_seconds (float)
+2. A clean "narration_text" string — the voiceover text only, with no stage directions or JSON markup. This will be sent directly to a TTS engine.
+
+Rules:
+- Scene sequence should flow naturally even if the original scene order is rearranged
+- Narration should complement the visuals, not describe them literally
+- Keep total duration close to {target_duration}s
+- Narration text should be 2-5 sentences per scene, pacing appropriate for the tone
+- For {tone} tone, narration should be {self._tone_narration_style(tone)}
+
+Return a JSON object:
+{{
+  "script": {{
+    "title": "string",
+    "tone": "{tone}",
+    "total_duration_seconds": float,
+    "scene_sequence": [
+      {{"scene_number": int, "narration": "str or null", "visual_description": "str", "duration_seconds": float}}
+    ],
+    "title_cards": {{}}  
+  }},
+  "narration_text": "Clean voiceover text only, no stage directions"
+}}"""
+
+        user_prompt = f"""Create a trailer script from these selected scenes:
+
+{scenes_text}
+{title_card_text}
+
+Write the script and narration now."""
+
+        try:
+            from app.core.services.provider_router import provider_router
+
+            response = await provider_router.chat_completion(
+                model="openai/gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.7,  # Creative task
+                max_tokens=3000,
+            )
+
+            content = response.choices[0].message.content if hasattr(response, 'choices') else str(response)
+
+            # Extract JSON from response
+            json_start = content.find("{")
+            json_end = content.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                result = json.loads(content[json_start:json_end])
+                return {
+                    "script": json.dumps(result.get("script", {}), ensure_ascii=False),
+                    "narration_text": result.get("narration_text", ""),
+                }
+
+            # Fallback: treat entire content as narration text
+            logger.warning("[KAN-150] Could not parse script JSON, using content as narration")
+            return {"script": content, "narration_text": content}
+
+        except Exception as e:
+            logger.error(f"[KAN-150] AI script generation failed: {e}")
+            raise
+
+    async def _generate_narration_audio(
+        self,
+        narration_text: str,
+        voice: str = "male_deep",
+        user_id: Optional[uuid.UUID] = None,
+    ) -> Optional[str]:
+        """Generate narration audio using ElevenLabs TTS.
+
+        Returns the S3 storage URL of the generated audio, or None on failure.
+        """
+        if not narration_text or not narration_text.strip():
+            logger.warning("[KAN-150] Empty narration text, skipping audio generation")
+            return None
+
+        # Map voice name to ElevenLabs voice ID
+        voice_map = {
+            "male_deep": "21m00Tcm4TlvDq8ikWAM",       # Adam
+            "female_soft": "EXAVITQu4vr4xnSDxMaL",     # Bella
+            "male_narrator": "nPczCjzK2NnW1Nn0iX0G",    # Marcus
+            "female_narrator": "mTSvIrmUhORL3Bq3Bq7M",  # Lily
+        }
+        voice_id = voice_map.get(voice, voice_map["male_deep"])
+
+        try:
+            from app.core.services.elevenlabs import ElevenLabsService
+            tts = ElevenLabsService()
+
+            result = await tts.generate_enhanced_speech(
+                text=narration_text,
+                voice_id=voice_id,
+                user_id=str(user_id) if user_id else None,
+                emotion="neutral",
+                speed=1.0,
+            )
+
+            audio_url = result.get("audio_url")
+            if audio_url:
+                # Persist to S3 storage
+                try:
+                    from app.core.services.storage import get_storage_service, S3StorageService
+                    import uuid as _uuid_mod
+                    storage = get_storage_service()
+                    s3_path = S3StorageService.build_media_path(
+                        user_id=str(user_id) if user_id else 'system',
+                        media_type='audio',
+                        record_id=str(_uuid_mod.uuid4()),
+                        extension='mp3',
+                    )
+                    persisted_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                    logger.info(f"[KAN-150] Persisted narration audio to S3: {s3_path}")
+                    return persisted_url
+                except Exception as persist_err:
+                    logger.error(f"[KAN-150] Failed to persist narration to S3: {persist_err}")
+                    # Return the original URL as fallback
+                    return audio_url
+
+            logger.warning(f"[KAN-150] ElevenLabs returned no audio URL")
+            return None
+
+        except Exception as e:
+            logger.error(f"[KAN-150] Narration audio generation failed: {e}")
+            return None
+
+    @staticmethod
+    def _tone_narration_style(tone: str) -> str:
+        """Return narration style guidance for the given tone."""
+        styles = {
+            "epic": "grand, sweeping, building intensity — like a movie trailer voiceover",
+            "dramatic": "intense, emotional, with pauses for impact — think Oscar-bait trailer",
+            "action": "fast-paced, punchy, building momentum — quick cuts feel",
+            "romantic": "tender, intimate, warm — soft and inviting",
+            "mysterious": "enigmatic, slow-burn, with questions — draw the viewer in",
+            "default": "engaging and compelling, balancing energy with clarity",
+        }
+        return styles.get(tone, styles["default"])

@@ -11,6 +11,7 @@ Endpoints:
 from typing import List
 from uuid import UUID
 import logging
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -271,6 +272,87 @@ async def regenerate_scene_selection(
         "new_scene_count": trailer_gen.scenes_selected_count,
         "estimated_duration": trailer_gen.actual_duration_seconds,
     }
+
+
+@router.post("/{trailer_id}/generate", response_model=TrailerGenerateResponse)
+async def generate_trailer_script_and_narration(
+    trailer_id: UUID,
+    request: TrailerGenerateRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    KAN-150: Generate trailer script and narration from selected scenes.
+
+    Takes the scenes selected in KAN-149 and uses AI to:
+    1. Generate a coherent trailer script that ties scenes together
+    2. Produce narration text suitable for voiceover
+    3. Generate narration audio via ElevenLabs TTS (if requested)
+
+    Request body:
+    - trailer_generation_id: UUID of the trailer (from KAN-149)
+    - include_narration: Whether to generate audio (default: true)
+    - narration_voice: Voice style (male_deep, female_soft, male_narrator, female_narrator)
+    - title_cards: Optional dict with series_name, tagline, cta_text
+
+    Returns:
+    - Updated trailer generation with script, narration, and audio
+    """
+    logger.info(f"[KAN-150] Generate request for trailer {trailer_id}")
+
+    if str(trailer_id) != str(request.trailer_generation_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="trailer_id in URL must match trailer_generation_id in body",
+        )
+
+    service = TrailerGenerationService(session)
+
+    try:
+        trailer = await service.generate_trailer_script_and_narration(
+            trailer_id=trailer_id,
+            include_narration=request.include_narration,
+            narration_voice=request.narration_voice,
+            title_cards=request.title_cards,
+        )
+
+        # Build script object for response if available
+        script_obj = None
+        if trailer.trailer_script:
+            try:
+                script_data = json.loads(trailer.trailer_script) if isinstance(trailer.trailer_script, str) else trailer.trailer_script
+                script_obj = TrailerScript(
+                    title=script_data.get("title", "Untitled Trailer"),
+                    duration_seconds=int(script_data.get("total_duration_seconds", trailer.target_duration_seconds)),
+                    scenes=script_data.get("scene_sequence", []),
+                    narration_text=trailer.narration_text,
+                    narration_timing=script_data.get("narration_timing"),
+                )
+            except (json.JSONDecodeError, TypeError):
+                script_obj = None
+
+        return TrailerGenerateResponse(
+            trailer_generation_id=trailer.id,
+            project_id=trailer.project_id,
+            status=trailer.status.value,
+            script=script_obj,
+            narration_audio_url=trailer.narration_audio_url,
+            video_url=trailer.video_url,
+            credits_used=trailer.credits_used,
+            created_at=trailer.created_at,
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.error(f"[KAN-150] Generation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Trailer script/narration generation failed: {str(e)}",
+        )
 
 
 def _get_status_description(status: TrailerStatus) -> str:
