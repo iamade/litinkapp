@@ -162,7 +162,7 @@ async def extract_last_frame(
     import subprocess
     import os
     import httpx
-    from app.core.services.supabase_storage import SupabaseStorageService
+    from app.core.services.storage import get_storage_service
 
     try:
         print(f"[LAST FRAME] Extracting last frame from video: {video_url[:50]}...")
@@ -219,17 +219,16 @@ async def extract_last_frame(
                 return None
 
             # Upload to storage
-            storage_service = SupabaseStorageService()
-            with open(frame_path, "rb") as f:
-                frame_data = f.read()
+            storage_service = get_storage_service()
 
             # Generate unique filename
             import uuid as uuid_lib
 
             frame_filename = f"frames/{user_id or 'system'}/last_frame_{uuid_lib.uuid4().hex[:8]}.jpg"
 
-            frame_url = await storage_service.upload_file(
-                file_data=frame_data,
+            # S3StorageService.upload expects a file path, not in-memory bytes
+            frame_url = await storage_service.upload(
+                frame_path,
                 file_path=frame_filename,
                 content_type="image/jpeg",
             )
@@ -1153,7 +1152,7 @@ async def generate_scene_videos(
     parsed_components = None
     if script_data and script_data.get("script"):
         try:
-            from app.api.services.script_parser import ScriptParser
+            from app.core.services.script_parser import ScriptParser
 
             script_parser = ScriptParser()
             characters = script_data.get("characters", [])
