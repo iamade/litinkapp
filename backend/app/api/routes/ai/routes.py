@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 import uuid
+import logging
 from fastapi import (
     APIRouter,
     Depends,
@@ -427,6 +428,7 @@ async def enhance_with_plot_context(
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/generate-text", response_model=AIResponse)
@@ -3863,6 +3865,9 @@ Script to analyze:
             ai_service = AIService()
             entries = await ai_service.generate_emotional_map(script, characters)
 
+            if not entries:
+                logger.warning(f"[EMOTIONAL_MAP] generate_emotional_map returned 0 entries for script in chapter {chapter_id}. Primary and all fallbacks may have failed.")
+
             validated_entries = []
             for entry in entries:
                 if "line_id" not in entry:
@@ -3876,7 +3881,7 @@ Script to analyze:
                 f"[DEBUG] Auto-generated emotional map with {len(validated_entries)} entries"
             )
         except Exception as e:
-            print(f"Error auto-generating emotional map: {e}")
+            logger.error(f"[EMOTIONAL_MAP] Failed to auto-generate emotional map for chapter {chapter_id}: {e}")
             # Non-fatal error, continue returning the script
             validated_entries = []
 
@@ -4064,6 +4069,9 @@ async def generate_script_and_scenes_with_gpt(
             ai_service = AIService()
             entries = await ai_service.generate_emotional_map(script, characters)
 
+            if not entries:
+                logger.warning(f"[EMOTIONAL_MAP] generate_emotional_map returned 0 entries for script update in chapter {chapter_id}. Primary and all fallbacks may have failed.")
+
             validated_entries = []
             for entry in entries:
                 if "line_id" not in entry:
@@ -4078,7 +4086,7 @@ async def generate_script_and_scenes_with_gpt(
                 f"[DEBUG] Auto-generated emotional map with {len(validated_entries)} entries"
             )
         except Exception as e:
-            print(f"Error auto-generating emotional map: {e}")
+            logger.error(f"[EMOTIONAL_MAP] Failed to auto-generate emotional map for script update in chapter {chapter_id}: {e}")
             validated_entries = []
 
         return {

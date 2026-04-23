@@ -34,10 +34,10 @@ class ModelConfig:
 # Primary: Ollama Cloud (KAN-181) | Fallbacks: Ollama Cloud models
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="gemma4:31b-cloud",  # Ollama Cloud API (KAN-181 fix)
-        fallback="llama3.1:8b",  # Ollama, 8B params, reliable fallback (KAN-238)
-        fallback2="qwen3.5:14b",  # Ollama, 14B params, strong reasoning (KAN-238)
-        fallback3="gemma4:9b",  # Ollama, 9B params, lightweight backup (KAN-238)
+        primary="ollama/gemma4:31b",  # Ollama Cloud API — valid model ID (KAN-239 fix)
+        fallback="ollama/ministral-3:8b",  # Ollama Cloud, 8B params, Mistral (KAN-239)
+        fallback2="ollama/gemma3:12b",  # Ollama Cloud, 12B params, Gemma 3 (KAN-239)
+        fallback3="ollama/gemma3:4b",  # Ollama Cloud, 4B params, lightweight backup (KAN-239)
         fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
         max_tokens=4000,
         temperature=0.7,
@@ -45,9 +45,9 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         cost_per_1k_output=0.0,
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="deepseek-r1:14b",  # Ollama, 14B params, reasoning-focused (KAN-238)
-        fallback="llama3.1:70b",  # Ollama, 70B params, high quality fallback (KAN-238)
-        fallback2="mistral:7b",  # Ollama, 7B params, lightweight fallback (KAN-238)
+        primary="ollama/deepseek-v3.2",  # Ollama Cloud, DeepSeek V3.2 (KAN-239)
+        fallback="ollama/gemma3:27b",  # Ollama Cloud, 27B params, high quality (KAN-239)
+        fallback2="ollama/ministral-3:14b",  # Ollama Cloud, 14B params, Mistral (KAN-239)
         fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
         max_tokens=4000,
         temperature=0.7,
