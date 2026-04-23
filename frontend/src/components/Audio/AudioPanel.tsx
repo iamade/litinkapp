@@ -161,6 +161,25 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     return fromMeta;
   }, [selectedScript]);
 
+  // IMPORTANT: useImageGeneration must be called BEFORE any useMemo/useCallback that references sceneImages
+  // to avoid TDZ (Temporal Dead Zone) error "Cannot access 'sceneImages' before initialization"
+  const {
+    sceneImages,
+    loadImages,
+  } = useImageGeneration(stableSelectedChapterId, selectedScriptId, scenes);
+
+  const {
+    files,
+    isGenerating,
+    loadAudio,
+    reassignAudio,
+  } = useAudioGeneration({
+    chapterId: stableSelectedChapterId,
+    scriptId: selectedScriptId,
+    versionToken,
+    videoGenerationId,
+  });
+
   // Check if any scene has storyboard images generated (not just script scenes)
   const hasAnySceneImages = React.useMemo(() => {
     for (let i = 1; i <= scenes.length; i++) {
@@ -193,23 +212,6 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
   const allScenesAudioCost = React.useMemo(() => {
     return scenes.reduce((total, _scene, idx) => total + getSceneAudioCost(idx + 1), 0);
   }, [scenes, getSceneAudioCost]);
-
-  const {
-    files,
-    isGenerating,
-    loadAudio,
-    reassignAudio,
-  } = useAudioGeneration({
-    chapterId: stableSelectedChapterId,
-    scriptId: selectedScriptId,
-    versionToken,
-    videoGenerationId,
-  });
-
-  const {
-    sceneImages,
-    loadImages,
-  } = useImageGeneration(stableSelectedChapterId, selectedScriptId, scenes);
 
   // Load images when entering component or scenes update
   useEffect(() => {
