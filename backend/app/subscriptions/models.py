@@ -40,14 +40,14 @@ class UserSubscription(SQLModel, table=True):
     )
     tier: SubscriptionTier = Field(
         sa_column=Column(
-            pg.ENUM(SubscriptionTier, name="subscription_tier"),
+            pg.ENUM(SubscriptionTier, name="subscription_tier", values_callable=lambda enum: [e.value for e in enum]),
             nullable=False,
             default=SubscriptionTier.FREE,
         )
     )
     status: SubscriptionStatus = Field(
         sa_column=Column(
-            pg.ENUM(SubscriptionStatus, name="subscription_status"),
+            pg.ENUM(SubscriptionStatus, name="subscription_status", values_callable=lambda enum: [e.value for e in enum]),
             nullable=False,
             default=SubscriptionStatus.ACTIVE,
         )
