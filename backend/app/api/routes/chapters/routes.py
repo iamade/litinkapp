@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select, col, or_, SQLModel
+from sqlmodel import select, col, SQLModel
 
 from app.core.auth import get_current_active_user
 from app.core.database import get_session
@@ -1360,14 +1360,15 @@ async def list_chapter_audio(
         )
 
         if chapter_exists:
-            # Query by chapter_id, and also include script_id if provided (OR condition)
+            # Query by chapter_id. If script_id is provided, constrain to rows
+            # that belong to both the requested chapter and script. Do not OR
+            # against chapter_id here: script-scoped fetches must not broaden to
+            # chapter-wide/null-script rows from the same chapter.
             if script_id:
                 stmt = select(AudioGeneration).where(
                     AudioGeneration.user_id == current_user.id,
-                    or_(
-                        AudioGeneration.chapter_id == uuid.UUID(chapter_id),
-                        AudioGeneration.script_id == uuid.UUID(script_id),
-                    ),
+                    AudioGeneration.chapter_id == uuid.UUID(chapter_id),
+                    AudioGeneration.script_id == uuid.UUID(script_id),
                 )
             else:
                 stmt = select(AudioGeneration).where(
