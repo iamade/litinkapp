@@ -17,7 +17,9 @@ import os
 import requests
 import tempfile
 import uuid
+from urllib.parse import urlparse, urlunparse
 from app.core.services.file import FileService
+from app.core.config import settings
 
 from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
 from app.videos.association_integrity import (
@@ -27,6 +29,95 @@ from app.videos.association_integrity import (
 )
 
 logger = get_task_logger(__name__)
+
+
+_LOCAL_MINIO_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "minio"}
+
+
+def _replace_url_origin(url: str, target_origin: Optional[str]) -> str:
+    """Return url with scheme/netloc from target_origin, preserving path/params/query."""
+    if not url or not target_origin:
+        return url
+
+    parsed_url = urlparse(url)
+    parsed_target = urlparse(target_origin)
+    if not parsed_url.scheme or not parsed_url.netloc or not parsed_target.scheme or not parsed_target.netloc:
+        return url
+
+    return urlunparse(
+        parsed_url._replace(scheme=parsed_target.scheme, netloc=parsed_target.netloc)
+    )
+
+
+def _is_local_minio_url(url: str) -> bool:
+    """Detect MinIO URLs that are only reachable from browser/dev/container context."""
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+
+    host = parsed.hostname.lower()
+    if host in _LOCAL_MINIO_HOSTS:
+        return True
+
+    for configured in (settings.MINIO_PUBLIC_URL, settings.MINIO_ENDPOINT):
+        configured_host = urlparse(configured or "").hostname
+        if configured_host and host == configured_host.lower() and configured_host.lower() in _LOCAL_MINIO_HOSTS:
+            return True
+    return False
+
+
+def _redact_media_url_for_log(url: Optional[str]) -> Optional[str]:
+    """Log media URL origin/path only; drop query strings that may contain signatures."""
+    if not url:
+        return url
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    return urlunparse(parsed._replace(query="", fragment=""))
+
+
+def normalize_media_url_for_provider(url: Optional[str]) -> Optional[str]:
+    """Normalize stored media URLs before sending them to external providers.
+
+    Celery often stores MinIO objects as http://localhost:9000/... URLs. Those
+    work from the dev browser, but ModelsLab cannot fetch localhost from inside
+    its infrastructure. When MINIO_PUBLIC_URL is configured, rewrite local MinIO
+    origins to that public origin while preserving bucket/object path.
+    """
+    if not url or not _is_local_minio_url(url):
+        return url
+
+    provider_url = _replace_url_origin(url, settings.MINIO_PUBLIC_URL)
+    public_host = urlparse(settings.MINIO_PUBLIC_URL or "").hostname
+    if public_host and public_host.lower() in _LOCAL_MINIO_HOSTS:
+        print(
+            "[MEDIA URL NORMALIZE] MINIO_PUBLIC_URL is local; provider may not be able to fetch media "
+            f"original={_redact_media_url_for_log(url)} provider={_redact_media_url_for_log(provider_url)}"
+        )
+    return provider_url
+
+
+def normalize_media_url_for_internal_access(url: Optional[str]) -> Optional[str]:
+    """Normalize media URLs for backend/container probes and downloads.
+
+    Internal probes (ffmpeg/requests from Celery) should use MINIO_ENDPOINT when
+    a URL is a local MinIO public URL, because localhost points at the worker
+    container rather than the MinIO service.
+    """
+    if not url or not _is_local_minio_url(url):
+        return url
+    return _replace_url_origin(url, settings.MINIO_ENDPOINT)
+
+
+def log_provider_media_url_normalization(kind: str, original_url: Optional[str], provider_url: Optional[str]) -> None:
+    """Diagnostic log for provider media URLs without leaking signed query data."""
+    if original_url != provider_url:
+        print(
+            f"[MEDIA URL NORMALIZE] {kind}: original={_redact_media_url_for_log(original_url)} "
+            f"provider={_redact_media_url_for_log(provider_url)}"
+        )
 
 
 # Removed image generation logic
@@ -1277,7 +1368,8 @@ async def generate_scene_videos(
                         # Unknown duration — probe the file to get actual duration
                         try:
                             from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
-                            probed = await probe_audio_duration_from_url(scene_audio.get("audio_url"))
+                            probe_audio_url = normalize_media_url_for_internal_access(scene_audio.get("audio_url"))
+                            probed = await probe_audio_duration_from_url(probe_audio_url)
                             if probed and probed > 0:
                                 audio_duration = probed
                                 print(f"[SCENE AUDIO] {scene_id}: KAN-166 probed duration={audio_duration}s")
@@ -1296,7 +1388,7 @@ async def generate_scene_videos(
                     try:
                         # Attempt to pad audio
                         padded_url = await pad_audio_to_min_duration(
-                            scene_audio.get("audio_url"), min_audio, user_id
+                            normalize_media_url_for_internal_access(scene_audio.get("audio_url")), min_audio, user_id
                         )
 
                         if padded_url:
@@ -1363,13 +1455,25 @@ async def generate_scene_videos(
                     f"[SCENE VIDEOS V7] No image prompt available, using scene description for {scene_id}"
                 )
 
+            # Normalize media URLs at the provider boundary. Stored MinIO URLs can
+            # be localhost/docker-internal URLs; ModelsLab needs externally
+            # reachable URLs, while earlier probes/downloads use internal URLs.
+            provider_image_url = normalize_media_url_for_provider(starting_image_url)
+            provider_init_audio_url = (
+                normalize_media_url_for_provider(init_audio_url)
+                if init_audio_url
+                else None
+            )
+            log_provider_media_url_normalization("image_url", starting_image_url, provider_image_url)
+            log_provider_media_url_normalization("init_audio", init_audio_url, provider_init_audio_url)
+
             # ✅ Generate video using ModelsLab Service
             result = await modelslab_service.generate_image_to_video(
-                image_url=starting_image_url,
+                image_url=provider_image_url,
                 prompt=enhanced_prompt,
                 model_id=current_model_id,
                 negative_prompt="",
-                init_audio=init_audio_url if init_audio_url else None,
+                init_audio=provider_init_audio_url if provider_init_audio_url else None,
             )
 
             # Process result (Adapt old verify logic to new direct call result)

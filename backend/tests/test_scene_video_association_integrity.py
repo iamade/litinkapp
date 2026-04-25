@@ -221,3 +221,88 @@ def test_kan86_find_scene_audio_normalizes_legacy_zero_based_scene_one_payload()
         "scene_1", audio_files, selected_audio_ids=["selected-scene-1"]
     )
     assert selected["id"] == "selected-scene-1"
+
+from unittest.mock import AsyncMock
+import pytest
+
+from app.tasks.video_tasks import (
+    generate_scene_videos,
+    normalize_media_url_for_internal_access,
+    normalize_media_url_for_provider,
+)
+
+
+def test_kan86_provider_media_url_rewrites_localhost_minio_to_public_url(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "https://minio-public.example.com")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+
+    stored_url = "http://localhost:9000/litink-books/users/u1/images/scene.png?X-Amz-Signature=secret"
+
+    assert (
+        normalize_media_url_for_provider(stored_url)
+        == "https://minio-public.example.com/litink-books/users/u1/images/scene.png?X-Amz-Signature=secret"
+    )
+    assert (
+        normalize_media_url_for_internal_access(stored_url)
+        == "http://minio:9000/litink-books/users/u1/images/scene.png?X-Amz-Signature=secret"
+    )
+
+
+def test_kan86_provider_media_url_leaves_external_urls_unchanged(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "https://minio-public.example.com")
+    external_url = "https://cdn.example.com/litink-books/users/u1/images/scene.png"
+
+    assert normalize_media_url_for_provider(external_url) == external_url
+
+
+class _RecordingModelsLabService:
+    def __init__(self):
+        self.calls = []
+
+    def get_min_audio_duration(self, model_id):
+        return 1.0
+
+    def get_max_audio_duration(self, model_id):
+        return 15.0
+
+    async def generate_image_to_video(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"status": "error", "error": "test stops before provider generation result handling"}
+
+
+@pytest.mark.asyncio
+async def test_kan86_selected_scene_audio_flow_passes_public_media_urls_to_provider(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "https://minio-public.example.com")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+
+    service = _RecordingModelsLabService()
+    session = AsyncMock()
+    image_url = "http://localhost:9000/litink-books/users/u1/images/scene-1.png"
+    audio_url = "http://localhost:9000/litink-books/users/u1/audio/scene-1.mp3"
+
+    result = await generate_scene_videos(
+        modelslab_service=service,
+        video_gen_id="video-gen-1",
+        scene_descriptions=["Scene one only"],
+        audio_files={
+            "characters": [
+                {"id": "audio-1", "scene": 1, "scene_number": 1, "audio_url": audio_url, "duration": 3.0},
+                {"id": "audio-2", "scene": 2, "scene_number": 2, "audio_url": "http://localhost:9000/litink-books/users/u1/audio/scene-2.mp3", "duration": 3.0},
+            ],
+            "narrator": [],
+            "sound_effects": [],
+            "background_music": [],
+        },
+        image_data={"scene_images": [{"id": "img-1", "scene_number": 1, "shot_index": 0, "image_url": image_url}]},
+        video_style="realistic",
+        script_data={"script": "", "characters": []},
+        user_id="u1",
+        session=session,
+        scene_numbers=[1],
+        selected_audio_ids=["audio-1"],
+    )
+
+    assert result == [None]
+    assert len(service.calls) == 1
+    assert service.calls[0]["image_url"] == "https://minio-public.example.com/litink-books/users/u1/images/scene-1.png"
+    assert service.calls[0]["init_audio"] == "https://minio-public.example.com/litink-books/users/u1/audio/scene-1.mp3"
