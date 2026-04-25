@@ -306,3 +306,98 @@ async def test_kan86_selected_scene_audio_flow_passes_public_media_urls_to_provi
     assert len(service.calls) == 1
     assert service.calls[0]["image_url"] == "https://minio-public.example.com/litink-books/users/u1/images/scene-1.png"
     assert service.calls[0]["init_audio"] == "https://minio-public.example.com/litink-books/users/u1/audio/scene-1.mp3"
+
+
+class _RecordingSession:
+    def __init__(self):
+        self.executed = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def execute(self, statement, params=None):
+        self.executed.append((str(statement), params or {}))
+        return SimpleNamespace(scalar=lambda: "segment-id")
+
+    async def commit(self):
+        self.commits += 1
+
+    async def rollback(self):
+        self.rollbacks += 1
+
+
+class _ProviderFailureService(_RecordingModelsLabService):
+    async def generate_image_to_video(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"status": "error", "error": "provider refused media"}
+
+
+@pytest.mark.asyncio
+async def test_kan86_failed_segment_insert_has_required_counts_and_provider_diagnostics(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "https://minio-public.example.com")
+    session = _RecordingSession()
+    service = _ProviderFailureService()
+
+    result = await generate_scene_videos(
+        modelslab_service=service,
+        video_gen_id="11111111-1111-1111-1111-111111111111",
+        scene_descriptions=["Scene one"],
+        audio_files={"characters": [], "narrator": [], "sound_effects": [], "background_music": []},
+        image_data={"scene_images": [{"image_url": "http://localhost:9000/bucket/scene.png?secret=1"}]},
+        video_style="realistic",
+        user_id="22222222-2222-2222-2222-222222222222",
+        session=session,
+        scene_numbers=[1],
+    )
+
+    assert result == [None]
+    diagnostic_calls = [params for stmt, params in session.executed if "provider_attempts" in stmt]
+    assert diagnostic_calls, "provider diagnostics should be persisted to task_meta"
+    assert "provider refused media" in diagnostic_calls[0]["diagnostic"]
+    assert "secret=1" not in diagnostic_calls[0]["diagnostic"]
+
+    failed_inserts = [params for stmt, params in session.executed if "INSERT INTO video_segments" in stmt]
+    assert failed_inserts
+    assert failed_inserts[-1]["user_id"] == "22222222-2222-2222-2222-222222222222"
+    assert failed_inserts[-1]["character_count"] == 0
+    assert failed_inserts[-1]["dialogue_count"] == 0
+    assert failed_inserts[-1]["action_count"] == 0
+    assert failed_inserts[-1]["status"] == "failed"
+
+
+class _ProviderSuccessService(_RecordingModelsLabService):
+    async def generate_image_to_video(self, **kwargs):
+        self.calls.append(kwargs)
+        return {"status": "success", "video_url": "https://cdn.example.com/video.mp4"}
+
+
+class _NoopStorage:
+    async def persist_from_url(self, url, *args, **kwargs):
+        return "https://storage.example.com/video.mp4"
+
+
+@pytest.mark.asyncio
+async def test_kan86_success_segment_insert_has_required_counts(monkeypatch):
+    monkeypatch.setattr("app.core.services.storage.get_storage_service", lambda: _NoopStorage())
+    monkeypatch.setattr("app.tasks.video_tasks.extract_last_frame", AsyncMock(return_value="https://storage.example.com/frame.jpg"))
+    session = _RecordingSession()
+
+    result = await generate_scene_videos(
+        modelslab_service=_ProviderSuccessService(),
+        video_gen_id="11111111-1111-1111-1111-111111111111",
+        scene_descriptions=["Scene one"],
+        audio_files={"characters": [], "narrator": [], "sound_effects": [], "background_music": []},
+        image_data={"scene_images": [{"image_url": "https://cdn.example.com/scene.png"}]},
+        video_style="realistic",
+        user_id="22222222-2222-2222-2222-222222222222",
+        session=session,
+        scene_numbers=[1],
+    )
+
+    assert result[0]["video_url"] == "https://storage.example.com/video.mp4"
+    completed_inserts = [params for stmt, params in session.executed if "INSERT INTO video_segments" in stmt]
+    assert completed_inserts
+    assert completed_inserts[-1]["status"] == "completed"
+    assert completed_inserts[-1]["user_id"] == "22222222-2222-2222-2222-222222222222"
+    assert completed_inserts[-1]["character_count"] == 0
+    assert completed_inserts[-1]["dialogue_count"] == 0
+    assert completed_inserts[-1]["action_count"] == 0

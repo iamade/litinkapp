@@ -114,10 +114,88 @@ def normalize_media_url_for_internal_access(url: Optional[str]) -> Optional[str]
 def log_provider_media_url_normalization(kind: str, original_url: Optional[str], provider_url: Optional[str]) -> None:
     """Diagnostic log for provider media URLs without leaking signed query data."""
     if original_url != provider_url:
-        print(
+        msg = (
             f"[MEDIA URL NORMALIZE] {kind}: original={_redact_media_url_for_log(original_url)} "
             f"provider={_redact_media_url_for_log(provider_url)}"
         )
+        logger.warning(msg)
+        print(msg)
+
+
+def _safe_uuid_string(value: Optional[str]) -> Optional[str]:
+    """Return a DB-safe UUID string or None for optional UUID FK columns."""
+    if not value:
+        return None
+    try:
+        return str(uuid.UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _build_provider_attempt_diagnostic(
+    *,
+    scene_id: str,
+    scene_number: int,
+    original_image_url: Optional[str],
+    provider_image_url: Optional[str],
+    original_audio_url: Optional[str],
+    provider_audio_url: Optional[str],
+    model: str,
+    status: str,
+    provider_error: Optional[str] = None,
+    exception: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Concise non-secret provider boundary diagnostics for DB/task metadata."""
+    diagnostic = {
+        "scene_id": scene_id,
+        "scene_number": scene_number,
+        "original_image_url": _redact_media_url_for_log(original_image_url),
+        "provider_image_url": _redact_media_url_for_log(provider_image_url),
+        "original_audio_url": _redact_media_url_for_log(original_audio_url),
+        "provider_audio_url": _redact_media_url_for_log(provider_audio_url),
+        "model": model,
+        "status": status,
+    }
+    if provider_error:
+        diagnostic["provider_error"] = str(provider_error)[:500]
+    if exception:
+        diagnostic["exception"] = str(exception)[:500]
+    return diagnostic
+
+
+async def _persist_provider_attempt_diagnostic(
+    session: AsyncSession,
+    video_gen_id: str,
+    diagnostic: Dict[str, Any],
+) -> None:
+    """Append provider attempt diagnostics to task_meta without breaking generation flow."""
+    if not session or not diagnostic:
+        return
+    try:
+        await session.execute(
+            text(
+                """
+                UPDATE video_generations
+                SET task_meta = COALESCE(task_meta, '{}'::jsonb) || jsonb_build_object(
+                    'provider_attempts',
+                    COALESCE(task_meta->'provider_attempts', '[]'::jsonb) || CAST(:diagnostic AS jsonb)
+                )
+                WHERE id = :id
+                """
+            ),
+            {"id": video_gen_id, "diagnostic": json.dumps([diagnostic])},
+        )
+        await session.commit()
+    except Exception as diag_err:
+        logger.error(
+            "[SCENE VIDEOS V7] Failed to persist provider diagnostics for %s: %s",
+            video_gen_id,
+            diag_err,
+        )
+        try:
+            await session.rollback()
+        except Exception:
+            pass
 
 
 # Removed image generation logic
@@ -1293,7 +1371,13 @@ async def generate_scene_videos(
     # Track the previous scene's key scene shot for continuity
     previous_key_scene_shot = None
 
+    db_user_id = _safe_uuid_string(user_id)
+
     for i, scene_description in enumerate(scene_descriptions):
+        scene_num = i + 1
+        scene_id = f"scene_{scene_num}"
+        provider_attempt = None
+        provider_attempt_persisted = False
         try:
             scene_num, scene_id = resolve_scene_identity(i, scene_numbers)
             scene_image = scene_images[i] if i < len(scene_images) else None
@@ -1467,8 +1551,27 @@ async def generate_scene_videos(
             log_provider_media_url_normalization("image_url", starting_image_url, provider_image_url)
             log_provider_media_url_normalization("init_audio", init_audio_url, provider_init_audio_url)
 
+            provider_attempt = _build_provider_attempt_diagnostic(
+                scene_id=scene_id,
+                scene_number=scene_num,
+                original_image_url=starting_image_url,
+                provider_image_url=provider_image_url,
+                original_audio_url=init_audio_url,
+                provider_audio_url=provider_init_audio_url,
+                model=current_model_id,
+                status="attempting",
+            )
+            logger.warning(
+                "[SCENE VIDEOS V7] Provider attempt scene_id=%s scene_number=%s model=%s image=%s audio=%s",
+                scene_id,
+                scene_num,
+                current_model_id,
+                provider_attempt.get("provider_image_url"),
+                provider_attempt.get("provider_audio_url"),
+            )
+
             # ✅ Generate video using ModelsLab Service
-            result = await modelslab_service.generate_image_to_video(
+            provider_result = await modelslab_service.generate_image_to_video(
                 image_url=provider_image_url,
                 prompt=enhanced_prompt,
                 model_id=current_model_id,
@@ -1476,11 +1579,20 @@ async def generate_scene_videos(
                 init_audio=provider_init_audio_url if provider_init_audio_url else None,
             )
 
+            provider_attempt["status"] = provider_result.get("status", "unknown")
+            if provider_result.get("error"):
+                provider_attempt["provider_error"] = str(provider_result.get("error"))[:500]
+                provider_attempt["exception"] = (
+                    f"V7 Video generation failed: {provider_result.get('error', 'Unknown error')}"
+                )[:500]
+            await _persist_provider_attempt_diagnostic(session, video_gen_id, provider_attempt)
+            provider_attempt_persisted = True
+
             # Process result (Adapt old verify logic to new direct call result)
             # generate_image_to_video returns dict with status/video_url or error
 
-            if result.get("status") == "success":
-                video_url = result.get("video_url")
+            if provider_result.get("status") == "success":
+                video_url = provider_result.get("video_url")
                 has_lipsync = bool(init_audio_url)
 
                 # Persist video from CDN to our own S3 storage
@@ -1544,11 +1656,13 @@ async def generate_scene_videos(
                         insert_query = text(
                             """
                             INSERT INTO video_segments (
-                                video_generation_id, scene_id, scene_number, scene_description,
-                                video_url, status, target_duration
+                                video_generation_id, user_id, scene_id, scene_number, scene_description,
+                                video_url, status, target_duration,
+                                character_count, dialogue_count, action_count
                             ) VALUES (
-                                :video_generation_id, :scene_id, :scene_number, :scene_description,
-                                :video_url, :status, :target_duration
+                                :video_generation_id, :user_id, :scene_id, :scene_number, :scene_description,
+                                :video_url, :status, :target_duration,
+                                :character_count, :dialogue_count, :action_count
                             ) RETURNING id
                         """
                         )
@@ -1557,12 +1671,16 @@ async def generate_scene_videos(
                             insert_query,
                             {
                                 "video_generation_id": video_gen_id,
+                                "user_id": db_user_id,
                                 "scene_id": scene_id,
                                 "scene_number": scene_num,
                                 "scene_description": scene_description,
                                 "video_url": video_url,
                                 "status": "completed",
                                 "target_duration": 5.0,
+                                "character_count": 0,
+                                "dialogue_count": 0,
+                                "action_count": 0,
                             },
                         )
                         await session.commit()
@@ -1600,11 +1718,29 @@ async def generate_scene_videos(
                 else:
                     raise Exception("No video URL in V7 response")
             else:
+                logger.error(
+                    "[SCENE VIDEOS V7] Provider failed scene_id=%s scene_number=%s model=%s error=%s",
+                    scene_id,
+                    scene_num,
+                    current_model_id,
+                    provider_result.get("error", "Unknown error"),
+                )
                 raise Exception(
-                    f"V7 Video generation failed: {result.get('error', 'Unknown error')}"
+                    f"V7 Video generation failed: {provider_result.get('error', 'Unknown error')}"
                 )
 
         except Exception as e:
+            if provider_attempt and not provider_attempt_persisted:
+                provider_attempt["status"] = provider_attempt.get("status") or "exception"
+                provider_attempt["exception"] = str(e)[:500]
+                logger.error(
+                    "[SCENE VIDEOS V7] Provider/scene exception scene_id=%s scene_number=%s model=%s error=%s",
+                    scene_id,
+                    scene_num,
+                    provider_attempt.get("model"),
+                    str(e),
+                )
+                await _persist_provider_attempt_diagnostic(session, video_gen_id, provider_attempt)
             print(f"[SCENE VIDEOS V7] ❌ Failed {scene_id}: {str(e)}")
 
             # Store failed record
@@ -1613,11 +1749,11 @@ async def generate_scene_videos(
                 fail_insert_query = text(
                     """
                     INSERT INTO video_segments (
-                        video_generation_id, scene_id, scene_number, scene_description,
-                        status
+                        video_generation_id, user_id, scene_id, scene_number, scene_description,
+                        status, character_count, dialogue_count, action_count
                     ) VALUES (
-                        :video_generation_id, :scene_id, :scene_number, :scene_description,
-                        :status
+                        :video_generation_id, :user_id, :scene_id, :scene_number, :scene_description,
+                        :status, :character_count, :dialogue_count, :action_count
                     )
                 """
                 )
@@ -1626,10 +1762,14 @@ async def generate_scene_videos(
                     fail_insert_query,
                     {
                         "video_generation_id": video_gen_id,
+                        "user_id": db_user_id,
                         "scene_id": scene_id,
                         "scene_number": scene_num,
                         "scene_description": scene_description,
                         "status": "failed",
+                        "character_count": 0,
+                        "dialogue_count": 0,
+                        "action_count": 0,
                     },
                 )
                 await session.commit()
