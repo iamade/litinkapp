@@ -328,34 +328,39 @@ AUDIO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 
 TTS_TIER_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="eleven_turbo_v2",
-        fallback="eleven_multilingual_v2",
-        fallback2="eleven_english_v1",
+        primary="elevenlabs/eleven_turbo_v2",
+        fallback="openai/tts-1",
+        fallback2="google/text-to-speech",
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="eleven_multilingual_v2",
-        fallback="eleven_turbo_v2",
-        fallback2="eleven_english_v1",
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="google/text-to-speech",
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="eleven_multilingual_v2",
-        fallback="elevenlabs/eleven_multilingual_v2",
-        fallback2="eleven_english_v1",
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="google/text-to-speech",
+        fallback3="fish-speech/default",
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="eleven_multilingual_v2",
-        fallback="elevenlabs/eleven_multilingual_v2",
-        fallback2="eleven_english_v1",
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="google/text-to-speech",
+        fallback3="fish-speech/default",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="eleven_multilingual_v2",
-        fallback="elevenlabs/eleven_multilingual_v2",
-        fallback2=None,
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="fish-speech/default",
+        fallback3="google/text-to-speech",
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="eleven_multilingual_v2",
-        fallback="elevenlabs/eleven_multilingual_v2",
-        fallback2=None,
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="fish-speech/default",
+        fallback3="google/text-to-speech",
+        fallback4="kokoro/default",
     ),
 }
 

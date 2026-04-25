@@ -30,17 +30,34 @@ class TTSRouter:
             return provider, provider_model
         return "elevenlabs", model
 
-    async def synthesize(self, text: str, user_tier: str, voice_id: Optional[str] = None, model: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]:
+    async def synthesize(
+        self,
+        text: str,
+        user_tier: str,
+        voice_id: Optional[str] = None,
+        model: Optional[str] = None,
+        model_chain: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
         config = get_model_config("tts", user_tier)
-        if not config and not model:
+        if not config and not model and not model_chain:
             raise ValueError(f"No TTS config found for tier: {user_tier}")
-        requested_model = model or config.primary
+        requested_model = model or (model_chain[0] if model_chain else config.primary)
 
         async def _generate_with_model(model: str, **inner_kwargs: Any) -> Dict[str, Any]:
             provider_name, provider_model = self._parse_model(model)
             provider = self.providers[provider_name]
             result = await provider.synthesize(text=text, voice_id=voice_id, model=provider_model, **kwargs, **inner_kwargs)
             return result.to_dict()
+
+        if model_chain:
+            return await fallback_manager.try_model_list_with_fallback(
+                models=model_chain,
+                generation_function=_generate_with_model,
+                request_params={"model": requested_model},
+                model_param_name="model",
+                service_type="tts",
+            )
 
         return await fallback_manager.try_with_fallback(
             service_type="tts",

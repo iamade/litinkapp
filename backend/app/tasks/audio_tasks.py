@@ -21,6 +21,12 @@ from celery.utils.log import get_task_logger
 # Use Celery's task logger - this is properly captured by worker processes
 logger = get_task_logger(__name__)
 
+CHAPTER_AUDIO_TTS_MODEL_CHAIN = [
+    "elevenlabs/eleven_turbo_v2",
+    "elevenlabs/eleven_multilingual_v2",
+    "elevenlabs/eleven_english_v1",
+]
+
 
 @asynccontextmanager
 async def session_scope():
@@ -2003,6 +2009,7 @@ def generate_chapter_audio_task(
                     user_tier=user_tier,
                     voice_id=resolved_voice_id,
                     model=requested_tts_model,
+                    model_chain=CHAPTER_AUDIO_TTS_MODEL_CHAIN,
                     user_id=user_id,
                     emotion=emotion,
                     speed=speed,

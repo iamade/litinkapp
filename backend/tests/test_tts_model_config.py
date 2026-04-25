@@ -1,29 +1,56 @@
+import inspect
+
+import pytest
+
 from app.core.model_config import ModelTier, get_model_config
+from app.core.services.tts import router as tts_router_module
+from app.core.services.tts.router import TTSRouter
+from app.tasks import audio_tasks
 
 
-DISALLOWED_TTS_PROVIDERS = (
+EXPECTED_GLOBAL_TTS_CHAINS = {
+    "free": ["elevenlabs/eleven_turbo_v2", "openai/tts-1", "google/text-to-speech"],
+    "basic": ["elevenlabs/eleven_multilingual_v2", "openai/tts-1-hd", "google/text-to-speech"],
+    "standard": [
+        "elevenlabs/eleven_multilingual_v2",
+        "openai/tts-1-hd",
+        "google/text-to-speech",
+        "fish-speech/default",
+    ],
+    "premium": [
+        "elevenlabs/eleven_multilingual_v2",
+        "openai/tts-1-hd",
+        "google/text-to-speech",
+        "fish-speech/default",
+    ],
+    "professional": [
+        "elevenlabs/eleven_multilingual_v2",
+        "openai/tts-1-hd",
+        "fish-speech/default",
+        "google/text-to-speech",
+    ],
+    "enterprise": [
+        "elevenlabs/eleven_multilingual_v2",
+        "openai/tts-1-hd",
+        "fish-speech/default",
+        "google/text-to-speech",
+        "kokoro/default",
+    ],
+}
+
+EXPECTED_CHAPTER_AUDIO_TTS_CHAIN = [
+    "elevenlabs/eleven_turbo_v2",
+    "elevenlabs/eleven_multilingual_v2",
+    "elevenlabs/eleven_english_v1",
+]
+
+
+DISALLOWED_CHAPTER_AUDIO_PROVIDERS = (
     "google",
     "openai",
     "fish-speech",
     "kokoro",
 )
-
-EXPECTED_TTS_CHAINS = {
-    "free": ["eleven_turbo_v2", "eleven_multilingual_v2", "eleven_english_v1"],
-    "basic": ["eleven_multilingual_v2", "eleven_turbo_v2", "eleven_english_v1"],
-    "standard": [
-        "eleven_multilingual_v2",
-        "elevenlabs/eleven_multilingual_v2",
-        "eleven_english_v1",
-    ],
-    "premium": [
-        "eleven_multilingual_v2",
-        "elevenlabs/eleven_multilingual_v2",
-        "eleven_english_v1",
-    ],
-    "professional": ["eleven_multilingual_v2", "elevenlabs/eleven_multilingual_v2"],
-    "enterprise": ["eleven_multilingual_v2", "elevenlabs/eleven_multilingual_v2"],
-}
 
 
 def _configured_chain(config):
@@ -40,32 +67,59 @@ def _configured_chain(config):
     ]
 
 
-def test_tts_tier_config_uses_elevenlabs_only_chains():
+def test_global_tts_tier_config_preserves_broader_provider_fallbacks():
     for tier in ModelTier:
         config = get_model_config("tts", tier.value)
         assert config is not None
+        assert _configured_chain(config) == EXPECTED_GLOBAL_TTS_CHAINS[tier.value]
 
-        chain = _configured_chain(config)
-        assert chain == EXPECTED_TTS_CHAINS[tier.value]
-        assert all(
-            model == "eleven_english_v1"
-            or model.startswith("eleven_")
-            or model.startswith("elevenlabs/")
-            for model in chain
-        )
-        assert not any(
-            blocked in model
-            for model in chain
-            for blocked in DISALLOWED_TTS_PROVIDERS
-        )
+    global_models = {
+        model
+        for chain in EXPECTED_GLOBAL_TTS_CHAINS.values()
+        for model in chain
+    }
+    assert "openai/tts-1-hd" in global_models
+    assert "google/text-to-speech" in global_models
+    assert "fish-speech/default" in global_models
+    assert "kokoro/default" in global_models
 
 
-def test_professional_and_enterprise_stop_after_direct_elevenlabs_fallback():
-    for tier in ("professional", "enterprise"):
-        config = get_model_config("tts", tier)
-        assert config is not None
-        assert config.primary == "eleven_multilingual_v2"
-        assert config.fallback == "elevenlabs/eleven_multilingual_v2"
-        assert config.fallback2 is None
-        assert config.fallback3 is None
-        assert config.fallback4 is None
+def test_chapter_audio_narrator_character_path_uses_elevenlabs_only_chain():
+    assert audio_tasks.CHAPTER_AUDIO_TTS_MODEL_CHAIN == EXPECTED_CHAPTER_AUDIO_TTS_CHAIN
+    assert not any(
+        blocked in model
+        for model in audio_tasks.CHAPTER_AUDIO_TTS_MODEL_CHAIN
+        for blocked in DISALLOWED_CHAPTER_AUDIO_PROVIDERS
+    )
+
+    source = inspect.getsource(audio_tasks.generate_chapter_audio_task.run)
+    assert 'use_tts_router = audio_type in ["narrator", "character"]' in source
+    assert "model_chain=CHAPTER_AUDIO_TTS_MODEL_CHAIN" in source
+
+
+@pytest.mark.asyncio
+async def test_tts_router_model_chain_uses_scoped_fallback_list(monkeypatch):
+    captured = {}
+
+    async def fake_try_model_list_with_fallback(**kwargs):
+        captured.update(kwargs)
+        return {"status": "success", "audio_url": "https://cdn.example/audio.mp3"}
+
+    monkeypatch.setattr(
+        tts_router_module.fallback_manager,
+        "try_model_list_with_fallback",
+        fake_try_model_list_with_fallback,
+    )
+
+    router = TTSRouter()
+    result = await router.synthesize(
+        text="hello",
+        user_tier="enterprise",
+        voice_id="voice-1",
+        model_chain=EXPECTED_CHAPTER_AUDIO_TTS_CHAIN,
+    )
+
+    assert result["status"] == "success"
+    assert captured["models"] == EXPECTED_CHAPTER_AUDIO_TTS_CHAIN
+    assert captured["model_param_name"] == "model"
+    assert captured["service_type"] == "tts"
