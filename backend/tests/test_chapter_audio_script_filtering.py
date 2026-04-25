@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.api.routes.chapters import routes as chapter_routes
+from app.audio.schemas import AudioRecord
 from app.tasks import audio_tasks
 
 
@@ -40,6 +41,22 @@ def test_chapter_audio_task_can_rebind_chapter_id_from_existing_record():
     chapter_symbol = nested_table.lookup("chapter_id")
     assert chapter_symbol.is_nonlocal()
     assert not chapter_symbol.is_local()
+
+
+def test_audio_record_serializes_script_id_for_script_scoped_frontend_hydration():
+    """API response schema must preserve the record_dict script_id field for strict script filtering."""
+    record = AudioRecord(
+        id="audio-1",
+        user_id="user-1",
+        chapter_id="chapter-1",
+        script_id="script-F",
+        audio_type="narrator",
+        generation_status="completed",
+        metadata={"scene_number": 1},
+        created_at="2026-04-25T08:00:00+00:00",
+    )
+
+    assert record.model_dump()["script_id"] == "script-F"
 
 
 async def _captured_audio_statement(monkeypatch, *, chapter_id, script_id):
