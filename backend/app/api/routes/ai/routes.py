@@ -835,6 +835,12 @@ async def generate_entertainment_video(
             task_meta["selected_audio_ids"] = request.selected_audio_ids
         task_meta["script_id"] = str(script_data.id)
         task_meta["credit_reservation_id"] = str(reservation_id)
+        target_scene_numbers = resolve_target_scene_numbers(
+            selected_shot_ids,
+            str(script_data.id),
+            script_data.scene_descriptions,
+        )
+        task_meta["target_scene_numbers"] = target_scene_numbers
 
         video_generation = VideoGeneration(
             chapter_id=chapter_id,
@@ -1030,10 +1036,28 @@ async def generate_entertainment_video(
                     # Falls back to audio_metadata.scene, then sequence_order.
                     from app.videos.association_integrity import parse_scene_id as _parse_scene_id
                     scene_number = _parse_scene_id(audio_record.scene_id)
-                    if scene_number is None and audio_record.audio_metadata:
-                        scene_number = audio_record.audio_metadata.get("scene")
+                    if scene_number is None and isinstance(audio_record.audio_metadata, dict):
+                        # Prefer explicit 1-based scene_number over legacy 0-based scene.
+                        metadata_scene = audio_record.audio_metadata.get("scene_number")
+                        if metadata_scene is None:
+                            metadata_scene = audio_record.audio_metadata.get("scene")
+                        try:
+                            scene_number = int(metadata_scene) if metadata_scene is not None else None
+                        except (TypeError, ValueError):
+                            scene_number = None
+                    if scene_number == 0:
+                        # Scene 0 is invalid for task/provider matching; legacy metadata used
+                        # zero for scene 1. Normalize before persisting task audio payload.
+                        scene_number = 1
+                    if (
+                        request.selected_audio_ids
+                        and str(audio_record.id) in {str(aid) for aid in request.selected_audio_ids}
+                        and len(target_scene_numbers) == 1
+                        and (scene_number is None or scene_number == 0)
+                    ):
+                        scene_number = target_scene_numbers[0]
                     if scene_number is None:
-                        scene_number = audio_record.sequence_order or 0
+                        scene_number = audio_record.sequence_order or 1
                     # Map database fields to format expected by find_scene_audio
                     # find_scene_audio checks: audio.get("scene") and audio.get("audio_url")
                     audio_data = {
@@ -1644,28 +1668,28 @@ async def get_scene_videos(
         scene_videos = []
         total_duration = 0.0
 
-        for video in videos_response.data or []:
-            # Calculate resolution from width and height
-            width = video.get("width", 512)
-            height = video.get("height", 288)
-            resolution = f"{width}x{height}"
+        for video in videos_data:
+            # Calculate resolution from width and height, tolerating sparse/failed segment rows.
+            width = video.get("width") or 512
+            height = video.get("height") or 288
+            duration = video.get("duration_seconds") or video.get("duration") or 0
 
             scene_videos.append(
                 {
-                    "id": video["id"],
-                    "scene_id": video["scene_id"],
-                    "scene_description": video["scene_description"],
-                    "video_url": video["video_url"],
-                    "duration": video["duration_seconds"],
-                    "resolution": video["resolution"],
-                    "width": width,  # ✅ Include individual dimensions too
-                    "height": height,  # ✅ Include individual dimensions too
-                    "fps": video["fps"],
-                    "generation_method": video["generation_method"],
-                    "created_at": video["created_at"],
+                    "id": video.get("id"),
+                    "scene_id": video.get("scene_id"),
+                    "scene_description": video.get("scene_description"),
+                    "video_url": video.get("video_url"),
+                    "duration": duration,
+                    "resolution": video.get("resolution") or f"{width}x{height}",
+                    "width": width,
+                    "height": height,
+                    "fps": video.get("fps"),
+                    "generation_method": video.get("generation_method"),
+                    "created_at": video.get("created_at"),
                 }
             )
-            total_duration += video["duration_seconds"]
+            total_duration += duration
 
         return {
             "video_generation_id": video_gen_id,
@@ -1674,6 +1698,8 @@ async def get_scene_videos(
             "total_duration": total_duration,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1709,7 +1735,7 @@ async def get_final_video(
             )
 
         final_video_url = data.video_url
-        merge_data = data.get("merge_data", {})
+        merge_data = data.merge_data or {}
 
         if not final_video_url:
             raise HTTPException(status_code=404, detail="Final video not found")
@@ -1723,6 +1749,8 @@ async def get_final_video(
             "processing_details": merge_data.get("processing_details", {}),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

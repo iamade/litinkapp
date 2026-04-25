@@ -313,6 +313,24 @@ def find_scene_audio(
 
     scene_number = int(scene_id.split("_")[1]) if "_" in scene_id else 1
 
+    def _audio_scene_values(audio: Dict[str, Any]) -> set[int]:
+        values = set()
+        for key in ("scene_number", "scene"):
+            try:
+                raw_scene = audio.get(key)
+                if raw_scene is None:
+                    continue
+                numeric_scene = int(raw_scene)
+            except (TypeError, ValueError):
+                continue
+            # Scene 0 is an invalid provider/task scene; legacy route payloads
+            # used 0-based metadata for scene 1. Normalize that explicit value.
+            values.add(1 if numeric_scene == 0 else numeric_scene)
+        return values
+
+    def _audio_matches_scene(audio: Dict[str, Any]) -> bool:
+        return scene_number in _audio_scene_values(audio)
+
     # Collect all audio across all types
     all_audio = []
     for audio_type in ["characters", "narrator", "sound_effects", "background_music"]:
@@ -329,10 +347,7 @@ def find_scene_audio(
         selected_id_set = {str(audio_id) for audio_id in selected_audio_ids}
         for audio in all_audio:
             if str(audio.get("id")) in selected_id_set and audio.get("audio_url"):
-                if (
-                    audio.get("scene") == scene_number
-                    or audio.get("scene_number") == scene_number
-                ):
+                if _audio_matches_scene(audio):
                     print(
                         f"[FIND AUDIO] Found EXPLICITLY selected audio for {scene_id}"
                     )
@@ -344,28 +359,19 @@ def find_scene_audio(
 
     # Priority 1: Exact scene match in character audio
     for audio in audio_files.get("characters", []):
-        if (
-            audio.get("scene") == scene_number
-            or audio.get("scene_number") == scene_number
-        ) and audio.get("audio_url"):
+        if _audio_matches_scene(audio) and audio.get("audio_url"):
             print(f"[FIND AUDIO] Found character audio for {scene_id}")
             return audio
 
     # Priority 2: Exact scene match in narrator audio
     for audio in audio_files.get("narrator", []):
-        if (
-            audio.get("scene") == scene_number
-            or audio.get("scene_number") == scene_number
-        ) and audio.get("audio_url"):
+        if _audio_matches_scene(audio) and audio.get("audio_url"):
             print(f"[FIND AUDIO] Found narrator audio for {scene_id}")
             return audio
 
     # Priority 3: Exact scene match in any type
     for audio in all_audio:
-        if (
-            audio.get("scene") == scene_number
-            or audio.get("scene_number") == scene_number
-        ) and audio.get("audio_url"):
+        if _audio_matches_scene(audio) and audio.get("audio_url"):
             print(
                 f"[FIND AUDIO] Found audio (type={audio.get('audio_type')}) for {scene_id}"
             )
@@ -373,6 +379,79 @@ def find_scene_audio(
 
     print(f"[FIND AUDIO] No usable scene-matched audio found for {scene_id}; refusing cross-scene fallback")
     return None
+
+
+def normalize_target_scene_numbers(value: Any) -> List[int]:
+    """Return a de-duped ordered list of positive 1-based scene numbers."""
+    if value is None:
+        return []
+    raw_values = value if isinstance(value, (list, tuple, set)) else [value]
+    scene_numbers: List[int] = []
+    seen = set()
+    for raw in raw_values:
+        try:
+            scene_number = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if scene_number <= 0 or scene_number in seen:
+            continue
+        scene_numbers.append(scene_number)
+        seen.add(scene_number)
+    return scene_numbers
+
+
+def select_scene_assets_for_targets(
+    *,
+    target_scene_numbers: List[int],
+    original_scene_descriptions: List[Any],
+    scene_image_map: Dict[int, Dict[int, Dict[str, Any]]],
+    pre_gen_scene_images: List[Dict[str, Any]],
+    pre_gen_character_images: List[Dict[str, Any]],
+    selected_shots: Optional[List[Any]] = None,
+) -> tuple[List[Any], List[int], List[Optional[Dict[str, Any]]]]:
+    """Select descriptions/images in the exact target scene order.
+
+    KAN-86: persisted target_scene_numbers are the durable scope. If selected
+    shot parsing is unavailable later, this helper still prevents falling back
+    to all scenes and maps images by scene_number instead of raw DB order.
+    """
+    shot_by_scene: Dict[int, int] = {}
+    for selection in selected_shots or []:
+        if selection.scene_number not in shot_by_scene:
+            shot_by_scene[selection.scene_number] = selection.shot_index
+
+    target_descriptions: List[Any] = []
+    final_scene_images: List[Optional[Dict[str, Any]]] = []
+
+    for scene_num in target_scene_numbers:
+        desc_index = scene_num - 1
+        if 0 <= desc_index < len(original_scene_descriptions):
+            target_descriptions.append(original_scene_descriptions[desc_index])
+        else:
+            target_descriptions.append(f"Scene {scene_num}")
+
+        found_image = None
+        shot_idx = shot_by_scene.get(scene_num, 0)
+        if scene_num in scene_image_map:
+            if shot_idx in scene_image_map[scene_num]:
+                found_image = scene_image_map[scene_num][shot_idx]
+            elif 0 in scene_image_map[scene_num]:
+                found_image = scene_image_map[scene_num][0]
+            elif scene_image_map[scene_num]:
+                found_image = next(iter(scene_image_map[scene_num].values()))
+
+        if found_image is None and not scene_image_map and pre_gen_scene_images:
+            # Legacy fallback only when images have no usable scene_number map.
+            fallback_index = desc_index if desc_index >= 0 else 0
+            if fallback_index < len(pre_gen_scene_images):
+                found_image = pre_gen_scene_images[fallback_index]
+
+        if found_image is None and pre_gen_character_images:
+            found_image = pre_gen_character_images[(scene_num - 1) % len(pre_gen_character_images)]
+
+        final_scene_images.append(found_image)
+
+    return target_descriptions, target_scene_numbers, final_scene_images
 
 
 async def update_pipeline_step(
@@ -564,115 +643,66 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             )
 
             # Build scene_images list from pre-generated images
-            # Map by scene_number for easy lookup
-            # Build scene_image_map with shot_index support
+            # Map by scene_number for deterministic lookup.
             # Structure: {scene_number: {shot_index: image_data}}
-            scene_image_map = {}
+            scene_image_map: Dict[int, Dict[int, Dict[str, Any]]] = {}
             for img in pre_gen_scene_images:
-                scene_num = img.get("scene_number", 0)
-                shot_idx = img.get("shot_index", 0)
+                try:
+                    scene_num = int(img.get("scene_number", 0) or 0)
+                except (TypeError, ValueError):
+                    scene_num = 0
+                try:
+                    shot_idx = int(img.get("shot_index", 0) or 0)
+                except (TypeError, ValueError):
+                    shot_idx = 0
+                if scene_num <= 0:
+                    continue
 
                 if scene_num not in scene_image_map:
                     scene_image_map[scene_num] = {}
 
-                # Store image by shot_index
-                # If multiple images have same scene/shot index, last one wins (or we could list them)
+                # Store image by shot_index. If duplicates exist, last one wins.
                 scene_image_map[scene_num][shot_idx] = img
 
             print(f"[IMAGE MAPPING] Map keys: {list(scene_image_map.keys())}")
 
-            # Parse selected shot IDs to get deduped (scene_index, shot_index) tuples
+            # Persisted target_scene_numbers are authoritative for KAN-86 selected
+            # per-scene renders; selected_shot_ids only refine shot image choice.
             video_script_id = str(video_gen.get("script_id")) if video_gen.get("script_id") else None
             selected_shots = extract_shot_selections(
                 task_meta.get("selected_shot_ids"), expected_script_id=video_script_id
             )
-            if selected_shots:
-                selected_scene_indices = [
-                    (selection.scene_index, selection.shot_index)
-                    for selection in selected_shots
-                ]
+            persisted_target_scene_numbers = normalize_target_scene_numbers(
+                task_meta.get("target_scene_numbers")
+            )
 
-                # IMPORTANT: Use the selected indices to order the generation
-                # This matches the user's timeline order
-                final_scene_images = []
-                target_scene_descriptions = []
-                target_scene_numbers = []
-
+            if persisted_target_scene_numbers:
+                target_scene_numbers = persisted_target_scene_numbers
                 print(
-                    f"[SCENE VIDEOS] Generating for {len(selected_scene_indices)} selected shots: {selected_scene_indices}"
+                    f"[SCENE VIDEOS] Using persisted target_scene_numbers: {target_scene_numbers}"
                 )
-
-                for idx, shot_idx in selected_scene_indices:
-                    scene_num = idx + 1  # 1-based scene description index
-
-                    # Try to find specific shot first
-                    found_image = None
-                    if scene_num in scene_image_map:
-                        # 1. Try exact match (scene + shot_index)
-                        if shot_idx in scene_image_map[scene_num]:
-                            found_image = scene_image_map[scene_num][shot_idx]
-                        # 2. Try key scene (shot_index 0)
-                        elif 0 in scene_image_map[scene_num]:
-                            found_image = scene_image_map[scene_num][0]
-                        # 3. Fallback to any available image for this scene
-                        elif scene_image_map[scene_num]:
-                            found_image = next(
-                                iter(scene_image_map[scene_num].values())
-                            )
-
-                    if found_image:
-                        final_scene_images.append(found_image)
-                    else:
-                        # Add placeholder if no image found but scene is selected
-                        final_scene_images.append(None)
-
-                    # Add description and number mapping
-                    if idx < len(original_scene_descriptions):
-                        target_scene_descriptions.append(
-                            original_scene_descriptions[idx]
-                        )
-                    else:
-                        target_scene_descriptions.append(f"Scene {scene_num}")
-                    target_scene_numbers.append(scene_num)
-
-                image_data["scene_images"] = final_scene_images
+            elif selected_shots:
+                target_scene_numbers = [selection.scene_number for selection in selected_shots]
+                print(
+                    f"[SCENE VIDEOS] Derived target scenes from selected_shot_ids: {target_scene_numbers}"
+                )
             else:
-                print(
-                    f"[VIDEO GENERATION] No valid selected_shot_ids in context, using all {len(scene_descriptions)} scenes"
-                )
-                # No selection filter: assign images by order or scene_number
-                target_scene_descriptions = scene_descriptions
                 target_scene_numbers = list(range(1, len(scene_descriptions) + 1))
-                final_scene_images = []
+                print(
+                    f"[VIDEO GENERATION] No selected scene scope in task_meta; using all {len(scene_descriptions)} scenes"
+                )
 
-                for i in range(len(scene_descriptions)):
-                    scene_num = i + 1
-                    found_image = None
-
-                    if scene_num in scene_image_map:
-                        # Default to key scene (0) or first available
-                        if 0 in scene_image_map[scene_num]:
-                            found_image = scene_image_map[scene_num][0]
-                        else:
-                            found_image = next(
-                                iter(scene_image_map[scene_num].values())
-                            )
-                    elif i < len(pre_gen_scene_images):
-                        found_image = pre_gen_scene_images[i]
-                    elif pre_gen_character_images:
-                        found_image = pre_gen_character_images[
-                            i % len(pre_gen_character_images)
-                        ]
-                    else:
-                        # Fallback to ANY generated image if list exists
-                        if pre_gen_scene_images:
-                            found_image = pre_gen_scene_images[0]
-                        else:
-                            found_image = None
-
-                    final_scene_images.append(found_image)
-
-                image_data["scene_images"] = final_scene_images
+            target_scene_descriptions, target_scene_numbers, final_scene_images = (
+                select_scene_assets_for_targets(
+                    target_scene_numbers=target_scene_numbers,
+                    original_scene_descriptions=original_scene_descriptions,
+                    scene_image_map=scene_image_map,
+                    pre_gen_scene_images=pre_gen_scene_images,
+                    pre_gen_character_images=pre_gen_character_images,
+                    selected_shots=selected_shots,
+                )
+            )
+            image_data["scene_images"] = final_scene_images
 
             scene_count = len(
                 [img for img in image_data.get("scene_images", []) if img is not None]

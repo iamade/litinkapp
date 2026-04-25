@@ -178,3 +178,46 @@ def test_kan86_find_scene_audio_requires_selected_audio_scene_match():
 
     selected = find_scene_audio("scene_1", audio_files, selected_audio_ids=["right-scene"])
     assert selected["id"] == "right-scene"
+
+from app.tasks.video_tasks import normalize_target_scene_numbers, select_scene_assets_for_targets
+
+
+def test_kan86_persisted_target_scene_filters_and_reorders_scene_images():
+    target_scene_numbers = normalize_target_scene_numbers(["1"])
+    pre_gen_scene_images = [
+        {"id": "scene-2-image", "scene_number": 2, "shot_index": 0, "image_url": "https://cdn/scene2.png"},
+        {"id": "scene-1-image", "scene_number": 1, "shot_index": 0, "image_url": "https://cdn/scene1.png"},
+    ]
+    scene_image_map = {
+        int(img["scene_number"]): {int(img["shot_index"]): img}
+        for img in pre_gen_scene_images
+    }
+
+    descriptions, scene_numbers, images = select_scene_assets_for_targets(
+        target_scene_numbers=target_scene_numbers,
+        original_scene_descriptions=["Scene one", "Scene two"],
+        scene_image_map=scene_image_map,
+        pre_gen_scene_images=pre_gen_scene_images,
+        pre_gen_character_images=[],
+        selected_shots=[],
+    )
+
+    assert descriptions == ["Scene one"]
+    assert scene_numbers == [1]
+    assert [img["id"] for img in images] == ["scene-1-image"]
+
+
+def test_kan86_find_scene_audio_normalizes_legacy_zero_based_scene_one_payload():
+    audio_files = {
+        "characters": [
+            {"id": "selected-scene-1", "scene": 0, "scene_number": 0, "audio_url": "https://cdn/audio-1.mp3"},
+        ],
+        "narrator": [],
+        "sound_effects": [],
+        "background_music": [],
+    }
+
+    selected = find_scene_audio(
+        "scene_1", audio_files, selected_audio_ids=["selected-scene-1"]
+    )
+    assert selected["id"] == "selected-scene-1"
