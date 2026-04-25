@@ -328,39 +328,34 @@ AUDIO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 
 TTS_TIER_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="elevenlabs/eleven_turbo_v2",
-        fallback="openai/tts-1",
-        fallback2="google/text-to-speech",
+        primary="eleven_turbo_v2",
+        fallback="eleven_multilingual_v2",
+        fallback2="eleven_english_v1",
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="elevenlabs/eleven_multilingual_v2",
-        fallback="openai/tts-1-hd",
-        fallback2="google/text-to-speech",
+        primary="eleven_multilingual_v2",
+        fallback="eleven_turbo_v2",
+        fallback2="eleven_english_v1",
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="elevenlabs/eleven_multilingual_v2",
-        fallback="openai/tts-1-hd",
-        fallback2="google/text-to-speech",
-        fallback3="fish-speech/default",
+        primary="eleven_multilingual_v2",
+        fallback="elevenlabs/eleven_multilingual_v2",
+        fallback2="eleven_english_v1",
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="elevenlabs/eleven_multilingual_v2",
-        fallback="openai/tts-1-hd",
-        fallback2="google/text-to-speech",
-        fallback3="fish-speech/default",
+        primary="eleven_multilingual_v2",
+        fallback="elevenlabs/eleven_multilingual_v2",
+        fallback2="eleven_english_v1",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
-        primary="elevenlabs/eleven_multilingual_v2",
-        fallback="openai/tts-1-hd",
-        fallback2="fish-speech/default",
-        fallback3="google/text-to-speech",
+        primary="eleven_multilingual_v2",
+        fallback="elevenlabs/eleven_multilingual_v2",
+        fallback2=None,
     ),
     ModelTier.ENTERPRISE: ModelConfig(
-        primary="elevenlabs/eleven_multilingual_v2",
-        fallback="openai/tts-1-hd",
-        fallback2="fish-speech/default",
-        fallback3="google/text-to-speech",
-        fallback4="kokoro/default",
+        primary="eleven_multilingual_v2",
+        fallback="elevenlabs/eleven_multilingual_v2",
+        fallback2=None,
     ),
 }
 
