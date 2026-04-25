@@ -269,6 +269,65 @@ def test_kan86_provider_media_url_rewrites_localhost_minio_to_explicit_provider_
     )
 
 
+def test_kan86_provider_media_url_rejects_raw_http_ip_minio_without_https_base(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://72.62.97.111:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    for env_name in (
+        "MODELSLAB_MEDIA_PUBLIC_URL",
+        "MINIO_PROVIDER_PUBLIC_URL",
+        "PUBLIC_MINIO_URL",
+        "MINIO_EXTERNAL_URL",
+        "MEDIA_PUBLIC_URL",
+        "PUBLIC_MEDIA_URL",
+        "S3_PUBLIC_URL",
+        "CDN_BASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    stored_url = "http://72.62.97.111:9000/litink-books/users/u1/images/scene.png"
+
+    with pytest.raises(ProviderMediaUrlConfigurationError) as excinfo:
+        normalize_media_url_for_provider(stored_url)
+    assert "HTTPS public/CDN/R2/S3 base" in str(excinfo.value)
+    assert "72.62.97.111" in str(excinfo.value)
+
+
+def test_kan86_provider_media_url_rewrites_raw_http_ip_minio_to_https_provider_base(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://72.62.97.111:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", "https://media.litinkai.example")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+
+    stored_url = "http://72.62.97.111:9000/litink-books/users/u1/images/scene.png"
+
+    assert (
+        normalize_media_url_for_provider(stored_url)
+        == "https://media.litinkai.example/litink-books/users/u1/images/scene.png"
+    )
+
+
+def test_kan86_provider_media_url_ignores_http_ip_provider_base(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://72.62.97.111:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", "http://72.62.97.111:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    for env_name in (
+        "MODELSLAB_MEDIA_PUBLIC_URL",
+        "MINIO_PROVIDER_PUBLIC_URL",
+        "PUBLIC_MINIO_URL",
+        "MINIO_EXTERNAL_URL",
+        "MEDIA_PUBLIC_URL",
+        "PUBLIC_MEDIA_URL",
+        "S3_PUBLIC_URL",
+        "CDN_BASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    with pytest.raises(ProviderMediaUrlConfigurationError):
+        normalize_media_url_for_provider("http://72.62.97.111:9000/litink-books/users/u1/images/scene.png")
+
+
 def test_kan86_provider_media_url_leaves_external_urls_unchanged(monkeypatch):
     monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "https://minio-public.example.com")
     external_url = "https://cdn.example.com/litink-books/users/u1/images/scene.png"

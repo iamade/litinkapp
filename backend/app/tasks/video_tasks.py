@@ -80,12 +80,26 @@ def _is_provider_unsafe_host(host: Optional[str]) -> bool:
         return False
 
 
+def _is_ip_literal(host: Optional[str]) -> bool:
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
 def _is_provider_unsafe_url(url: Optional[str]) -> bool:
     if not url:
         return False
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return False
+    # ModelsLab may return "invalid accessible without redirect/auth" for raw
+    # IP-origin media even when the IP is publicly reachable from our network.
+    if _is_ip_literal(parsed.hostname):
+        return True
     return _is_provider_unsafe_host(parsed.hostname)
 
 
@@ -140,9 +154,9 @@ def _valid_external_media_base(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
     parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme != "https" or not parsed.netloc:
         return None
-    if _is_provider_unsafe_host(parsed.hostname):
+    if _is_provider_unsafe_url(value):
         return None
     return value.rstrip("/")
 
@@ -190,8 +204,9 @@ def normalize_media_url_for_provider(url: Optional[str]) -> Optional[str]:
     if not provider_base:
         raise ProviderMediaUrlConfigurationError(
             "Provider media URL is not externally reachable. Configure MODELSLAB_MEDIA_PUBLIC_URL "
-            "or MINIO_PROVIDER_PUBLIC_URL (external MinIO/CDN base without bucket name); refusing "
-            f"to send {_redact_media_url_for_log(url)} to ModelsLab."
+            "or MINIO_PROVIDER_PUBLIC_URL to an HTTPS public/CDN/R2/S3 base (without bucket name); "
+            "raw http IP, localhost, minio, and private media URLs are refused before ModelsLab calls: "
+            f"{_redact_media_url_for_log(url)}"
         )
 
     provider_url = _replace_url_base(url, provider_base)
