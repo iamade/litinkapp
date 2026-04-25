@@ -305,9 +305,10 @@ def find_scene_audio(
     script_style: str = None,
     selected_audio_ids: List[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Find audio for a scene with progressive fallback.
+    """Find audio for a scene without cross-scene fallback.
 
-    Priority: explicit selection > exact scene match (character > narrator > any type) > any available audio.
+    Priority: explicit selection for this scene > exact scene match (character > narrator > any type).
+    KAN-86: never fall back to unrelated audio with a URL.
     """
 
     scene_number = int(scene_id.split("_")[1]) if "_" in scene_id else 1
@@ -321,12 +322,13 @@ def find_scene_audio(
         f"[FIND AUDIO] Looking for audio for {scene_id} (scene_number={scene_number}), total audio files: {len(all_audio)}"
     )
 
-    # Priority 0: Explicitly selected audio
+    # Priority 0: Explicitly selected audio. If selected_audio_ids are supplied,
+    # they are an allow-list for this render request; do not silently fall back to
+    # any other audio when the selected IDs are wrong-scene or unusable.
     if selected_audio_ids:
+        selected_id_set = {str(audio_id) for audio_id in selected_audio_ids}
         for audio in all_audio:
-            if audio.get("id") in selected_audio_ids and audio.get("audio_url"):
-                # The explicit selection should be respected regardless of scene match,
-                # but if there are multiple selections across the storyboard, we try to match the scene.
+            if str(audio.get("id")) in selected_id_set and audio.get("audio_url"):
                 if (
                     audio.get("scene") == scene_number
                     or audio.get("scene_number") == scene_number
@@ -335,9 +337,10 @@ def find_scene_audio(
                         f"[FIND AUDIO] Found EXPLICITLY selected audio for {scene_id}"
                     )
                     return audio
-                # If scene match fails but we have this selection, we might still use it
-                # if there's only one selection, or if we map selections specifically.
-                # Better to be safe: rely on scene match if multiple selections exist.
+        print(
+            f"[FIND AUDIO] Selected audio IDs did not include usable scene-matched audio for {scene_id}; refusing fallback"
+        )
+        return None
 
     # Priority 1: Exact scene match in character audio
     for audio in audio_files.get("characters", []):
@@ -368,15 +371,7 @@ def find_scene_audio(
             )
             return audio
 
-    # Priority 4: Any audio with a URL (fallback when sequence_order doesn't match scene)
-    for audio in all_audio:
-        if audio.get("audio_url"):
-            print(
-                f"[AUDIO FALLBACK] Using audio id={audio.get('id')} (scene={audio.get('scene')}) for {scene_id}"
-            )
-            return audio
-
-    print(f"[FIND AUDIO] No audio found for {scene_id}")
+    print(f"[FIND AUDIO] No usable scene-matched audio found for {scene_id}; refusing cross-scene fallback")
     return None
 
 
@@ -1457,6 +1452,10 @@ async def generate_scene_videos(
                             "method": "veo2_image_to_video_sequential",
                             "model": current_model_id,
                             "has_lipsync": has_lipsync,
+                            "audio_id": scene_audio.get("id") if scene_audio else None,
+                            "audio_url": scene_audio.get("audio_url") if scene_audio else None,
+                            "audio_scene_number": scene_audio.get("scene_number") if scene_audio else None,
+                            "audio_duration": audio_duration if scene_audio else None,
                             "scene_sequence": scene_num,
                         }
                     )

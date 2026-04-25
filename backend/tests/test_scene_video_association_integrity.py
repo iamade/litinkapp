@@ -67,3 +67,36 @@ def test_extract_shot_selections_handles_numeric_prefix_script_id():
     assert selected[0].scene_index == 0
     assert selected[0].shot_index == 0
     assert selected[0].script_id == script_id
+
+from app.tasks.video_tasks import find_scene_audio
+
+
+def test_kan86_find_scene_audio_refuses_unrelated_url_fallback():
+    audio_files = {
+        "characters": [],
+        "narrator": [
+            {"id": "audio-scene-2", "scene": 2, "scene_number": 2, "audio_url": "https://cdn/audio-2.mp3"}
+        ],
+        "sound_effects": [],
+        "background_music": [],
+    }
+
+    assert find_scene_audio("scene_1", audio_files) is None
+
+
+def test_kan86_find_scene_audio_requires_selected_audio_scene_match():
+    audio_files = {
+        "characters": [
+            {"id": "wrong-scene", "scene": 2, "scene_number": 2, "audio_url": "https://cdn/audio-2.mp3"},
+            {"id": "right-scene", "scene": 1, "scene_number": 1, "audio_url": "https://cdn/audio-1.mp3"},
+        ],
+        "narrator": [],
+        "sound_effects": [],
+        "background_music": [],
+    }
+
+    selected = find_scene_audio("scene_1", audio_files, selected_audio_ids=["wrong-scene"])
+    assert selected is None
+
+    selected = find_scene_audio("scene_1", audio_files, selected_audio_ids=["right-scene"])
+    assert selected["id"] == "right-scene"

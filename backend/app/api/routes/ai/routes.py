@@ -34,6 +34,7 @@ from app.videos.association_integrity import (
     extract_selected_scene_numbers,
     is_audio_record_in_context,
     is_generation_excluded,
+    parse_scene_id,
 )
 from app.books.models import (
     Book,
@@ -881,6 +882,7 @@ async def generate_entertainment_video(
 
             result = await session.exec(stmt)
             audio_records = result.all()
+            raw_audio_records = list(audio_records)
             selected_scene_numbers = extract_selected_scene_numbers(
                 selected_shot_ids, str(script_data.id)
             )
@@ -891,6 +893,91 @@ async def generate_entertainment_video(
                     record, str(script_data.id), selected_scene_numbers
                 )
             ]
+
+            def _record_scene_number(record: AudioGeneration) -> Optional[int]:
+                scene_number = parse_scene_id(record.scene_id)
+                if scene_number is None and record.audio_metadata:
+                    raw_scene = record.audio_metadata.get("scene") or record.audio_metadata.get("scene_number")
+                    try:
+                        scene_number = int(raw_scene) if raw_scene is not None else None
+                    except (TypeError, ValueError):
+                        scene_number = None
+                if scene_number is None and record.sequence_order:
+                    try:
+                        scene_number = int(record.sequence_order)
+                    except (TypeError, ValueError):
+                        scene_number = None
+                return scene_number
+
+            def _record_has_usable_audio(record: AudioGeneration) -> bool:
+                return bool(record.audio_url and record.status == "completed")
+
+            target_scene_numbers = selected_scene_numbers or [
+                int(scene.get("scene_number") or idx + 1)
+                for idx, scene in enumerate(script_data.scene_descriptions or [])
+            ]
+            usable_audio_by_scene: Dict[int, List[str]] = {}
+            for record in audio_records:
+                record_scene = _record_scene_number(record)
+                if record_scene is not None and _record_has_usable_audio(record):
+                    usable_audio_by_scene.setdefault(record_scene, []).append(str(record.id))
+
+            if request.selected_audio_ids:
+                requested_audio_ids = {str(aid) for aid in request.selected_audio_ids}
+                found_selected_ids = {str(record.id) for record in raw_audio_records}
+                missing_selected_ids = sorted(requested_audio_ids - found_selected_ids)
+                if missing_selected_ids:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "status": "error",
+                            "code": "KAN86_AUDIO_SCOPE_MISMATCH",
+                            "message": "Selected audio was not found in the current user/script scope.",
+                            "missing_or_unscoped_audio_ids": missing_selected_ids,
+                        },
+                    )
+
+                if selected_scene_numbers:
+                    selected_scene_set = set(target_scene_numbers)
+                    mismatched_audio = []
+                    for record in raw_audio_records:
+                        if str(record.id) not in requested_audio_ids:
+                            continue
+                        record_scene = _record_scene_number(record)
+                        if record_scene not in selected_scene_set:
+                            mismatched_audio.append({
+                                "audio_id": str(record.id),
+                                "audio_scene_number": record_scene,
+                                "target_scene_numbers": target_scene_numbers,
+                            })
+                    if mismatched_audio:
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "status": "error",
+                                "code": "KAN86_AUDIO_SCENE_MISMATCH",
+                                "message": "Selected audio does not belong to the selected scene/chapter/script/scene scope.",
+                                "mismatched_audio": mismatched_audio,
+                            },
+                        )
+
+
+            missing_audio_scenes = [
+                scene_number for scene_number in target_scene_numbers
+                if scene_number not in usable_audio_by_scene
+            ]
+            if missing_audio_scenes:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "status": "error",
+                        "code": "KAN86_MISSING_SCENE_AUDIO",
+                        "message": "Video generation requires usable audio for every targeted scene.",
+                        "missing_scene_numbers": missing_audio_scenes,
+                        "target_scene_numbers": target_scene_numbers,
+                        "selected_audio_ids": request.selected_audio_ids or [],
+                    },
+                )
 
             # KAN-166 integration fix: Reject audio files that are too short for video rendering.
             # ModelsLab requires >= 5 seconds. However, duration_seconds=0 means unknown duration
@@ -1168,6 +1255,8 @@ async def generate_entertainment_video(
                 "selected_audio": (
                     len(request.selected_audio_ids) if request.selected_audio_ids else 0
                 ),
+                "target_scene_numbers": target_scene_numbers,
+                "usable_audio_by_scene": usable_audio_by_scene,
                 "total_images": len(existing_images),
                 "created_at": (
                     script_data.created_at.isoformat()
