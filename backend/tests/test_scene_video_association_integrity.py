@@ -226,25 +226,46 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.tasks.video_tasks import (
+    ProviderMediaUrlConfigurationError,
     generate_scene_videos,
     normalize_media_url_for_internal_access,
     normalize_media_url_for_provider,
 )
 
 
-def test_kan86_provider_media_url_rewrites_localhost_minio_to_public_url(monkeypatch):
-    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "https://minio-public.example.com")
+def test_kan86_provider_media_url_rejects_localhost_without_external_base(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
     monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    monkeypatch.delenv("PUBLIC_MINIO_URL", raising=False)
+    monkeypatch.delenv("MINIO_EXTERNAL_URL", raising=False)
+    monkeypatch.delenv("MEDIA_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("PUBLIC_MEDIA_URL", raising=False)
+    monkeypatch.delenv("S3_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("CDN_BASE_URL", raising=False)
+
+    stored_url = "http://localhost:9000/litink-books/users/u1/images/scene.png?X-Amz-Signature=secret"
+
+    with pytest.raises(ProviderMediaUrlConfigurationError):
+        normalize_media_url_for_provider(stored_url)
+    assert (
+        normalize_media_url_for_internal_access(stored_url)
+        == "http://minio:9000/litink-books/users/u1/images/scene.png?X-Amz-Signature=secret"
+    )
+
+
+def test_kan86_provider_media_url_rewrites_localhost_minio_to_explicit_provider_base(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", "https://minio-public.example.com")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
 
     stored_url = "http://localhost:9000/litink-books/users/u1/images/scene.png?X-Amz-Signature=secret"
 
     assert (
         normalize_media_url_for_provider(stored_url)
         == "https://minio-public.example.com/litink-books/users/u1/images/scene.png?X-Amz-Signature=secret"
-    )
-    assert (
-        normalize_media_url_for_internal_access(stored_url)
-        == "http://minio:9000/litink-books/users/u1/images/scene.png?X-Amz-Signature=secret"
     )
 
 
@@ -329,6 +350,47 @@ class _ProviderFailureService(_RecordingModelsLabService):
     async def generate_image_to_video(self, **kwargs):
         self.calls.append(kwargs)
         return {"status": "error", "error": "provider refused media"}
+
+
+@pytest.mark.asyncio
+async def test_kan86_localhost_media_config_error_is_persisted_before_provider_call(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    for env_name in (
+        "MODELSLAB_MEDIA_PUBLIC_URL",
+        "MINIO_PROVIDER_PUBLIC_URL",
+        "PUBLIC_MINIO_URL",
+        "MINIO_EXTERNAL_URL",
+        "MEDIA_PUBLIC_URL",
+        "PUBLIC_MEDIA_URL",
+        "S3_PUBLIC_URL",
+        "CDN_BASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+    session = _RecordingSession()
+    service = _ProviderFailureService()
+
+    result = await generate_scene_videos(
+        modelslab_service=service,
+        video_gen_id="11111111-1111-1111-1111-111111111111",
+        scene_descriptions=["Scene one"],
+        audio_files={"characters": [], "narrator": [], "sound_effects": [], "background_music": []},
+        image_data={"scene_images": [{"image_url": "http://localhost:9000/litink-dev/scene.png?secret=1"}]},
+        video_style="realistic",
+        user_id="22222222-2222-2222-2222-222222222222",
+        session=session,
+        scene_numbers=[1],
+    )
+
+    assert result == [None]
+    assert service.calls == []
+    diagnostic_calls = [params for stmt, params in session.executed if "provider_attempts" in stmt]
+    assert diagnostic_calls, "configuration errors should be persisted to task_meta"
+    assert "configuration_error" in diagnostic_calls[0]["diagnostic"]
+    assert "Provider media URL is not externally reachable" in diagnostic_calls[0]["diagnostic"]
+    assert "secret=1" not in diagnostic_calls[0]["diagnostic"]
 
 
 @pytest.mark.asyncio

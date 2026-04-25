@@ -17,6 +17,7 @@ import os
 import requests
 import tempfile
 import uuid
+import ipaddress
 from urllib.parse import urlparse, urlunparse
 from app.core.services.file import FileService
 from app.core.config import settings
@@ -31,7 +32,21 @@ from app.videos.association_integrity import (
 logger = get_task_logger(__name__)
 
 
-_LOCAL_MINIO_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "minio"}
+_LOCAL_MINIO_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "minio", "host.docker.internal"}
+_PROVIDER_MEDIA_PUBLIC_URL_ENV_NAMES = (
+    "MODELSLAB_MEDIA_PUBLIC_URL",
+    "MINIO_PROVIDER_PUBLIC_URL",
+    "PUBLIC_MINIO_URL",
+    "MINIO_EXTERNAL_URL",
+    "MEDIA_PUBLIC_URL",
+    "PUBLIC_MEDIA_URL",
+    "S3_PUBLIC_URL",
+    "CDN_BASE_URL",
+)
+
+
+class ProviderMediaUrlConfigurationError(ValueError):
+    """Raised before provider calls when media URLs are not externally fetchable."""
 
 
 def _replace_url_origin(url: str, target_origin: Optional[str]) -> str:
@@ -49,6 +64,31 @@ def _replace_url_origin(url: str, target_origin: Optional[str]) -> str:
     )
 
 
+def _is_provider_unsafe_host(host: Optional[str]) -> bool:
+    """Return True for hosts external providers cannot fetch (local/docker/private IPs)."""
+    if not host:
+        return True
+
+    host = host.lower()
+    if host in _LOCAL_MINIO_HOSTS or host.endswith(".local"):
+        return True
+
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified
+    except ValueError:
+        return False
+
+
+def _is_provider_unsafe_url(url: Optional[str]) -> bool:
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    return _is_provider_unsafe_host(parsed.hostname)
+
+
 def _is_local_minio_url(url: str) -> bool:
     """Detect MinIO URLs that are only reachable from browser/dev/container context."""
     if not url:
@@ -58,12 +98,12 @@ def _is_local_minio_url(url: str) -> bool:
         return False
 
     host = parsed.hostname.lower()
-    if host in _LOCAL_MINIO_HOSTS:
+    if _is_provider_unsafe_host(host):
         return True
 
     for configured in (settings.MINIO_PUBLIC_URL, settings.MINIO_ENDPOINT):
         configured_host = urlparse(configured or "").hostname
-        if configured_host and host == configured_host.lower() and configured_host.lower() in _LOCAL_MINIO_HOSTS:
+        if configured_host and host == configured_host.lower() and _is_provider_unsafe_host(configured_host):
             return True
     return False
 
@@ -78,23 +118,87 @@ def _redact_media_url_for_log(url: Optional[str]) -> Optional[str]:
     return urlunparse(parsed._replace(query="", fragment=""))
 
 
+def _replace_url_base(url: str, target_base: Optional[str]) -> str:
+    """Rewrite a media URL to target_base, preserving bucket/object path and query."""
+    if not url or not target_base:
+        return url
+
+    parsed_url = urlparse(url)
+    parsed_target = urlparse(target_base)
+    if not parsed_url.scheme or not parsed_url.netloc or not parsed_target.scheme or not parsed_target.netloc:
+        return url
+
+    target_prefix = (parsed_target.path or "").rstrip("/")
+    source_path = parsed_url.path if parsed_url.path.startswith("/") else f"/{parsed_url.path}"
+    new_path = f"{target_prefix}{source_path}" if target_prefix else source_path
+    return urlunparse(
+        parsed_url._replace(scheme=parsed_target.scheme, netloc=parsed_target.netloc, path=new_path)
+    )
+
+
+def _valid_external_media_base(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    if _is_provider_unsafe_host(parsed.hostname):
+        return None
+    return value.rstrip("/")
+
+
+def _provider_media_public_base() -> Optional[str]:
+    """Resolve an externally reachable base URL for provider-bound MinIO media."""
+    for configured in (
+        getattr(settings, "MODELSLAB_MEDIA_PUBLIC_URL", None),
+        getattr(settings, "MINIO_PROVIDER_PUBLIC_URL", None),
+    ):
+        valid = _valid_external_media_base(configured)
+        if valid:
+            return valid
+
+    minio_public = getattr(settings, "MINIO_PUBLIC_URL", None)
+    if minio_public and not _is_provider_unsafe_url(minio_public):
+        valid = _valid_external_media_base(minio_public)
+        if valid:
+            return valid
+
+    # Last-resort compatibility for deployments that already expose a generic
+    # media/CDN env var but have not yet moved it into typed settings.
+    for env_name in _PROVIDER_MEDIA_PUBLIC_URL_ENV_NAMES:
+        valid = _valid_external_media_base(os.getenv(env_name))
+        if valid:
+            return valid
+    return None
+
+
 def normalize_media_url_for_provider(url: Optional[str]) -> Optional[str]:
     """Normalize stored media URLs before sending them to external providers.
 
     Celery often stores MinIO objects as http://localhost:9000/... URLs. Those
-    work from the dev browser, but ModelsLab cannot fetch localhost from inside
-    its infrastructure. When MINIO_PUBLIC_URL is configured, rewrite local MinIO
-    origins to that public origin while preserving bucket/object path.
+    work from the dev browser/container network, but ModelsLab cannot fetch
+    localhost/minio/private URLs from its infrastructure. Provider-bound media
+    must therefore be rewritten to an explicitly configured external base, or
+    fail before spending provider credits.
     """
-    if not url or not _is_local_minio_url(url):
+    if not url:
+        return url
+    if not _is_provider_unsafe_url(url):
         return url
 
-    provider_url = _replace_url_origin(url, settings.MINIO_PUBLIC_URL)
-    public_host = urlparse(settings.MINIO_PUBLIC_URL or "").hostname
-    if public_host and public_host.lower() in _LOCAL_MINIO_HOSTS:
-        print(
-            "[MEDIA URL NORMALIZE] MINIO_PUBLIC_URL is local; provider may not be able to fetch media "
-            f"original={_redact_media_url_for_log(url)} provider={_redact_media_url_for_log(provider_url)}"
+    provider_base = _provider_media_public_base()
+    if not provider_base:
+        raise ProviderMediaUrlConfigurationError(
+            "Provider media URL is not externally reachable. Configure MODELSLAB_MEDIA_PUBLIC_URL "
+            "or MINIO_PROVIDER_PUBLIC_URL (external MinIO/CDN base without bucket name); refusing "
+            f"to send {_redact_media_url_for_log(url)} to ModelsLab."
+        )
+
+    provider_url = _replace_url_base(url, provider_base)
+    if _is_provider_unsafe_url(provider_url):
+        raise ProviderMediaUrlConfigurationError(
+            "Resolved provider media URL is still local/private; refusing to send media to ModelsLab: "
+            f"{_redact_media_url_for_log(provider_url)}"
         )
     return provider_url
 
@@ -1542,12 +1646,27 @@ async def generate_scene_videos(
             # Normalize media URLs at the provider boundary. Stored MinIO URLs can
             # be localhost/docker-internal URLs; ModelsLab needs externally
             # reachable URLs, while earlier probes/downloads use internal URLs.
-            provider_image_url = normalize_media_url_for_provider(starting_image_url)
-            provider_init_audio_url = (
-                normalize_media_url_for_provider(init_audio_url)
-                if init_audio_url
-                else None
-            )
+            try:
+                provider_image_url = normalize_media_url_for_provider(starting_image_url)
+                provider_init_audio_url = (
+                    normalize_media_url_for_provider(init_audio_url)
+                    if init_audio_url
+                    else None
+                )
+            except ProviderMediaUrlConfigurationError as media_config_error:
+                provider_attempt = _build_provider_attempt_diagnostic(
+                    scene_id=scene_id,
+                    scene_number=scene_num,
+                    original_image_url=starting_image_url,
+                    provider_image_url=None,
+                    original_audio_url=init_audio_url,
+                    provider_audio_url=None,
+                    model=current_model_id,
+                    status="configuration_error",
+                    exception=str(media_config_error),
+                )
+                raise
+
             log_provider_media_url_normalization("image_url", starting_image_url, provider_image_url)
             log_provider_media_url_normalization("init_audio", init_audio_url, provider_init_audio_url)
 
