@@ -90,25 +90,30 @@ interface StoryboardContextValue extends StoryboardState {
 
 const StoryboardContext = createContext<StoryboardContextValue | null>(null);
 
-// Helper: map raw audio files to AudioFile objects grouped by scene
+// Helper: map raw audio files to AudioFile objects grouped by scene.
+// KAN-142: Video-tab audio hydration must be strict to the active script and scene.
+// Do not carry over null-script/legacy rows or rows without parseable scene metadata;
+// those can make stale audio from another lane appear as selectable video audio.
 function mapAudioFiles(rawFiles: any[], scriptId: string): Record<number, AudioFile[]> {
   const filteredAudio = rawFiles.filter((file: any) => {
     const normalizedScriptId = file.script_id ?? file.scriptId;
-    return normalizedScriptId === scriptId || !normalizedScriptId;
+    return String(normalizedScriptId || '') === String(scriptId);
   });
 
   const groupedAudio: Record<number, AudioFile[]> = {};
   filteredAudio.forEach((file: any) => {
     const metadata = file.metadata || file.audio_metadata || {};
     const rawScene = metadata?.scene ?? file.scene_id ?? file.scene_number ?? null;
-    let sceneNumber = 1;
-    if (typeof rawScene === 'number') {
+    let sceneNumber: number | null = null;
+    if (typeof rawScene === 'number' && Number.isFinite(rawScene)) {
       sceneNumber = Math.floor(rawScene);
     } else if (typeof rawScene === 'string') {
       const cleaned = rawScene.replace(/^scene_/i, '');
       const parsed = parseFloat(cleaned);
       if (!isNaN(parsed)) sceneNumber = Math.floor(parsed);
     }
+
+    if (!sceneNumber || sceneNumber < 1) return;
 
     let type: AudioFile['type'] = 'narration';
     const audioType = file.audio_type || file.type;
@@ -350,6 +355,7 @@ export const StoryboardProvider: React.FC<{ children: ReactNode }> = ({ children
 
     setStatus('loading');
     setError(null);
+    resetStoryboard();
 
     (async () => {
       try {
