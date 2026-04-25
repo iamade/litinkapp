@@ -31,13 +31,13 @@ class ModelConfig:
 
 
 # Text & Script Generation Strategy (LMSYS Creative Writing Leaderboard-based)
-# Primary: Ollama Cloud (KAN-181) | Fallbacks: OpenRouter free-tier models
+# Primary: Ollama Cloud (KAN-181) | Fallbacks: Ollama Cloud models
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="gemma4:31b-cloud",  # Ollama Cloud API (KAN-181 fix)
-        fallback="meta-llama/llama-3.3-70b-instruct:free",  # OpenRouter FREE, 66K ctx, battle-tested
-        fallback2="stepfun/step-3.5-flash:free",  # OpenRouter FREE, 1M ctx, strong reasoning MoE
-        fallback3="deepseek/deepseek-chat",  # OpenRouter $0.55/1M, 164K ctx, reliable paid backup
+        primary="ollama/gemma4:31b",  # Ollama Cloud API — valid model ID (KAN-239 fix)
+        fallback="ollama/ministral-3:8b",  # Ollama Cloud, 8B params, Mistral (KAN-239)
+        fallback2="ollama/gemma3:12b",  # Ollama Cloud, 12B params, Gemma 3 (KAN-239)
+        fallback3="ollama/gemma3:4b",  # Ollama Cloud, 4B params, lightweight backup (KAN-239)
         fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
         max_tokens=4000,
         temperature=0.7,
@@ -45,9 +45,9 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         cost_per_1k_output=0.0,
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="qwen/qwen3.5-flash-02-23",  # OpenRouter $0.33/1M, 1M ctx, best value
-        fallback="mistralai/mistral-small-2603",  # OpenRouter $0.75/1M, 262K ctx, reliable
-        fallback2="openai/gpt-5.4-nano",  # OpenRouter $1.45/1M, 400K ctx, OpenAI quality
+        primary="ollama/deepseek-v3.2",  # Ollama Cloud, DeepSeek V3.2 (KAN-239)
+        fallback="ollama/gemma3:27b",  # Ollama Cloud, 27B params, high quality (KAN-239)
+        fallback2="ollama/ministral-3:14b",  # Ollama Cloud, 14B params, Mistral (KAN-239)
         fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
         max_tokens=4000,
         temperature=0.7,

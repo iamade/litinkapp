@@ -157,9 +157,9 @@ export const AudioStoryboardSceneRow: React.FC<AudioStoryboardSceneRowProps> = (
           <div title={generateDisabledReason}>
             <button
               onClick={onGenerateAudio}
-              disabled={isGeneratingAudio}
+              disabled={isGeneratingAudio || !!generateDisabledReason}
               className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                isGeneratingAudio
+                isGeneratingAudio || generateDisabledReason
                   ? 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-300 opacity-60 cursor-not-allowed'
                   : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:from-purple-700 hover:to-indigo-700 hover:shadow-md'
               }`}

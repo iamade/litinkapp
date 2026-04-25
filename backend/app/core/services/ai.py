@@ -1,6 +1,7 @@
 import openai
 from typing import List, Dict, Any, Optional
 import json
+import logging
 import asyncio
 import re
 import os
@@ -15,8 +16,10 @@ from app.core.services.text_utils import (
 from app.core.services.provider_router import provider_router
 from app.core.model_config import get_model_config
 
-# Default model for AIService calls (free tier primary)
+# Default model for AIService calls (free tier primary — includes ollama/ prefix for correct routing)
 _DEFAULT_MODEL = get_model_config("script", "free").primary
+
+logger = logging.getLogger(__name__)
 
 
 class AIService:
@@ -46,17 +49,59 @@ class AIService:
         messages: List[Dict],
         model: Optional[str] = None,
         provider: str = "auto",
+        fallback_tier: Optional[str] = None,
         **kwargs,
     ) -> Any:
-        """Make completion request via unified ProviderRouter.
+        """Make completion request via unified ProviderRouter with fallback support.
 
         The `provider` parameter is kept for backward compatibility but ignored —
-        routing is determined by the model prefix (google/, groq/, or OpenRouter).
+        routing is determined by the model prefix (ollama/, google/, groq/, or OpenRouter).
+
+        If `fallback_tier` is provided (e.g. "free", "basic"), attempts the primary model
+        first, then falls back through fallback/fallback2/fallback3/fallback4 in the
+        tier's ModelConfig until one succeeds.
         """
         model = model or _DEFAULT_MODEL
-        return await provider_router.chat_completion(
-            model=model, messages=messages, **kwargs
-        )
+
+        # If no fallback tier specified, try the single model only
+        if fallback_tier is None:
+            return await provider_router.chat_completion(
+                model=model, messages=messages, **kwargs
+            )
+
+        # Build fallback chain from ModelConfig for the specified tier
+        from app.core.model_config import ModelTier
+        config = get_model_config("script", fallback_tier)
+        if not config:
+            logger.warning(f"No model config for tier '{fallback_tier}', using primary only")
+            return await provider_router.chat_completion(
+                model=model, messages=messages, **kwargs
+            )
+
+        # Try primary, then fallbacks
+        models_to_try = [config.primary]
+        for attr in ["fallback", "fallback2", "fallback3", "fallback4"]:
+            val = getattr(config, attr, None)
+            if val:
+                models_to_try.append(val)
+
+        last_error = None
+        for attempt, model_id in enumerate(models_to_try):
+            try:
+                response = await provider_router.chat_completion(
+                    model=model_id, messages=messages, **kwargs
+                )
+                if attempt > 0:
+                    logger.info(f"[FALLBACK] Succeeded with {model_id} after primary failed (attempt {attempt + 1})")
+                return response
+            except Exception as e:
+                logger.warning(f"[FALLBACK] Model {model_id} failed: {e}")
+                last_error = e
+                continue
+
+        # All models failed
+        logger.error(f"[FALLBACK] All {len(models_to_try)} models failed for tier '{fallback_tier}'. Last error: {last_error}")
+        raise last_error or Exception(f"All models failed for tier '{fallback_tier}'")
 
     async def generate_quiz(
         self, content: str, difficulty: str = "medium", provider: str = "auto"
@@ -811,6 +856,7 @@ Return only the list of scene descriptions.
             response = await self._make_completion(
                 messages=messages,
                 provider=provider,
+                fallback_tier="free",
                 response_format={"type": "json_object"},
                 temperature=0.5,  # Balanced creativity and adherence to context
                 max_tokens=8000,  # Increased for longer scripts with audio design

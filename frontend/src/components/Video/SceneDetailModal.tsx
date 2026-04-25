@@ -302,8 +302,8 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
               {allSceneAudio.length === 0 ? (
                 <div className="text-center py-8">
                   <Volume2 className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-                  <p className="text-sm text-gray-500 italic">No audio loaded for this scene.</p>
-                  <p className="text-xs text-gray-400 mt-1">If you've already generated audio, visit the Audio tab first to load it — then come back here to select a track.</p>
+                  <p className="text-sm text-gray-500 italic">No generated audio found for this scene.</p>
+                  <p className="text-xs text-gray-400 mt-1">Generate audio in the Audio tab for the active script, then return here. The Video tab will load matching tracks automatically.</p>
                 </div>
               ) : (
                 // Render grouped by type
