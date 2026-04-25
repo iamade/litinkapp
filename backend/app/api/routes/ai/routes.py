@@ -35,6 +35,7 @@ from app.videos.association_integrity import (
     is_audio_record_in_context,
     is_generation_excluded,
     parse_scene_id,
+    resolve_target_scene_numbers,
 )
 from app.books.models import (
     Book,
@@ -912,10 +913,11 @@ async def generate_entertainment_video(
             def _record_has_usable_audio(record: AudioGeneration) -> bool:
                 return bool(record.audio_url and record.status == "completed")
 
-            target_scene_numbers = selected_scene_numbers or [
-                int(scene.get("scene_number") or idx + 1)
-                for idx, scene in enumerate(script_data.scene_descriptions or [])
-            ]
+            target_scene_numbers = resolve_target_scene_numbers(
+                selected_shot_ids,
+                str(script_data.id),
+                script_data.scene_descriptions,
+            )
             usable_audio_by_scene: Dict[int, List[str]] = {}
             for record in audio_records:
                 record_scene = _record_scene_number(record)

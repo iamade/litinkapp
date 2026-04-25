@@ -6,6 +6,7 @@ from app.videos.association_integrity import (
     extract_shot_selections,
     is_audio_record_in_context,
     resolve_scene_identity,
+    resolve_target_scene_numbers,
 )
 
 
@@ -67,6 +68,47 @@ def test_extract_shot_selections_handles_numeric_prefix_script_id():
     assert selected[0].scene_index == 0
     assert selected[0].shot_index == 0
     assert selected[0].script_id == script_id
+
+
+def test_kan86_extract_shot_selection_handles_scene_number_before_uuid():
+    script_id = "c5942431-1552-4f50-a23e-73d8d1d6fb3a"
+    selected = extract_shot_selections(
+        [f"scene-1777133288345-0-1-0-{script_id}"], expected_script_id=script_id
+    )
+    assert len(selected) == 1
+    assert selected[0].scene_index == 0
+    assert selected[0].shot_index == 0
+    assert selected[0].script_id == script_id
+
+
+def test_kan86_target_scene_numbers_support_string_scene_descriptions():
+    assert resolve_target_scene_numbers(
+        selected_shot_ids=None,
+        expected_script_id="script-a",
+        scene_descriptions=["Opening shot", "Closing shot"],
+    ) == [1, 2]
+
+
+def test_kan86_target_scene_numbers_support_mixed_scene_description_shapes():
+    scene_obj = SimpleNamespace(scene_number="4", description="object scene")
+    scenes = [
+        {"scene_number": "2", "description": "dict scene"},
+        "string scene",
+        scene_obj,
+        {"description": "missing explicit scene number"},
+        SimpleNamespace(description="object missing scene_number"),
+    ]
+    assert resolve_target_scene_numbers(None, "script-a", scenes) == [2, 4, 5]
+
+
+def test_kan86_target_scene_numbers_prefers_selected_shot_ids():
+    script_id = "c5942431-1552-4f50-a23e-73d8d1d6fb3a"
+    selected_shot_ids = [f"scene-1777133288345-2-3-0-{script_id}"]
+    assert resolve_target_scene_numbers(
+        selected_shot_ids,
+        script_id,
+        ["Scene 1", "Scene 2", "Scene 3"],
+    ) == [3]
 
 from app.tasks.video_tasks import find_scene_audio
 
