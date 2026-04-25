@@ -1208,6 +1208,8 @@ async def generate_entertainment_video(
                 #     }
                 # }).eq('id', video_gen_id).execute()
 
+        except HTTPException:
+            raise
         except Exception as e:
             print(f"❌ Failed to queue audio task: {e}")
 

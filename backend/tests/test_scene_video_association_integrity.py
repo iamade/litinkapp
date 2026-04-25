@@ -24,6 +24,42 @@ def test_scene_context_filters_out_other_script_assets():
     assert is_audio_record_in_context(wrong_script_audio, script_a, [1]) is False
 
 
+def test_kan86_audio_context_uses_metadata_scene_number_when_scene_fields_missing():
+    script_id = str(uuid.uuid4())
+    audio = SimpleNamespace(
+        script_id=script_id,
+        scene_id=None,
+        sequence_order=None,
+        audio_metadata={"scene_number": 1},
+    )
+
+    assert is_audio_record_in_context(audio, script_id, [1]) is True
+
+
+def test_kan86_audio_context_rejects_mismatched_metadata_scene_number():
+    script_id = str(uuid.uuid4())
+    audio = SimpleNamespace(
+        script_id=script_id,
+        scene_id=None,
+        sequence_order=None,
+        audio_metadata={"scene_number": 2},
+    )
+
+    assert is_audio_record_in_context(audio, script_id, [1]) is False
+
+
+def test_kan86_audio_context_ignores_non_dict_metadata_before_sequence_fallback():
+    script_id = str(uuid.uuid4())
+    audio = SimpleNamespace(
+        script_id=script_id,
+        scene_id=None,
+        sequence_order=None,
+        audio_metadata='{"scene_number": 1}',
+    )
+
+    assert is_audio_record_in_context(audio, script_id, [1]) is False
+
+
 def test_deduplicate_scene_videos_by_deterministic_key():
     scene_videos = [
         {

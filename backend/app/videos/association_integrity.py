@@ -181,9 +181,23 @@ def is_audio_record_in_context(
     if not allowed_set:
         return True
 
-    # KAN-165 integration fix: Try scene_id first (e.g. "scene_2" → 2),
-    # since sequence_order is just a sequential index within audio type, NOT the scene number.
+    # KAN-86: Prefer the explicit scene_id when present, then scene metadata
+    # persisted by the audio pipeline, and only fall back to legacy
+    # sequence_order. sequence_order can be an audio ordering index, so it must
+    # not hide a valid audio_metadata.scene_number match when scene_id is null.
     scene_number = parse_scene_id(getattr(audio_record, "scene_id", None))
+
+    if scene_number is None:
+        audio_metadata = getattr(audio_record, "audio_metadata", None)
+        if isinstance(audio_metadata, dict):
+            metadata_scene = audio_metadata.get("scene")
+            if metadata_scene is None:
+                metadata_scene = audio_metadata.get("scene_number")
+            try:
+                scene_number = int(metadata_scene) if metadata_scene is not None else None
+            except (TypeError, ValueError):
+                scene_number = None
+
     if scene_number is None:
         scene_number = getattr(audio_record, "sequence_order", None)
 
