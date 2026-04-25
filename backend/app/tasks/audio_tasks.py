@@ -1921,6 +1921,8 @@ def generate_chapter_audio_task(
     """Generate audio for a chapter scene"""
 
     async def async_generate_chapter_audio():
+        nonlocal chapter_id
+
         from app.core.services.elevenlabs import ElevenLabsService
         from app.core.services.modelslab_v7_audio import ModelsLabV7AudioService
 

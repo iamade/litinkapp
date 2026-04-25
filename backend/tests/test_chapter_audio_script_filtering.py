@@ -1,9 +1,12 @@
+import inspect
+import symtable
 import uuid
 from types import SimpleNamespace
 
 import pytest
 
 from app.api.routes.chapters import routes as chapter_routes
+from app.tasks import audio_tasks
 
 
 class _EmptyResult:
@@ -22,6 +25,21 @@ class _CapturingSession:
 
 async def _allow_chapter_access(chapter_id, user_id, session):
     return {"id": chapter_id, "user_id": str(user_id)}
+
+
+def test_chapter_audio_task_can_rebind_chapter_id_from_existing_record():
+    """Regression: nested task rebinds chapter_id, so it must not be an unbound local."""
+    source = inspect.getsource(audio_tasks.generate_chapter_audio_task.run)
+    task_table = symtable.symtable(source, "audio_tasks.py", "exec").get_children()[0]
+    nested_table = next(
+        child
+        for child in task_table.get_children()
+        if child.get_name() == "async_generate_chapter_audio"
+    )
+
+    chapter_symbol = nested_table.lookup("chapter_id")
+    assert chapter_symbol.is_nonlocal()
+    assert not chapter_symbol.is_local()
 
 
 async def _captured_audio_statement(monkeypatch, *, chapter_id, script_id):
