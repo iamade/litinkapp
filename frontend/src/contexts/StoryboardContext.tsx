@@ -90,20 +90,66 @@ interface StoryboardContextValue extends StoryboardState {
 
 const StoryboardContext = createContext<StoryboardContextValue | null>(null);
 
+interface RawAudioMetadata {
+  scene_number?: unknown;
+  scene?: unknown;
+  shot_type?: 'key_scene' | 'suggested_shot';
+  shot_index?: unknown;
+  character_name?: unknown;
+}
+
+interface RawAudioFile {
+  id?: unknown;
+  script_id?: unknown;
+  scriptId?: unknown;
+  generation_status?: unknown;
+  status?: unknown;
+  audio_url?: unknown;
+  url?: unknown;
+  metadata?: RawAudioMetadata | null;
+  audio_metadata?: RawAudioMetadata | null;
+  scene_id?: unknown;
+  scene_number?: unknown;
+  audio_type?: unknown;
+  type?: unknown;
+  duration?: unknown;
+  duration_seconds?: unknown;
+  character_name?: unknown;
+  text_content?: unknown;
+  text_prompt?: unknown;
+}
+
+const stringValue = (value: unknown): string | undefined => (
+  typeof value === 'string' ? value : undefined
+);
+
+const numberValue = (value: unknown): number | undefined => (
+  typeof value === 'number' ? value : undefined
+);
+
 // Helper: map raw audio files to AudioFile objects grouped by scene.
 // KAN-142: Video-tab audio hydration must be strict to the active script and scene.
 // Do not carry over null-script/legacy rows or rows without parseable scene metadata;
 // those can make stale audio from another lane appear as selectable video audio.
-function mapAudioFiles(rawFiles: any[], scriptId: string): Record<number, AudioFile[]> {
-  const filteredAudio = rawFiles.filter((file: any) => {
+// eslint-disable-next-line react-refresh/only-export-components
+export function mapAudioFiles(rawFiles: RawAudioFile[], scriptId: string): Record<number, AudioFile[]> {
+  const filteredAudio = rawFiles.filter((file) => {
     const normalizedScriptId = file.script_id ?? file.scriptId;
-    return String(normalizedScriptId || '') === String(scriptId);
+    const status = String(file.generation_status ?? file.status ?? '').toLowerCase();
+    const audioUrl = file.audio_url ?? file.url;
+
+    return (
+      String(normalizedScriptId || '') === String(scriptId)
+      && status === 'completed'
+      && typeof audioUrl === 'string'
+      && audioUrl.trim().length > 0
+    );
   });
 
   const groupedAudio: Record<number, AudioFile[]> = {};
-  filteredAudio.forEach((file: any) => {
+  filteredAudio.forEach((file) => {
     const metadata = file.metadata || file.audio_metadata || {};
-    const rawScene = metadata?.scene ?? file.scene_id ?? file.scene_number ?? null;
+    const rawScene = metadata.scene_number ?? metadata.scene ?? file.scene_id ?? file.scene_number ?? null;
     let sceneNumber: number | null = null;
     if (typeof rawScene === 'number' && Number.isFinite(rawScene)) {
       sceneNumber = Math.floor(rawScene);
@@ -124,17 +170,17 @@ function mapAudioFiles(rawFiles: any[], scriptId: string): Record<number, AudioF
     else if (audioType === 'ambiance' || audioType === 'ambient') type = 'ambiance';
 
     const mapped: AudioFile = {
-      id: file.id,
+      id: String(file.id ?? ''),
       type,
       sceneNumber,
-      shotType: metadata?.shot_type,
-      shotIndex: typeof metadata?.shot_index === 'number' ? metadata.shot_index : undefined,
-      url: file.url ?? file.audio_url,
-      duration: file.duration ?? file.duration_seconds,
-      character: file.character_name ?? metadata?.character_name,
-      status: file.generation_status ?? file.status,
-      text_content: file.text_content,
-      text_prompt: file.text_prompt,
+      shotType: metadata.shot_type,
+      shotIndex: numberValue(metadata.shot_index),
+      url: stringValue(file.audio_url ?? file.url),
+      duration: numberValue(file.duration ?? file.duration_seconds),
+      character: stringValue(file.character_name ?? metadata.character_name),
+      status: stringValue(file.generation_status ?? file.status),
+      text_content: stringValue(file.text_content),
+      text_prompt: stringValue(file.text_prompt),
     };
 
     if (!groupedAudio[sceneNumber]) groupedAudio[sceneNumber] = [];
