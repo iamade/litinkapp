@@ -7,7 +7,7 @@ from app.api.services.video import VideoService
 from app.core.database import async_session, engine
 from sqlmodel import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from app.videos.models import VideoGeneration, VideoSegment
 from app.subscriptions.models import UserSubscription
 from app.core.model_config import get_model_config, ModelConfig
@@ -244,6 +244,7 @@ def log_provider_media_url_normalization(kind: str, original_url: Optional[str],
 
 _PROVIDER_CDN_METADATA_KEYS = (
     "provider_image_url",
+    "provider_audio_url",
     "provider_cdn_url",
     "provider_url",
     "modelslab_cdn_url",
@@ -254,6 +255,7 @@ _PROVIDER_CDN_METADATA_KEYS = (
 _PROVIDER_CDN_TIMESTAMP_KEYS = (
     "provider_url_created_at",
     "provider_image_url_created_at",
+    "provider_audio_url_created_at",
     "original_cdn_url_created_at",
     "cdn_created_at",
     "created_at",
@@ -338,6 +340,144 @@ def select_provider_media_source(
         if not _is_provider_unsafe_url(candidate):
             return candidate
     return canonical_url
+
+
+def _provider_metadata_subset(metadata: Any) -> Dict[str, Any]:
+    """Return only provider/CDN URL metadata needed at the ModelsLab boundary."""
+    meta = _metadata_dict(metadata)
+    return {
+        key: value
+        for key, value in meta.items()
+        if key in _PROVIDER_CDN_METADATA_KEYS or key in _PROVIDER_CDN_TIMESTAMP_KEYS
+    }
+
+
+def _merge_provider_metadata(media_item: Dict[str, Any], metadata: Any, metadata_key: str) -> bool:
+    """Promote persisted provider CDN metadata onto a task media snapshot.
+
+    The product path can snapshot selected audio/image rows with canonical
+    localhost MinIO URLs while omitting audio_metadata/meta. Rehydrating only
+    provider/CDN fields preserves fail-closed canonical fallback behavior while
+    allowing verified CDN URLs to be selected before provider normalization.
+    """
+    if not isinstance(media_item, dict):
+        return False
+    provider_meta = _provider_metadata_subset(metadata)
+    if not provider_meta:
+        return False
+
+    nested = _metadata_dict(media_item.get(metadata_key))
+    changed = False
+    for key, value in provider_meta.items():
+        if value is None or value == "":
+            continue
+        if nested.get(key) != value:
+            nested[key] = value
+            changed = True
+        if media_item.get(key) in (None, ""):
+            media_item[key] = value
+            changed = True
+    if changed:
+        media_item[metadata_key] = nested
+    return changed
+
+
+def _result_mappings(result: Any) -> List[Dict[str, Any]]:
+    try:
+        mappings = result.mappings()
+        return [dict(row) for row in mappings.all()]
+    except Exception:
+        pass
+    try:
+        rows = result.fetchall()
+    except Exception:
+        rows = []
+    mapped = []
+    for row in rows:
+        if isinstance(row, dict):
+            mapped.append(row)
+        elif hasattr(row, "_mapping"):
+            mapped.append(dict(row._mapping))
+    return mapped
+
+
+async def rehydrate_media_provider_metadata(
+    session: Optional[AsyncSession],
+    *,
+    audio_files: Optional[Dict[str, Any]] = None,
+    image_data: Optional[Dict[str, Any]] = None,
+    selected_audio_ids: Optional[List[str]] = None,
+) -> None:
+    """Rehydrate provider CDN metadata for selected/snapshotted media rows.
+
+    This intentionally does not replace canonical audio_url/image_url values.
+    Provider URLs are consumed later by select_provider_media_source(), where
+    unsafe localhost/raw-IP fallbacks still fail closed before ModelsLab.
+    """
+    if not session:
+        return
+
+    audio_items_by_id: Dict[str, List[Dict[str, Any]]] = {}
+    if audio_files:
+        selected_set = {str(value) for value in (selected_audio_ids or []) if value}
+        for audio_type in ("characters", "narrator", "sound_effects", "background_music"):
+            for item in audio_files.get(audio_type, []) or []:
+                if not isinstance(item, dict) or not item.get("id"):
+                    continue
+                item_id = str(item.get("id"))
+                if selected_set and item_id not in selected_set:
+                    continue
+                audio_items_by_id.setdefault(item_id, []).append(item)
+
+    image_items_by_id: Dict[str, List[Dict[str, Any]]] = {}
+    if image_data:
+        candidate_images = list(image_data.get("scene_images", []) or [])
+        images_container = image_data.get("images", {}) or {}
+        candidate_images.extend(images_container.get("scene_images", []) or [])
+        for item in candidate_images:
+            if isinstance(item, dict) and item.get("id"):
+                image_items_by_id.setdefault(str(item.get("id")), []).append(item)
+
+    try:
+        if audio_items_by_id:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT id::text AS id, audio_metadata
+                    FROM audio_generations
+                    WHERE id::text IN :ids
+                    """
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": list(audio_items_by_id.keys())},
+            )
+            for row in _result_mappings(result):
+                for item in audio_items_by_id.get(str(row.get("id")), []):
+                    if _merge_provider_metadata(item, row.get("audio_metadata"), "audio_metadata"):
+                        logger.warning(
+                            "[KAN-86] Rehydrated provider audio metadata for selected audio id=%s",
+                            row.get("id"),
+                        )
+
+        if image_items_by_id:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT id::text AS id, meta
+                    FROM image_generations
+                    WHERE id::text IN :ids
+                    """
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": list(image_items_by_id.keys())},
+            )
+            for row in _result_mappings(result):
+                for item in image_items_by_id.get(str(row.get("id")), []):
+                    if _merge_provider_metadata(item, row.get("meta"), "meta"):
+                        logger.warning(
+                            "[KAN-86] Rehydrated provider image metadata for image id=%s",
+                            row.get("id"),
+                        )
+    except Exception as exc:
+        logger.warning("[KAN-86] Provider media metadata rehydrate skipped: %s", exc)
 
 
 def _safe_uuid_string(value: Optional[str]) -> Optional[str]:
@@ -1554,6 +1694,13 @@ async def generate_scene_videos(
     video_results = []
     if not session:
         raise Exception("Session required for generate_scene_videos")
+
+    await rehydrate_media_provider_metadata(
+        session,
+        audio_files=audio_files,
+        image_data=image_data,
+        selected_audio_ids=selected_audio_ids,
+    )
 
     scene_images = image_data.get("scene_images", [])  # Fixed key mismatch
 

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 
 from app.videos.association_integrity import (
@@ -230,6 +231,7 @@ from app.tasks.video_tasks import (
     generate_scene_videos,
     normalize_media_url_for_internal_access,
     normalize_media_url_for_provider,
+    rehydrate_media_provider_metadata,
     select_provider_media_source,
 )
 
@@ -365,6 +367,103 @@ def test_kan86_provider_media_source_skips_unsafe_metadata_url():
     assert select_provider_media_source(canonical_url, scene_image) == canonical_url
 
 
+def test_kan86_provider_media_source_prefers_audio_provider_url_metadata():
+    canonical_url = "http://localhost:9000/litink-books/users/u1/audio/scene-1.mp3"
+    provider_audio_url = "https://pub-3626123a908346a7a8be8d9295f44e26.r2.dev/generations/4b402da1-f8af-4ee8-97cd-7baca0ad5c05.mp3"
+    selected_audio = {
+        "id": "ff624d48-0000-4000-8000-000000000000",
+        "audio_url": canonical_url,
+        "audio_metadata": {
+            "provider_audio_url": provider_audio_url,
+            "provider_url_created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+
+    assert select_provider_media_source(canonical_url, selected_audio) == provider_audio_url
+
+
+class _HydrateResult:
+    def __init__(self, rows, scalar_value="segment-id"):
+        self._rows = rows
+        self._scalar_value = scalar_value
+
+    def mappings(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+    def scalar(self):
+        return self._scalar_value
+
+
+class _HydrateSession:
+    def __init__(self, *, audio_rows=None, image_rows=None):
+        self.audio_rows = audio_rows or []
+        self.image_rows = image_rows or []
+        self.executed = []
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def execute(self, statement, params=None):
+        statement_text = str(statement)
+        self.executed.append((statement_text, params or {}))
+        if "audio_generations" in statement_text:
+            return _HydrateResult(self.audio_rows)
+        if "image_generations" in statement_text:
+            return _HydrateResult(self.image_rows)
+        return _HydrateResult([])
+
+    async def commit(self):
+        self.commits += 1
+
+    async def rollback(self):
+        self.rollbacks += 1
+
+
+@pytest.mark.asyncio
+async def test_kan86_rehydrates_selected_audio_snapshot_from_audio_metadata():
+    provider_audio_url = "https://pub-3626123a908346a7a8be8d9295f44e26.r2.dev/generations/4b402da1-f8af-4ee8-97cd-7baca0ad5c05.mp3"
+    audio_files = {
+        "characters": [
+            {
+                "id": "ff624d48-0000-4000-8000-000000000000",
+                "scene": 1,
+                "scene_number": 1,
+                "audio_url": "http://localhost:9000/litink-books/users/u1/audio/scene-1.mp3",
+                "duration": 3.0,
+            }
+        ],
+        "narrator": [],
+        "sound_effects": [],
+        "background_music": [],
+    }
+    session = _HydrateSession(
+        audio_rows=[
+            {
+                "id": "ff624d48-0000-4000-8000-000000000000",
+                "audio_metadata": {
+                    "provider_audio_url": provider_audio_url,
+                    "provider_cdn_url": provider_audio_url,
+                    "provider_url_created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+        ]
+    )
+
+    await rehydrate_media_provider_metadata(
+        session,
+        audio_files=audio_files,
+        image_data={"scene_images": []},
+        selected_audio_ids=["ff624d48-0000-4000-8000-000000000000"],
+    )
+
+    selected_audio = audio_files["characters"][0]
+    assert selected_audio["audio_url"].startswith("http://localhost:9000/")
+    assert selected_audio["audio_metadata"]["provider_audio_url"] == provider_audio_url
+    assert select_provider_media_source(selected_audio["audio_url"], selected_audio) == provider_audio_url
+
+
 class _RecordingModelsLabService:
     def __init__(self):
         self.calls = []
@@ -432,6 +531,91 @@ async def test_kan86_scene_video_uses_preserved_provider_cdn_image_without_minio
     assert result == [None]
     assert len(service.calls) == 1
     assert service.calls[0]["image_url"] == provider_cdn_url
+
+
+@pytest.mark.asyncio
+async def test_kan86_selected_scene_audio_rehydrates_provider_cdn_and_records_attempt(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    for env_name in (
+        "MODELSLAB_MEDIA_PUBLIC_URL",
+        "MINIO_PROVIDER_PUBLIC_URL",
+        "PUBLIC_MINIO_URL",
+        "MINIO_EXTERNAL_URL",
+        "MEDIA_PUBLIC_URL",
+        "PUBLIC_MEDIA_URL",
+        "S3_PUBLIC_URL",
+        "CDN_BASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    provider_audio_url = "https://pub-3626123a908346a7a8be8d9295f44e26.r2.dev/generations/4b402da1-f8af-4ee8-97cd-7baca0ad5c05.mp3"
+    provider_image_url = "https://modelslab-cdn.example.com/scene-1.png"
+    service = _RecordingModelsLabService()
+    session = _HydrateSession(
+        audio_rows=[
+            {
+                "id": "ff624d48-0000-4000-8000-000000000000",
+                "audio_metadata": {
+                    "provider_audio_url": provider_audio_url,
+                    "provider_cdn_url": provider_audio_url,
+                    "provider_url_created_at": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+        ]
+    )
+
+    result = await generate_scene_videos(
+        modelslab_service=service,
+        video_gen_id="11111111-1111-1111-1111-111111111111",
+        scene_descriptions=["Scene one only"],
+        audio_files={
+            "characters": [
+                {
+                    "id": "ff624d48-0000-4000-8000-000000000000",
+                    "scene": 1,
+                    "scene_number": 1,
+                    "audio_url": "http://localhost:9000/litink-books/users/u1/audio/scene-1.mp3",
+                    "duration": 3.0,
+                }
+            ],
+            "narrator": [],
+            "sound_effects": [],
+            "background_music": [],
+        },
+        image_data={
+            "scene_images": [
+                {
+                    "id": "img-1",
+                    "scene_number": 1,
+                    "shot_index": 0,
+                    "image_url": "http://localhost:9000/litink-books/users/u1/images/scene-1.png",
+                    "metadata": {
+                        "provider_image_url": provider_image_url,
+                        "provider_url_created_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
+            ]
+        },
+        video_style="realistic",
+        script_data={"script": "", "characters": []},
+        user_id="22222222-2222-2222-2222-222222222222",
+        session=session,
+        scene_numbers=[1],
+        selected_audio_ids=["ff624d48-0000-4000-8000-000000000000"],
+    )
+
+    assert result == [None]
+    assert service.calls[0]["image_url"] == provider_image_url
+    assert service.calls[0]["init_audio"] == provider_audio_url
+    diagnostic_calls = [params for stmt, params in session.executed if "provider_attempts" in stmt]
+    assert diagnostic_calls
+    assert provider_audio_url in diagnostic_calls[0]["diagnostic"]
+    assert provider_image_url in diagnostic_calls[0]["diagnostic"]
+    assert '"provider_audio_url": null' not in diagnostic_calls[0]["diagnostic"]
+    assert '"provider_image_url": null' not in diagnostic_calls[0]["diagnostic"]
 
 
 @pytest.mark.asyncio
@@ -606,9 +790,6 @@ async def test_kan86_success_segment_insert_has_required_counts(monkeypatch):
     assert completed_inserts[-1]["character_count"] == 0
     assert completed_inserts[-1]["dialogue_count"] == 0
     assert completed_inserts[-1]["action_count"] == 0
-
-from datetime import datetime, timezone, timedelta
-from app.tasks.video_tasks import select_provider_media_source
 
 
 def test_kan86_provider_cdn_url_preferred_over_localhost_minio_without_provider_base(monkeypatch):
