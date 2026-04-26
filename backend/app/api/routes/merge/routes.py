@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Any, Optional, List
 import uuid
 from fastapi import (
     APIRouter,
@@ -37,6 +37,27 @@ import mimetypes
 import io
 
 router = APIRouter()
+
+
+def get_current_user_id(current_user: Any) -> str:
+    """Return authenticated user id from SQLModel/Pydantic User or legacy dict."""
+    if isinstance(current_user, dict):
+        user_id = current_user.get("id")
+    else:
+        user_id = getattr(current_user, "id", None)
+
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+    return str(user_id)
+
+
+def get_current_user_log_id(current_user: Any) -> Optional[str]:
+    """Best-effort user id for logs without assuming dict-like access."""
+    try:
+        return get_current_user_id(current_user)
+    except HTTPException:
+        return None
 
 
 def validate_ffmpeg_params(ffmpeg_params: dict) -> None:
@@ -112,10 +133,11 @@ async def start_manual_merge(
     request: MergeManualRequest,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: Any = Depends(get_current_active_user),
 ):
     """Start a manual merge operation with user-controlled parameters"""
     try:
+        user_id = get_current_user_id(current_user)
         # Validate FFmpeg parameters
         if request.ffmpeg_params:
             validate_ffmpeg_params(request.ffmpeg_params.dict())
@@ -124,7 +146,7 @@ async def start_manual_merge(
         if request.video_generation_id:
             stmt = select(VideoGeneration).where(
                 VideoGeneration.id == uuid.UUID(request.video_generation_id),
-                VideoGeneration.user_id == uuid.UUID(current_user["id"]),
+                VideoGeneration.user_id == uuid.UUID(user_id),
             )
             result = await session.exec(stmt)
             video_gen = result.first()
@@ -141,7 +163,7 @@ async def start_manual_merge(
         # Create merge operation record
         merge_op = MergeOperation(
             id=merge_id,
-            user_id=uuid.UUID(current_user["id"]),
+            user_id=uuid.UUID(user_id),
             video_generation_id=(
                 uuid.UUID(request.video_generation_id)
                 if request.video_generation_id
@@ -164,7 +186,7 @@ async def start_manual_merge(
 
         # Start background merge task
         background_tasks.add_task(
-            process_manual_merge, str(merge_id), request, current_user["id"]
+            process_manual_merge, str(merge_id), request, user_id
         )
 
         # Estimate processing time based on input sources
@@ -191,10 +213,11 @@ async def generate_merge_preview(
     request: MergePreviewRequest,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: Any = Depends(get_current_active_user),
 ):
     """Generate a preview of the merge operation without full processing"""
     try:
+        user_id = get_current_user_id(current_user)
         # Validate FFmpeg parameters
         if request.ffmpeg_params:
             validate_ffmpeg_params(request.ffmpeg_params.dict())
@@ -204,7 +227,7 @@ async def generate_merge_preview(
 
         # Start background preview task
         background_tasks.add_task(
-            process_merge_preview, preview_id, request, current_user["id"]
+            process_merge_preview, preview_id, request, user_id
         )
 
         return MergePreviewResponse(
@@ -224,18 +247,19 @@ async def generate_merge_preview(
 async def get_merge_status(
     merge_id: str,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: Any = Depends(get_current_active_user),
 ):
     """Check the status and progress of a merge operation"""
     try:
+        user_id = get_current_user_id(current_user)
         print(
-            f"[MERGE STATUS] Checking status for merge_id: {merge_id}, user: {current_user.get('id')}"
+            f"[MERGE STATUS] Checking status for merge_id: {merge_id}, user: {get_current_user_log_id(current_user)}"
         )
 
         # Query merge operation from database
         stmt = select(MergeOperation).where(
             MergeOperation.id == uuid.UUID(merge_id),
-            MergeOperation.user_id == uuid.UUID(current_user["id"]),
+            MergeOperation.user_id == uuid.UUID(user_id),
         )
         result = await session.exec(stmt)
         merge_op = result.first()
@@ -300,7 +324,7 @@ async def download_merge_result(
     merge_id: str,
     remove_watermark: bool = False,
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: Any = Depends(get_current_active_user),
 ):
     """
     Download the completed merge result.
@@ -310,9 +334,10 @@ async def download_merge_result(
             Only available for paid tiers (Basic+). Free tier gets 403.
     """
     try:
+        user_id = get_current_user_id(current_user)
         print(
             f"[MERGE DOWNLOAD] Downloading merge result for merge_id: {merge_id}, "
-            f"user: {current_user.get('id')}, remove_watermark: {remove_watermark}"
+            f"user: {get_current_user_log_id(current_user)}, remove_watermark: {remove_watermark}"
         )
 
         # Validate merge_id format
@@ -324,7 +349,7 @@ async def download_merge_result(
         # Query merge operation from database
         stmt = select(MergeOperation).where(
             MergeOperation.id == uuid.UUID(merge_id),
-            MergeOperation.user_id == uuid.UUID(current_user["id"]),
+            MergeOperation.user_id == uuid.UUID(user_id),
         )
         result = await session.exec(stmt)
         merge_op = result.first()
@@ -344,7 +369,7 @@ async def download_merge_result(
         # Check download limits + tier permissions (Free tier blocked, watermark toggle enforced)
         manager = SubscriptionManager(session)
         download_check = await manager.check_and_record_download(
-            uuid.UUID(current_user["id"]),
+            uuid.UUID(user_id),
             merge_id=merge_id,
             resource_type="merge",
             remove_watermark=remove_watermark,
@@ -462,12 +487,13 @@ async def upload_merge_file(
     file: UploadFile = File(...),
     file_type: str = Form(..., description="Type of file: video or audio"),
     session: AsyncSession = Depends(get_session),
-    current_user: dict = Depends(get_current_active_user),
+    current_user: Any = Depends(get_current_active_user),
 ):
     """Upload a file for use in merge operations"""
     try:
+        user_id = get_current_user_id(current_user)
         print(
-            f"[FILE UPLOAD] Starting upload for file: {file.filename}, type: {file_type}, user: {current_user.get('id')}"
+            f"[FILE UPLOAD] Starting upload for file: {file.filename}, type: {file_type}, user: {get_current_user_log_id(current_user)}"
         )
 
         # Validate file type
@@ -482,7 +508,7 @@ async def upload_merge_file(
 
         # Upload file to Storage
         file_url, file_size = await upload_file_to_storage(
-            file, file_type, current_user["id"]
+            file, file_type, user_id
         )
 
         # Create merge operation record
@@ -490,7 +516,7 @@ async def upload_merge_file(
 
         merge_op = MergeOperation(
             id=merge_id,
-            user_id=uuid.UUID(current_user["id"]),
+            user_id=uuid.UUID(user_id),
             merge_status="PENDING",
             progress=0,
             quality_tier="web",  # Default
