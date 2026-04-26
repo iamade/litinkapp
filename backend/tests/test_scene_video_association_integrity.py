@@ -227,6 +227,7 @@ def test_kan86_find_scene_audio_normalizes_legacy_zero_based_scene_one_payload()
 from unittest.mock import AsyncMock
 import pytest
 
+from app.tasks.audio_tasks import build_provider_audio_metadata
 from app.tasks.video_tasks import (
     ProviderMediaUrlConfigurationError,
     _json_dumps_safe,
@@ -382,6 +383,41 @@ def test_kan86_provider_media_source_prefers_audio_provider_url_metadata():
     }
 
     assert select_provider_media_source(canonical_url, selected_audio) == provider_audio_url
+
+
+def test_kan260_audio_provider_metadata_shape_enables_fresh_provider_reuse():
+    canonical_url = "http://localhost:9000/litink-books/users/u1/audio/scene-1.mp3"
+    provider_audio_url = "https://pub-3626123a908346a7a8be8d9295f44e26.r2.dev/generations/kan260.mp3"
+
+    metadata = build_provider_audio_metadata(provider_audio_url)
+
+    assert metadata["provider_audio_url"] == provider_audio_url
+    assert metadata["original_cdn_url"] == provider_audio_url
+    assert metadata["provider_cdn_url"] == provider_audio_url
+    assert metadata["cdn_url"] == provider_audio_url
+    assert metadata["provider_url_created_at"]
+    assert metadata["provider_audio_url_created_at"]
+    assert metadata["original_cdn_url_created_at"]
+    assert (
+        select_provider_media_source(canonical_url, {"audio_metadata": metadata})
+        == provider_audio_url
+    )
+
+
+def test_kan260_audio_provider_metadata_without_timestamp_fails_closed_to_canonical():
+    canonical_url = "https://storage.example.com/litink-books/users/u1/audio/scene-1.mp3"
+    provider_audio_url = "https://pub-3626123a908346a7a8be8d9295f44e26.r2.dev/generations/kan260.mp3"
+
+    selected_audio = {
+        "audio_metadata": {
+            "provider_audio_url": provider_audio_url,
+            "original_cdn_url": provider_audio_url,
+            "provider_cdn_url": provider_audio_url,
+            "cdn_url": provider_audio_url,
+        }
+    }
+
+    assert select_provider_media_source(canonical_url, selected_audio) == canonical_url
 
 
 class _HydrateResult:
