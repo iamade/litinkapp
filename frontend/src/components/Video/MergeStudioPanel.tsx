@@ -216,14 +216,6 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
     );
   }
 
-  if (!enrichedScenes.length) {
-    return (
-      <div className="p-4 text-sm text-gray-500">
-        No scenes available. Generate scene videos first in the Video tab.
-      </div>
-    );
-  }
-
   const generatedCount = enrichedScenes.filter((scene) => !!scene.video_url).length;
   const allScenesHaveVideos = enrichedScenes.length > 0 && generatedCount === enrichedScenes.length;
 
