@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Play, Pause, Video, Volume2, Music, Wind, Headphones, Mic, FileText, Loader2 } from 'lucide-react';
+import { X, Play, Pause, Video, Volume2, Music, Wind, Headphones, Mic, FileText, Loader2, AlertTriangle } from 'lucide-react';
 import { VideoScene } from '../../types/videoProduction';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 import ProtectedImage from '../Common/ProtectedImage';
@@ -10,6 +10,8 @@ interface SceneDetailModalProps {
   onGenerate: (audioId?: string) => void;
   isGenerating?: boolean;
   selectedScript?: {
+    id?: string;
+    chapter_id?: string;
     script?: string;
     scene_descriptions?: Array<{
       scene_number: number;
@@ -64,7 +66,8 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
     detectedDurations[audio.id] ?? audio.duration ?? 0;
 
   // Get all audio for this scene's sceneNumber (all shots)
-  const allSceneAudio = storyboardContext?.sceneAudioMap[scene.sceneNumber] || [];
+  const allSceneAudio = storyboardContext?.getAudioForShot(scene.sceneNumber, scene.shotIndex) || [];
+  const allScriptAudio = React.useMemo(() => Object.values(storyboardContext?.sceneAudioMap || {}).flat(), [storyboardContext?.sceneAudioMap]);
 
   // Group audio by type
   const audioByType = React.useMemo(() => {
@@ -384,6 +387,11 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
                                   {audio.text_content && (
                                     <p className="text-[10px] text-gray-400 truncate mt-0.5">{audio.text_content}</p>
                                   )}
+                                  <div className="mt-1 grid grid-cols-1 gap-0.5 text-[10px] text-gray-500 dark:text-gray-400 font-mono">
+                                    <span className="truncate">ID: {audio.id}</span>
+                                    <span className="truncate">URL/path: {audio.url || 'missing'}</span>
+                                    <span>scope: script {selectedScript?.id || 'unknown'} • chapter {selectedScript?.chapter_id || 'unknown'} • scene {audio.sceneNumber} • shot {audio.shotIndex ?? 0} • status {audio.status || 'unknown'}</span>
+                                  </div>
                                 </div>
 
                                 {/* Radio button */}
@@ -450,6 +458,16 @@ export const SceneDetailModal: React.FC<SceneDetailModalProps> = ({
                   ⚠️ {durationWarning}
                 </p>
               )}
+              <div className="mt-2 text-[10px] text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 rounded p-2 text-left">
+                <div className="font-semibold uppercase tracking-wide mb-1">KAN-86 audio diagnostics</div>
+                <div>Scope: script {selectedScript?.id || 'unknown'} • chapter {selectedScript?.chapter_id || 'unknown'} • scene {scene.sceneNumber} • shot {scene.shotIndex ?? 0}</div>
+                <div>Mapped audio in scene: {allSceneAudio.length} / script audio visible: {allScriptAudio.length}</div>
+                {selectedAudioItem ? (
+                  <div className="mt-1 break-all">Selected: {selectedAudioItem.id} • {selectedAudioItem.url || 'missing URL'} • status {selectedAudioItem.status || 'unknown'} • duration {getAudioDuration(selectedAudioItem) || 'unknown'}s</div>
+                ) : (
+                  <div className="mt-1 flex items-center gap-1 text-amber-600 dark:text-amber-400"><AlertTriangle className="w-3 h-3" /> No usable scene-scoped audio selected.</div>
+                )}
+              </div>
             </div>
           </div>
         </div>

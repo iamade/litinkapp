@@ -5,6 +5,7 @@ from app.core.database import async_session, engine
 import json
 import logging
 import uuid as _uuid
+from datetime import datetime, timezone
 
 # from app.core.services.modelslab_image import ModelsLabImageService
 from app.core.services.pipeline import PipelineManager, PipelineStep
@@ -421,6 +422,10 @@ async def generate_character_images_optimized(
                 if not image_url:
                     raise Exception("No image URL in V7 response")
 
+                # Preserve provider CDN URL before replacing canonical URL with persisted storage URL.
+                original_cdn_url = image_url
+                original_cdn_url_created_at = datetime.now(timezone.utc).isoformat()
+
                 # Persist image from CDN to our own S3 storage
                 try:
                     from app.core.services.storage import get_storage_service, S3StorageService
@@ -460,6 +465,12 @@ async def generate_character_images_optimized(
                             "service": "modelslab_v7",
                             "model_used": result.get("model_used", "seedream-t2i"),
                             "generation_time": result.get("generation_time", 0),
+                            "provider_image_url": original_cdn_url,
+                            "original_cdn_url": original_cdn_url,
+                            "provider_cdn_url": original_cdn_url,
+                            "cdn_url": original_cdn_url,
+                            "provider_url_created_at": original_cdn_url_created_at,
+                            "original_cdn_url_created_at": original_cdn_url_created_at,
                         }
                     ),
                 }
@@ -654,6 +665,10 @@ async def generate_scene_images_optimized(
                 if not image_url:
                     raise Exception("No image URL in V7 response")
 
+                # Preserve provider CDN URL before replacing canonical URL with persisted storage URL.
+                original_cdn_url = image_url
+                original_cdn_url_created_at = datetime.now(timezone.utc).isoformat()
+
                 # Persist image from CDN to our own S3 storage
                 try:
                     from app.core.services.storage import get_storage_service, S3StorageService
@@ -693,6 +708,12 @@ async def generate_scene_images_optimized(
                             "service": "modelslab_v7",
                             "model_used": result.get("model_used", "seedream-t2i"),
                             "generation_time": result.get("generation_time", 0),
+                            "provider_image_url": original_cdn_url,
+                            "original_cdn_url": original_cdn_url,
+                            "provider_cdn_url": original_cdn_url,
+                            "cdn_url": original_cdn_url,
+                            "provider_url_created_at": original_cdn_url_created_at,
+                            "original_cdn_url_created_at": original_cdn_url_created_at,
                         }
                     ),
                 }
@@ -738,6 +759,9 @@ async def generate_scene_images_optimized(
                         "id": record_id,
                         "scene_number": scene_number,
                         "image_url": image_url,
+                        "original_cdn_url": original_cdn_url,
+                        "provider_cdn_url": original_cdn_url,
+                        "provider_url_created_at": original_cdn_url_created_at,
                         "description": scene_text,
                         "style": style,
                         "status": "success",
@@ -1010,7 +1034,6 @@ async def async_generate_character_image_task(
             # If character_id provided, also update the characters table
             if character_id and image_url:
                 try:
-                    from datetime import datetime, timezone
                     image_metadata = {
                         "model_used": model_used,
                         "generation_time": generation_time,
@@ -1020,6 +1043,10 @@ async def async_generate_character_image_task(
                         "task_id": task_id,
                         "image_generation_record_id": record_id,
                         "cdn_url": original_cdn_url,
+                        "provider_image_url": original_cdn_url,
+                        "original_cdn_url": original_cdn_url,
+                        "provider_cdn_url": original_cdn_url,
+                        "provider_url_created_at": datetime.now(timezone.utc).isoformat(),
                         "cdn_created_at": datetime.now(timezone.utc).isoformat(),
                     }
 
@@ -1360,7 +1387,7 @@ async def async_generate_scene_image_task(
                             cdn_result = await session.execute(cdn_query, {"url": url})
                             cdn_row = cdn_result.first()
                             if cdn_row and cdn_row.cdn_url:
-                                from datetime import datetime, timezone, timedelta
+                                from datetime import timedelta
                                 try:
                                     created = datetime.fromisoformat(cdn_row.cdn_created_at)
                                     if datetime.now(timezone.utc) - created < timedelta(days=13):
@@ -1395,6 +1422,8 @@ async def async_generate_scene_image_task(
                 raise Exception(result.get("error", "Unknown error from image service"))
 
             image_url = result.get("image_url")
+            provider_image_url = image_url
+            provider_url_created_at = datetime.utcnow().isoformat()
             generation_time = result.get("generation_time", 0)
             model_used = result.get("model_used", "seedream-t2i")
 
@@ -1460,6 +1489,12 @@ async def async_generate_scene_image_task(
                 "model_used": model_used,
                 "generation_time": generation_time,
                 "service": "modelslab_v7",
+                "provider_image_url": provider_image_url,
+                "original_cdn_url": provider_image_url,
+                "provider_cdn_url": provider_image_url,
+                "cdn_url": provider_image_url,
+                "provider_url_created_at": provider_url_created_at,
+                "original_cdn_url_created_at": provider_url_created_at,
                 "prompt_used": final_description,
                 "style": style or "cinematic",
                 "aspect_ratio": aspect_ratio or "16:9",
