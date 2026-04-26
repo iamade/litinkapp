@@ -216,8 +216,9 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
     );
   }
 
-  const generatedCount = enrichedScenes.filter((scene) => !!scene.video_url).length;
-  const allScenesHaveVideos = enrichedScenes.length > 0 && generatedCount === enrichedScenes.length;
+  const safeEnrichedScenes = enrichedScenes.filter(Boolean);
+  const generatedCount = safeEnrichedScenes.filter((scene) => !!scene.video_url).length;
+  const allScenesHaveVideos = safeEnrichedScenes.length > 0 && generatedCount === safeEnrichedScenes.length;
 
   return (
     <div className="space-y-6">
@@ -231,7 +232,7 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
             Use Tracks, Controls, and Preview to assemble generated scene videos with audio before starting the final merge.
           </p>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Generated scenes: {generatedCount}/{enrichedScenes.length}
+            Generated scenes: {generatedCount}/{safeEnrichedScenes.length}
           </p>
         </div>
 
@@ -260,7 +261,7 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
         scriptId={selectedScriptId}
         videoGenerations={videoGenerations}
         audioFiles={audioFiles}
-        scenes={enrichedScenes}
+        scenes={safeEnrichedScenes}
         editorSettings={editorSettings}
         userTier={userTier}
       />
@@ -269,7 +270,7 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
         <button
           type="button"
           onClick={saveProduction}
-          disabled={isLoading || isSwitching || !enrichedScenes.length}
+          disabled={isLoading || isSwitching || !safeEnrichedScenes.length}
           className="rounded-lg bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:bg-gray-400"
         >
           Save scene order
