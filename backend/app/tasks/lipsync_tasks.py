@@ -1,7 +1,7 @@
 from app.tasks.celery_app import celery_app
 import asyncio
 from typing import Dict, Any, List, Optional
-from app.core.services.modelslab_image import ModelsLabImageService
+from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
 from app.core.database import async_session
 from sqlalchemy import text
 import json
@@ -66,7 +66,7 @@ async def async_apply_lip_sync_to_generation(video_generation_id: str):
             print(f"- Quality tier: {quality_tier}")
 
             # Apply lip sync
-            modelslab_service = ModelsLabImageService()
+            modelslab_service = ModelsLabV7VideoService()
 
             lipsync_results = await apply_lip_sync_to_scenes(
                 modelslab_service,
@@ -172,7 +172,7 @@ async def async_apply_lip_sync_to_generation(video_generation_id: str):
 
 
 async def apply_lip_sync_to_scenes(
-    modelslab_service: ModelsLabImageService,
+    modelslab_service: ModelsLabV7VideoService,
     video_gen_id: str,
     scene_videos: List[Dict[str, Any]],
     audio_files: Dict[str, Any],
@@ -261,7 +261,7 @@ def find_character_audio_for_scene(
 
 
 async def apply_lip_sync_to_single_scene(
-    modelslab_service: ModelsLabImageService,
+    modelslab_service: ModelsLabV7VideoService,
     video_gen_id: str,
     scene_video: Dict[str, Any],
     character_audio: List[Dict[str, Any]],

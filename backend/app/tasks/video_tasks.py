@@ -1,13 +1,13 @@
 from app.tasks.celery_app import celery_app
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from celery.utils.log import get_task_logger
 
 from app.api.services.video import VideoService
 from app.core.database import async_session, engine
 from sqlmodel import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from app.videos.models import VideoGeneration, VideoSegment
 from app.subscriptions.models import UserSubscription
 from app.core.model_config import get_model_config, ModelConfig
@@ -17,7 +17,11 @@ import os
 import requests
 import tempfile
 import uuid
+import ipaddress
+from datetime import datetime, timezone, timedelta
+from urllib.parse import urlparse, urlunparse
 from app.core.services.file import FileService
+from app.core.config import settings
 
 from app.core.services.modelslab_v7_video import ModelsLabV7VideoService
 from app.videos.association_integrity import (
@@ -27,6 +31,557 @@ from app.videos.association_integrity import (
 )
 
 logger = get_task_logger(__name__)
+
+
+_LOCAL_MINIO_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "minio", "host.docker.internal"}
+_PROVIDER_MEDIA_PUBLIC_URL_ENV_NAMES = (
+    "MODELSLAB_MEDIA_PUBLIC_URL",
+    "MINIO_PROVIDER_PUBLIC_URL",
+    "PUBLIC_MINIO_URL",
+    "MINIO_EXTERNAL_URL",
+    "MEDIA_PUBLIC_URL",
+    "PUBLIC_MEDIA_URL",
+    "S3_PUBLIC_URL",
+    "CDN_BASE_URL",
+)
+
+
+class ProviderMediaUrlConfigurationError(ValueError):
+    """Raised before provider calls when media URLs are not externally fetchable."""
+
+
+def _replace_url_origin(url: str, target_origin: Optional[str]) -> str:
+    """Return url with scheme/netloc from target_origin, preserving path/params/query."""
+    if not url or not target_origin:
+        return url
+
+    parsed_url = urlparse(url)
+    parsed_target = urlparse(target_origin)
+    if not parsed_url.scheme or not parsed_url.netloc or not parsed_target.scheme or not parsed_target.netloc:
+        return url
+
+    return urlunparse(
+        parsed_url._replace(scheme=parsed_target.scheme, netloc=parsed_target.netloc)
+    )
+
+
+def _is_provider_unsafe_host(host: Optional[str]) -> bool:
+    """Return True for hosts external providers cannot fetch (local/docker/private IPs)."""
+    if not host:
+        return True
+
+    host = host.lower()
+    if host in _LOCAL_MINIO_HOSTS or host.endswith(".local"):
+        return True
+
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_unspecified
+    except ValueError:
+        return False
+
+
+def _is_ip_literal(host: Optional[str]) -> bool:
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_provider_unsafe_url(url: Optional[str]) -> bool:
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    # ModelsLab may return "invalid accessible without redirect/auth" for raw
+    # IP-origin media even when the IP is publicly reachable from our network.
+    if _is_ip_literal(parsed.hostname):
+        return True
+    return _is_provider_unsafe_host(parsed.hostname)
+
+
+def _is_local_minio_url(url: str) -> bool:
+    """Detect MinIO URLs that are only reachable from browser/dev/container context."""
+    if not url:
+        return False
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+
+    host = parsed.hostname.lower()
+    if _is_provider_unsafe_host(host):
+        return True
+
+    for configured in (settings.MINIO_PUBLIC_URL, settings.MINIO_ENDPOINT):
+        configured_host = urlparse(configured or "").hostname
+        if configured_host and host == configured_host.lower() and _is_provider_unsafe_host(configured_host):
+            return True
+    return False
+
+
+def _redact_media_url_for_log(url: Optional[str]) -> Optional[str]:
+    """Log media URL origin/path only; drop query strings that may contain signatures."""
+    if not url:
+        return url
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    return urlunparse(parsed._replace(query="", fragment=""))
+
+
+def _replace_url_base(url: str, target_base: Optional[str]) -> str:
+    """Rewrite a media URL to target_base, preserving bucket/object path and query."""
+    if not url or not target_base:
+        return url
+
+    parsed_url = urlparse(url)
+    parsed_target = urlparse(target_base)
+    if not parsed_url.scheme or not parsed_url.netloc or not parsed_target.scheme or not parsed_target.netloc:
+        return url
+
+    target_prefix = (parsed_target.path or "").rstrip("/")
+    source_path = parsed_url.path if parsed_url.path.startswith("/") else f"/{parsed_url.path}"
+    new_path = f"{target_prefix}{source_path}" if target_prefix else source_path
+    return urlunparse(
+        parsed_url._replace(scheme=parsed_target.scheme, netloc=parsed_target.netloc, path=new_path)
+    )
+
+
+def _valid_external_media_base(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        return None
+    if _is_provider_unsafe_url(value):
+        return None
+    return value.rstrip("/")
+
+
+def _provider_media_public_base() -> Optional[str]:
+    """Resolve an externally reachable base URL for provider-bound MinIO media."""
+    for configured in (
+        getattr(settings, "MODELSLAB_MEDIA_PUBLIC_URL", None),
+        getattr(settings, "MINIO_PROVIDER_PUBLIC_URL", None),
+    ):
+        valid = _valid_external_media_base(configured)
+        if valid:
+            return valid
+
+    minio_public = getattr(settings, "MINIO_PUBLIC_URL", None)
+    if minio_public and not _is_provider_unsafe_url(minio_public):
+        valid = _valid_external_media_base(minio_public)
+        if valid:
+            return valid
+
+    # Last-resort compatibility for deployments that already expose a generic
+    # media/CDN env var but have not yet moved it into typed settings.
+    for env_name in _PROVIDER_MEDIA_PUBLIC_URL_ENV_NAMES:
+        valid = _valid_external_media_base(os.getenv(env_name))
+        if valid:
+            return valid
+    return None
+
+
+def normalize_media_url_for_provider(url: Optional[str]) -> Optional[str]:
+    """Normalize stored media URLs before sending them to external providers.
+
+    Celery often stores MinIO objects as http://localhost:9000/... URLs. Those
+    work from the dev browser/container network, but ModelsLab cannot fetch
+    localhost/minio/private URLs from its infrastructure. Provider-bound media
+    must therefore be rewritten to an explicitly configured external base, or
+    fail before spending provider credits.
+    """
+    if not url:
+        return url
+    if not _is_provider_unsafe_url(url):
+        return url
+
+    provider_base = _provider_media_public_base()
+    if not provider_base:
+        raise ProviderMediaUrlConfigurationError(
+            "Provider media URL is not externally reachable. Configure MODELSLAB_MEDIA_PUBLIC_URL "
+            "or MINIO_PROVIDER_PUBLIC_URL to an HTTPS public/CDN/R2/S3 base (without bucket name); "
+            "raw http IP, localhost, minio, and private media URLs are refused before ModelsLab calls: "
+            f"{_redact_media_url_for_log(url)}"
+        )
+
+    provider_url = _replace_url_base(url, provider_base)
+    if _is_provider_unsafe_url(provider_url):
+        raise ProviderMediaUrlConfigurationError(
+            "Resolved provider media URL is still local/private; refusing to send media to ModelsLab: "
+            f"{_redact_media_url_for_log(provider_url)}"
+        )
+    return provider_url
+
+
+def normalize_media_url_for_internal_access(url: Optional[str]) -> Optional[str]:
+    """Normalize media URLs for backend/container probes and downloads.
+
+    Internal probes (ffmpeg/requests from Celery) should use MINIO_ENDPOINT when
+    a URL is a local MinIO public URL, because localhost points at the worker
+    container rather than the MinIO service.
+    """
+    if not url or not _is_local_minio_url(url):
+        return url
+    return _replace_url_origin(url, settings.MINIO_ENDPOINT)
+
+
+def log_provider_media_url_normalization(kind: str, original_url: Optional[str], provider_url: Optional[str]) -> None:
+    """Diagnostic log for provider media URLs without leaking signed query data."""
+    if original_url != provider_url:
+        msg = (
+            f"[MEDIA URL NORMALIZE] {kind}: original={_redact_media_url_for_log(original_url)} "
+            f"provider={_redact_media_url_for_log(provider_url)}"
+        )
+        logger.warning(msg)
+        print(msg)
+
+
+_PROVIDER_CDN_METADATA_KEYS = (
+    "provider_image_url",
+    "provider_audio_url",
+    "provider_cdn_url",
+    "provider_url",
+    "modelslab_cdn_url",
+    "modelslab_url",
+    "original_cdn_url",
+    "cdn_url",
+)
+_PROVIDER_CDN_TIMESTAMP_KEYS = (
+    "provider_url_created_at",
+    "provider_image_url_created_at",
+    "provider_audio_url_created_at",
+    "original_cdn_url_created_at",
+    "cdn_created_at",
+    "created_at",
+)
+_PROVIDER_CDN_MAX_AGE = timedelta(days=13)
+
+
+def _metadata_dict(value: Any) -> Dict[str, Any]:
+    """Return metadata as a dict, tolerating legacy JSON-string metadata."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+def _parse_provider_timestamp(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _fresh_provider_timestamp(container: Dict[str, Any]) -> Optional[datetime]:
+    now = datetime.now(timezone.utc)
+    for key in _PROVIDER_CDN_TIMESTAMP_KEYS:
+        parsed = _parse_provider_timestamp(container.get(key))
+        if parsed and now - parsed < _PROVIDER_CDN_MAX_AGE:
+            return parsed
+    return None
+
+
+def _candidate_provider_cdn_urls(media_item: Optional[Dict[str, Any]]) -> List[Tuple[str, datetime]]:
+    """Extract fresh preserved provider/CDN media URLs from an image/audio/video item."""
+    if not media_item:
+        return []
+
+    containers: List[Dict[str, Any]] = [media_item]
+    for meta_key in ("meta", "metadata", "image_metadata", "video_metadata", "audio_metadata"):
+        meta = _metadata_dict(media_item.get(meta_key))
+        if meta:
+            containers.append(meta)
+
+    urls: List[Tuple[str, datetime]] = []
+    seen = set()
+    for container in containers:
+        fresh_at = _fresh_provider_timestamp(container)
+        if not fresh_at:
+            continue
+        for key in _PROVIDER_CDN_METADATA_KEYS:
+            value = container.get(key)
+            if isinstance(value, str) and value.strip() and value.strip() not in seen:
+                seen.add(value.strip())
+                urls.append((value.strip(), fresh_at))
+    return urls
+
+
+def select_provider_media_source(
+    canonical_url: Optional[str],
+    media_item: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Prefer a preserved fresh provider CDN URL, then fall back to canonical URL.
+
+    Provider CDN links expire; only reuse preserved links with a creation
+    timestamp newer than roughly 13 days. Unsafe/raw-IP candidates are skipped
+    so the canonical fallback can still go through existing normalization and
+    blocker handling.
+    """
+    for candidate, _created_at in _candidate_provider_cdn_urls(media_item):
+        if not _is_provider_unsafe_url(candidate):
+            return candidate
+    return canonical_url
+
+
+def _provider_metadata_subset(metadata: Any) -> Dict[str, Any]:
+    """Return only provider/CDN URL metadata needed at the ModelsLab boundary."""
+    meta = _metadata_dict(metadata)
+    return {
+        key: value
+        for key, value in meta.items()
+        if key in _PROVIDER_CDN_METADATA_KEYS or key in _PROVIDER_CDN_TIMESTAMP_KEYS
+    }
+
+
+def _merge_provider_metadata(media_item: Dict[str, Any], metadata: Any, metadata_key: str) -> bool:
+    """Promote persisted provider CDN metadata onto a task media snapshot.
+
+    The product path can snapshot selected audio/image rows with canonical
+    localhost MinIO URLs while omitting audio_metadata/meta. Rehydrating only
+    provider/CDN fields preserves fail-closed canonical fallback behavior while
+    allowing verified CDN URLs to be selected before provider normalization.
+    """
+    if not isinstance(media_item, dict):
+        return False
+    provider_meta = _provider_metadata_subset(metadata)
+    if not provider_meta:
+        return False
+
+    nested = _metadata_dict(media_item.get(metadata_key))
+    changed = False
+    for key, value in provider_meta.items():
+        if value is None or value == "":
+            continue
+        if nested.get(key) != value:
+            nested[key] = value
+            changed = True
+        if media_item.get(key) in (None, ""):
+            media_item[key] = value
+            changed = True
+    if changed:
+        media_item[metadata_key] = nested
+    return changed
+
+
+def _result_mappings(result: Any) -> List[Dict[str, Any]]:
+    try:
+        mappings = result.mappings()
+        return [dict(row) for row in mappings.all()]
+    except Exception:
+        pass
+    try:
+        rows = result.fetchall()
+    except Exception:
+        rows = []
+    mapped = []
+    for row in rows:
+        if isinstance(row, dict):
+            mapped.append(row)
+        elif hasattr(row, "_mapping"):
+            mapped.append(dict(row._mapping))
+    return mapped
+
+
+async def rehydrate_media_provider_metadata(
+    session: Optional[AsyncSession],
+    *,
+    audio_files: Optional[Dict[str, Any]] = None,
+    image_data: Optional[Dict[str, Any]] = None,
+    selected_audio_ids: Optional[List[str]] = None,
+) -> None:
+    """Rehydrate provider CDN metadata for selected/snapshotted media rows.
+
+    This intentionally does not replace canonical audio_url/image_url values.
+    Provider URLs are consumed later by select_provider_media_source(), where
+    unsafe localhost/raw-IP fallbacks still fail closed before ModelsLab.
+    """
+    if not session:
+        return
+
+    audio_items_by_id: Dict[str, List[Dict[str, Any]]] = {}
+    if audio_files:
+        selected_set = {str(value) for value in (selected_audio_ids or []) if value}
+        for audio_type in ("characters", "narrator", "sound_effects", "background_music"):
+            for item in audio_files.get(audio_type, []) or []:
+                if not isinstance(item, dict) or not item.get("id"):
+                    continue
+                item_id = str(item.get("id"))
+                if selected_set and item_id not in selected_set:
+                    continue
+                audio_items_by_id.setdefault(item_id, []).append(item)
+
+    image_items_by_id: Dict[str, List[Dict[str, Any]]] = {}
+    if image_data:
+        candidate_images = list(image_data.get("scene_images", []) or [])
+        images_container = image_data.get("images", {}) or {}
+        candidate_images.extend(images_container.get("scene_images", []) or [])
+        for item in candidate_images:
+            if isinstance(item, dict) and item.get("id"):
+                image_items_by_id.setdefault(str(item.get("id")), []).append(item)
+
+    try:
+        if audio_items_by_id:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT id::text AS id, audio_metadata
+                    FROM audio_generations
+                    WHERE id::text IN :ids
+                    """
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": list(audio_items_by_id.keys())},
+            )
+            for row in _result_mappings(result):
+                for item in audio_items_by_id.get(str(row.get("id")), []):
+                    if _merge_provider_metadata(item, row.get("audio_metadata"), "audio_metadata"):
+                        logger.warning(
+                            "[KAN-86] Rehydrated provider audio metadata for selected audio id=%s",
+                            row.get("id"),
+                        )
+
+        if image_items_by_id:
+            result = await session.execute(
+                text(
+                    """
+                    SELECT id::text AS id, meta
+                    FROM image_generations
+                    WHERE id::text IN :ids
+                    """
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": list(image_items_by_id.keys())},
+            )
+            for row in _result_mappings(result):
+                for item in image_items_by_id.get(str(row.get("id")), []):
+                    if _merge_provider_metadata(item, row.get("meta"), "meta"):
+                        logger.warning(
+                            "[KAN-86] Rehydrated provider image metadata for image id=%s",
+                            row.get("id"),
+                        )
+    except Exception as exc:
+        logger.warning("[KAN-86] Provider media metadata rehydrate skipped: %s", exc)
+
+
+def _safe_uuid_string(value: Optional[str]) -> Optional[str]:
+    """Return a DB-safe UUID string or None for optional UUID FK columns."""
+    if not value:
+        return None
+    try:
+        return str(uuid.UUID(str(value)))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _json_safe_value(value: Any) -> Any:
+    """Return a JSON-serializable copy for task metadata/API payloads.
+
+    SQLAlchemy returns PostgreSQL UUID columns as ``uuid.UUID`` objects. KAN-86
+    scene video finalization builds ``video_data`` from inserted segment IDs;
+    letting raw UUIDs reach ``json.dumps`` aborts the otherwise-successful
+    generation after the segment is already created.
+    """
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(v) for v in value]
+    return value
+
+
+def _json_dumps_safe(value: Any) -> str:
+    """Serialize DB JSON payloads after normalizing UUID/datetime values."""
+    return json.dumps(_json_safe_value(value))
+
+
+def _build_provider_attempt_diagnostic(
+    *,
+    scene_id: str,
+    scene_number: int,
+    original_image_url: Optional[str],
+    provider_image_url: Optional[str],
+    original_audio_url: Optional[str],
+    provider_audio_url: Optional[str],
+    model: str,
+    status: str,
+    provider_error: Optional[str] = None,
+    exception: Optional[str] = None,
+    canonical_image_url: Optional[str] = None,
+    canonical_audio_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Concise non-secret provider boundary diagnostics for DB/task metadata."""
+    diagnostic = {
+        "scene_id": scene_id,
+        "scene_number": scene_number,
+        "original_image_url": _redact_media_url_for_log(original_image_url),
+        "provider_image_url": _redact_media_url_for_log(provider_image_url),
+        "original_audio_url": _redact_media_url_for_log(original_audio_url),
+        "provider_audio_url": _redact_media_url_for_log(provider_audio_url),
+        "canonical_image_url": _redact_media_url_for_log(canonical_image_url),
+        "canonical_audio_url": _redact_media_url_for_log(canonical_audio_url),
+        "model": model,
+        "status": status,
+    }
+    if provider_error:
+        diagnostic["provider_error"] = str(provider_error)[:500]
+    if exception:
+        diagnostic["exception"] = str(exception)[:500]
+    return diagnostic
+
+
+async def _persist_provider_attempt_diagnostic(
+    session: AsyncSession,
+    video_gen_id: str,
+    diagnostic: Dict[str, Any],
+) -> None:
+    """Append provider attempt diagnostics to task_meta without breaking generation flow."""
+    if not session or not diagnostic:
+        return
+    try:
+        await session.execute(
+            text(
+                """
+                UPDATE video_generations
+                SET task_meta = COALESCE(task_meta, '{}'::jsonb) || jsonb_build_object(
+                    'provider_attempts',
+                    COALESCE(task_meta->'provider_attempts', '[]'::jsonb) || CAST(:diagnostic AS jsonb)
+                )
+                WHERE id = :id
+                """
+            ),
+            {"id": video_gen_id, "diagnostic": _json_dumps_safe([diagnostic])},
+        )
+        await session.commit()
+    except Exception as diag_err:
+        logger.error(
+            "[SCENE VIDEOS V7] Failed to persist provider diagnostics for %s: %s",
+            video_gen_id,
+            diag_err,
+        )
+        try:
+            await session.rollback()
+        except Exception:
+            pass
 
 
 # Removed image generation logic
@@ -162,7 +717,7 @@ async def extract_last_frame(
     import subprocess
     import os
     import httpx
-    from app.core.services.supabase_storage import SupabaseStorageService
+    from app.core.services.storage import get_storage_service
 
     try:
         print(f"[LAST FRAME] Extracting last frame from video: {video_url[:50]}...")
@@ -219,17 +774,16 @@ async def extract_last_frame(
                 return None
 
             # Upload to storage
-            storage_service = SupabaseStorageService()
-            with open(frame_path, "rb") as f:
-                frame_data = f.read()
+            storage_service = get_storage_service()
 
             # Generate unique filename
             import uuid as uuid_lib
 
             frame_filename = f"frames/{user_id or 'system'}/last_frame_{uuid_lib.uuid4().hex[:8]}.jpg"
 
-            frame_url = await storage_service.upload_file(
-                file_data=frame_data,
+            # S3StorageService.upload expects a file path, not in-memory bytes
+            frame_url = await storage_service.upload(
+                frame_path,
                 file_path=frame_filename,
                 content_type="image/jpeg",
             )
@@ -306,12 +860,31 @@ def find_scene_audio(
     script_style: str = None,
     selected_audio_ids: List[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Find audio for a scene with progressive fallback.
+    """Find audio for a scene without cross-scene fallback.
 
-    Priority: explicit selection > exact scene match (character > narrator > any type) > any available audio.
+    Priority: explicit selection for this scene > exact scene match (character > narrator > any type).
+    KAN-86: never fall back to unrelated audio with a URL.
     """
 
     scene_number = int(scene_id.split("_")[1]) if "_" in scene_id else 1
+
+    def _audio_scene_values(audio: Dict[str, Any]) -> set[int]:
+        values = set()
+        for key in ("scene_number", "scene"):
+            try:
+                raw_scene = audio.get(key)
+                if raw_scene is None:
+                    continue
+                numeric_scene = int(raw_scene)
+            except (TypeError, ValueError):
+                continue
+            # Scene 0 is an invalid provider/task scene; legacy route payloads
+            # used 0-based metadata for scene 1. Normalize that explicit value.
+            values.add(1 if numeric_scene == 0 else numeric_scene)
+        return values
+
+    def _audio_matches_scene(audio: Dict[str, Any]) -> bool:
+        return scene_number in _audio_scene_values(audio)
 
     # Collect all audio across all types
     all_audio = []
@@ -322,63 +895,118 @@ def find_scene_audio(
         f"[FIND AUDIO] Looking for audio for {scene_id} (scene_number={scene_number}), total audio files: {len(all_audio)}"
     )
 
-    # Priority 0: Explicitly selected audio
+    # Priority 0: Explicitly selected audio. If selected_audio_ids are supplied,
+    # they are an allow-list for this render request; do not silently fall back to
+    # any other audio when the selected IDs are wrong-scene or unusable.
     if selected_audio_ids:
+        selected_id_set = {str(audio_id) for audio_id in selected_audio_ids}
         for audio in all_audio:
-            if audio.get("id") in selected_audio_ids and audio.get("audio_url"):
-                # The explicit selection should be respected regardless of scene match,
-                # but if there are multiple selections across the storyboard, we try to match the scene.
-                if (
-                    audio.get("scene") == scene_number
-                    or audio.get("scene_number") == scene_number
-                ):
+            if str(audio.get("id")) in selected_id_set and audio.get("audio_url"):
+                if _audio_matches_scene(audio):
                     print(
                         f"[FIND AUDIO] Found EXPLICITLY selected audio for {scene_id}"
                     )
                     return audio
-                # If scene match fails but we have this selection, we might still use it
-                # if there's only one selection, or if we map selections specifically.
-                # Better to be safe: rely on scene match if multiple selections exist.
+        print(
+            f"[FIND AUDIO] Selected audio IDs did not include usable scene-matched audio for {scene_id}; refusing fallback"
+        )
+        return None
 
     # Priority 1: Exact scene match in character audio
     for audio in audio_files.get("characters", []):
-        if (
-            audio.get("scene") == scene_number
-            or audio.get("scene_number") == scene_number
-        ) and audio.get("audio_url"):
+        if _audio_matches_scene(audio) and audio.get("audio_url"):
             print(f"[FIND AUDIO] Found character audio for {scene_id}")
             return audio
 
     # Priority 2: Exact scene match in narrator audio
     for audio in audio_files.get("narrator", []):
-        if (
-            audio.get("scene") == scene_number
-            or audio.get("scene_number") == scene_number
-        ) and audio.get("audio_url"):
+        if _audio_matches_scene(audio) and audio.get("audio_url"):
             print(f"[FIND AUDIO] Found narrator audio for {scene_id}")
             return audio
 
     # Priority 3: Exact scene match in any type
     for audio in all_audio:
-        if (
-            audio.get("scene") == scene_number
-            or audio.get("scene_number") == scene_number
-        ) and audio.get("audio_url"):
+        if _audio_matches_scene(audio) and audio.get("audio_url"):
             print(
                 f"[FIND AUDIO] Found audio (type={audio.get('audio_type')}) for {scene_id}"
             )
             return audio
 
-    # Priority 4: Any audio with a URL (fallback when sequence_order doesn't match scene)
-    for audio in all_audio:
-        if audio.get("audio_url"):
-            print(
-                f"[AUDIO FALLBACK] Using audio id={audio.get('id')} (scene={audio.get('scene')}) for {scene_id}"
-            )
-            return audio
-
-    print(f"[FIND AUDIO] No audio found for {scene_id}")
+    print(f"[FIND AUDIO] No usable scene-matched audio found for {scene_id}; refusing cross-scene fallback")
     return None
+
+
+def normalize_target_scene_numbers(value: Any) -> List[int]:
+    """Return a de-duped ordered list of positive 1-based scene numbers."""
+    if value is None:
+        return []
+    raw_values = value if isinstance(value, (list, tuple, set)) else [value]
+    scene_numbers: List[int] = []
+    seen = set()
+    for raw in raw_values:
+        try:
+            scene_number = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if scene_number <= 0 or scene_number in seen:
+            continue
+        scene_numbers.append(scene_number)
+        seen.add(scene_number)
+    return scene_numbers
+
+
+def select_scene_assets_for_targets(
+    *,
+    target_scene_numbers: List[int],
+    original_scene_descriptions: List[Any],
+    scene_image_map: Dict[int, Dict[int, Dict[str, Any]]],
+    pre_gen_scene_images: List[Dict[str, Any]],
+    pre_gen_character_images: List[Dict[str, Any]],
+    selected_shots: Optional[List[Any]] = None,
+) -> tuple[List[Any], List[int], List[Optional[Dict[str, Any]]]]:
+    """Select descriptions/images in the exact target scene order.
+
+    KAN-86: persisted target_scene_numbers are the durable scope. If selected
+    shot parsing is unavailable later, this helper still prevents falling back
+    to all scenes and maps images by scene_number instead of raw DB order.
+    """
+    shot_by_scene: Dict[int, int] = {}
+    for selection in selected_shots or []:
+        if selection.scene_number not in shot_by_scene:
+            shot_by_scene[selection.scene_number] = selection.shot_index
+
+    target_descriptions: List[Any] = []
+    final_scene_images: List[Optional[Dict[str, Any]]] = []
+
+    for scene_num in target_scene_numbers:
+        desc_index = scene_num - 1
+        if 0 <= desc_index < len(original_scene_descriptions):
+            target_descriptions.append(original_scene_descriptions[desc_index])
+        else:
+            target_descriptions.append(f"Scene {scene_num}")
+
+        found_image = None
+        shot_idx = shot_by_scene.get(scene_num, 0)
+        if scene_num in scene_image_map:
+            if shot_idx in scene_image_map[scene_num]:
+                found_image = scene_image_map[scene_num][shot_idx]
+            elif 0 in scene_image_map[scene_num]:
+                found_image = scene_image_map[scene_num][0]
+            elif scene_image_map[scene_num]:
+                found_image = next(iter(scene_image_map[scene_num].values()))
+
+        if found_image is None and not scene_image_map and pre_gen_scene_images:
+            # Legacy fallback only when images have no usable scene_number map.
+            fallback_index = desc_index if desc_index >= 0 else 0
+            if fallback_index < len(pre_gen_scene_images):
+                found_image = pre_gen_scene_images[fallback_index]
+
+        if found_image is None and pre_gen_character_images:
+            found_image = pre_gen_character_images[(scene_num - 1) % len(pre_gen_character_images)]
+
+        final_scene_images.append(found_image)
+
+    return target_descriptions, target_scene_numbers, final_scene_images
 
 
 async def update_pipeline_step(
@@ -570,115 +1198,66 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             )
 
             # Build scene_images list from pre-generated images
-            # Map by scene_number for easy lookup
-            # Build scene_image_map with shot_index support
+            # Map by scene_number for deterministic lookup.
             # Structure: {scene_number: {shot_index: image_data}}
-            scene_image_map = {}
+            scene_image_map: Dict[int, Dict[int, Dict[str, Any]]] = {}
             for img in pre_gen_scene_images:
-                scene_num = img.get("scene_number", 0)
-                shot_idx = img.get("shot_index", 0)
+                try:
+                    scene_num = int(img.get("scene_number", 0) or 0)
+                except (TypeError, ValueError):
+                    scene_num = 0
+                try:
+                    shot_idx = int(img.get("shot_index", 0) or 0)
+                except (TypeError, ValueError):
+                    shot_idx = 0
+                if scene_num <= 0:
+                    continue
 
                 if scene_num not in scene_image_map:
                     scene_image_map[scene_num] = {}
 
-                # Store image by shot_index
-                # If multiple images have same scene/shot index, last one wins (or we could list them)
+                # Store image by shot_index. If duplicates exist, last one wins.
                 scene_image_map[scene_num][shot_idx] = img
 
             print(f"[IMAGE MAPPING] Map keys: {list(scene_image_map.keys())}")
 
-            # Parse selected shot IDs to get deduped (scene_index, shot_index) tuples
+            # Persisted target_scene_numbers are authoritative for KAN-86 selected
+            # per-scene renders; selected_shot_ids only refine shot image choice.
             video_script_id = str(video_gen.get("script_id")) if video_gen.get("script_id") else None
             selected_shots = extract_shot_selections(
                 task_meta.get("selected_shot_ids"), expected_script_id=video_script_id
             )
-            if selected_shots:
-                selected_scene_indices = [
-                    (selection.scene_index, selection.shot_index)
-                    for selection in selected_shots
-                ]
+            persisted_target_scene_numbers = normalize_target_scene_numbers(
+                task_meta.get("target_scene_numbers")
+            )
 
-                # IMPORTANT: Use the selected indices to order the generation
-                # This matches the user's timeline order
-                final_scene_images = []
-                target_scene_descriptions = []
-                target_scene_numbers = []
-
+            if persisted_target_scene_numbers:
+                target_scene_numbers = persisted_target_scene_numbers
                 print(
-                    f"[SCENE VIDEOS] Generating for {len(selected_scene_indices)} selected shots: {selected_scene_indices}"
+                    f"[SCENE VIDEOS] Using persisted target_scene_numbers: {target_scene_numbers}"
                 )
-
-                for idx, shot_idx in selected_scene_indices:
-                    scene_num = idx + 1  # 1-based scene description index
-
-                    # Try to find specific shot first
-                    found_image = None
-                    if scene_num in scene_image_map:
-                        # 1. Try exact match (scene + shot_index)
-                        if shot_idx in scene_image_map[scene_num]:
-                            found_image = scene_image_map[scene_num][shot_idx]
-                        # 2. Try key scene (shot_index 0)
-                        elif 0 in scene_image_map[scene_num]:
-                            found_image = scene_image_map[scene_num][0]
-                        # 3. Fallback to any available image for this scene
-                        elif scene_image_map[scene_num]:
-                            found_image = next(
-                                iter(scene_image_map[scene_num].values())
-                            )
-
-                    if found_image:
-                        final_scene_images.append(found_image)
-                    else:
-                        # Add placeholder if no image found but scene is selected
-                        final_scene_images.append(None)
-
-                    # Add description and number mapping
-                    if idx < len(original_scene_descriptions):
-                        target_scene_descriptions.append(
-                            original_scene_descriptions[idx]
-                        )
-                    else:
-                        target_scene_descriptions.append(f"Scene {scene_num}")
-                    target_scene_numbers.append(scene_num)
-
-                image_data["scene_images"] = final_scene_images
+            elif selected_shots:
+                target_scene_numbers = [selection.scene_number for selection in selected_shots]
+                print(
+                    f"[SCENE VIDEOS] Derived target scenes from selected_shot_ids: {target_scene_numbers}"
+                )
             else:
-                print(
-                    f"[VIDEO GENERATION] No valid selected_shot_ids in context, using all {len(scene_descriptions)} scenes"
-                )
-                # No selection filter: assign images by order or scene_number
-                target_scene_descriptions = scene_descriptions
                 target_scene_numbers = list(range(1, len(scene_descriptions) + 1))
-                final_scene_images = []
+                print(
+                    f"[VIDEO GENERATION] No selected scene scope in task_meta; using all {len(scene_descriptions)} scenes"
+                )
 
-                for i in range(len(scene_descriptions)):
-                    scene_num = i + 1
-                    found_image = None
-
-                    if scene_num in scene_image_map:
-                        # Default to key scene (0) or first available
-                        if 0 in scene_image_map[scene_num]:
-                            found_image = scene_image_map[scene_num][0]
-                        else:
-                            found_image = next(
-                                iter(scene_image_map[scene_num].values())
-                            )
-                    elif i < len(pre_gen_scene_images):
-                        found_image = pre_gen_scene_images[i]
-                    elif pre_gen_character_images:
-                        found_image = pre_gen_character_images[
-                            i % len(pre_gen_character_images)
-                        ]
-                    else:
-                        # Fallback to ANY generated image if list exists
-                        if pre_gen_scene_images:
-                            found_image = pre_gen_scene_images[0]
-                        else:
-                            found_image = None
-
-                    final_scene_images.append(found_image)
-
-                image_data["scene_images"] = final_scene_images
+            target_scene_descriptions, target_scene_numbers, final_scene_images = (
+                select_scene_assets_for_targets(
+                    target_scene_numbers=target_scene_numbers,
+                    original_scene_descriptions=original_scene_descriptions,
+                    scene_image_map=scene_image_map,
+                    pre_gen_scene_images=pre_gen_scene_images,
+                    pre_gen_character_images=pre_gen_character_images,
+                    selected_shots=selected_shots,
+                )
+            )
+            image_data["scene_images"] = final_scene_images
 
             scene_count = len(
                 [img for img in image_data.get("scene_images", []) if img is not None]
@@ -766,7 +1345,7 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             await session.execute(
                 update_query,
                 {
-                    "video_data": json.dumps(video_data_result),
+                    "video_data": _json_dumps_safe(video_data_result),
                     "status": final_status,
                     "error_message": error_msg,
                     "video_url": first_video_url,
@@ -1140,6 +1719,13 @@ async def generate_scene_videos(
     if not session:
         raise Exception("Session required for generate_scene_videos")
 
+    await rehydrate_media_provider_metadata(
+        session,
+        audio_files=audio_files,
+        image_data=image_data,
+        selected_audio_ids=selected_audio_ids,
+    )
+
     scene_images = image_data.get("scene_images", [])  # Fixed key mismatch
 
     # Determine Model ID from Config or fallback
@@ -1153,7 +1739,7 @@ async def generate_scene_videos(
     parsed_components = None
     if script_data and script_data.get("script"):
         try:
-            from app.api.services.script_parser import ScriptParser
+            from app.core.services.script_parser import ScriptParser
 
             script_parser = ScriptParser()
             characters = script_data.get("characters", [])
@@ -1178,7 +1764,13 @@ async def generate_scene_videos(
     # Track the previous scene's key scene shot for continuity
     previous_key_scene_shot = None
 
+    db_user_id = _safe_uuid_string(user_id)
+
     for i, scene_description in enumerate(scene_descriptions):
+        scene_num = i + 1
+        scene_id = f"scene_{scene_num}"
+        provider_attempt = None
+        provider_attempt_persisted = False
         try:
             scene_num, scene_id = resolve_scene_identity(i, scene_numbers)
             scene_image = scene_images[i] if i < len(scene_images) else None
@@ -1244,6 +1836,23 @@ async def generate_scene_videos(
                 audio_duration = scene_audio.get("duration", 0)
                 max_audio = modelslab_service.get_max_audio_duration(current_model_id)
 
+                # KAN-166: Fix duration validation — audio_duration <= 0 means unknown duration
+                # Previously, `audio_duration > 0` guard caused audio with unknown duration to
+                # bypass min/max validation entirely, passing 0s audio to the video API.
+                if audio_duration <= 0:
+                    audio_url_available = scene_audio.get("audio_url")
+                    if audio_url_available:
+                        # Unknown duration — probe the file to get actual duration
+                        try:
+                            from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                            probe_audio_url = normalize_media_url_for_internal_access(scene_audio.get("audio_url"))
+                            probed = await probe_audio_duration_from_url(probe_audio_url)
+                            if probed and probed > 0:
+                                audio_duration = probed
+                                print(f"[SCENE AUDIO] {scene_id}: KAN-166 probed duration={audio_duration}s")
+                        except Exception as probe_err:
+                            print(f"[SCENE AUDIO] {scene_id}: KAN-166 duration probe failed: {probe_err}")
+
                 if max_audio and audio_duration > 0 and audio_duration > max_audio:
                     print(
                         f"[SCENE AUDIO] {scene_id}: duration ({audio_duration}s) exceeds max ({max_audio}s). Skipping audio."
@@ -1256,7 +1865,7 @@ async def generate_scene_videos(
                     try:
                         # Attempt to pad audio
                         padded_url = await pad_audio_to_min_duration(
-                            scene_audio.get("audio_url"), min_audio, user_id
+                            normalize_media_url_for_internal_access(scene_audio.get("audio_url")), min_audio, user_id
                         )
 
                         if padded_url:
@@ -1272,6 +1881,12 @@ async def generate_scene_videos(
                     except Exception as e:
                         print(f"[SCENE AUDIO] {scene_id}: Error padding audio: {e}")
                         init_audio_url = None
+                elif audio_duration <= 0:
+                    # KAN-166: Audio with duration <= 0 (even after probing) is effectively broken
+                    print(
+                        f"[SCENE AUDIO] {scene_id}: duration unknown/unproable ({audio_duration}s). Skipping audio."
+                    )
+                    init_audio_url = None
                 else:
                     init_audio_url = scene_audio.get("audio_url")
                     print(
@@ -1317,20 +1932,87 @@ async def generate_scene_videos(
                     f"[SCENE VIDEOS V7] No image prompt available, using scene description for {scene_id}"
                 )
 
+            # Normalize media URLs at the provider boundary. Stored MinIO URLs can
+            # be localhost/docker-internal URLs; ModelsLab needs externally
+            # reachable URLs, while earlier probes/downloads use internal URLs.
+            try:
+                provider_source_image_url = select_provider_media_source(
+                    starting_image_url,
+                    scene_image_for_prompt or scene_image,
+                )
+                provider_source_audio_url = select_provider_media_source(
+                    init_audio_url,
+                    scene_audio,
+                )
+                provider_image_url = normalize_media_url_for_provider(provider_source_image_url)
+                provider_init_audio_url = (
+                    normalize_media_url_for_provider(provider_source_audio_url)
+                    if provider_source_audio_url
+                    else None
+                )
+            except ProviderMediaUrlConfigurationError as media_config_error:
+                provider_attempt = _build_provider_attempt_diagnostic(
+                    scene_id=scene_id,
+                    scene_number=scene_num,
+                    original_image_url=provider_source_image_url,
+                    provider_image_url=None,
+                    original_audio_url=provider_source_audio_url,
+                    provider_audio_url=None,
+                    model=current_model_id,
+                    status="configuration_error",
+                    exception=str(media_config_error),
+                    canonical_image_url=starting_image_url,
+                    canonical_audio_url=init_audio_url,
+                )
+                raise
+
+            log_provider_media_url_normalization("image_url", provider_source_image_url, provider_image_url)
+            log_provider_media_url_normalization("init_audio", provider_source_audio_url, provider_init_audio_url)
+
+            provider_attempt = _build_provider_attempt_diagnostic(
+                scene_id=scene_id,
+                scene_number=scene_num,
+                original_image_url=provider_source_image_url,
+                provider_image_url=provider_image_url,
+                original_audio_url=provider_source_audio_url,
+                provider_audio_url=provider_init_audio_url,
+                model=current_model_id,
+                status="attempting",
+                canonical_image_url=starting_image_url,
+                canonical_audio_url=init_audio_url,
+            )
+            logger.warning(
+                "[SCENE VIDEOS V7] Provider attempt scene_id=%s scene_number=%s model=%s image=%s audio=%s",
+                scene_id,
+                scene_num,
+                current_model_id,
+                provider_attempt.get("provider_image_url"),
+                provider_attempt.get("provider_audio_url"),
+            )
+
             # ✅ Generate video using ModelsLab Service
-            result = await modelslab_service.generate_image_to_video(
-                image_url=starting_image_url,
+            provider_result = await modelslab_service.generate_image_to_video(
+                image_url=provider_image_url,
                 prompt=enhanced_prompt,
                 model_id=current_model_id,
                 negative_prompt="",
-                init_audio=init_audio_url if init_audio_url else None,
+                init_audio=provider_init_audio_url if provider_init_audio_url else None,
             )
+
+            provider_attempt["status"] = provider_result.get("status", "unknown")
+            if provider_result.get("error"):
+                provider_attempt["provider_error"] = str(provider_result.get("error"))[:500]
+                provider_attempt["exception"] = (
+                    f"V7 Video generation failed: {provider_result.get('error', 'Unknown error')}"
+                )[:500]
+            await _persist_provider_attempt_diagnostic(session, video_gen_id, provider_attempt)
+            provider_attempt_persisted = True
 
             # Process result (Adapt old verify logic to new direct call result)
             # generate_image_to_video returns dict with status/video_url or error
 
-            if result.get("status") == "success":
-                video_url = result.get("video_url")
+            if provider_result.get("status") == "success":
+                video_url = provider_result.get("video_url")
                 has_lipsync = bool(init_audio_url)
 
                 # Persist video from CDN to our own S3 storage
@@ -1394,11 +2076,13 @@ async def generate_scene_videos(
                         insert_query = text(
                             """
                             INSERT INTO video_segments (
-                                video_generation_id, scene_id, scene_number, scene_description,
-                                video_url, status, target_duration
+                                video_generation_id, user_id, scene_id, scene_number, scene_description,
+                                video_url, status, target_duration,
+                                character_count, dialogue_count, action_count
                             ) VALUES (
-                                :video_generation_id, :scene_id, :scene_number, :scene_description,
-                                :video_url, :status, :target_duration
+                                :video_generation_id, :user_id, :scene_id, :scene_number, :scene_description,
+                                :video_url, :status, :target_duration,
+                                :character_count, :dialogue_count, :action_count
                             ) RETURNING id
                         """
                         )
@@ -1407,16 +2091,22 @@ async def generate_scene_videos(
                             insert_query,
                             {
                                 "video_generation_id": video_gen_id,
+                                "user_id": db_user_id,
                                 "scene_id": scene_id,
                                 "scene_number": scene_num,
                                 "scene_description": scene_description,
                                 "video_url": video_url,
                                 "status": "completed",
                                 "target_duration": 5.0,
+                                "character_count": 0,
+                                "dialogue_count": 0,
+                                "action_count": 0,
                             },
                         )
                         await session.commit()
                         video_record_id = result.scalar()
+                        if video_record_id is not None:
+                            video_record_id = str(video_record_id)
                     except Exception as e:
                         print(f"[SCENE VIDEOS V7] Error inserting video segment: {e}")
                         await session.rollback()
@@ -1429,6 +2119,8 @@ async def generate_scene_videos(
                             "scene_number": scene_num,
                             "shot_index": target_shot_index,
                             "video_url": video_url,
+                            "original_cdn_url": original_cdn_url,
+                            "provider_cdn_url": original_cdn_url,
                             "key_scene_shot_url": key_scene_shot_url,
                             "duration": 5.0,
                             "source_image": starting_image_url,
@@ -1436,6 +2128,10 @@ async def generate_scene_videos(
                             "method": "veo2_image_to_video_sequential",
                             "model": current_model_id,
                             "has_lipsync": has_lipsync,
+                            "audio_id": scene_audio.get("id") if scene_audio else None,
+                            "audio_url": scene_audio.get("audio_url") if scene_audio else None,
+                            "audio_scene_number": scene_audio.get("scene_number") if scene_audio else None,
+                            "audio_duration": audio_duration if scene_audio else None,
                             "scene_sequence": scene_num,
                         }
                     )
@@ -1446,11 +2142,29 @@ async def generate_scene_videos(
                 else:
                     raise Exception("No video URL in V7 response")
             else:
+                logger.error(
+                    "[SCENE VIDEOS V7] Provider failed scene_id=%s scene_number=%s model=%s error=%s",
+                    scene_id,
+                    scene_num,
+                    current_model_id,
+                    provider_result.get("error", "Unknown error"),
+                )
                 raise Exception(
-                    f"V7 Video generation failed: {result.get('error', 'Unknown error')}"
+                    f"V7 Video generation failed: {provider_result.get('error', 'Unknown error')}"
                 )
 
         except Exception as e:
+            if provider_attempt and not provider_attempt_persisted:
+                provider_attempt["status"] = provider_attempt.get("status") or "exception"
+                provider_attempt["exception"] = str(e)[:500]
+                logger.error(
+                    "[SCENE VIDEOS V7] Provider/scene exception scene_id=%s scene_number=%s model=%s error=%s",
+                    scene_id,
+                    scene_num,
+                    provider_attempt.get("model"),
+                    str(e),
+                )
+                await _persist_provider_attempt_diagnostic(session, video_gen_id, provider_attempt)
             print(f"[SCENE VIDEOS V7] ❌ Failed {scene_id}: {str(e)}")
 
             # Store failed record
@@ -1459,11 +2173,11 @@ async def generate_scene_videos(
                 fail_insert_query = text(
                     """
                     INSERT INTO video_segments (
-                        video_generation_id, scene_id, scene_number, scene_description,
-                        status
+                        video_generation_id, user_id, scene_id, scene_number, scene_description,
+                        status, character_count, dialogue_count, action_count
                     ) VALUES (
-                        :video_generation_id, :scene_id, :scene_number, :scene_description,
-                        :status
+                        :video_generation_id, :user_id, :scene_id, :scene_number, :scene_description,
+                        :status, :character_count, :dialogue_count, :action_count
                     )
                 """
                 )
@@ -1472,10 +2186,14 @@ async def generate_scene_videos(
                     fail_insert_query,
                     {
                         "video_generation_id": video_gen_id,
+                        "user_id": db_user_id,
                         "scene_id": scene_id,
                         "scene_number": scene_num,
                         "scene_description": scene_description,
                         "status": "failed",
+                        "character_count": 0,
+                        "dialogue_count": 0,
+                        "action_count": 0,
                     },
                 )
                 await session.commit()
@@ -1634,6 +2352,8 @@ async def async_retry_video_retrieval_task(
                 {
                     "retry_success": True,
                     "retry_video_url": video_url,
+                    "original_cdn_url": original_cdn_url,
+                    "provider_cdn_url": original_cdn_url,
                     "video_duration": video_duration,
                     "final_retrieval_time": "now()",
                 }
@@ -1900,6 +2620,8 @@ async def async_automatic_video_retry_task(video_generation_id: str):
                 {
                     "retry_success": True,
                     "retry_video_url": video_url,
+                    "original_cdn_url": original_cdn_url,
+                    "provider_cdn_url": original_cdn_url,
                     "video_duration": video_duration,
                     "final_retrieval_time": "now()",
                 }

@@ -14,12 +14,17 @@ from sqlmodel import select
 import uuid
 from app.core.model_config import get_model_config, ModelConfig
 from app.core.services.elevenlabs import ElevenLabsService
-from app.core.services.tts import tts_router
 from contextlib import asynccontextmanager
 from celery.utils.log import get_task_logger
 
 # Use Celery's task logger - this is properly captured by worker processes
 logger = get_task_logger(__name__)
+
+CHAPTER_AUDIO_TTS_MODEL_CHAIN = [
+    "elevenlabs/eleven_turbo_v2",
+    "elevenlabs/eleven_multilingual_v2",
+    "elevenlabs/eleven_english_v1",
+]
 
 
 @asynccontextmanager
@@ -767,7 +772,7 @@ async def generate_narrator_audio(
                             result = {
                                 "status": "success",
                                 "audio_url": fallback_result.get("audio_url"),
-                                "audio_time": 0,  # Duration might need calculation or be missing
+                                "audio_time": 0,  # KAN-166: Duration probed after persist below
                                 "model_used": "direct_eleven_multilingual_v2",
                                 "service": "elevenlabs_direct",
                             }
@@ -811,6 +816,18 @@ async def generate_narrator_audio(
                 except Exception as persist_error:
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+
+                # KAN-166: If API didn't report duration (fallback paths return audio_time:0),
+                # probe the actual audio file to get real duration
+                if duration <= 0 and audio_url:
+                    try:
+                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                        probed = await probe_audio_duration_from_url(audio_url)
+                        if probed and probed > 0:
+                            duration = probed
+                            print(f"[NARRATOR AUDIO] KAN-166: Probed actual duration: {duration}s")
+                    except Exception as probe_err:
+                        print(f"[NARRATOR AUDIO] KAN-166: Duration probe failed: {probe_err}")
             else:
                 raise Exception(
                     f"V7 Audio generation failed: {result.get('error', 'Unknown error')}"
@@ -1409,6 +1426,18 @@ async def generate_character_audio(
                 except Exception as persist_error:
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+
+                # KAN-166: If API didn't report duration (fallback paths return audio_time:0),
+                # probe the actual audio file to get real duration
+                if duration <= 0 and audio_url:
+                    try:
+                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                        probed = await probe_audio_duration_from_url(audio_url)
+                        if probed and probed > 0:
+                            duration = probed
+                            print(f"[CHARACTER AUDIO] KAN-166: Probed actual duration: {duration}s")
+                    except Exception as probe_err:
+                        print(f"[CHARACTER AUDIO] KAN-166: Duration probe failed: {probe_err}")
             else:
                 raise Exception(
                     f"V7 Audio generation failed: {result.get('error', 'Unknown error')}"
@@ -1644,6 +1673,17 @@ async def generate_sound_effects_audio(
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
 
+                # KAN-166: If API didn't report duration, probe actual file
+                if duration <= 0 and audio_url:
+                    try:
+                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                        probed = await probe_audio_duration_from_url(audio_url)
+                        if probed and probed > 0:
+                            duration = probed
+                            print(f"[SOUND EFFECTS] KAN-166: Probed actual duration: {duration}s")
+                    except Exception as probe_err:
+                        print(f"[SOUND EFFECTS] KAN-166: Duration probe failed: {probe_err}")
+
                 # Using passed script_id
 
                 # Store in database
@@ -1679,11 +1719,15 @@ async def generate_sound_effects_audio(
 
                     effects_results.append(
                         {
+                            "id": str(audio_record.id),
                             "effect_id": i + 1,
                             "audio_url": audio_url,
                             "description": effect["description"],
                             "duration": duration,
-                            "db_id": str(audio_record.id),
+                            "scene": scene_id,
+                            "scene_number": scene_id,  # KAN-165: explicit scene_number for find_scene_audio
+                            "shot_type": shot_type,
+                            "shot_index": shot_index,
                         }
                     )
 
@@ -1776,6 +1820,17 @@ async def generate_background_music(
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
 
+                # KAN-166: If API didn't report duration, probe actual file
+                if duration <= 0 and audio_url:
+                    try:
+                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
+                        probed = await probe_audio_duration_from_url(audio_url)
+                        if probed and probed > 0:
+                            duration = probed
+                            print(f"[BACKGROUND MUSIC] KAN-166: Probed actual duration: {duration}s")
+                    except Exception as probe_err:
+                        print(f"[BACKGROUND MUSIC] KAN-166: Duration probe failed: {probe_err}")
+
                 # Using passed script_id
 
                 # Store in database
@@ -1811,6 +1866,7 @@ async def generate_background_music(
                         {
                             "id": str(audio_record.id),
                             "scene": music_cue["scene"],
+                            "scene_number": music_cue["scene"],  # KAN-165: explicit scene_number for find_scene_audio
                             "audio_url": audio_url,
                             "description": music_cue["description"],
                             "duration": duration,
@@ -1870,8 +1926,7 @@ def generate_chapter_audio_task(
     """Generate audio for a chapter scene"""
 
     async def async_generate_chapter_audio():
-        from app.core.services.elevenlabs import ElevenLabsService
-        from app.core.services.modelslab_v7_audio import ModelsLabV7AudioService
+        nonlocal chapter_id
 
         try:
             print(
@@ -1934,40 +1989,51 @@ def generate_chapter_audio_task(
             print(f"[DEBUG] User tier: {user_tier}")
 
             # Choose service based on user tier and audio type
-            use_tts_router = audio_type in ["narrator", "character"]
+            use_chapter_tts = audio_type in ["narrator", "character"]
             service_used = None
             original_cdn_url = None
             resolved_voice_id = voice_id or "21m00Tcm4TlvDq8ikWAM"
             resolved_model_id = None
 
-            if use_tts_router:
-                tts_config = get_model_config("tts", user_tier)
-                requested_tts_model = (
-                    tts_config.primary if tts_config else "elevenlabs/eleven_turbo_v2"
-                )
-                tts_result = await tts_router.synthesize(
-                    text=text_content,
-                    user_tier=user_tier,
-                    voice_id=resolved_voice_id,
-                    model=requested_tts_model,
-                    user_id=user_id,
-                    emotion=emotion,
-                    speed=speed,
-                )
+            if use_chapter_tts:
+                # KAN-142: chapter narrator/character TTS must use ModelsLab V7
+                # even though the scoped chain keeps the historical elevenlabs/*
+                # model labels. Do not route this path through the global TTS
+                # router, because its elevenlabs provider calls ElevenLabsService
+                # directly and bypasses MODELSLAB_API_KEY/ModelsLab endpoint.
+                audio_service = ModelsLabV7AudioService()
+                tts_errors = []
 
-                if tts_result.get("status") != "success" or not tts_result.get("audio_url"):
-                    raise Exception(tts_result.get("error") or "Failed to generate audio with TTS router")
+                for configured_model in CHAPTER_AUDIO_TTS_MODEL_CHAIN:
+                    model_id = configured_model.split("/", 1)[-1]
+                    try:
+                        tts_result = await audio_service.generate_tts_audio(
+                            text=text_content,
+                            voice_id=resolved_voice_id,
+                            model_id=model_id,
+                            speed=speed,
+                        )
+                    except Exception as model_error:
+                        tts_errors.append(f"{model_id}: {model_error}")
+                        continue
 
-                original_cdn_url = tts_result["audio_url"]
-                audio_url = original_cdn_url
-                resolved_voice_id = tts_result.get("voice_id") or resolved_voice_id
-                resolved_model_id = (
-                    tts_result.get("model_used")
-                    or tts_result.get("model")
-                    or requested_tts_model
-                )
-                service_used = tts_result.get("provider") or "tts_router"
-                audio_duration = tts_result.get("duration_seconds")
+                    if tts_result.get("status") == "success" and tts_result.get("audio_url"):
+                        original_cdn_url = tts_result["audio_url"]
+                        audio_url = original_cdn_url
+                        service_used = "modelslab_v7"
+                        resolved_model_id = model_id
+                        audio_duration = tts_result.get("audio_time") or tts_result.get("duration_seconds")
+                        break
+
+                    tts_errors.append(
+                        f"{model_id}: {tts_result.get('error') or 'No audio URL returned'}"
+                    )
+                else:
+                    raise Exception(
+                        "Failed to generate audio with ModelsLab V7 TTS chain: "
+                        + "; ".join(tts_errors)
+                    )
+
                 try:
                     from app.core.services.storage import get_storage_service, S3StorageService
                     import uuid as _uuid_mod

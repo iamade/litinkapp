@@ -45,6 +45,7 @@ class AudioRecord(BaseModel):
     id: str
     user_id: str
     chapter_id: Optional[str] = None
+    script_id: Optional[str] = None
     audio_type: str
     text_content: Optional[str] = None
     voice_id: Optional[str] = None

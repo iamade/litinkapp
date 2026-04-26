@@ -586,6 +586,68 @@ def _get_video_duration(video_path: str) -> Optional[float]:
     return None
 
 
+def _get_audio_duration(audio_path: str) -> Optional[float]:
+    """Get audio duration in seconds using ffprobe (KAN-166).
+
+    Works for local files and URLs. Returns None if probing fails.
+    """
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            audio_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0 and result.stdout.strip():
+            val = float(result.stdout.strip())
+            if val > 0:
+                return val
+    except Exception as e:
+        logger.error(f"[FFPROBE] Error getting audio duration: {e}")
+    return None
+
+
+async def probe_audio_duration_from_url(audio_url: str) -> Optional[float]:
+    """Probe audio file duration from a URL using ffprobe (KAN-166).
+
+    Downloads to a temp file first if the URL is remote, since ffprobe
+    may not support all URL schemes directly. Returns None on failure.
+    """
+    import tempfile
+    import requests as _requests
+
+    if not audio_url:
+        return None
+
+    # Try direct probing first (ffprobe supports many URLs natively)
+    duration = _get_audio_duration(audio_url)
+    if duration is not None:
+        return duration
+
+    # Fallback: download to temp file and probe
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = tmp.name
+        resp = _requests.get(audio_url, timeout=15, stream=True)
+        resp.raise_for_status()
+        with open(tmp_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+        duration = _get_audio_duration(tmp_path)
+        return duration
+    except Exception as e:
+        logger.error(f"[FFPROBE] Error probing audio duration from URL: {e}")
+        return None
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
 def _calculate_letterbox_dimensions(
     input_width: int,
     input_height: int,

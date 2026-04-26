@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 import uuid
+import logging
 from fastapi import (
     APIRouter,
     Depends,
@@ -33,6 +34,8 @@ from app.videos.association_integrity import (
     extract_selected_scene_numbers,
     is_audio_record_in_context,
     is_generation_excluded,
+    parse_scene_id,
+    resolve_target_scene_numbers,
 )
 from app.books.models import (
     Book,
@@ -427,6 +430,7 @@ async def enhance_with_plot_context(
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/generate-text", response_model=AIResponse)
@@ -831,6 +835,12 @@ async def generate_entertainment_video(
             task_meta["selected_audio_ids"] = request.selected_audio_ids
         task_meta["script_id"] = str(script_data.id)
         task_meta["credit_reservation_id"] = str(reservation_id)
+        target_scene_numbers = resolve_target_scene_numbers(
+            selected_shot_ids,
+            str(script_data.id),
+            script_data.scene_descriptions,
+        )
+        task_meta["target_scene_numbers"] = target_scene_numbers
 
         video_generation = VideoGeneration(
             chapter_id=chapter_id,
@@ -879,6 +889,7 @@ async def generate_entertainment_video(
 
             result = await session.exec(stmt)
             audio_records = result.all()
+            raw_audio_records = list(audio_records)
             selected_scene_numbers = extract_selected_scene_numbers(
                 selected_shot_ids, str(script_data.id)
             )
@@ -890,10 +901,98 @@ async def generate_entertainment_video(
                 )
             ]
 
-            # Reject audio files that are too short — ModelsLab requires >= 5 seconds.
+            def _record_scene_number(record: AudioGeneration) -> Optional[int]:
+                scene_number = parse_scene_id(record.scene_id)
+                if scene_number is None and record.audio_metadata:
+                    raw_scene = record.audio_metadata.get("scene") or record.audio_metadata.get("scene_number")
+                    try:
+                        scene_number = int(raw_scene) if raw_scene is not None else None
+                    except (TypeError, ValueError):
+                        scene_number = None
+                if scene_number is None and record.sequence_order:
+                    try:
+                        scene_number = int(record.sequence_order)
+                    except (TypeError, ValueError):
+                        scene_number = None
+                return scene_number
+
+            def _record_has_usable_audio(record: AudioGeneration) -> bool:
+                return bool(record.audio_url and record.status == "completed")
+
+            target_scene_numbers = resolve_target_scene_numbers(
+                selected_shot_ids,
+                str(script_data.id),
+                script_data.scene_descriptions,
+            )
+            usable_audio_by_scene: Dict[int, List[str]] = {}
+            for record in audio_records:
+                record_scene = _record_scene_number(record)
+                if record_scene is not None and _record_has_usable_audio(record):
+                    usable_audio_by_scene.setdefault(record_scene, []).append(str(record.id))
+
+            if request.selected_audio_ids:
+                requested_audio_ids = {str(aid) for aid in request.selected_audio_ids}
+                found_selected_ids = {str(record.id) for record in raw_audio_records}
+                missing_selected_ids = sorted(requested_audio_ids - found_selected_ids)
+                if missing_selected_ids:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "status": "error",
+                            "code": "KAN86_AUDIO_SCOPE_MISMATCH",
+                            "message": "Selected audio was not found in the current user/script scope.",
+                            "missing_or_unscoped_audio_ids": missing_selected_ids,
+                        },
+                    )
+
+                if selected_scene_numbers:
+                    selected_scene_set = set(target_scene_numbers)
+                    mismatched_audio = []
+                    for record in raw_audio_records:
+                        if str(record.id) not in requested_audio_ids:
+                            continue
+                        record_scene = _record_scene_number(record)
+                        if record_scene not in selected_scene_set:
+                            mismatched_audio.append({
+                                "audio_id": str(record.id),
+                                "audio_scene_number": record_scene,
+                                "target_scene_numbers": target_scene_numbers,
+                            })
+                    if mismatched_audio:
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "status": "error",
+                                "code": "KAN86_AUDIO_SCENE_MISMATCH",
+                                "message": "Selected audio does not belong to the selected scene/chapter/script/scene scope.",
+                                "mismatched_audio": mismatched_audio,
+                            },
+                        )
+
+
+            missing_audio_scenes = [
+                scene_number for scene_number in target_scene_numbers
+                if scene_number not in usable_audio_by_scene
+            ]
+            if missing_audio_scenes:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "status": "error",
+                        "code": "KAN86_MISSING_SCENE_AUDIO",
+                        "message": "Video generation requires usable audio for every targeted scene.",
+                        "missing_scene_numbers": missing_audio_scenes,
+                        "target_scene_numbers": target_scene_numbers,
+                        "selected_audio_ids": request.selected_audio_ids or [],
+                    },
+                )
+
+            # KAN-166 integration fix: Reject audio files that are too short for video rendering.
+            # ModelsLab requires >= 5 seconds. However, duration_seconds=0 means unknown duration
+            # (probe failed or not yet run) — don't reject those, let video_tasks handle probing.
             short_audio = [
                 r for r in audio_records
-                if (r.duration_seconds or 0) < 5
+                if r.duration_seconds is not None and r.duration_seconds > 0 and r.duration_seconds < 5
             ]
             if short_audio:
                 short_ids = [str(r.id) for r in short_audio]
@@ -932,7 +1031,33 @@ async def generate_entertainment_video(
             if audio_records:
                 for audio_record in audio_records:
                     audio_type = audio_record.audio_type or "narrator"
-                    scene_number = audio_record.sequence_order or 0
+                    # KAN-165 integration fix: Derive scene_number from scene_id (e.g. "scene_2" → 2),
+                    # NOT from sequence_order (which is just a sequential index within audio type).
+                    # Falls back to audio_metadata.scene, then sequence_order.
+                    from app.videos.association_integrity import parse_scene_id as _parse_scene_id
+                    scene_number = _parse_scene_id(audio_record.scene_id)
+                    if scene_number is None and isinstance(audio_record.audio_metadata, dict):
+                        # Prefer explicit 1-based scene_number over legacy 0-based scene.
+                        metadata_scene = audio_record.audio_metadata.get("scene_number")
+                        if metadata_scene is None:
+                            metadata_scene = audio_record.audio_metadata.get("scene")
+                        try:
+                            scene_number = int(metadata_scene) if metadata_scene is not None else None
+                        except (TypeError, ValueError):
+                            scene_number = None
+                    if scene_number == 0:
+                        # Scene 0 is invalid for task/provider matching; legacy metadata used
+                        # zero for scene 1. Normalize before persisting task audio payload.
+                        scene_number = 1
+                    if (
+                        request.selected_audio_ids
+                        and str(audio_record.id) in {str(aid) for aid in request.selected_audio_ids}
+                        and len(target_scene_numbers) == 1
+                        and (scene_number is None or scene_number == 0)
+                    ):
+                        scene_number = target_scene_numbers[0]
+                    if scene_number is None:
+                        scene_number = audio_record.sequence_order or 1
                     # Map database fields to format expected by find_scene_audio
                     # find_scene_audio checks: audio.get("scene") and audio.get("audio_url")
                     audio_data = {
@@ -1022,11 +1147,17 @@ async def generate_entertainment_video(
                 if image_records:
                     for img in image_records:
                         image_type = img.image_type or "scene"
+                        image_meta = img.meta or {}
                         image_data = {
                             "id": str(img.id),
                             "url": img.image_url,
                             "image_url": img.image_url,
                             "prompt": img.image_prompt or "",
+                            "metadata": image_meta,
+                            "meta": image_meta,
+                            "original_cdn_url": image_meta.get("original_cdn_url") or image_meta.get("cdn_url"),
+                            "provider_cdn_url": image_meta.get("provider_cdn_url") or image_meta.get("original_cdn_url") or image_meta.get("cdn_url"),
+                            "provider_url_created_at": image_meta.get("provider_url_created_at") or image_meta.get("original_cdn_url_created_at") or image_meta.get("cdn_created_at"),
                             "created_at": (
                                 img.created_at.isoformat() if img.created_at else None
                             ),
@@ -1107,6 +1238,8 @@ async def generate_entertainment_video(
                 #     }
                 # }).eq('id', video_gen_id).execute()
 
+        except HTTPException:
+            raise
         except Exception as e:
             print(f"❌ Failed to queue audio task: {e}")
 
@@ -1156,6 +1289,8 @@ async def generate_entertainment_video(
                 "selected_audio": (
                     len(request.selected_audio_ids) if request.selected_audio_ids else 0
                 ),
+                "target_scene_numbers": target_scene_numbers,
+                "usable_audio_by_scene": usable_audio_by_scene,
                 "total_images": len(existing_images),
                 "created_at": (
                     script_data.created_at.isoformat()
@@ -1539,28 +1674,33 @@ async def get_scene_videos(
         scene_videos = []
         total_duration = 0.0
 
-        for video in videos_response.data or []:
-            # Calculate resolution from width and height
-            width = video.get("width", 512)
-            height = video.get("height", 288)
-            resolution = f"{width}x{height}"
+        for video in videos_data:
+            # Calculate resolution from width and height, tolerating sparse/failed segment rows.
+            width = video.get("width") or 512
+            height = video.get("height") or 288
+            duration = (
+                video.get("duration_seconds")
+                or video.get("duration")
+                or video.get("target_duration")
+                or 0
+            )
 
             scene_videos.append(
                 {
-                    "id": video["id"],
-                    "scene_id": video["scene_id"],
-                    "scene_description": video["scene_description"],
-                    "video_url": video["video_url"],
-                    "duration": video["duration_seconds"],
-                    "resolution": video["resolution"],
-                    "width": width,  # ✅ Include individual dimensions too
-                    "height": height,  # ✅ Include individual dimensions too
-                    "fps": video["fps"],
-                    "generation_method": video["generation_method"],
-                    "created_at": video["created_at"],
+                    "id": video.get("id"),
+                    "scene_id": video.get("scene_id"),
+                    "scene_description": video.get("scene_description"),
+                    "video_url": video.get("video_url"),
+                    "duration": duration,
+                    "resolution": video.get("resolution") or f"{width}x{height}",
+                    "width": width,
+                    "height": height,
+                    "fps": video.get("fps"),
+                    "generation_method": video.get("generation_method"),
+                    "created_at": video.get("created_at"),
                 }
             )
-            total_duration += video["duration_seconds"]
+            total_duration += duration
 
         return {
             "video_generation_id": video_gen_id,
@@ -1569,6 +1709,8 @@ async def get_scene_videos(
             "total_duration": total_duration,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1604,7 +1746,7 @@ async def get_final_video(
             )
 
         final_video_url = data.video_url
-        merge_data = data.get("merge_data", {})
+        merge_data = data.merge_data or {}
 
         if not final_video_url:
             raise HTTPException(status_code=404, detail="Final video not found")
@@ -1618,6 +1760,8 @@ async def get_final_video(
             "processing_details": merge_data.get("processing_details", {}),
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -3853,6 +3997,9 @@ Script to analyze:
             ai_service = AIService()
             entries = await ai_service.generate_emotional_map(script, characters)
 
+            if not entries:
+                logger.warning(f"[EMOTIONAL_MAP] generate_emotional_map returned 0 entries for script in chapter {chapter_id}. Primary and all fallbacks may have failed.")
+
             validated_entries = []
             for entry in entries:
                 if "line_id" not in entry:
@@ -3866,7 +4013,7 @@ Script to analyze:
                 f"[DEBUG] Auto-generated emotional map with {len(validated_entries)} entries"
             )
         except Exception as e:
-            print(f"Error auto-generating emotional map: {e}")
+            logger.error(f"[EMOTIONAL_MAP] Failed to auto-generate emotional map for chapter {chapter_id}: {e}")
             # Non-fatal error, continue returning the script
             validated_entries = []
 
@@ -4054,6 +4201,9 @@ async def generate_script_and_scenes_with_gpt(
             ai_service = AIService()
             entries = await ai_service.generate_emotional_map(script, characters)
 
+            if not entries:
+                logger.warning(f"[EMOTIONAL_MAP] generate_emotional_map returned 0 entries for script update in chapter {chapter_id}. Primary and all fallbacks may have failed.")
+
             validated_entries = []
             for entry in entries:
                 if "line_id" not in entry:
@@ -4068,7 +4218,7 @@ async def generate_script_and_scenes_with_gpt(
                 f"[DEBUG] Auto-generated emotional map with {len(validated_entries)} entries"
             )
         except Exception as e:
-            print(f"Error auto-generating emotional map: {e}")
+            logger.error(f"[EMOTIONAL_MAP] Failed to auto-generate emotional map for script update in chapter {chapter_id}: {e}")
             validated_entries = []
 
         return {

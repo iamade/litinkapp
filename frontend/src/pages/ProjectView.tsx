@@ -46,6 +46,7 @@ import { useVideoGenerationStatus } from '../hooks/useVideoGenerationStatus';
 import { useCreditBalance } from '../hooks/useCreditBalance';
 import { DEFAULT_VIDEO_SECONDS_PER_SHOT, estimateVideoCreditsFromShots, getInsufficientCreditsTooltip } from '../lib/creditCosts';
 import { dispatchCreditsRefresh } from '../lib/credits';
+import { getActualChapterId, getScriptSceneImageUrls } from '../lib/projectChapterSelection';
 
 // Types
 interface ChapterArtifact {
@@ -84,15 +85,6 @@ const getDynamicLabel = (artifact: ChapterArtifact, index: number): { label: str
     label: `${label} ${number}`,
     plural: pluralMap[label] || `${label}s`
   };
-};
-
-// Helper to get the actual chapter ID for API calls
-// For uploaded books, content.chapter_id contains the real chapter table ID
-// For prompt-only projects, we use the artifact/project ID
-const getActualChapterId = (chapter: ChapterArtifact | null): string => {
-  if (!chapter) return '';
-  // Prefer content.chapter_id (actual Chapter table ID) if available
-  return chapter.content?.chapter_id || chapter.id;
 };
 
 interface WorkflowProgress {
@@ -305,7 +297,7 @@ const ProjectView: React.FC = () => {
           // resolve selectedScriptId correctly on initial load.
           // Without this, the context keeps selectedChapterId=null
           // which causes downstream panels to render blank.
-          selectChapter(chapters[0].id, { reason: 'navigation' });
+          selectChapter(getActualChapterId(chapters[0]), { reason: 'navigation' });
         }
       }
     } catch (error) {
@@ -349,7 +341,7 @@ const ProjectView: React.FC = () => {
       if (virtualChapter) {
         setSelectedChapter(virtualChapter);
         // Sync with ScriptSelectionContext for prompt-only projects
-        selectChapter(virtualChapter.id, { reason: 'navigation' });
+        selectChapter(getActualChapterId(virtualChapter), { reason: 'navigation' });
       }
     }
   }, [loading, isPromptOnlyProject, isWorkflowMode, virtualChapter]);
@@ -422,16 +414,8 @@ const ProjectView: React.FC = () => {
   const [generatedAudioFiles, setGeneratedAudioFiles] = useState<string[]>([]);
 
   useEffect(() => {
-    const imageUrls = Object.values(sceneImages)
-      .flat()
-      .filter((img: any) => {
-        const normalizedScriptId = img.script_id || img.scriptId;
-        return img.imageUrl && (!selectedScriptId || normalizedScriptId === selectedScriptId);
-      })
-      .sort((a: any, b: any) => a.sceneNumber - b.sceneNumber)
-      .map((img: any) => img.imageUrl);
-    setGeneratedImageUrls(imageUrls);
-  }, [sceneImages]);
+    setGeneratedImageUrls(getScriptSceneImageUrls(sceneImages, selectedScriptId));
+  }, [sceneImages, selectedScriptId]);
 
   useEffect(() => {
     const audioUrls: string[] = [];
@@ -678,7 +662,7 @@ const ProjectView: React.FC = () => {
               const chapter = chapters.find((c) => c.id === artifactId);
               if (chapter) {
                 setSelectedChapter(chapter);
-                selectChapter(chapter.id, { reason: 'user' });
+                selectChapter(getActualChapterId(chapter), { reason: 'user' });
               }
               setActiveTab("script");
             }}
@@ -1018,7 +1002,7 @@ const ProjectView: React.FC = () => {
                       key={chapter.id}
                       onClick={() => {
                         setSelectedChapter(chapter);
-                        selectChapter(chapter.id, { reason: 'user' });
+                        selectChapter(getActualChapterId(chapter), { reason: 'user' });
                       }}
                       className={`w-full text-left p-3 rounded-lg transition-colors mb-2 ${
                         selectedChapter?.id === chapter.id
