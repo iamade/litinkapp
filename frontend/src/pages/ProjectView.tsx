@@ -917,7 +917,7 @@ const ProjectView: React.FC = () => {
               {/* Workflow Tabs */}
               <div className="min-w-0 overflow-hidden bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
                 <div className="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
-                  <nav className="flex w-max min-w-full space-x-8 px-6" aria-label="Tabs">
+                  <nav className="flex min-w-full gap-2 px-4 md:gap-4 md:px-6" aria-label="Tabs">
                     {workflowTabs.map((tab) => {
                       const isActive = activeTab === tab.id;
                       const currentProgress = getCurrentProgress();
@@ -927,17 +927,17 @@ const ProjectView: React.FC = () => {
                         <button
                           key={tab.id}
                           onClick={() => setActiveTab(tab.id)}
-                          className={`flex items-center space-x-3 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                          className={`flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                             isActive
                               ? "border-purple-500 text-purple-600"
                               : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                           }`}
                         >
                           <tab.icon className="w-5 h-5" />
-                          <span>{tab.label}</span>
+                          <span className="truncate">{tab.label}</span>
                           <ProgressIndicator status={tabProgress} />
-                          {!isActive && (
-                            <span className="text-xs text-gray-400 hidden lg:block">
+                          {isActive && (
+                            <span className="hidden max-w-40 truncate text-xs text-gray-400 xl:inline">
                               {tab.description}
                             </span>
                           )}
