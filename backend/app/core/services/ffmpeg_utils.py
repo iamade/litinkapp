@@ -22,9 +22,50 @@ import subprocess
 import tempfile
 import uuid as uuid_lib
 from typing import Dict, Any, Optional, List, Tuple
+from urllib.parse import urlparse, urlunparse
+
+from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger()
+
+
+def _replace_url_origin(url: str, target_origin: Optional[str]) -> str:
+    """Return url with scheme/netloc from target_origin, preserving path/query."""
+    if not url or not target_origin:
+        return url
+
+    parsed_url = urlparse(url)
+    parsed_target = urlparse(target_origin)
+    if not parsed_url.scheme or not parsed_url.netloc or not parsed_target.scheme or not parsed_target.netloc:
+        return url
+
+    return urlunparse(parsed_url._replace(scheme=parsed_target.scheme, netloc=parsed_target.netloc))
+
+
+def _normalize_minio_url_for_internal_download(url: Optional[str]) -> Optional[str]:
+    """Use the internal MinIO endpoint for backend downloads of local public URLs."""
+    if not url:
+        return url
+
+    parsed_url = urlparse(url)
+    public_url = urlparse(getattr(settings, "MINIO_PUBLIC_URL", "") or "")
+    endpoint_url = urlparse(getattr(settings, "MINIO_ENDPOINT", "") or "")
+
+    if (
+        parsed_url.scheme in {"http", "https"}
+        and parsed_url.netloc
+        and public_url.scheme in {"http", "https"}
+        and public_url.netloc
+        and endpoint_url.scheme in {"http", "https"}
+        and endpoint_url.netloc
+        and parsed_url.scheme == public_url.scheme
+        and parsed_url.netloc == public_url.netloc
+        and public_url.netloc != endpoint_url.netloc
+    ):
+        return _replace_url_origin(url, settings.MINIO_ENDPOINT)
+
+    return url
 
 
 async def extract_last_frame(
@@ -45,9 +86,12 @@ async def extract_last_frame(
     video_path = None
     frame_path = None
     try:
+        download_url = _normalize_minio_url_for_internal_download(video_url)
         logger.info("[LAST FRAME] Extracting last frame from %s", (video_url or "")[:80])
+        if download_url != video_url:
+            logger.info("[LAST FRAME] Using internal media URL for download")
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.get(video_url)
+            response = await client.get(download_url)
             if response.status_code != 200:
                 logger.warning("[LAST FRAME] Download failed with status %s", response.status_code)
                 return None
