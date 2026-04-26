@@ -20,10 +20,93 @@ import asyncio
 import os
 import subprocess
 import tempfile
+import uuid as uuid_lib
 from typing import Dict, Any, Optional, List, Tuple
 from app.core.logging import get_logger
 
 logger = get_logger()
+
+
+async def extract_last_frame(
+    video_url: str,
+    user_id: Optional[str] = None,
+    *,
+    seek_offset_seconds: float = 0.1,
+) -> Optional[str]:
+    """Download a video, extract its last frame with ffmpeg, and upload it.
+
+    Returns the uploaded JPEG URL, or ``None`` when extraction/upload fails. This
+    utility is intentionally centralized so video generation tasks and API
+    services use the same frame extraction behavior for Prompt 6 continuity.
+    """
+    import httpx
+    from app.core.services.storage import get_storage_service
+
+    video_path = None
+    frame_path = None
+    try:
+        logger.info("[LAST FRAME] Extracting last frame from %s", (video_url or "")[:80])
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(video_url)
+            if response.status_code != 200:
+                logger.warning("[LAST FRAME] Download failed with status %s", response.status_code)
+                return None
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as video_file:
+            video_file.write(response.content)
+            video_path = video_file.name
+        frame_path = video_path.replace(".mp4", "_last_frame.jpg")
+
+        probe_cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            video_path,
+        ]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        duration = float(result.stdout.strip()) if result.stdout.strip() else 0.0
+        seek_time = max(0, duration - seek_offset_seconds)
+
+        extract_cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            str(seek_time),
+            "-i",
+            video_path,
+            "-vframes",
+            "1",
+            "-q:v",
+            "2",
+            frame_path,
+        ]
+        subprocess.run(extract_cmd, capture_output=True, check=True)
+
+        if not os.path.exists(frame_path):
+            logger.warning("[LAST FRAME] ffmpeg completed without frame output")
+            return None
+
+        storage_service = get_storage_service()
+        frame_filename = f"frames/{user_id or 'system'}/last_frame_{uuid_lib.uuid4().hex[:8]}.jpg"
+        return await storage_service.upload(
+            frame_path,
+            file_path=frame_filename,
+            content_type="image/jpeg",
+        )
+    except Exception as exc:
+        logger.warning("[LAST FRAME] Extraction failed: %s", exc)
+        return None
+    finally:
+        for path in (video_path, frame_path):
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
 
 # ============================================================================
