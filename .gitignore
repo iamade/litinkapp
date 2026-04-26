@@ -1,10 +1,12 @@
 # Environment files
+env.*
 .env
 .env.local
 .env.production
 .env.test
 .env.*
 !.env.example
+!scripts/env.*.example
 
 # Backend environments
 backend/.envs/*

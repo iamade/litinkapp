@@ -1,0 +1,35 @@
+# =============================================================================
+# Override file — tunnel mode (connects to VPS services via SSH tunnel)
+# This excludes postgres/redis/minio (they run on VPS)
+# Usage: docker compose -f backend/local.yml -f backend/local-tunnel.yml up
+# =============================================================================
+
+services:
+  postgres:
+    # Don't run postgres locally — use VPS via tunnel
+    profiles: []
+
+  redis:
+    profiles: []
+
+  minio:
+    profiles: []
+
+  backend:
+    # Override ports to avoid conflicts
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.envs/.env.local
+
+  celery-worker:
+    env_file:
+      - ../.envs/.env.local
+
+  celery-beat:
+    env_file:
+      - ../.envs/.env.local
+
+  frontend:
+    environment:
+      - VITE_API_URL=http://localhost:8000
