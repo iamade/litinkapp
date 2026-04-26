@@ -973,12 +973,32 @@ class StandaloneImageService:
                 "model_used": generation_result.get("model_used"),
             }
 
+            # Preserve the provider CDN URL before replacing canonical image_url
+            # with the persisted storage URL. Video generation can reuse this
+            # fresh provider URL without needing localhost/private MinIO exposure.
+            provider_image_url = generation_result.get("image_url")
+            if provider_image_url:
+                provider_url_created_at = datetime.utcnow().isoformat()
+                merged_metadata.update({
+                    "provider_image_url": provider_image_url,
+                    "provider_cdn_url": provider_image_url,
+                    "original_cdn_url": provider_image_url,
+                    "cdn_url": provider_image_url,
+                    "provider_url_created_at": provider_url_created_at,
+                    "original_cdn_url_created_at": provider_url_created_at,
+                })
+
             # Persist both watermarked and clean copies to storage.
             # Watermarked URL becomes the canonical image_url; clean URL is stored
             # in meta.clean_url so the API can serve it to paid-tier users.
-            provider_image_url = generation_result.get("image_url")
             final_image_url = provider_image_url
             if provider_image_url:
+                # Preserve the ModelsLab/provider CDN URL before the canonical
+                # image_url is replaced by the persisted storage URL. Scene video
+                # generation can reuse this fresh provider URL for init_image.
+                merged_metadata.setdefault("original_cdn_url", provider_image_url)
+                merged_metadata.setdefault("provider_cdn_url", provider_image_url)
+                merged_metadata.setdefault("cdn_url", provider_image_url)
                 storage = get_storage_service()
                 image_scope = str(record.script_id or record.chapter_id or record.video_generation_id or 'global')
                 wm_s3_path = S3StorageService.build_media_path(
