@@ -5,6 +5,7 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from app.api.routes.merge.routes import generate_merge_preview, get_current_user_id
+from app.auth.models import User
 from app.merges.schemas import MergePreviewRequest
 
 
@@ -50,3 +51,20 @@ def test_get_current_user_id_rejects_missing_id():
         get_current_user_id(SimpleNamespace())
 
     assert exc_info.value.status_code == 401
+
+
+def test_user_model_supports_legacy_dict_access_for_auth_paths():
+    user_id = uuid.uuid4()
+    user = User(
+        id=user_id,
+        email="kan259@example.com",
+        hashed_password="unused",
+        is_active=True,
+    )
+
+    assert user["id"] == user_id
+    assert user.get("id") == user_id
+    assert user.get("missing", "fallback") == "fallback"
+
+    with pytest.raises(KeyError):
+        _ = user["missing"]
