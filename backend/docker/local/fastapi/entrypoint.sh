@@ -42,7 +42,12 @@ END
 
 echo >&2 'PostgreSQL is ready to accept connections'
 
-alembic upgrade head
+if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+    echo "Running Alembic migrations for ${SERVICE_ROLE:-unknown}..."
+    alembic upgrade head
+else
+    echo "Skipping Alembic migrations for ${SERVICE_ROLE:-unknown}"
+fi
 
 # If called with an explicit command (e.g., /start.sh), run it
 # Otherwise, use environment detection to start the appropriate mode

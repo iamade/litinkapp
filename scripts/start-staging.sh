@@ -4,8 +4,8 @@
 
 echo "Starting LitInkAI staging (tunnel mode)..."
 
-# Check tunnel
-pgrep -f "ssh -N.*72.62.97.111.*5432" > /dev/null || { echo "❌ Run tunnel-staging.sh first!"; exit 1; }
+# Check tunnel (match forwarded staging port; ssh args may appear before the host)
+pgrep -f "ssh .*5432:127.0.0.1:5432.*72.62.97.111" > /dev/null || { echo "❌ Run tunnel-staging.sh first and leave it open!"; exit 1; }
 
 # Use staging env
 cp scripts/env.staging backend/.envs/.env.local
