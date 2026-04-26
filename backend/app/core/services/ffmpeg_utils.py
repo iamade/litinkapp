@@ -136,9 +136,11 @@ async def extract_last_frame(
 
         storage_service = get_storage_service()
         frame_filename = f"frames/{user_id or 'system'}/last_frame_{uuid_lib.uuid4().hex[:8]}.jpg"
+        with open(frame_path, "rb") as frame_file:
+            frame_bytes = frame_file.read()
         return await storage_service.upload(
-            frame_path,
-            file_path=frame_filename,
+            frame_bytes,
+            frame_filename,
             content_type="image/jpeg",
         )
     except Exception as exc:
