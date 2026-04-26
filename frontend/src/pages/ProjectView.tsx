@@ -808,6 +808,7 @@ const ProjectView: React.FC = () => {
             canRender={!!selectedChapter && videoStatus !== "processing" && videoStatus !== "starting"}
             isRenderInProgress={videoStatus === "processing" || videoStatus === "starting"}
             onRenderVideo={() => handleGenerateVideo()}
+            userTier={(user?.subscription_tier as 'free' | 'basic' | 'pro' | 'enterprise') || 'free'}
           />
         );
 
