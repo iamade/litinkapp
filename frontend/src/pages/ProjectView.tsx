@@ -909,12 +909,15 @@ const ProjectView: React.FC = () => {
 
         <div className="flex min-h-screen">
           {/* Main Content Area */}
-          <div className={`flex-1 min-w-0 overflow-hidden transition-all duration-300 ${sidebarCollapsed ? "mr-16" : "mr-80"}`}>
-            <div className="p-6 overflow-x-auto">
+          <div
+            className={`flex-none min-w-0 overflow-hidden transition-all duration-300 ${sidebarCollapsed ? "mr-16" : "mr-80"}`}
+            style={{ width: sidebarCollapsed ? 'calc(100vw - 4rem)' : 'calc(100vw - 20rem)' }}
+          >
+            <div className="min-w-0 p-6 overflow-x-hidden">
               {/* Workflow Tabs */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
-                <div className="border-b border-gray-200 dark:border-gray-700">
-                  <nav className="flex space-x-8 px-6" aria-label="Tabs">
+              <div className="min-w-0 overflow-hidden bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
+                <div className="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+                  <nav className="flex w-max min-w-full space-x-8 px-6" aria-label="Tabs">
                     {workflowTabs.map((tab) => {
                       const isActive = activeTab === tab.id;
                       const currentProgress = getCurrentProgress();
@@ -945,7 +948,7 @@ const ProjectView: React.FC = () => {
                 </div>
 
                 {/* Tab Content */}
-                <div className="p-6">{renderTabContent()}</div>
+                <div className="min-w-0 overflow-x-auto p-6">{renderTabContent()}</div>
               </div>
             </div>
           </div>

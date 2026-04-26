@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react';
-import { Video } from 'lucide-react';
 import { useVideoProduction } from '../../hooks/useVideoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
@@ -41,9 +40,6 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
   imageUrls = [],
   audioFiles = [],
   videoGenerations = [],
-  canRender = false,
-  isRenderInProgress = false,
-  onRenderVideo,
   userTier = 'free',
 }) => {
   const { selectedScriptId, isSwitching } = useScriptSelection();
@@ -221,9 +217,9 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
   const allScenesHaveVideos = safeEnrichedScenes.length > 0 && generatedCount === safeEnrichedScenes.length;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-        <div>
+    <div className="min-w-0 space-y-6">
+      <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             Merge Studio
           </p>
@@ -236,18 +232,6 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
           </p>
         </div>
 
-        {!allScenesHaveVideos && onRenderVideo && (
-          <button
-            type="button"
-            onClick={onRenderVideo}
-            disabled={isLoading || isSwitching || isRenderInProgress || !canRender}
-            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-            title="Generate missing scene videos before merging"
-          >
-            <Video className="h-4 w-4" />
-            <span>{isRenderInProgress ? 'Generating...' : 'Generate Missing Videos'}</span>
-          </button>
-        )}
       </div>
 
       {!allScenesHaveVideos && (
