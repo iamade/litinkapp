@@ -54,3 +54,8 @@ async def test_extract_last_frame_uses_internal_minio_endpoint_for_download(monk
     assert requested_urls == ["http://minio:9000/litink-books/videos/generated.mp4"]
     assert result == "http://localhost:9000/litink-books/frames/user/last.jpg"
     storage.upload.assert_awaited_once()
+    upload_args, upload_kwargs = storage.upload.await_args
+    assert upload_args[0] == b"fake-frame"
+    assert upload_args[1].startswith("frames/user-123/last_frame_")
+    assert upload_args[1].endswith(".jpg")
+    assert upload_kwargs == {"content_type": "image/jpeg"}
