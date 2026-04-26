@@ -15,6 +15,7 @@ AI-powered book processing and interactive trailer generation platform.
 - [Environment Configuration](#environment-configuration)
 - [Makefile Commands](#makefile-commands)
 - [Frontend (Local Dev)](#frontend-local-dev)
+- [Stripe Dev Subscription Upgrade Guide](#stripe-dev-subscription-upgrade-guide)
 - [Testing](#testing)
 - [Project Structure](#project-structure)
 - [Conventional Commits](#conventional-commits)
@@ -244,6 +245,92 @@ npm run lint         # ESLint
 ```
 
 The frontend proxies API requests to the backend via `VITE_API_URL` (set in `frontend/.env`).
+
+---
+
+## Stripe Dev Subscription Upgrade Guide
+
+Use this guide to test subscription upgrades locally via Stripe test mode. **Do not manually edit `subscription_tier` in the database** — always use the Stripe checkout flow to avoid enum case mismatches.
+
+### 1. Start the Stripe CLI listener
+
+Before testing subscriptions, start the Stripe CLI to forward webhook events to your local backend:
+
+```bash
+stripe listen --forward-to localhost:8000/api/subscriptions/webhook
+```
+
+This prints a `whsec_...` webhook signing secret. Set it in your `backend/.envs/.env.local`:
+
+```
+STRIPE_WEBHOOK_SECRET=whsec_<from-stripe-listen-output>
+```
+
+Restart the backend after updating the env var.
+
+### 2. Configure Stripe Price IDs
+
+Ensure the following Stripe Price IDs are set in `backend/.envs/.env.local`:
+
+| Env Var | Tier | Required |
+|---------|------|----------|
+| `STRIPE_FREE_PRICE_ID` | Free | No (default tier) |
+| `STRIPE_BASIC_PRICE_ID` | Basic | Yes |
+| `STRIPE_STANDARD_PRICE_ID` | Standard | Yes |
+| `STRIPE_PREMIUM_PRICE_ID` | Premium | Yes |
+| `STRIPE_PROFESSIONAL_PRICE_ID` | Professional | Yes |
+| `STRIPE_ENTERPRISE_PRICE_ID` | Enterprise | Yes |
+| `STRIPE_PRO_PRICE_ID` | Pro (legacy) | No |
+
+Create Price IDs in the [Stripe Dashboard](https://dashboard.stripe.com/test/products) under **Test Mode**.
+
+### 3. Trigger a subscription upgrade
+
+Use the checkout API endpoint:
+
+```bash
+curl -X POST http://localhost:8000/api/subscriptions/checkout \
+  -H "Authorization: Bearer <your-jwt-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tier": "professional",
+    "success_url": "http://localhost:5173/settings?upgrade=success",
+    "cancel_url": "http://localhost:5173/settings?upgrade=cancelled"
+  }'
+```
+
+This returns a `checkout_url`. Open it in a browser.
+
+### 4. Complete payment with test cards
+
+Use these Stripe test card numbers (any future expiry, any CVC, any postal code):
+
+| Card Number | Result |
+|------------|--------|
+| `4242 4242 4242 4242` | ✅ Succeeds |
+| `4000 0025 0000 3155` | Requires 3DS authentication |
+| `4000 0000 0000 9995` | ❌ Declines |
+
+After payment, Stripe sends a `checkout.session.completed` webhook to your local backend, which activates the subscription in the database.
+
+### 5. Verify the subscription
+
+Check the user's subscription status via API or directly in the database:
+
+```sql
+SELECT tier, status FROM user_subscriptions WHERE user_id = '<your-user-uuid>' AND status = 'active';
+```
+
+Expected: `tier = 'professional'`, `status = 'active'` (lowercase values per KAN-244 enum normalization).
+
+### Troubleshooting
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Webhook not received | Stripe CLI not running | Start `stripe listen` before testing |
+| `Invalid webhook signature` | `STRIPE_WEBHOOK_SECRET` mismatch | Copy `whsec_...` from `stripe listen` output |
+| Subscription stays inactive | Webhook handler error | Check backend logs for webhook processing errors |
+| `enum case mismatch` | Manual DB edit inserted uppercase values | Never edit `subscription_tier`/`subscription_status` directly — use Stripe checkout only |
 
 ---
 

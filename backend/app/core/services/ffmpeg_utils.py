@@ -20,10 +20,93 @@ import asyncio
 import os
 import subprocess
 import tempfile
+import uuid as uuid_lib
 from typing import Dict, Any, Optional, List, Tuple
 from app.core.logging import get_logger
 
 logger = get_logger()
+
+
+async def extract_last_frame(
+    video_url: str,
+    user_id: Optional[str] = None,
+    *,
+    seek_offset_seconds: float = 0.1,
+) -> Optional[str]:
+    """Download a video, extract its last frame with ffmpeg, and upload it.
+
+    Returns the uploaded JPEG URL, or ``None`` when extraction/upload fails. This
+    utility is intentionally centralized so video generation tasks and API
+    services use the same frame extraction behavior for Prompt 6 continuity.
+    """
+    import httpx
+    from app.core.services.storage import get_storage_service
+
+    video_path = None
+    frame_path = None
+    try:
+        logger.info("[LAST FRAME] Extracting last frame from %s", (video_url or "")[:80])
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(video_url)
+            if response.status_code != 200:
+                logger.warning("[LAST FRAME] Download failed with status %s", response.status_code)
+                return None
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as video_file:
+            video_file.write(response.content)
+            video_path = video_file.name
+        frame_path = video_path.replace(".mp4", "_last_frame.jpg")
+
+        probe_cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            video_path,
+        ]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        duration = float(result.stdout.strip()) if result.stdout.strip() else 0.0
+        seek_time = max(0, duration - seek_offset_seconds)
+
+        extract_cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            str(seek_time),
+            "-i",
+            video_path,
+            "-vframes",
+            "1",
+            "-q:v",
+            "2",
+            frame_path,
+        ]
+        subprocess.run(extract_cmd, capture_output=True, check=True)
+
+        if not os.path.exists(frame_path):
+            logger.warning("[LAST FRAME] ffmpeg completed without frame output")
+            return None
+
+        storage_service = get_storage_service()
+        frame_filename = f"frames/{user_id or 'system'}/last_frame_{uuid_lib.uuid4().hex[:8]}.jpg"
+        return await storage_service.upload(
+            frame_path,
+            file_path=frame_filename,
+            content_type="image/jpeg",
+        )
+    except Exception as exc:
+        logger.warning("[LAST FRAME] Extraction failed: %s", exc)
+        return None
+    finally:
+        for path in (video_path, frame_path):
+            if path and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
 
 # ============================================================================
@@ -584,6 +667,68 @@ def _get_video_duration(video_path: str) -> Optional[float]:
     except Exception as e:
         logger.error(f"[FFPROBE] Error getting duration: {e}")
     return None
+
+
+def _get_audio_duration(audio_path: str) -> Optional[float]:
+    """Get audio duration in seconds using ffprobe (KAN-166).
+
+    Works for local files and URLs. Returns None if probing fails.
+    """
+    try:
+        cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            audio_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0 and result.stdout.strip():
+            val = float(result.stdout.strip())
+            if val > 0:
+                return val
+    except Exception as e:
+        logger.error(f"[FFPROBE] Error getting audio duration: {e}")
+    return None
+
+
+async def probe_audio_duration_from_url(audio_url: str) -> Optional[float]:
+    """Probe audio file duration from a URL using ffprobe (KAN-166).
+
+    Downloads to a temp file first if the URL is remote, since ffprobe
+    may not support all URL schemes directly. Returns None on failure.
+    """
+    import tempfile
+    import requests as _requests
+
+    if not audio_url:
+        return None
+
+    # Try direct probing first (ffprobe supports many URLs natively)
+    duration = _get_audio_duration(audio_url)
+    if duration is not None:
+        return duration
+
+    # Fallback: download to temp file and probe
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = tmp.name
+        resp = _requests.get(audio_url, timeout=15, stream=True)
+        resp.raise_for_status()
+        with open(tmp_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+        duration = _get_audio_duration(tmp_path)
+        return duration
+    except Exception as e:
+        logger.error(f"[FFPROBE] Error probing audio duration from URL: {e}")
+        return None
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 def _calculate_letterbox_dimensions(

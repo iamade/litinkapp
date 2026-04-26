@@ -16,13 +16,15 @@ import {
   Edit2,
   Trash2,
   GripVertical,
-  Users
+  Users,
+  AlertTriangle
 } from 'lucide-react';
 import type { VideoScene, Transition } from '../../types/videoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 import { SceneDetailModal } from './SceneDetailModal';
 import ProtectedImage from '../Common/ProtectedImage';
+import { isKan86UsableSceneAudio } from '../../lib/kan86AudioPreflight';
 
 // Define ChapterScript interface locally to avoid import issues
 interface ChapterScript {
@@ -75,10 +77,12 @@ const SceneCard: React.FC<{
   scriptScene?: SceneDescription;
   sceneCharacters?: string[];
   storyboardAudioCount?: number;
+  usableAudioCount?: number;
+  audioDiagnostic?: string;
   isSelectedForGeneration?: boolean;  // Whether this scene is selected for video generation
   onToggleSelection?: () => void;     // Toggle selection for video generation
   isGenerating?: boolean;             // Whether this scene is currently being generated
-}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters, storyboardAudioCount, isSelectedForGeneration, onToggleSelection, isGenerating }) => {
+}> = ({ scene, onSelect, onUpdate, onDelete, isSelected, disabled, scriptScene, sceneCharacters, storyboardAudioCount, usableAudioCount = 0, audioDiagnostic, isSelectedForGeneration, onToggleSelection, isGenerating }) => {
   const {
     attributes,
     listeners,
@@ -275,6 +279,13 @@ const SceneCard: React.FC<{
                 </div>
               </div>
               
+              <div className={`flex items-center gap-1 text-[10px] ${usableAudioCount > 0 ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`} title={audioDiagnostic}>
+                {usableAudioCount > 0 ? <Music className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                <span className="truncate">
+                  {usableAudioCount > 0 ? `${usableAudioCount} usable scene audio` : 'Missing usable scene audio'}
+                </span>
+              </div>
+
               {/* Script-specific character info */}
               {sceneCharacters && sceneCharacters.length > 0 && (
                 <div className="flex items-center space-x-1 text-xs text-blue-600">
@@ -468,6 +479,11 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
               // Get script-specific scene description if available
               const scriptScene = selectedScript?.scene_descriptions?.[index];
               const sceneCharacters = scriptScene?.characters || [];
+              const sceneAudio = storyboardContext?.getAudioForShot(scene.sceneNumber, scene.shotIndex) || [];
+              const usableAudio = sceneAudio.filter(isKan86UsableSceneAudio);
+              const audioDiagnostic = usableAudio[0]
+                ? `audio ${usableAudio[0].id} • ${usableAudio[0].url || 'missing URL'} • scene ${scene.sceneNumber} shot ${scene.shotIndex ?? 0} • status ${usableAudio[0].status || 'completed'} • duration ${usableAudio[0].duration || 'unknown'}s`
+                : `No usable audio for scene ${scene.sceneNumber} shot ${scene.shotIndex ?? 0}`;
               
               return (
                 <SceneCard
@@ -485,7 +501,9 @@ const SceneTimeline: React.FC<SceneTimelineProps> = ({
                   disabled={disabled}
                   scriptScene={scriptScene}
                   sceneCharacters={sceneCharacters}
-                  storyboardAudioCount={storyboardContext?.getAudioForShot(scene.sceneNumber, scene.shotIndex)?.length ?? 0}
+                  storyboardAudioCount={sceneAudio.length}
+                  usableAudioCount={usableAudio.length}
+                  audioDiagnostic={audioDiagnostic}
                   isSelectedForGeneration={selectedShotIds.includes(scene.id)}
                   onToggleSelection={() => onToggleShotSelection?.(scene.id)}
                   isGenerating={generatingShotIds.has(scene.id) || generatingShotIds.has('__all__')}

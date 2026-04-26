@@ -51,17 +51,21 @@ def extract_shot_selections(
             return None
 
         prefix = raw_id[: -len(marker)]
-        match = re.match(
-            r"^scene-(?P<timestamp>\d+)-(?P<scene_index>\d+)(?:-(?P<shot_index>\d+))?$",
-            prefix,
-        )
-        if not match:
+        parts = prefix.split("-")
+        if len(parts) < 3 or parts[0] != "scene":
             return None
 
+        # Frontend IDs may be either:
+        #   scene-{timestamp}-{scene_index}-{script_id}
+        #   scene-{timestamp}-{scene_index}-{shot_index}-{script_id}
+        #   scene-{timestamp}-{scene_index}-{sceneNumber}-{shot_index}-{script_id}
+        # The script UUID itself contains dashes, so always strip the known script
+        # suffix first, then read the stable numeric prefix. The selected scene is
+        # the first numeric part after timestamp; the shot is the last extra
+        # numeric part when present.
         try:
-            scene_index = int(match.group("scene_index"))
-            shot_index_raw = match.group("shot_index")
-            shot_index = int(shot_index_raw) if shot_index_raw is not None else 0
+            scene_index = int(parts[2])
+            shot_index = int(parts[-1]) if len(parts) > 3 else 0
         except (TypeError, ValueError):
             return None
 
@@ -114,6 +118,47 @@ def parse_scene_id(scene_id: Any) -> Optional[int]:
     return None
 
 
+def get_scene_number(scene_description: Any, fallback_number: int) -> int:
+    """Return a 1-based scene number from dict/object/string scene metadata.
+
+    Historical scripts can store scene_descriptions as strings, dicts, Pydantic
+    objects, SQLModel-ish objects, or mixed lists. Strings have no explicit
+    scene_number, so their position is the canonical fallback.
+    """
+    raw_scene_number = None
+    if isinstance(scene_description, dict):
+        raw_scene_number = scene_description.get("scene_number")
+    elif scene_description is not None and not isinstance(scene_description, str):
+        raw_scene_number = getattr(scene_description, "scene_number", None)
+
+    try:
+        return int(raw_scene_number) if raw_scene_number is not None else fallback_number
+    except (TypeError, ValueError):
+        return fallback_number
+
+
+def resolve_target_scene_numbers(
+    selected_shot_ids: Optional[Sequence[Any]],
+    expected_script_id: Optional[str],
+    scene_descriptions: Optional[Sequence[Any]],
+) -> List[int]:
+    selected_scene_numbers = extract_selected_scene_numbers(
+        selected_shot_ids, expected_script_id
+    )
+    if selected_scene_numbers:
+        return selected_scene_numbers
+
+    target_scene_numbers: List[int] = []
+    seen: set[int] = set()
+    for idx, scene in enumerate(scene_descriptions or []):
+        scene_number = get_scene_number(scene, idx + 1)
+        if scene_number in seen:
+            continue
+        target_scene_numbers.append(scene_number)
+        seen.add(scene_number)
+    return target_scene_numbers
+
+
 def is_generation_excluded(task_meta: Optional[Dict[str, Any]]) -> bool:
     if not isinstance(task_meta, dict):
         return False
@@ -136,9 +181,25 @@ def is_audio_record_in_context(
     if not allowed_set:
         return True
 
-    scene_number = getattr(audio_record, "sequence_order", None)
+    # KAN-86: Prefer the explicit scene_id when present, then scene metadata
+    # persisted by the audio pipeline, and only fall back to legacy
+    # sequence_order. sequence_order can be an audio ordering index, so it must
+    # not hide a valid audio_metadata.scene_number match when scene_id is null.
+    scene_number = parse_scene_id(getattr(audio_record, "scene_id", None))
+
     if scene_number is None:
-        scene_number = parse_scene_id(getattr(audio_record, "scene_id", None))
+        audio_metadata = getattr(audio_record, "audio_metadata", None)
+        if isinstance(audio_metadata, dict):
+            metadata_scene = audio_metadata.get("scene")
+            if metadata_scene is None:
+                metadata_scene = audio_metadata.get("scene_number")
+            try:
+                scene_number = int(metadata_scene) if metadata_scene is not None else None
+            except (TypeError, ValueError):
+                scene_number = None
+
+    if scene_number is None:
+        scene_number = getattr(audio_record, "sequence_order", None)
 
     try:
         if scene_number is None:

@@ -161,19 +161,12 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     return fromMeta;
   }, [selectedScript]);
 
-  const getSceneDurationSeconds = React.useCallback((sceneNum: number) => {
-    const scene = scenes[sceneNum - 1] as any;
-    const rawDuration = Number(scene?.estimated_duration ?? scene?.duration ?? 5);
-    return Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 5;
-  }, [scenes]);
-
-  const getSceneAudioCost = React.useCallback((sceneNum: number) => {
-    return estimateAudioCredits(getSceneDurationSeconds(sceneNum));
-  }, [getSceneDurationSeconds]);
-
-  const allScenesAudioCost = React.useMemo(() => {
-    return scenes.reduce((total, _scene, idx) => total + getSceneAudioCost(idx + 1), 0);
-  }, [scenes, getSceneAudioCost]);
+  // IMPORTANT: useImageGeneration must be called BEFORE any useMemo/useCallback that references sceneImages
+  // to avoid TDZ (Temporal Dead Zone) error "Cannot access 'sceneImages' before initialization"
+  const {
+    sceneImages,
+    loadImages,
+  } = useImageGeneration(stableSelectedChapterId, selectedScriptId, scenes);
 
   const {
     files,
@@ -187,10 +180,38 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
     videoGenerationId,
   });
 
-  const {
-    sceneImages,
-    loadImages,
-  } = useImageGeneration(stableSelectedChapterId, selectedScriptId, scenes);
+  // Check if any scene has storyboard images generated (not just script scenes)
+  const hasAnySceneImages = React.useMemo(() => {
+    for (let i = 1; i <= scenes.length; i++) {
+      const imgs = sceneImages[`${selectedScriptId}_${i}`] || sceneImages[i] || [];
+      if (imgs.some((img: any) => img.id && !deselectedImages.has(img.id))) {
+        return true;
+      }
+    }
+    return false;
+  }, [scenes, sceneImages, selectedScriptId, deselectedImages]);
+
+  // Computed disabled reason for Generate All Audio button tooltip
+  const generateDisabledReason = React.useMemo(() => {
+    if (!scenes.length) return 'No scenes available';
+    if (!hasAnySceneImages) return 'Generate scenes first';
+    if (isGenerating) return 'Audio generation in progress';
+    return '';
+  }, [scenes.length, hasAnySceneImages, isGenerating]);
+
+  const getSceneDurationSeconds = React.useCallback((sceneNum: number) => {
+    const scene = scenes[sceneNum - 1] as any;
+    const rawDuration = Number(scene?.estimated_duration ?? scene?.duration ?? 5);
+    return Number.isFinite(rawDuration) && rawDuration > 0 ? rawDuration : 5;
+  }, [scenes]);
+
+  const getSceneAudioCost = React.useCallback((sceneNum: number) => {
+    return estimateAudioCredits(getSceneDurationSeconds(sceneNum));
+  }, [getSceneDurationSeconds]);
+
+  const allScenesAudioCost = React.useMemo(() => {
+    return scenes.reduce((total, _scene, idx) => total + getSceneAudioCost(idx + 1), 0);
+  }, [scenes, getSceneAudioCost]);
 
   // Load images when entering component or scenes update
   useEffect(() => {
@@ -542,6 +563,11 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
       return;
     }
 
+    if (!hasAnySceneImages) {
+      toast.error('Generate scene images first in the Images tab');
+      return;
+    }
+
     // Require emotional map for cinematic scripts
     const isCinematic = selectedScript?.script_style === 'cinematic' || 
                         selectedScript?.script_style === 'cinematic_movie';
@@ -683,7 +709,8 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
           </button>
           <button
             onClick={handleGenerateAll}
-            disabled={!scenes.length || isGeneratingAudio}
+            disabled={!scenes.length || !hasAnySceneImages || isGeneratingAudio}
+            title={generateDisabledReason || undefined}
             className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg shadow-md hover:shadow-lg hover:from-purple-700 hover:to-indigo-700 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed disabled:transform-none"
           >
             {isGeneratingAudio ? (
@@ -1061,7 +1088,12 @@ const AudioPanel: React.FC<AudioPanelProps> = ({
                                 isGeneratingAudio={generatingScenesAudio.has(sceneNum)}
                                 hasAudio={sceneHasAudio(sceneNum)}
                                 estimatedCreditCost={getSceneAudioCost(sceneNum)}
-                                generateDisabledReason={undefined}
+                                generateDisabledReason={
+                                  (sceneImages[`${selectedScriptId}_${sceneNum}`] || sceneImages[sceneNum] || [])
+                                    .filter((img: any) => !img.id || !deselectedImages.has(img.id)).length === 0
+                                    ? 'Generate scenes first'
+                                    : undefined
+                                }
                                 onGenerateAudio={() => handleGenerateSceneAudio(sceneNum)}
                                 onView={(url, imgDescription) => {
                                     const desc = imgDescription || (typeof scene === 'string' ? scene : (scene.visual_description || scene.description));

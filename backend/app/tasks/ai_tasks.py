@@ -1,7 +1,8 @@
 from celery import current_task
 from app.tasks.celery_app import celery_app
 from app.core.services.ai import AIService
-from app.core.services.voice import VoiceService
+import asyncio
+from app.core.services.tts.router import TTSRouter
 from app.api.services.video import VideoService
 
 
@@ -31,9 +32,12 @@ def generate_voice_task(self, text: str, character: str, emotion: str = "neutral
             state="PROGRESS", meta={"status": "Generating voice audio..."}
         )
 
-        voice_service = VoiceService()
-        # Sync version needed for Celery
-        audio_url = voice_service.generate_speech_sync(text, character, emotion)
+        tts_router = TTSRouter()
+        # TTSRouter is async; wrap for sync Celery task
+        async def _synthesize():
+            result = await tts_router.synthesize(text=text, user_tier="basic", voice_id=character)
+            return result.get("audio_url", result.get("url", ""))
+        audio_url = asyncio.run(_synthesize())
 
         return {"status": "SUCCESS", "audio_url": audio_url}
     except Exception as e:

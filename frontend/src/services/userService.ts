@@ -139,7 +139,7 @@ interface ImageGenerationResponse {
 }
 
 interface SceneImageRequest {
-  scene_description: string;
+  scene_description?: string;
   style?: string;
   aspect_ratio?: string;
   custom_prompt?: string;

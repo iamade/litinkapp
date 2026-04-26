@@ -121,7 +121,7 @@ export const projectService = {
     projectId: string, 
     sceneNumber: number, 
     data: { 
-      scene_description: string; 
+      scene_description?: string; 
       style: string; 
       aspect_ratio: string; 
       custom_prompt?: string;

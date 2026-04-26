@@ -181,7 +181,12 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET_NAME: str = "litink-books"
     MINIO_SECURE: bool = False  # Use HTTP in development
-    MINIO_PUBLIC_URL: str = "http://localhost:9000"  # Public URL (without bucket name)
+    MINIO_PUBLIC_URL: str = "http://localhost:9000"  # Browser/public URL (without bucket name)
+    # External provider-readable media URL base (without bucket name). Use when
+    # MINIO_PUBLIC_URL is localhost/docker-local for browser/dev access but
+    # ModelsLab must fetch media from an externally reachable host.
+    MODELSLAB_MEDIA_PUBLIC_URL: Optional[str] = None
+    MINIO_PROVIDER_PUBLIC_URL: Optional[str] = None
 
     # S3 Configuration (for production)
     S3_ENDPOINT: Optional[str] = None  # AWS S3 or S3-compatible endpoint

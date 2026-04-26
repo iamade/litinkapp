@@ -46,6 +46,7 @@ import { useVideoGenerationStatus } from '../hooks/useVideoGenerationStatus';
 import { useCreditBalance } from '../hooks/useCreditBalance';
 import { DEFAULT_VIDEO_SECONDS_PER_SHOT, estimateVideoCreditsFromShots, getInsufficientCreditsTooltip } from '../lib/creditCosts';
 import { dispatchCreditsRefresh } from '../lib/credits';
+import { getActualChapterId, getScriptSceneImageUrls } from '../lib/projectChapterSelection';
 
 // Types
 interface ChapterArtifact {
@@ -84,15 +85,6 @@ const getDynamicLabel = (artifact: ChapterArtifact, index: number): { label: str
     label: `${label} ${number}`,
     plural: pluralMap[label] || `${label}s`
   };
-};
-
-// Helper to get the actual chapter ID for API calls
-// For uploaded books, content.chapter_id contains the real chapter table ID
-// For prompt-only projects, we use the artifact/project ID
-const getActualChapterId = (chapter: ChapterArtifact | null): string => {
-  if (!chapter) return '';
-  // Prefer content.chapter_id (actual Chapter table ID) if available
-  return chapter.content?.chapter_id || chapter.id;
 };
 
 interface WorkflowProgress {
@@ -305,7 +297,7 @@ const ProjectView: React.FC = () => {
           // resolve selectedScriptId correctly on initial load.
           // Without this, the context keeps selectedChapterId=null
           // which causes downstream panels to render blank.
-          selectChapter(chapters[0].id, { reason: 'navigation' });
+          selectChapter(getActualChapterId(chapters[0]), { reason: 'navigation' });
         }
       }
     } catch (error) {
@@ -349,7 +341,7 @@ const ProjectView: React.FC = () => {
       if (virtualChapter) {
         setSelectedChapter(virtualChapter);
         // Sync with ScriptSelectionContext for prompt-only projects
-        selectChapter(virtualChapter.id, { reason: 'navigation' });
+        selectChapter(getActualChapterId(virtualChapter), { reason: 'navigation' });
       }
     }
   }, [loading, isPromptOnlyProject, isWorkflowMode, virtualChapter]);
@@ -422,16 +414,8 @@ const ProjectView: React.FC = () => {
   const [generatedAudioFiles, setGeneratedAudioFiles] = useState<string[]>([]);
 
   useEffect(() => {
-    const imageUrls = Object.values(sceneImages)
-      .flat()
-      .filter((img: any) => {
-        const normalizedScriptId = img.script_id || img.scriptId;
-        return img.imageUrl && (!selectedScriptId || normalizedScriptId === selectedScriptId);
-      })
-      .sort((a: any, b: any) => a.sceneNumber - b.sceneNumber)
-      .map((img: any) => img.imageUrl);
-    setGeneratedImageUrls(imageUrls);
-  }, [sceneImages]);
+    setGeneratedImageUrls(getScriptSceneImageUrls(sceneImages, selectedScriptId));
+  }, [sceneImages, selectedScriptId]);
 
   useEffect(() => {
     const audioUrls: string[] = [];
@@ -678,7 +662,7 @@ const ProjectView: React.FC = () => {
               const chapter = chapters.find((c) => c.id === artifactId);
               if (chapter) {
                 setSelectedChapter(chapter);
-                selectChapter(chapter.id, { reason: 'user' });
+                selectChapter(getActualChapterId(chapter), { reason: 'user' });
               }
               setActiveTab("script");
             }}
@@ -824,6 +808,7 @@ const ProjectView: React.FC = () => {
             canRender={!!selectedChapter && videoStatus !== "processing" && videoStatus !== "starting"}
             isRenderInProgress={videoStatus === "processing" || videoStatus === "starting"}
             onRenderVideo={() => handleGenerateVideo()}
+            userTier={(user?.subscription_tier as 'free' | 'basic' | 'pro' | 'enterprise') || 'free'}
           />
         );
 
@@ -924,12 +909,15 @@ const ProjectView: React.FC = () => {
 
         <div className="flex min-h-screen">
           {/* Main Content Area */}
-          <div className={`flex-1 min-w-0 overflow-hidden transition-all duration-300 ${sidebarCollapsed ? "mr-16" : "mr-80"}`}>
-            <div className="p-6 overflow-x-auto">
+          <div
+            className={`flex-none min-w-0 overflow-hidden transition-all duration-300 ${sidebarCollapsed ? "mr-16" : "mr-80"}`}
+            style={{ width: sidebarCollapsed ? 'calc(100vw - 4rem)' : 'calc(100vw - 20rem)' }}
+          >
+            <div className="min-w-0 p-6 overflow-x-hidden">
               {/* Workflow Tabs */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
-                <div className="border-b border-gray-200 dark:border-gray-700">
-                  <nav className="flex space-x-8 px-6" aria-label="Tabs">
+              <div className="min-w-0 overflow-hidden bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6">
+                <div className="border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+                  <nav className="flex min-w-full gap-2 px-4 md:gap-4 md:px-6" aria-label="Tabs">
                     {workflowTabs.map((tab) => {
                       const isActive = activeTab === tab.id;
                       const currentProgress = getCurrentProgress();
@@ -939,17 +927,17 @@ const ProjectView: React.FC = () => {
                         <button
                           key={tab.id}
                           onClick={() => setActiveTab(tab.id)}
-                          className={`flex items-center space-x-3 py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                          className={`flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
                             isActive
                               ? "border-purple-500 text-purple-600"
                               : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                           }`}
                         >
                           <tab.icon className="w-5 h-5" />
-                          <span>{tab.label}</span>
+                          <span className="truncate">{tab.label}</span>
                           <ProgressIndicator status={tabProgress} />
-                          {!isActive && (
-                            <span className="text-xs text-gray-400 hidden lg:block">
+                          {isActive && (
+                            <span className="hidden max-w-40 truncate text-xs text-gray-400 xl:inline">
                               {tab.description}
                             </span>
                           )}
@@ -960,7 +948,7 @@ const ProjectView: React.FC = () => {
                 </div>
 
                 {/* Tab Content */}
-                <div className="p-6">{renderTabContent()}</div>
+                <div className="min-w-0 overflow-x-auto p-6">{renderTabContent()}</div>
               </div>
             </div>
           </div>
@@ -1018,7 +1006,7 @@ const ProjectView: React.FC = () => {
                       key={chapter.id}
                       onClick={() => {
                         setSelectedChapter(chapter);
-                        selectChapter(chapter.id, { reason: 'user' });
+                        selectChapter(getActualChapterId(chapter), { reason: 'user' });
                       }}
                       className={`w-full text-left p-3 rounded-lg transition-colors mb-2 ${
                         selectedChapter?.id === chapter.id

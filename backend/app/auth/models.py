@@ -54,3 +54,13 @@ class User(UserBaseSchema, table=True):
 
     def has_role(self, role: RoleChoicesSchema) -> bool:
         return role in self.roles
+
+    def __getitem__(self, key: str):
+        """Provide legacy dict-style access for routes not yet migrated to attributes."""
+        if hasattr(self, key):
+            return getattr(self, key)
+        raise KeyError(key)
+
+    def get(self, key: str, default=None):
+        """Provide legacy dict-style get access for routes not yet migrated."""
+        return getattr(self, key, default)

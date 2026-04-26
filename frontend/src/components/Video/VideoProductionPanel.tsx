@@ -6,7 +6,8 @@ import {
   Download,
   RefreshCw,
   Film,
-  Monitor
+  Monitor,
+  AlertTriangle
 } from 'lucide-react';
 import { useVideoProduction } from '../../hooks/useVideoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
@@ -18,6 +19,7 @@ import type { VideoScene } from '../../types/videoProduction';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
 import { useCreditBalance } from '../../hooks/useCreditBalance';
 import { DEFAULT_VIDEO_SECONDS_PER_SHOT, estimateVideoCreditsFromShots } from '../../lib/creditCosts';
+import { buildKan86AudioPreflight } from '../../lib/kan86AudioPreflight';
 import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 import {
   subscriptionService,
@@ -376,6 +378,32 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
     setShowInsufficientCreditsModal(true);
   };
 
+  const buildAudioPreflight = React.useCallback((targetScenes: VideoScene[]) => (
+    buildKan86AudioPreflight(
+      targetScenes,
+      (sceneNumber, shotIndex) => storyboardContext?.getAudioForShot(sceneNumber, shotIndex) || [],
+      storyboardContext?.selectedAudioIds || new Set<string>(),
+      { scriptId: selectedScript?.id, chapterId: selectedScript?.chapter_id || chapterId }
+    )
+  ), [storyboardContext, selectedScript?.id, selectedScript?.chapter_id, chapterId]);
+
+  const allAudioPreflight = React.useMemo(() => buildAudioPreflight(enrichedScenes), [buildAudioPreflight, enrichedScenes]);
+  const selectedScenesForPreflight = React.useMemo(
+    () => enrichedScenes.filter(scene => selectedShotIds.includes(scene.id)),
+    [enrichedScenes, selectedShotIds]
+  );
+  const selectedAudioPreflight = React.useMemo(
+    () => buildAudioPreflight(selectedScenesForPreflight),
+    [buildAudioPreflight, selectedScenesForPreflight]
+  );
+
+  const blockForMissingAudio = (missingScenes: Array<{ sceneNumber: number; shotIndex?: number; reason: string }>) => {
+    const sceneList = missingScenes
+      .map(item => `Scene ${item.sceneNumber}${typeof item.shotIndex === 'number' ? ` shot ${item.shotIndex + 1}` : ''}: ${item.reason}`)
+      .join('; ');
+    toast.error(`KAN-86 preflight blocked video generation. Missing usable audio: ${sceneList}`, { duration: 8000 });
+  };
+
 
   const [watermarkStatus, setWatermarkStatus] = useState<WatermarkStatusResponse | null>(null);
   const [downloadStatus, setDownloadStatus] = useState<DownloadStatusResponse | null>(null);
@@ -436,19 +464,27 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   }, [downloadStatus]);
 
   const handleGenerateSelected = () => {
+    if (!selectedAudioPreflight.ok) {
+      blockForMissingAudio(selectedAudioPreflight.missingScenes);
+      return;
+    }
     if (creditBalance < selectedVideoCost) {
       openInsufficientCreditsModal(selectedVideoCost);
       return;
     }
-    onGenerateVideo?.(selectedShotIds);
+    onGenerateVideo?.(selectedShotIds, selectedAudioPreflight.selectedAudioIds);
   };
 
   const handleGenerateAll = () => {
+    if (!allAudioPreflight.ok) {
+      blockForMissingAudio(allAudioPreflight.missingScenes);
+      return;
+    }
     if (creditBalance < allVideoCost) {
       openInsufficientCreditsModal(allVideoCost);
       return;
     }
-    onGenerateVideo?.();
+    onGenerateVideo?.(undefined, allAudioPreflight.selectedAudioIds);
   };
 
   // Reset UI state when script changes
@@ -607,7 +643,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             <div>
               <button
                 onClick={handleGenerateSelected}
-                disabled={controlsDisabled || !canGenerateVideo || selectedShotIds.length === 0}
+                disabled={controlsDisabled || !canGenerateVideo || selectedShotIds.length === 0 || !selectedAudioPreflight.ok}
                 className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
                 <Video className="w-4 h-4" />
@@ -621,7 +657,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             <div>
               <button
                 onClick={handleGenerateAll}
-                disabled={controlsDisabled || !canGenerateVideo}
+                disabled={controlsDisabled || !canGenerateVideo || !allAudioPreflight.ok}
                 className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
                 <Video className="w-4 h-4" />
@@ -634,6 +670,30 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
             </div>
           </div>
         </div>
+        {(!allAudioPreflight.ok || (selectedShotIds.length > 0 && !selectedAudioPreflight.ok)) && (
+          <div className="mt-3 rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-xs text-amber-800 dark:text-amber-200">
+            <div className="flex items-center gap-2 font-semibold mb-1">
+              <AlertTriangle className="w-4 h-4" /> KAN-86 preflight: video generation requires one usable scene-scoped audio per targeted scene.
+            </div>
+            <ul className="list-disc pl-5 space-y-0.5">
+              {(selectedShotIds.length > 0 ? selectedAudioPreflight.missingScenes : allAudioPreflight.missingScenes).slice(0, 8).map((item, idx) => (
+                <li key={`${item.sceneNumber}-${item.shotIndex ?? 'all'}-${idx}`}>
+                  Scene {item.sceneNumber}{typeof item.shotIndex === 'number' ? ` shot ${item.shotIndex + 1}` : ''}: {item.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {allAudioPreflight.diagnostics.length > 0 && (
+          <div className="mt-3 text-[10px] text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900/40 rounded border border-gray-200 dark:border-gray-700 p-2 max-h-24 overflow-y-auto">
+            <div className="font-semibold uppercase tracking-wide mb-1">Mapped audio diagnostics for PSQ</div>
+            {allAudioPreflight.diagnostics.map(item => (
+              <div key={`${item.sceneNumber}-${item.shotIndex ?? 0}-${item.audioId}`} className="font-mono truncate">
+                Script {item.scriptId || 'unknown'} / chapter {item.chapterId || 'unknown'} / scene {item.sceneNumber}/shot {item.shotIndex ?? 0} → audio {item.audioId} • {item.url || 'missing URL'} • {item.status} • {item.duration || 'unknown'}s
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Generation Progress */}

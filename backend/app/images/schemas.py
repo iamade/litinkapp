@@ -6,7 +6,7 @@ from pydantic import BaseModel
 class SceneImageRequest(BaseModel):
     """Request model for generating scene images"""
 
-    scene_description: str
+    scene_description: Optional[str] = None  # Optional: backend derives from chapter data if omitted
     style: str = "cinematic"
     aspect_ratio: str = "16:9"
     custom_prompt: Optional[str] = None
