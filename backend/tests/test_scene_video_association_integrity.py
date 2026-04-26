@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
@@ -228,6 +229,7 @@ import pytest
 
 from app.tasks.video_tasks import (
     ProviderMediaUrlConfigurationError,
+    _json_dumps_safe,
     generate_scene_videos,
     normalize_media_url_for_internal_access,
     normalize_media_url_for_provider,
@@ -790,6 +792,34 @@ async def test_kan86_success_segment_insert_has_required_counts(monkeypatch):
     assert completed_inserts[-1]["character_count"] == 0
     assert completed_inserts[-1]["dialogue_count"] == 0
     assert completed_inserts[-1]["action_count"] == 0
+
+
+def test_kan86_finalization_metadata_serializes_uuid_and_duration():
+    segment_id = uuid.uuid4()
+    payload = {
+        "scene_videos": [
+            {
+                "id": segment_id,
+                "scene_id": "scene_1",
+                "scene_number": 1,
+                "video_url": "https://storage.example.com/video.mp4",
+                "duration": 5.05,
+            }
+        ],
+        "statistics": {
+            "total_scenes": 1,
+            "videos_generated": 1,
+            "total_duration": 5.05,
+            "success_rate": 100.0,
+        },
+    }
+
+    serialized = _json_dumps_safe(payload)
+    decoded = json.loads(serialized)
+
+    assert decoded["scene_videos"][0]["id"] == str(segment_id)
+    assert decoded["scene_videos"][0]["video_url"] == "https://storage.example.com/video.mp4"
+    assert decoded["statistics"]["total_duration"] == 5.05
 
 
 def test_kan86_provider_cdn_url_preferred_over_localhost_minio_without_provider_base(monkeypatch):

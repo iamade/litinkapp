@@ -1678,7 +1678,12 @@ async def get_scene_videos(
             # Calculate resolution from width and height, tolerating sparse/failed segment rows.
             width = video.get("width") or 512
             height = video.get("height") or 288
-            duration = video.get("duration_seconds") or video.get("duration") or 0
+            duration = (
+                video.get("duration_seconds")
+                or video.get("duration")
+                or video.get("target_duration")
+                or 0
+            )
 
             scene_videos.append(
                 {

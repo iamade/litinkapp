@@ -490,6 +490,30 @@ def _safe_uuid_string(value: Optional[str]) -> Optional[str]:
         return None
 
 
+def _json_safe_value(value: Any) -> Any:
+    """Return a JSON-serializable copy for task metadata/API payloads.
+
+    SQLAlchemy returns PostgreSQL UUID columns as ``uuid.UUID`` objects. KAN-86
+    scene video finalization builds ``video_data`` from inserted segment IDs;
+    letting raw UUIDs reach ``json.dumps`` aborts the otherwise-successful
+    generation after the segment is already created.
+    """
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe_value(v) for v in value]
+    return value
+
+
+def _json_dumps_safe(value: Any) -> str:
+    """Serialize DB JSON payloads after normalizing UUID/datetime values."""
+    return json.dumps(_json_safe_value(value))
+
+
 def _build_provider_attempt_diagnostic(
     *,
     scene_id: str,
@@ -545,7 +569,7 @@ async def _persist_provider_attempt_diagnostic(
                 WHERE id = :id
                 """
             ),
-            {"id": video_gen_id, "diagnostic": json.dumps([diagnostic])},
+            {"id": video_gen_id, "diagnostic": _json_dumps_safe([diagnostic])},
         )
         await session.commit()
     except Exception as diag_err:
@@ -1321,7 +1345,7 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             await session.execute(
                 update_query,
                 {
-                    "video_data": json.dumps(video_data_result),
+                    "video_data": _json_dumps_safe(video_data_result),
                     "status": final_status,
                     "error_message": error_msg,
                     "video_url": first_video_url,
@@ -2081,6 +2105,8 @@ async def generate_scene_videos(
                         )
                         await session.commit()
                         video_record_id = result.scalar()
+                        if video_record_id is not None:
+                            video_record_id = str(video_record_id)
                     except Exception as e:
                         print(f"[SCENE VIDEOS V7] Error inserting video segment: {e}")
                         await session.rollback()
