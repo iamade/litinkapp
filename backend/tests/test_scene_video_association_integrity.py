@@ -921,3 +921,86 @@ def test_kan86_raw_ip_provider_cdn_candidate_still_rejected_or_falls_back(monkey
     assert selected == canonical
     with pytest.raises(ProviderMediaUrlConfigurationError):
         normalize_media_url_for_provider(selected)
+
+
+def test_kan87_generate_all_expands_scene_then_shot_order():
+    pre_gen_scene_images = [
+        {"id": "scene-1-shot-1", "scene_number": 1, "shot_index": 1, "image_url": "https://cdn/s1-1.png"},
+        {"id": "scene-1-key", "scene_number": 1, "shot_index": 0, "image_url": "https://cdn/s1-0.png"},
+        {"id": "scene-2-key", "scene_number": 2, "shot_index": 0, "image_url": "https://cdn/s2-0.png"},
+    ]
+    scene_image_map = {}
+    for img in pre_gen_scene_images:
+        scene_image_map.setdefault(int(img["scene_number"]), {})[int(img["shot_index"])] = img
+
+    descriptions, scene_numbers, images = select_scene_assets_for_targets(
+        target_scene_numbers=[1, 2],
+        original_scene_descriptions=["Scene one", "Scene two"],
+        scene_image_map=scene_image_map,
+        pre_gen_scene_images=pre_gen_scene_images,
+        pre_gen_character_images=[],
+        selected_shots=[],
+    )
+
+    assert descriptions == ["Scene one", "Scene one", "Scene two"]
+    assert scene_numbers == [1, 1, 2]
+    assert [img["id"] for img in images] == ["scene-1-key", "scene-1-shot-1", "scene-2-key"]
+
+
+@pytest.mark.asyncio
+async def test_kan87_suggested_shot_uses_previous_upscaled_frame_and_scene_key_resets(monkeypatch):
+    monkeypatch.setattr("app.core.services.storage.get_storage_service", lambda: _NoopStorage())
+    frames = ["https://storage.example.com/frame-key.jpg", "https://storage.example.com/frame-suggested.jpg", "https://storage.example.com/frame-scene2.jpg"]
+    monkeypatch.setattr("app.tasks.video_tasks.extract_last_frame", AsyncMock(side_effect=frames))
+    monkeypatch.setattr("app.tasks.video_tasks.upscale_frame", AsyncMock(side_effect=lambda url, **kwargs: url.replace("frame", "upscaled")))
+    session = _RecordingSession()
+    service = _ProviderSuccessService()
+
+    result = await generate_scene_videos(
+        modelslab_service=service,
+        video_gen_id="11111111-1111-1111-1111-111111111111",
+        scene_descriptions=["Scene one", "Scene one suggested", "Scene two"],
+        audio_files={"characters": [], "narrator": [], "sound_effects": [], "background_music": []},
+        image_data={"scene_images": [
+            {"image_url": "https://cdn.example.com/scene1-key.png", "scene_number": 1, "shot_index": 0},
+            {"image_url": "https://cdn.example.com/scene1-shot1.png", "scene_number": 1, "shot_index": 1},
+            {"image_url": "https://cdn.example.com/scene2-key.png", "scene_number": 2, "shot_index": 0},
+        ]},
+        video_style="realistic",
+        user_id="22222222-2222-2222-2222-222222222222",
+        session=session,
+        scene_numbers=[1, 1, 2],
+    )
+
+    assert [r["shot_index"] for r in result] == [0, 1, 0]
+    assert service.calls[0]["image_url"] == "https://cdn.example.com/scene1-key.png"
+    assert service.calls[1]["image_url"] == "https://storage.example.com/upscaled-key.jpg"
+    assert service.calls[2]["image_url"] == "https://cdn.example.com/scene2-key.png"
+    assert result[1]["frame_dependency"]["extracted_frame_url"] == "https://storage.example.com/frame-key.jpg"
+
+
+@pytest.mark.asyncio
+async def test_kan87_suggested_shot_fails_without_previous_frame_dependency(monkeypatch):
+    monkeypatch.setattr("app.core.services.storage.get_storage_service", lambda: _NoopStorage())
+    monkeypatch.setattr("app.tasks.video_tasks.extract_last_frame", AsyncMock(return_value=None))
+    session = _RecordingSession()
+    service = _ProviderSuccessService()
+
+    result = await generate_scene_videos(
+        modelslab_service=service,
+        video_gen_id="11111111-1111-1111-1111-111111111111",
+        scene_descriptions=["Scene one", "Scene one suggested"],
+        audio_files={"characters": [], "narrator": [], "sound_effects": [], "background_music": []},
+        image_data={"scene_images": [
+            {"image_url": "https://cdn.example.com/scene1-key.png", "scene_number": 1, "shot_index": 0},
+            {"image_url": "https://cdn.example.com/scene1-shot1.png", "scene_number": 1, "shot_index": 1},
+        ]},
+        video_style="realistic",
+        user_id="22222222-2222-2222-2222-222222222222",
+        session=session,
+        scene_numbers=[1, 1],
+    )
+
+    assert result[0] is not None
+    assert result[1] is None
+    assert len(service.calls) == 1

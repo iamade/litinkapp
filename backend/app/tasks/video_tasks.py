@@ -699,110 +699,6 @@ async def extract_scene_dialogue_and_generate_audio(
         return {"dialogue_audio": [], "error": str(e)}
 
 
-async def extract_last_frame(
-    video_url: str, user_id: Optional[str] = None
-) -> Optional[str]:
-    """
-    Extract the last frame from a video for use as the starting image of the next scene.
-    This helps maintain visual continuity between scenes.
-
-    Args:
-        video_url: URL of the video to extract frame from
-        user_id: Optional user ID for storage organization
-
-    Returns:
-        URL of the extracted frame image, or None if extraction fails
-    """
-    import tempfile
-    import subprocess
-    import os
-    import httpx
-    from app.core.services.storage import get_storage_service
-
-    try:
-        print(f"[LAST FRAME] Extracting last frame from video: {video_url[:50]}...")
-
-        # Download video to temp file
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.get(video_url)
-            if response.status_code != 200:
-                print(f"[LAST FRAME] Failed to download video: {response.status_code}")
-                return None
-
-        # Create temp files
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as video_file:
-            video_file.write(response.content)
-            video_path = video_file.name
-
-        frame_path = video_path.replace(".mp4", "_last_frame.jpg")
-
-        try:
-            # Extract last frame using ffmpeg
-            # First, get video duration
-            probe_cmd = [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                video_path,
-            ]
-            result = subprocess.run(probe_cmd, capture_output=True, text=True)
-            duration = float(result.stdout.strip()) if result.stdout.strip() else 5.0
-
-            # Extract frame at last second
-            seek_time = max(0, duration - 0.1)  # 0.1 seconds before end
-            extract_cmd = [
-                "ffmpeg",
-                "-y",
-                "-ss",
-                str(seek_time),
-                "-i",
-                video_path,
-                "-vframes",
-                "1",
-                "-q:v",
-                "2",
-                frame_path,
-            ]
-            subprocess.run(extract_cmd, capture_output=True, check=True)
-
-            if not os.path.exists(frame_path):
-                print("[LAST FRAME] Frame extraction failed - no output file")
-                return None
-
-            # Upload to storage
-            storage_service = get_storage_service()
-
-            # Generate unique filename
-            import uuid as uuid_lib
-
-            frame_filename = f"frames/{user_id or 'system'}/last_frame_{uuid_lib.uuid4().hex[:8]}.jpg"
-
-            # S3StorageService.upload expects a file path, not in-memory bytes
-            frame_url = await storage_service.upload(
-                frame_path,
-                file_path=frame_filename,
-                content_type="image/jpeg",
-            )
-
-            print(f"[LAST FRAME] ✅ Extracted and uploaded frame: {frame_url[:50]}...")
-            return frame_url
-
-        finally:
-            # Clean up temp files
-            if os.path.exists(video_path):
-                os.unlink(video_path)
-            if os.path.exists(frame_path):
-                os.unlink(frame_path)
-
-    except Exception as e:
-        print(f"[LAST FRAME] ❌ Error extracting frame: {e}")
-        return None
-
-
 async def upscale_frame(
     image_url: str, user_tier: str = "BASIC", user_id: Optional[str] = None
 ) -> str:
@@ -970,43 +866,68 @@ def select_scene_assets_for_targets(
     shot parsing is unavailable later, this helper still prevents falling back
     to all scenes and maps images by scene_number instead of raw DB order.
     """
-    shot_by_scene: Dict[int, int] = {}
+    shots_by_scene: Dict[int, List[int]] = {}
     for selection in selected_shots or []:
-        if selection.scene_number not in shot_by_scene:
-            shot_by_scene[selection.scene_number] = selection.shot_index
+        shots_by_scene.setdefault(selection.scene_number, [])
+        # Suggested shots depend on the key/base shot video; include shot 0 first.
+        if selection.shot_index > 0 and 0 not in shots_by_scene[selection.scene_number]:
+            shots_by_scene[selection.scene_number].append(0)
+        if selection.shot_index not in shots_by_scene[selection.scene_number]:
+            shots_by_scene[selection.scene_number].append(selection.shot_index)
 
     target_descriptions: List[Any] = []
+    expanded_scene_numbers: List[int] = []
     final_scene_images: List[Optional[Dict[str, Any]]] = []
 
     for scene_num in target_scene_numbers:
         desc_index = scene_num - 1
-        if 0 <= desc_index < len(original_scene_descriptions):
-            target_descriptions.append(original_scene_descriptions[desc_index])
+        description = (
+            original_scene_descriptions[desc_index]
+            if 0 <= desc_index < len(original_scene_descriptions)
+            else f"Scene {scene_num}"
+        )
+
+        if shots_by_scene.get(scene_num):
+            shot_indexes = sorted(shots_by_scene[scene_num])
+        elif scene_num in scene_image_map and scene_image_map[scene_num]:
+            # Generate All must respect scene order and then shot order, including
+            # suggested shots after the key/base shot.
+            shot_indexes = sorted(scene_image_map[scene_num].keys())
         else:
-            target_descriptions.append(f"Scene {scene_num}")
+            shot_indexes = [0]
 
-        found_image = None
-        shot_idx = shot_by_scene.get(scene_num, 0)
-        if scene_num in scene_image_map:
-            if shot_idx in scene_image_map[scene_num]:
-                found_image = scene_image_map[scene_num][shot_idx]
-            elif 0 in scene_image_map[scene_num]:
-                found_image = scene_image_map[scene_num][0]
-            elif scene_image_map[scene_num]:
-                found_image = next(iter(scene_image_map[scene_num].values()))
+        for shot_idx in shot_indexes:
+            found_image = None
+            if scene_num in scene_image_map:
+                if shot_idx in scene_image_map[scene_num]:
+                    found_image = scene_image_map[scene_num][shot_idx]
+                elif shot_idx > 0 and 0 in scene_image_map[scene_num]:
+                    # Missing suggested-shot image may still use the base scene
+                    # image as a visual prompt, but the generated video input is
+                    # enforced later to be the previous shot's extracted frame.
+                    found_image = scene_image_map[scene_num][0]
+                elif scene_image_map[scene_num]:
+                    found_image = next(iter(scene_image_map[scene_num].values()))
 
-        if found_image is None and not scene_image_map and pre_gen_scene_images:
-            # Legacy fallback only when images have no usable scene_number map.
-            fallback_index = desc_index if desc_index >= 0 else 0
-            if fallback_index < len(pre_gen_scene_images):
-                found_image = pre_gen_scene_images[fallback_index]
+            if found_image is None and not scene_image_map and pre_gen_scene_images:
+                # Legacy fallback only when images have no usable scene_number map.
+                fallback_index = desc_index if desc_index >= 0 else 0
+                if fallback_index < len(pre_gen_scene_images):
+                    found_image = pre_gen_scene_images[fallback_index]
 
-        if found_image is None and pre_gen_character_images:
-            found_image = pre_gen_character_images[(scene_num - 1) % len(pre_gen_character_images)]
+            if found_image is None and pre_gen_character_images:
+                found_image = pre_gen_character_images[(scene_num - 1) % len(pre_gen_character_images)]
 
-        final_scene_images.append(found_image)
+            if found_image is not None:
+                found_image = dict(found_image)
+                found_image.setdefault("scene_number", scene_num)
+                found_image.setdefault("shot_index", shot_idx)
 
-    return target_descriptions, target_scene_numbers, final_scene_images
+            target_descriptions.append(description)
+            expanded_scene_numbers.append(scene_num)
+            final_scene_images.append(found_image)
+
+    return target_descriptions, expanded_scene_numbers, final_scene_images
 
 
 async def update_pipeline_step(
@@ -1330,10 +1251,15 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             """
             )
 
-            # If 0 videos were generated, this is a failure — no video_url will be produced
-            if successful_videos == 0:
+            # Any scene/shot dependency or provider failure makes Generate All
+            # fail visibly; do not report completion after silently skipping a
+            # blocked suggested shot.
+            if successful_videos < total_scenes:
                 final_status = "failed"
-                error_msg = f"Video generation failed: 0 out of {total_scenes} scene videos were created. Check image availability and ModelsLab API."
+                error_msg = (
+                    f"Video generation failed: {successful_videos} out of {total_scenes} "
+                    "ordered scene/shot videos were created. Check dependency frames, image availability, and ModelsLab API."
+                )
                 print(f"[VIDEO GENERATION FAILED] {error_msg}")
             else:
                 final_status = "video_completed"
@@ -1551,75 +1477,10 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
 
 
 async def extract_last_frame(video_url: str, user_id: str) -> Optional[str]:
-    """
-    Extract the last frame from a video URL and upload it to storage.
-    Returns the URL of the extracted image.
-    """
-    try:
-        print(f"[FRAME EXTRACTION] Extracting last frame from {video_url}")
+    """Compatibility wrapper around the shared ffmpeg last-frame utility."""
+    from app.core.services.ffmpeg_utils import extract_last_frame as _extract_last_frame
 
-        # Create temp files
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_video:
-            video_path = temp_video.name
-
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_image:
-            image_path = temp_image.name
-
-        # Download video
-        response = requests.get(video_url, stream=True)
-        response.raise_for_status()
-        with open(video_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-
-        # Extract last frame using ffmpeg
-        # -sseof -3: seek to 3 seconds before end (to ensure we locate valid frames)
-        # -update 1: overwrite output
-        # -q:v 2: high quality
-        cmd = [
-            "ffmpeg",
-            "-sseof",
-            "-1",  # Look at the very end
-            "-i",
-            video_path,
-            "-update",
-            "1",
-            "-q:v",
-            "2",
-            "-y",
-            image_path,
-        ]
-
-        process = subprocess.run(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
-        )
-
-        # Upload extracted frame
-        file_service = FileService()
-        result = await file_service.upload_file(
-            file_path=image_path,
-            file_name=f"last_frame_{uuid.uuid4()}.jpg",
-            content_type="image/jpeg",
-            user_id=user_id,
-            folder="video_frames",
-        )
-
-        # Cleanup
-        if os.path.exists(video_path):
-            os.remove(video_path)
-        if os.path.exists(image_path):
-            os.remove(image_path)
-
-        return result.get("url")
-
-    except Exception as e:
-        print(f"[FRAME EXTRACTION ERROR] {e}")
-        # Cleanup on error
-        if "video_path" in locals() and os.path.exists(video_path):
-            os.remove(video_path)
-        if "image_path" in locals() and os.path.exists(image_path):
-            os.remove(image_path)
-        return None
+    return await _extract_last_frame(video_url, user_id)
 
 
 async def pad_audio_to_min_duration(
@@ -1761,8 +1622,12 @@ async def generate_scene_videos(
                 f"[SCENE VIDEOS V7] ⚠️ Failed to parse script for enhanced prompts: {e}"
             )
 
-    # Track the previous scene's key scene shot for continuity
-    previous_key_scene_shot = None
+    # Track continuity only within the current scene. Key scenes keep their
+    # original image/reference policy and never inherit unrelated prior-scene
+    # frames; suggested shots consume the previous shot video's extracted frame.
+    previous_scene_number = None
+    previous_shot_frame_url = None
+    previous_shot_frame_metadata: Optional[Dict[str, Any]] = None
 
     db_user_id = _safe_uuid_string(user_id)
 
@@ -1785,42 +1650,35 @@ async def generate_scene_videos(
                 f"[SCENE VIDEOS V7] Processing {scene_id} ({i+1}/{len(scene_descriptions)})"
             )
 
-            # Determine the starting image for this scene
+            if previous_scene_number != scene_num:
+                previous_shot_frame_url = None
+                previous_shot_frame_metadata = None
+                previous_scene_number = scene_num
+
+            # Determine the starting image for this scene/shot.
             starting_image_url = None
+            dependency_metadata = None
 
-            if i == 0:
-                # First scene: use the original scene image
+            if int(target_shot_index or 0) == 0:
+                # Key/base scene: always use its own scene image/reference. Do
+                # not inherit frames from any previous scene.
                 if not scene_image or not scene_image.get("image_url"):
-                    print(f"[SCENE VIDEOS V7] ⚠️ No valid image found for {scene_id}")
-                    video_results.append(None)
-                    continue
-
+                    raise Exception(f"No valid key scene image found for {scene_id}")
                 starting_image_url = scene_image["image_url"]
-                print(f"[SCENE VIDEOS V7] Using original scene image for {scene_id}")
+                print(f"[SCENE VIDEOS V7] Using original key scene image for {scene_id}")
             else:
-                # Subsequent scenes: use the previous scene's key scene shot
-                if previous_key_scene_shot:
-                    starting_image_url = previous_key_scene_shot
-                    print(
-                        f"[SCENE VIDEOS V7] Using previous key scene shot for {scene_id}: {starting_image_url}"
+                # Suggested shot: enforced dependency on previous shot video's
+                # extracted/upscaled frame. Do not silently fall back to a base
+                # image if the dependency is missing.
+                if not previous_shot_frame_url:
+                    raise Exception(
+                        f"Missing previous shot frame dependency for {scene_id} shot {target_shot_index}"
                     )
-                else:
-                    # Fallback to original scene image if no previous key scene shot
-                    scene_image = None
-                    if i < len(scene_images) and scene_images[i] is not None:
-                        scene_image = scene_images[i]
-
-                    if scene_image and scene_image.get("image_url"):
-                        starting_image_url = scene_image["image_url"]
-                        print(
-                            f"[SCENE VIDEOS V7] Using fallback scene image for {scene_id} (no previous key scene shot)"
-                        )
-                    else:
-                        print(
-                            f"[SCENE VIDEOS V7] ⚠️ No valid image found for {scene_id}"
-                        )
-                        video_results.append(None)
-                        continue
+                starting_image_url = previous_shot_frame_url
+                dependency_metadata = previous_shot_frame_metadata or {}
+                print(
+                    f"[SCENE VIDEOS V7] Using previous shot frame for {scene_id} shot {target_shot_index}: {starting_image_url}"
+                )
 
             # Determine model ID before audio check (needed for duration limits)
             current_model_id = primary_model_id
@@ -1938,7 +1796,7 @@ async def generate_scene_videos(
             try:
                 provider_source_image_url = select_provider_media_source(
                     starting_image_url,
-                    scene_image_for_prompt or scene_image,
+                    (scene_image_for_prompt or scene_image) if int(target_shot_index or 0) == 0 else None,
                 )
                 provider_source_audio_url = select_provider_media_source(
                     init_audio_url,
@@ -2048,28 +1906,66 @@ async def generate_scene_videos(
                         )
 
                 if video_url:
-                    # Extract the last frame as key scene shot for the next scene
+                    # Extract/upscale only when the immediately following item is
+                    # another suggested shot in this same scene. Missing extraction
+                    # then blocks that shot instead of falling back silently.
                     key_scene_shot_url = None
-                    try:
-                        key_scene_shot_url = await extract_last_frame(
-                            video_url, user_id
-                        )
+                    upscaled_key_scene_shot_url = None
+                    frame_metadata = None
+                    next_scene_num = None
+                    next_shot_index = 0
+                    if i + 1 < len(scene_descriptions):
+                        next_scene_num, _next_scene_id = resolve_scene_identity(i + 1, scene_numbers)
+                        next_scene_image = scene_images[i + 1] if i + 1 < len(scene_images) else None
+                        next_shot_index = next_scene_image.get("shot_index", 0) if next_scene_image else 0
 
-                        if key_scene_shot_url:
-                            print(
-                                f"[SCENE VIDEOS V7] ✅ Extracted key scene shot for {scene_id}: {key_scene_shot_url}"
-                            )
-                            previous_key_scene_shot = (
-                                key_scene_shot_url  # Update for next scene
-                            )
-                        else:
-                            print(
-                                f"[SCENE VIDEOS V7] ⚠️ Failed to extract key scene shot for {scene_id}"
-                            )
-                    except Exception as frame_error:
-                        print(
-                            f"[SCENE VIDEOS V7] ⚠️ Error extracting key scene shot for {scene_id}: {frame_error}"
-                        )
+                    should_prepare_continuity = (
+                        next_scene_num == scene_num and int(next_shot_index or 0) > 0
+                    )
+
+                    if should_prepare_continuity:
+                        frame_metadata = {
+                            "source_video_url": video_url,
+                            "scene_number": scene_num,
+                            "shot_index": target_shot_index,
+                            "next_scene_number": next_scene_num,
+                            "next_shot_index": next_shot_index,
+                            "extracted_frame_url": None,
+                            "upscaled_frame_url": None,
+                            "upscale_service": "modelslab",
+                        }
+                        try:
+                            key_scene_shot_url = await extract_last_frame(video_url, user_id)
+                            frame_metadata["extracted_frame_url"] = key_scene_shot_url
+
+                            if not key_scene_shot_url:
+                                frame_metadata["error"] = "last_frame_extraction_failed"
+                                previous_shot_frame_url = None
+                                previous_shot_frame_metadata = frame_metadata
+                                print(f"[SCENE VIDEOS V7] ⚠️ Failed to extract shot frame for {scene_id}")
+                            else:
+                                try:
+                                    upscaled_key_scene_shot_url = await upscale_frame(
+                                        key_scene_shot_url, user_tier="BASIC", user_id=user_id
+                                    )
+                                    frame_metadata["upscaled_frame_url"] = upscaled_key_scene_shot_url
+                                except Exception as upscale_error:
+                                    frame_metadata["upscale_error"] = str(upscale_error)[:500]
+                                    upscaled_key_scene_shot_url = key_scene_shot_url
+
+                                previous_shot_frame_url = upscaled_key_scene_shot_url or key_scene_shot_url
+                                previous_shot_frame_metadata = frame_metadata
+                                print(
+                                    f"[SCENE VIDEOS V7] ✅ Prepared continuity frame for {scene_id}: {previous_shot_frame_url}"
+                                )
+                        except Exception as frame_error:
+                            frame_metadata["error"] = str(frame_error)[:500]
+                            previous_shot_frame_url = None
+                            previous_shot_frame_metadata = frame_metadata
+                            print(f"[SCENE VIDEOS V7] ⚠️ Error preparing continuity frame for {scene_id}: {frame_error}")
+                    else:
+                        previous_shot_frame_url = None
+                        previous_shot_frame_metadata = None
 
                     # Store in database
                     try:
@@ -2122,6 +2018,11 @@ async def generate_scene_videos(
                             "original_cdn_url": original_cdn_url,
                             "provider_cdn_url": original_cdn_url,
                             "key_scene_shot_url": key_scene_shot_url,
+                            "extracted_frame_url": key_scene_shot_url,
+                            "upscaled_frame_url": upscaled_key_scene_shot_url,
+                            "continuity_frame_url": previous_shot_frame_url,
+                            "frame_dependency": dependency_metadata,
+                            "frame_metadata": frame_metadata,
                             "duration": 5.0,
                             "source_image": starting_image_url,
                             "target_image": target_image_url,
