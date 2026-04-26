@@ -42,11 +42,39 @@ import {
   DownloadStatusResponse
 } from '../../services/subscriptionService';
 
+interface SceneVideoPayload {
+  video_url?: string;
+  duration?: number;
+}
+
+interface GenerationAudioItem {
+  url?: string;
+  duration?: number;
+}
+
+interface GenerationAudioPayload {
+  narrator?: GenerationAudioItem[];
+  characters?: GenerationAudioItem[];
+  background_music?: GenerationAudioItem[];
+  sound_effects?: GenerationAudioItem[];
+  ambiance?: GenerationAudioItem[];
+}
+
+interface MergeGenerationPayload {
+  id?: string;
+  scene_videos?: SceneVideoPayload[];
+  audio_files?: GenerationAudioPayload;
+  video_data?: {
+    scene_videos?: SceneVideoPayload[];
+    audio_files?: GenerationAudioPayload;
+  };
+}
+
 interface MergePanelProps {
   chapterId?: string;
   scriptId?: string;
   videoGenerationId?: string;
-  videoGenerations?: any[];
+  videoGenerations?: MergeGenerationPayload[];
   audioFiles?: string[];
   scenes?: VideoScene[];
   editorSettings?: EditorSettings;
@@ -104,6 +132,8 @@ const getFallbackAllowedDownloadQualities = (tier?: string): DownloadQuality[] =
 
 const MergePanel: React.FC<MergePanelProps> = ({
   videoGenerations = [],
+  audioFiles = [],
+  scenes = [],
   editorSettings,
   userTier = 'free'
 }) => {
@@ -149,7 +179,7 @@ const MergePanel: React.FC<MergePanelProps> = ({
     try {
       const status = await subscriptionService.getWatermarkStatus();
       setWatermarkStatus(status);
-    } catch (error) {
+    } catch {
       setWatermarkStatus(null);
     }
   }, []);
@@ -158,7 +188,7 @@ const MergePanel: React.FC<MergePanelProps> = ({
     try {
       const status = await subscriptionService.getDownloadStatus();
       setDownloadStatus(status);
-    } catch (error) {
+    } catch {
       setDownloadStatus(null);
     }
   }, []);
@@ -205,30 +235,56 @@ const MergePanel: React.FC<MergePanelProps> = ({
   useEffect(() => {
     const sources: MergeInputFile[] = [];
     const tracks: AudioTrack[] = [];
+    const seenSourceUrls = new Set<string>();
+    const addSource = (source: MergeInputFile) => {
+      if (!source.url || seenSourceUrls.has(source.url)) return;
+      seenSourceUrls.add(source.url);
+      sources.push(source);
+    };
     let trackIndex = 0;
 
-    // 1. Video tracks from generations
+    // 1. Video tracks from the restored Merge Studio adapter and generation payloads.
+    // Backend responses have used both top-level scene_videos and video_data.scene_videos;
+    // support both so the Tracks tab reliably hydrates from current production data.
+    scenes.forEach((scene) => {
+      if (scene.video_url) {
+        addSource({
+          url: scene.video_url,
+          type: 'video',
+          duration: scene.duration || 10,
+          start_time: 0,
+          volume: 1.0
+        });
+      }
+    });
+
     if (videoGenerations.length > 0) {
-      videoGenerations.forEach((gen: any) => {
-        if (gen.scene_videos && Array.isArray(gen.scene_videos)) {
-          gen.scene_videos.forEach((scene: any) => {
-            if (scene.video_url) {
-              sources.push({
-                url: scene.video_url,
-                type: 'video',
-                duration: scene.duration || 10,
-                start_time: 0,
-                volume: 1.0
-              });
-            }
-          });
-        }
+      videoGenerations.forEach((gen) => {
+        const sceneVideos: SceneVideoPayload[] = Array.isArray(gen.scene_videos)
+          ? gen.scene_videos
+          : Array.isArray(gen.video_data?.scene_videos)
+            ? gen.video_data.scene_videos
+            : [];
+
+        sceneVideos.forEach((scene) => {
+          if (scene.video_url) {
+            addSource({
+              url: scene.video_url,
+              type: 'video',
+              duration: scene.duration || 10,
+              start_time: 0,
+              volume: 1.0
+            });
+          }
+        });
+
+        const generationAudioFiles = gen.audio_files || gen.video_data?.audio_files;
 
         // Primary audio (already merged with video during generation)
-        if (gen.audio_files) {
+        if (generationAudioFiles) {
           // Narrator audio = primary track (locked/informational)
-          if (gen.audio_files.narrator && Array.isArray(gen.audio_files.narrator)) {
-            gen.audio_files.narrator.forEach((audio: any, idx: number) => {
+          if (generationAudioFiles.narrator && Array.isArray(generationAudioFiles.narrator)) {
+            generationAudioFiles.narrator.forEach((audio, idx) => {
               if (audio.url) {
                 tracks.push({
                   id: `narrator-${trackIndex++}`,
@@ -239,7 +295,7 @@ const MergePanel: React.FC<MergePanelProps> = ({
                   volume: 1.0,
                   locked: true
                 });
-                sources.push({
+                addSource({
                   url: audio.url,
                   type: 'audio',
                   duration: audio.duration || 30,
@@ -251,8 +307,8 @@ const MergePanel: React.FC<MergePanelProps> = ({
           }
 
           // Character audio = primary track (locked/informational)
-          if (gen.audio_files.characters && Array.isArray(gen.audio_files.characters)) {
-            gen.audio_files.characters.forEach((audio: any, idx: number) => {
+          if (generationAudioFiles.characters && Array.isArray(generationAudioFiles.characters)) {
+            generationAudioFiles.characters.forEach((audio, idx) => {
               if (audio.url) {
                 tracks.push({
                   id: `character-${trackIndex++}`,
@@ -263,7 +319,7 @@ const MergePanel: React.FC<MergePanelProps> = ({
                   volume: 1.0,
                   locked: true
                 });
-                sources.push({
+                addSource({
                   url: audio.url,
                   type: 'audio',
                   duration: audio.duration || 15,
@@ -275,8 +331,8 @@ const MergePanel: React.FC<MergePanelProps> = ({
           }
 
           // Background music = additional track (adjustable)
-          if (gen.audio_files.background_music && Array.isArray(gen.audio_files.background_music)) {
-            gen.audio_files.background_music.forEach((audio: any, idx: number) => {
+          if (generationAudioFiles.background_music && Array.isArray(generationAudioFiles.background_music)) {
+            generationAudioFiles.background_music.forEach((audio, idx) => {
               if (audio.url) {
                 tracks.push({
                   id: `music-${trackIndex++}`,
@@ -292,8 +348,8 @@ const MergePanel: React.FC<MergePanelProps> = ({
           }
 
           // Sound effects = additional track (adjustable)
-          if (gen.audio_files.sound_effects && Array.isArray(gen.audio_files.sound_effects)) {
-            gen.audio_files.sound_effects.forEach((audio: any, idx: number) => {
+          if (generationAudioFiles.sound_effects && Array.isArray(generationAudioFiles.sound_effects)) {
+            generationAudioFiles.sound_effects.forEach((audio, idx) => {
               if (audio.url) {
                 tracks.push({
                   id: `effects-${trackIndex++}`,
@@ -309,8 +365,8 @@ const MergePanel: React.FC<MergePanelProps> = ({
           }
 
           // Ambiance = additional track (adjustable)
-          if (gen.audio_files.ambiance && Array.isArray(gen.audio_files.ambiance)) {
-            gen.audio_files.ambiance.forEach((audio: any, idx: number) => {
+          if (generationAudioFiles.ambiance && Array.isArray(generationAudioFiles.ambiance)) {
+            generationAudioFiles.ambiance.forEach((audio, idx) => {
               if (audio.url) {
                 tracks.push({
                   id: `ambiance-${trackIndex++}`,
@@ -334,7 +390,7 @@ const MergePanel: React.FC<MergePanelProps> = ({
       if (generation.scene_videos && generation.scene_videos.length > 0) {
         generation.scene_videos.forEach((scene: { video_url?: string; duration?: number }) => {
           if (scene.video_url) {
-            sources.push({
+            addSource({
               url: scene.video_url,
               type: 'video',
               duration: scene.duration || 10,
@@ -346,9 +402,27 @@ const MergePanel: React.FC<MergePanelProps> = ({
       }
     }
 
-    if (sources.length > 0) setInputFiles(sources);
-    if (tracks.length > 0) setAudioTracks(tracks);
-  }, [videoGenerations, generationState.currentGeneration]);
+    audioFiles.forEach((url, idx) => {
+      if (!url) return;
+      tracks.push({
+        id: `audio-file-${idx}`,
+        label: `Audio Track ${idx + 1}`,
+        type: 'custom',
+        url,
+        volume: 1.0,
+        locked: false
+      });
+      addSource({
+        url,
+        type: 'audio',
+        start_time: 0,
+        volume: 1.0
+      });
+    });
+
+    setInputFiles(sources);
+    setAudioTracks(tracks);
+  }, [videoGenerations, scenes, audioFiles, generationState.currentGeneration]);
 
   // Cleanup on unmount
   useEffect(() => {

@@ -1,20 +1,38 @@
 import React, { useEffect } from 'react';
-import { toast } from 'react-hot-toast';
-import { Save, Video, ArrowUp, ArrowDown, CheckCircle2 } from 'lucide-react';
+import { Video } from 'lucide-react';
 import { useVideoProduction } from '../../hooks/useVideoProduction';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
-import ProtectedImage from '../Common/ProtectedImage';
+import MergePanel from './MergePanel';
+
+interface MergeStudioClip {
+  video_url?: string;
+  duration?: number;
+  scene_number?: number;
+  scene_id?: string;
+  shot_index?: number;
+  target_image?: string;
+  source_image?: string;
+  status?: string;
+}
+
+interface MergeStudioGeneration {
+  scene_videos?: MergeStudioClip[];
+  video_data?: {
+    scene_videos?: MergeStudioClip[];
+  };
+}
 
 interface MergeStudioPanelProps {
   chapterId: string;
   chapterTitle: string;
   imageUrls?: string[];
   audioFiles?: string[];
-  videoGenerations?: any[];
+  videoGenerations?: MergeStudioGeneration[];
   canRender?: boolean;
   isRenderInProgress?: boolean;
   onRenderVideo?: () => void;
+  userTier?: 'free' | 'basic' | 'pro' | 'enterprise';
 }
 
 const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
@@ -26,6 +44,7 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
   canRender = false,
   isRenderInProgress = false,
   onRenderVideo,
+  userTier = 'free',
 }) => {
   const { selectedScriptId, isSwitching } = useScriptSelection();
   const storyboardContext = useStoryboardOptional();
@@ -110,7 +129,7 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
     scenes,
     isLoading,
     initializeScenes,
-    reorderScenes,
+    editorSettings,
     saveProduction,
   } = useVideoProduction({
     chapterId,
@@ -128,9 +147,9 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
       let foundStatus = scene.status;
 
       for (const gen of videoGenerations) {
-        const clips = gen.video_data?.scene_videos || [];
+        const clips = gen.video_data?.scene_videos || gen.scene_videos || [];
 
-        const matchedClip = clips.find((sv: any) => {
+        const matchedClip = clips.find((sv) => {
           if (!sv) return false;
 
           const sameSceneNumber =
@@ -206,121 +225,63 @@ const MergeStudioPanel: React.FC<MergeStudioPanelProps> = ({
   }
 
   const generatedCount = enrichedScenes.filter((scene) => !!scene.video_url).length;
-  const allScenesHaveVideos = generatedCount === enrichedScenes.length;
-
-  const handleRender = () => {
-    if (!onRenderVideo) {
-      toast.error('Render is not available right now.');
-      return;
-    }
-    onRenderVideo();
-  };
+  const allScenesHaveVideos = enrichedScenes.length > 0 && generatedCount === enrichedScenes.length;
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
         <div>
-          <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Merge Studio</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            Assemble scene videos for "{chapterTitle}" and render the final output.
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Merge Studio
+          </p>
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100">{chapterTitle}</h3>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            Use Tracks, Controls, and Preview to assemble generated scene videos with audio before starting the final merge.
           </p>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             Generated scenes: {generatedCount}/{enrichedScenes.length}
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        {!allScenesHaveVideos && onRenderVideo && (
           <button
-            onClick={saveProduction}
-            disabled={isLoading || isSwitching || !enrichedScenes.length}
-            className="flex items-center gap-2 rounded-lg bg-gray-600 px-4 py-2 text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-          >
-            <Save className="h-4 w-4" />
-            <span>Save</span>
-          </button>
-          <button
-            onClick={handleRender}
-            disabled={isLoading || isSwitching || isRenderInProgress || !canRender || !allScenesHaveVideos}
-            className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-white hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-            title={!allScenesHaveVideos ? 'Render is enabled after all scenes have generated videos' : undefined}
+            type="button"
+            onClick={onRenderVideo}
+            disabled={isLoading || isSwitching || isRenderInProgress || !canRender}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+            title="Generate missing scene videos before merging"
           >
             <Video className="h-4 w-4" />
-            <span>{isRenderInProgress ? 'Rendering...' : 'Render Video'}</span>
+            <span>{isRenderInProgress ? 'Generating...' : 'Generate Missing Videos'}</span>
           </button>
-        </div>
+        )}
       </div>
 
       {!allScenesHaveVideos && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300">
-          Render is disabled until every scene has a generated video.
+          Merge can be configured now, but the final output needs generated video clips for every scene.
         </div>
       )}
 
-      <div className="space-y-3">
-        {enrichedScenes.map((scene, index) => {
-          const hasVideo = Boolean(scene.video_url);
-          return (
-            <div
-              key={scene.id}
-              className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 md:flex-row md:items-center"
-            >
-              <div className="h-24 w-full overflow-hidden rounded-md bg-gray-100 md:w-40">
-                {hasVideo ? (
-                  <video
-                    src={scene.video_url}
-                    className="h-full w-full object-cover"
-                    muted
-                    playsInline
-                    preload="metadata"
-                  />
-                ) : (
-                  <ProtectedImage src={scene.imageUrl} alt={`Scene ${scene.sceneNumber}`} className="h-full w-full object-cover" />
-                )}
-              </div>
+      <MergePanel
+        chapterId={chapterId}
+        scriptId={selectedScriptId}
+        videoGenerations={videoGenerations}
+        audioFiles={audioFiles}
+        scenes={enrichedScenes}
+        editorSettings={editorSettings}
+        userTier={userTier}
+      />
 
-              <div className="flex-1">
-                <div className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-                  <span>Scene {scene.sceneNumber}</span>
-                  {scene.shotType && (
-                    <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                      {scene.shotType === 'key_scene' ? 'Key scene' : 'Suggested shot'}
-                    </span>
-                  )}
-                  {hasVideo ? (
-                    <span className="inline-flex items-center gap-1 rounded bg-green-100 px-2 py-0.5 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-300">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      Video ready
-                    </span>
-                  ) : (
-                    <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                      Awaiting video
-                    </span>
-                  )}
-                </div>
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Duration: {scene.duration}s</p>
-              </div>
-
-              <div className="flex items-center gap-2 self-end md:self-center">
-                <button
-                  onClick={() => reorderScenes(index, index - 1)}
-                  disabled={index === 0 || isLoading || isSwitching}
-                  className="rounded border border-gray-300 p-2 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                  title="Move up"
-                >
-                  <ArrowUp className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => reorderScenes(index, index + 1)}
-                  disabled={index === enrichedScenes.length - 1 || isLoading || isSwitching}
-                  className="rounded border border-gray-300 p-2 text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-                  title="Move down"
-                >
-                  <ArrowDown className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          );
-        })}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={saveProduction}
+          disabled={isLoading || isSwitching || !enrichedScenes.length}
+          className="rounded-lg bg-gray-600 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+        >
+          Save scene order
+        </button>
       </div>
     </div>
   );
