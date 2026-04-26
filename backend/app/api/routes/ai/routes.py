@@ -1147,11 +1147,17 @@ async def generate_entertainment_video(
                 if image_records:
                     for img in image_records:
                         image_type = img.image_type or "scene"
+                        image_meta = img.meta or {}
                         image_data = {
                             "id": str(img.id),
                             "url": img.image_url,
                             "image_url": img.image_url,
                             "prompt": img.image_prompt or "",
+                            "metadata": image_meta,
+                            "meta": image_meta,
+                            "original_cdn_url": image_meta.get("original_cdn_url") or image_meta.get("cdn_url"),
+                            "provider_cdn_url": image_meta.get("provider_cdn_url") or image_meta.get("original_cdn_url") or image_meta.get("cdn_url"),
+                            "provider_url_created_at": image_meta.get("provider_url_created_at") or image_meta.get("original_cdn_url_created_at") or image_meta.get("cdn_created_at"),
                             "created_at": (
                                 img.created_at.isoformat() if img.created_at else None
                             ),

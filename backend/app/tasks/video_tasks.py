@@ -1,6 +1,6 @@
 from app.tasks.celery_app import celery_app
 import asyncio
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from celery.utils.log import get_task_logger
 
 from app.api.services.video import VideoService
@@ -18,6 +18,7 @@ import requests
 import tempfile
 import uuid
 import ipaddress
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse, urlunparse
 from app.core.services.file import FileService
 from app.core.config import settings
@@ -241,6 +242,104 @@ def log_provider_media_url_normalization(kind: str, original_url: Optional[str],
         print(msg)
 
 
+_PROVIDER_CDN_METADATA_KEYS = (
+    "provider_image_url",
+    "provider_cdn_url",
+    "provider_url",
+    "modelslab_cdn_url",
+    "modelslab_url",
+    "original_cdn_url",
+    "cdn_url",
+)
+_PROVIDER_CDN_TIMESTAMP_KEYS = (
+    "provider_url_created_at",
+    "provider_image_url_created_at",
+    "original_cdn_url_created_at",
+    "cdn_created_at",
+    "created_at",
+)
+_PROVIDER_CDN_MAX_AGE = timedelta(days=13)
+
+
+def _metadata_dict(value: Any) -> Dict[str, Any]:
+    """Return metadata as a dict, tolerating legacy JSON-string metadata."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+def _parse_provider_timestamp(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _fresh_provider_timestamp(container: Dict[str, Any]) -> Optional[datetime]:
+    now = datetime.now(timezone.utc)
+    for key in _PROVIDER_CDN_TIMESTAMP_KEYS:
+        parsed = _parse_provider_timestamp(container.get(key))
+        if parsed and now - parsed < _PROVIDER_CDN_MAX_AGE:
+            return parsed
+    return None
+
+
+def _candidate_provider_cdn_urls(media_item: Optional[Dict[str, Any]]) -> List[Tuple[str, datetime]]:
+    """Extract fresh preserved provider/CDN media URLs from an image/audio/video item."""
+    if not media_item:
+        return []
+
+    containers: List[Dict[str, Any]] = [media_item]
+    for meta_key in ("meta", "metadata", "image_metadata", "video_metadata", "audio_metadata"):
+        meta = _metadata_dict(media_item.get(meta_key))
+        if meta:
+            containers.append(meta)
+
+    urls: List[Tuple[str, datetime]] = []
+    seen = set()
+    for container in containers:
+        fresh_at = _fresh_provider_timestamp(container)
+        if not fresh_at:
+            continue
+        for key in _PROVIDER_CDN_METADATA_KEYS:
+            value = container.get(key)
+            if isinstance(value, str) and value.strip() and value.strip() not in seen:
+                seen.add(value.strip())
+                urls.append((value.strip(), fresh_at))
+    return urls
+
+
+def select_provider_media_source(
+    canonical_url: Optional[str],
+    media_item: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Prefer a preserved fresh provider CDN URL, then fall back to canonical URL.
+
+    Provider CDN links expire; only reuse preserved links with a creation
+    timestamp newer than roughly 13 days. Unsafe/raw-IP candidates are skipped
+    so the canonical fallback can still go through existing normalization and
+    blocker handling.
+    """
+    for candidate, _created_at in _candidate_provider_cdn_urls(media_item):
+        if not _is_provider_unsafe_url(candidate):
+            return candidate
+    return canonical_url
+
+
 def _safe_uuid_string(value: Optional[str]) -> Optional[str]:
     """Return a DB-safe UUID string or None for optional UUID FK columns."""
     if not value:
@@ -263,6 +362,8 @@ def _build_provider_attempt_diagnostic(
     status: str,
     provider_error: Optional[str] = None,
     exception: Optional[str] = None,
+    canonical_image_url: Optional[str] = None,
+    canonical_audio_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Concise non-secret provider boundary diagnostics for DB/task metadata."""
     diagnostic = {
@@ -272,6 +373,8 @@ def _build_provider_attempt_diagnostic(
         "provider_image_url": _redact_media_url_for_log(provider_image_url),
         "original_audio_url": _redact_media_url_for_log(original_audio_url),
         "provider_audio_url": _redact_media_url_for_log(provider_audio_url),
+        "canonical_image_url": _redact_media_url_for_log(canonical_image_url),
+        "canonical_audio_url": _redact_media_url_for_log(canonical_audio_url),
         "model": model,
         "status": status,
     }
@@ -1662,38 +1765,50 @@ async def generate_scene_videos(
             # be localhost/docker-internal URLs; ModelsLab needs externally
             # reachable URLs, while earlier probes/downloads use internal URLs.
             try:
-                provider_image_url = normalize_media_url_for_provider(starting_image_url)
+                provider_source_image_url = select_provider_media_source(
+                    starting_image_url,
+                    scene_image_for_prompt or scene_image,
+                )
+                provider_source_audio_url = select_provider_media_source(
+                    init_audio_url,
+                    scene_audio,
+                )
+                provider_image_url = normalize_media_url_for_provider(provider_source_image_url)
                 provider_init_audio_url = (
-                    normalize_media_url_for_provider(init_audio_url)
-                    if init_audio_url
+                    normalize_media_url_for_provider(provider_source_audio_url)
+                    if provider_source_audio_url
                     else None
                 )
             except ProviderMediaUrlConfigurationError as media_config_error:
                 provider_attempt = _build_provider_attempt_diagnostic(
                     scene_id=scene_id,
                     scene_number=scene_num,
-                    original_image_url=starting_image_url,
+                    original_image_url=provider_source_image_url,
                     provider_image_url=None,
-                    original_audio_url=init_audio_url,
+                    original_audio_url=provider_source_audio_url,
                     provider_audio_url=None,
                     model=current_model_id,
                     status="configuration_error",
                     exception=str(media_config_error),
+                    canonical_image_url=starting_image_url,
+                    canonical_audio_url=init_audio_url,
                 )
                 raise
 
-            log_provider_media_url_normalization("image_url", starting_image_url, provider_image_url)
-            log_provider_media_url_normalization("init_audio", init_audio_url, provider_init_audio_url)
+            log_provider_media_url_normalization("image_url", provider_source_image_url, provider_image_url)
+            log_provider_media_url_normalization("init_audio", provider_source_audio_url, provider_init_audio_url)
 
             provider_attempt = _build_provider_attempt_diagnostic(
                 scene_id=scene_id,
                 scene_number=scene_num,
-                original_image_url=starting_image_url,
+                original_image_url=provider_source_image_url,
                 provider_image_url=provider_image_url,
-                original_audio_url=init_audio_url,
+                original_audio_url=provider_source_audio_url,
                 provider_audio_url=provider_init_audio_url,
                 model=current_model_id,
                 status="attempting",
+                canonical_image_url=starting_image_url,
+                canonical_audio_url=init_audio_url,
             )
             logger.warning(
                 "[SCENE VIDEOS V7] Provider attempt scene_id=%s scene_number=%s model=%s image=%s audio=%s",
@@ -1831,6 +1946,8 @@ async def generate_scene_videos(
                             "scene_number": scene_num,
                             "shot_index": target_shot_index,
                             "video_url": video_url,
+                            "original_cdn_url": original_cdn_url,
+                            "provider_cdn_url": original_cdn_url,
                             "key_scene_shot_url": key_scene_shot_url,
                             "duration": 5.0,
                             "source_image": starting_image_url,
@@ -2062,6 +2179,8 @@ async def async_retry_video_retrieval_task(
                 {
                     "retry_success": True,
                     "retry_video_url": video_url,
+                    "original_cdn_url": original_cdn_url,
+                    "provider_cdn_url": original_cdn_url,
                     "video_duration": video_duration,
                     "final_retrieval_time": "now()",
                 }
@@ -2328,6 +2447,8 @@ async def async_automatic_video_retry_task(video_generation_id: str):
                 {
                     "retry_success": True,
                     "retry_video_url": video_url,
+                    "original_cdn_url": original_cdn_url,
+                    "provider_cdn_url": original_cdn_url,
                     "video_duration": video_duration,
                     "final_retrieval_time": "now()",
                 }

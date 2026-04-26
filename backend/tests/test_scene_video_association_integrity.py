@@ -230,6 +230,7 @@ from app.tasks.video_tasks import (
     generate_scene_videos,
     normalize_media_url_for_internal_access,
     normalize_media_url_for_provider,
+    select_provider_media_source,
 )
 
 
@@ -335,6 +336,35 @@ def test_kan86_provider_media_url_leaves_external_urls_unchanged(monkeypatch):
     assert normalize_media_url_for_provider(external_url) == external_url
 
 
+def test_kan86_provider_media_source_prefers_preserved_provider_cdn_url():
+    canonical_url = "http://localhost:9000/litink-books/users/u1/images/scene.png"
+    scene_image = {
+        "image_url": canonical_url,
+        "metadata": {
+            "provider_cdn_url": "https://modelslab-cdn.example.com/scene.png?fresh=1",
+            "provider_url_created_at": "2999-01-01T00:00:00+00:00",
+        },
+    }
+
+    assert (
+        select_provider_media_source(canonical_url, scene_image)
+        == "https://modelslab-cdn.example.com/scene.png?fresh=1"
+    )
+
+
+def test_kan86_provider_media_source_skips_unsafe_metadata_url():
+    canonical_url = "https://storage.example.com/litink-books/users/u1/images/scene.png"
+    scene_image = {
+        "image_url": canonical_url,
+        "meta": {
+            "provider_cdn_url": "http://72.62.97.111:9000/litink-books/users/u1/images/scene.png",
+            "provider_url_created_at": "2999-01-01T00:00:00+00:00",
+        },
+    }
+
+    assert select_provider_media_source(canonical_url, scene_image) == canonical_url
+
+
 class _RecordingModelsLabService:
     def __init__(self):
         self.calls = []
@@ -348,6 +378,60 @@ class _RecordingModelsLabService:
     async def generate_image_to_video(self, **kwargs):
         self.calls.append(kwargs)
         return {"status": "error", "error": "test stops before provider generation result handling"}
+
+
+@pytest.mark.asyncio
+async def test_kan86_scene_video_uses_preserved_provider_cdn_image_without_minio_public_base(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    for env_name in (
+        "MODELSLAB_MEDIA_PUBLIC_URL",
+        "MINIO_PROVIDER_PUBLIC_URL",
+        "PUBLIC_MINIO_URL",
+        "MINIO_EXTERNAL_URL",
+        "MEDIA_PUBLIC_URL",
+        "PUBLIC_MEDIA_URL",
+        "S3_PUBLIC_URL",
+        "CDN_BASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    service = _RecordingModelsLabService()
+    session = AsyncMock()
+    local_image_url = "http://localhost:9000/litink-books/users/u1/images/scene-1.png"
+    provider_cdn_url = "https://modelslab-cdn.example.com/scene-1.png?fresh=1"
+
+    result = await generate_scene_videos(
+        modelslab_service=service,
+        video_gen_id="video-gen-1",
+        scene_descriptions=["Scene one only"],
+        audio_files={"characters": [], "narrator": [], "sound_effects": [], "background_music": []},
+        image_data={
+            "scene_images": [
+                {
+                    "id": "img-1",
+                    "scene_number": 1,
+                    "shot_index": 0,
+                    "image_url": local_image_url,
+                    "metadata": {
+                        "provider_cdn_url": provider_cdn_url,
+                        "provider_url_created_at": "2999-01-01T00:00:00+00:00",
+                    },
+                }
+            ]
+        },
+        video_style="realistic",
+        script_data={"script": "", "characters": []},
+        user_id="u1",
+        session=session,
+        scene_numbers=[1],
+    )
+
+    assert result == [None]
+    assert len(service.calls) == 1
+    assert service.calls[0]["image_url"] == provider_cdn_url
 
 
 @pytest.mark.asyncio
@@ -522,3 +606,107 @@ async def test_kan86_success_segment_insert_has_required_counts(monkeypatch):
     assert completed_inserts[-1]["character_count"] == 0
     assert completed_inserts[-1]["dialogue_count"] == 0
     assert completed_inserts[-1]["action_count"] == 0
+
+from datetime import datetime, timezone, timedelta
+from app.tasks.video_tasks import select_provider_media_source
+
+
+def test_kan86_provider_cdn_url_preferred_over_localhost_minio_without_provider_base(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    for env_name in (
+        "MODELSLAB_MEDIA_PUBLIC_URL",
+        "MINIO_PROVIDER_PUBLIC_URL",
+        "PUBLIC_MINIO_URL",
+        "MINIO_EXTERNAL_URL",
+        "MEDIA_PUBLIC_URL",
+        "PUBLIC_MEDIA_URL",
+        "S3_PUBLIC_URL",
+        "CDN_BASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    canonical = "http://localhost:9000/litink-books/users/u1/images/scene.png"
+    provider = "https://modelslab-cdn.example.com/scene.png"
+    selected = select_provider_media_source(
+        canonical,
+        {
+            "image_url": canonical,
+            "meta": {
+                "provider_image_url": provider,
+                "provider_url_created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        },
+    )
+
+    assert selected == provider
+    assert normalize_media_url_for_provider(selected) == provider
+
+
+def test_kan86_stale_provider_cdn_url_falls_back_to_local_minio_config_error(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    for env_name in (
+        "MODELSLAB_MEDIA_PUBLIC_URL",
+        "MINIO_PROVIDER_PUBLIC_URL",
+        "PUBLIC_MINIO_URL",
+        "MINIO_EXTERNAL_URL",
+        "MEDIA_PUBLIC_URL",
+        "PUBLIC_MEDIA_URL",
+        "S3_PUBLIC_URL",
+        "CDN_BASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    canonical = "http://localhost:9000/litink-books/users/u1/images/scene.png"
+    selected = select_provider_media_source(
+        canonical,
+        {
+            "image_url": canonical,
+            "metadata": {
+                "original_cdn_url": "https://modelslab-cdn.example.com/stale.png",
+                "provider_url_created_at": (
+                    datetime.now(timezone.utc) - timedelta(days=14)
+                ).isoformat(),
+            },
+        },
+    )
+
+    assert selected == canonical
+    with pytest.raises(ProviderMediaUrlConfigurationError):
+        normalize_media_url_for_provider(selected)
+
+
+def test_kan86_raw_ip_provider_cdn_candidate_still_rejected_or_falls_back(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://72.62.97.111:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    for env_name in (
+        "MODELSLAB_MEDIA_PUBLIC_URL",
+        "MINIO_PROVIDER_PUBLIC_URL",
+        "PUBLIC_MINIO_URL",
+        "MINIO_EXTERNAL_URL",
+        "MEDIA_PUBLIC_URL",
+        "PUBLIC_MEDIA_URL",
+        "S3_PUBLIC_URL",
+        "CDN_BASE_URL",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+
+    canonical = "http://72.62.97.111:9000/litink-books/users/u1/images/scene.png"
+    selected = select_provider_media_source(
+        canonical,
+        {
+            "image_url": canonical,
+            "image_metadata": {
+                "provider_image_url": "http://72.62.97.111:9000/provider/scene.png",
+                "provider_url_created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        },
+    )
+
+    assert selected == canonical
+    with pytest.raises(ProviderMediaUrlConfigurationError):
+        normalize_media_url_for_provider(selected)
