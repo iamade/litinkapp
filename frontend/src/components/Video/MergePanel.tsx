@@ -246,7 +246,7 @@ const MergePanel: React.FC<MergePanelProps> = ({
     // 1. Video tracks from the restored Merge Studio adapter and generation payloads.
     // Backend responses have used both top-level scene_videos and video_data.scene_videos;
     // support both so the Tracks tab reliably hydrates from current production data.
-    scenes.forEach((scene) => {
+    scenes.filter(Boolean).forEach((scene) => {
       if (scene.video_url) {
         addSource({
           url: scene.video_url,
@@ -266,7 +266,7 @@ const MergePanel: React.FC<MergePanelProps> = ({
             ? gen.video_data.scene_videos
             : [];
 
-        sceneVideos.forEach((scene) => {
+        sceneVideos.filter(Boolean).forEach((scene) => {
           if (scene.video_url) {
             addSource({
               url: scene.video_url,
@@ -388,7 +388,7 @@ const MergePanel: React.FC<MergePanelProps> = ({
     if (sources.length === 0 && generationState.currentGeneration) {
       const generation = generationState.currentGeneration;
       if (generation.scene_videos && generation.scene_videos.length > 0) {
-        generation.scene_videos.forEach((scene: { video_url?: string; duration?: number }) => {
+        generation.scene_videos.filter(Boolean).forEach((scene: { video_url?: string; duration?: number }) => {
           if (scene.video_url) {
             addSource({
               url: scene.video_url,
