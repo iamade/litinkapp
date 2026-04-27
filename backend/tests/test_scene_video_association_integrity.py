@@ -1099,6 +1099,67 @@ async def test_kan262_continuity_frame_uses_provider_safe_url_not_local_minio(mo
 
 
 @pytest.mark.asyncio
+async def test_kan263_continuity_frame_direct_persists_to_provider_readable_s3(monkeypatch):
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
+    monkeypatch.setattr("app.tasks.video_tasks.settings.S3_ACCESS_KEY", "test-access")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.S3_SECRET_KEY", "test-secret")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.S3_BUCKET_NAME", "litink-provider-media")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.S3_ENDPOINT", "https://storage.example.com")
+    monkeypatch.setattr("app.tasks.video_tasks.settings.S3_REGION", "us-east-1")
+    _clear_provider_media_env(monkeypatch)
+    monkeypatch.setattr("app.core.services.storage.get_storage_service", lambda: _NoopStorage())
+    local_frame = "http://localhost:9000/litink-dev/frames/scene-1-last.jpg?sig=secret"
+    persisted_provider_frame = "https://storage.example.com/litink-provider-media/users/22222222-2222-2222-2222-222222222222/continuity-frames/scene-1-shot-0-extracted-test.jpg"
+
+    class _ProviderFrameStorage:
+        def __init__(self, *, force_s3=False):
+            assert force_s3 is True
+
+        @staticmethod
+        def build_media_path(user_id, media_type, record_id, extension, scope_id=None):
+            return f"users/{user_id}/{media_type}/{record_id}.{extension}"
+
+        async def persist_from_url(self, source_url, dest_path, **kwargs):
+            assert source_url == "http://minio:9000/litink-dev/frames/scene-1-last.jpg?sig=secret"
+            assert dest_path.startswith("users/22222222-2222-2222-2222-222222222222/continuity-frames/scene-1-shot-0-extracted-")
+            assert kwargs["content_type"] == "image/jpeg"
+            return persisted_provider_frame
+
+    monkeypatch.setattr("app.core.services.storage.S3StorageService", _ProviderFrameStorage)
+    upscale_mock = AsyncMock(return_value="https://modelslab-cdn.example.com/upscaled-scene-1-last.jpg")
+    monkeypatch.setattr("app.tasks.video_tasks.extract_last_frame", AsyncMock(return_value=local_frame))
+    monkeypatch.setattr("app.tasks.video_tasks.upscale_frame", upscale_mock)
+    session = _RecordingSession()
+    service = _ProviderSuccessService()
+
+    result = await generate_scene_videos(
+        modelslab_service=service,
+        video_gen_id="11111111-1111-1111-1111-111111111111",
+        scene_descriptions=["Scene one", "Scene one suggested"],
+        audio_files={"characters": [], "narrator": [], "sound_effects": [], "background_music": []},
+        image_data={"scene_images": [
+            {"image_url": "https://cdn.example.com/scene1-key.png", "scene_number": 1, "shot_index": 0},
+            {"image_url": "https://cdn.example.com/scene1-shot1.png", "scene_number": 1, "shot_index": 1},
+        ]},
+        video_style="realistic",
+        user_id="22222222-2222-2222-2222-222222222222",
+        session=session,
+        scene_numbers=[1, 1],
+    )
+
+    assert len(service.calls) == 2
+    assert upscale_mock.await_args.args[0] == persisted_provider_frame
+    assert service.calls[1]["image_url"] == "https://modelslab-cdn.example.com/upscaled-scene-1-last.jpg"
+    assert result[0]["frame_metadata"]["extracted_frame_url"] == local_frame
+    assert result[0]["frame_metadata"]["provider_persisted_extracted_frame_url"] == persisted_provider_frame
+    assert result[0]["frame_metadata"]["provider_extracted_frame_url"] == persisted_provider_frame
+    assert result[0]["frame_metadata"]["continuity_frame_provider_url"] == "https://modelslab-cdn.example.com/upscaled-scene-1-last.jpg"
+
+
+@pytest.mark.asyncio
 async def test_kan262_continuity_frame_without_provider_url_fails_before_suggested_provider_call(monkeypatch):
     monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "http://localhost:9000")
     monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")

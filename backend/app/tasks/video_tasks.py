@@ -231,6 +231,65 @@ def normalize_media_url_for_internal_access(url: Optional[str]) -> Optional[str]
     return _replace_url_origin(url, settings.MINIO_ENDPOINT)
 
 
+def _provider_frame_storage_configured() -> bool:
+    """Return True when direct S3-compatible provider-frame persistence can run.
+
+    This intentionally uses the existing S3-compatible storage configuration and
+    does not infer/write to provider CDN hosts (for example ModelsLab/R2
+    /generations URLs). The uploaded URL is still validated by the provider guard
+    before any ModelsLab call can consume it.
+    """
+    return bool(
+        getattr(settings, "S3_ACCESS_KEY", None)
+        and getattr(settings, "S3_SECRET_KEY", None)
+        and getattr(settings, "S3_BUCKET_NAME", None)
+        and (getattr(settings, "S3_ENDPOINT", None) or getattr(settings, "S3_REGION", None))
+    )
+
+
+async def persist_continuity_frame_for_provider(
+    source_url: Optional[str],
+    user_id: Optional[str],
+    *,
+    label: str,
+) -> Optional[str]:
+    """Copy a continuity frame into existing S3 storage and return a provider-safe URL.
+
+    Canonical/internal frame URLs remain unchanged. This is only a direct copy to
+    our configured S3-compatible storage when credentials already exist; it never
+    rewrites to third-party provider CDN hosts and it fails closed if the returned
+    URL is not HTTPS/provider-readable.
+    """
+    if not source_url or not _provider_frame_storage_configured():
+        return None
+
+    from app.core.services.storage import S3StorageService
+
+    safe_label = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in label)[:48] or "frame"
+    dest_path = S3StorageService.build_media_path(
+        user_id or "system",
+        "continuity-frames",
+        f"{safe_label}-{uuid.uuid4().hex[:12]}",
+        "jpg",
+    )
+    source_for_download = normalize_media_url_for_internal_access(source_url)
+    storage = S3StorageService(force_s3=True)
+    provider_url = await storage.persist_from_url(
+        source_for_download,
+        dest_path,
+        content_type="image/jpeg",
+        timeout_seconds=120,
+    )
+    parsed_provider_url = urlparse(provider_url or "")
+    if parsed_provider_url.scheme != "https" or _is_provider_unsafe_url(provider_url):
+        raise ProviderMediaUrlConfigurationError(
+            "Direct continuity-frame provider persistence returned a non-provider-readable URL; "
+            "configure existing S3 storage/public URL to return HTTPS public media before ModelsLab calls: "
+            f"{_redact_media_url_for_log(provider_url)}"
+        )
+    return provider_url
+
+
 def log_provider_media_url_normalization(kind: str, original_url: Optional[str], provider_url: Optional[str]) -> None:
     """Diagnostic log for provider media URLs without leaking signed query data."""
     if original_url != provider_url:
@@ -1994,7 +2053,14 @@ async def generate_scene_videos(
                                 print(f"[SCENE VIDEOS V7] ⚠️ Failed to extract shot frame for {scene_id}")
                             else:
                                 try:
-                                    provider_extracted_frame_url = normalize_media_url_for_provider(key_scene_shot_url)
+                                    persisted_provider_frame_url = await persist_continuity_frame_for_provider(
+                                        key_scene_shot_url,
+                                        user_id,
+                                        label=f"scene-{scene_num}-shot-{target_shot_index}-extracted",
+                                    )
+                                    if persisted_provider_frame_url:
+                                        frame_metadata["provider_persisted_extracted_frame_url"] = persisted_provider_frame_url
+                                    provider_extracted_frame_url = persisted_provider_frame_url or normalize_media_url_for_provider(key_scene_shot_url)
                                     frame_metadata["provider_extracted_frame_url"] = provider_extracted_frame_url
                                 except ProviderMediaUrlConfigurationError as provider_frame_error:
                                     frame_metadata["provider_readiness_error"] = (
@@ -2013,13 +2079,25 @@ async def generate_scene_videos(
                                             provider_extracted_frame_url, user_tier="BASIC", user_id=user_id
                                         )
                                         frame_metadata["upscaled_frame_url"] = upscaled_key_scene_shot_url
-                                        frame_metadata["provider_upscaled_frame_url"] = upscaled_key_scene_shot_url
+                                        if upscaled_key_scene_shot_url and _is_provider_unsafe_url(upscaled_key_scene_shot_url):
+                                            persisted_upscaled_frame_url = await persist_continuity_frame_for_provider(
+                                                upscaled_key_scene_shot_url,
+                                                user_id,
+                                                label=f"scene-{scene_num}-shot-{target_shot_index}-upscaled",
+                                            )
+                                            if persisted_upscaled_frame_url:
+                                                frame_metadata["provider_persisted_upscaled_frame_url"] = persisted_upscaled_frame_url
+                                                frame_metadata["provider_upscaled_frame_url"] = persisted_upscaled_frame_url
+                                            else:
+                                                frame_metadata["provider_upscaled_frame_url"] = normalize_media_url_for_provider(upscaled_key_scene_shot_url)
+                                        else:
+                                            frame_metadata["provider_upscaled_frame_url"] = upscaled_key_scene_shot_url
                                     except Exception as upscale_error:
                                         frame_metadata["upscale_error"] = str(upscale_error)[:500]
                                         upscaled_key_scene_shot_url = None
 
                                     previous_shot_frame_url = key_scene_shot_url
-                                    previous_shot_frame_provider_url = upscaled_key_scene_shot_url or provider_extracted_frame_url
+                                    previous_shot_frame_provider_url = frame_metadata.get("provider_upscaled_frame_url") or provider_extracted_frame_url
                                     frame_metadata["continuity_frame_provider_url"] = previous_shot_frame_provider_url
                                     previous_shot_frame_metadata = frame_metadata
                                     print(
