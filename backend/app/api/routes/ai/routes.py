@@ -3514,20 +3514,9 @@ async def generate_script_and_scenes(
                     status_code=403, detail="Not authorized to access this chapter"
                 )
 
-        # ✅ Check subscription tier and SCRIPT limits (not video)
+        # ✅ Check subscription tier (credit-only, no monthly cap)
         subscription_manager = SubscriptionManager(session)
         user_tier = await subscription_manager.get_user_tier(current_user.id)
-
-        # Check script generation limits
-        usage_check = await subscription_manager.check_usage_limits(
-            current_user.id, "script"
-        )
-
-        if not usage_check["can_generate"]:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Script generation limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
-            )
 
         # Map subscription tier to model tier
         model_tier_mapping = {
@@ -4086,17 +4075,9 @@ async def generate_script_and_scenes_with_gpt(
                 status_code=403, detail="Not authorized to access this chapter"
             )
 
-        # ✅ Check script generation limits
+        # ✅ Check subscription tier (credit-only, no monthly cap)
         subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(
-            current_user.id, "script"
-        )
-        if not usage_check["can_generate"]:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Script generation limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
-            )
-
+        user_tier = await subscription_manager.get_user_tier(current_user.id)
         # Generate script using RAGService
         rag_service = RAGService(session)
         chapter_context = await rag_service.get_chapter_with_context(
@@ -5414,24 +5395,8 @@ async def enhance_scene_prompt(
     try:
         user_id = current_user.id
 
-        # Check usage limits
+        # Credit-only: no monthly cap gating
         subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(
-            user_id, "ai_assist"
-        )
-
-        if not usage_check.get("can_generate", True):
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "message": "AI assist limit reached for your subscription tier",
-                    "tier": usage_check.get("tier", "free"),
-                    "limit": usage_check.get("limits", {}).get(
-                        "ai_assists_per_month", 0
-                    ),
-                    "used": usage_check.get("current_usage", {}).get("ai_assist", 0),
-                },
-            )
 
         # Detect shot type from description
         detected_shot = None
@@ -5798,8 +5763,7 @@ async def analyze_for_consultation(
         raise HTTPException(status_code=400, detail="No files provided")
 
     subscription_manager = SubscriptionManager(session)
-    usage_check = await subscription_manager.check_usage_limits(current_user.id)
-    user_tier = usage_check.get("tier", "free")
+    user_tier = await subscription_manager.get_user_tier(current_user.id)
 
     consultation_service = ConsultationService(session)
     enriched_prompt = prompt
@@ -5863,12 +5827,11 @@ async def consultation_chat(
 
         # Get user tier
         subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(current_user.id)
-        user_tier = str(usage_check.get("tier", "free")).lower()
+        user_tier_result = await subscription_manager.get_user_tier(current_user.id)
+        user_tier = str(user_tier_result.value if hasattr(user_tier_result, 'value') else user_tier_result).lower()
 
         # Track per-session chat usage using context state.
-        # Internal subscription tiers map to product labels as:
-        # pro -> Standard, professional -> Pro.
+        # KAN-265: per-session soft caps remain; monthly TIER_LIMITS caps removed.
         tier_caps = {
             "free": 15,
             "basic": 30,

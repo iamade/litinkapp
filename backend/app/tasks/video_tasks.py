@@ -231,6 +231,65 @@ def normalize_media_url_for_internal_access(url: Optional[str]) -> Optional[str]
     return _replace_url_origin(url, settings.MINIO_ENDPOINT)
 
 
+def _provider_frame_storage_configured() -> bool:
+    """Return True when direct S3-compatible provider-frame persistence can run.
+
+    This intentionally uses the existing S3-compatible storage configuration and
+    does not infer/write to provider CDN hosts (for example ModelsLab/R2
+    /generations URLs). The uploaded URL is still validated by the provider guard
+    before any ModelsLab call can consume it.
+    """
+    return bool(
+        getattr(settings, "S3_ACCESS_KEY", None)
+        and getattr(settings, "S3_SECRET_KEY", None)
+        and getattr(settings, "S3_BUCKET_NAME", None)
+        and (getattr(settings, "S3_ENDPOINT", None) or getattr(settings, "S3_REGION", None))
+    )
+
+
+async def persist_continuity_frame_for_provider(
+    source_url: Optional[str],
+    user_id: Optional[str],
+    *,
+    label: str,
+) -> Optional[str]:
+    """Copy a continuity frame into existing S3 storage and return a provider-safe URL.
+
+    Canonical/internal frame URLs remain unchanged. This is only a direct copy to
+    our configured S3-compatible storage when credentials already exist; it never
+    rewrites to third-party provider CDN hosts and it fails closed if the returned
+    URL is not HTTPS/provider-readable.
+    """
+    if not source_url or not _provider_frame_storage_configured():
+        return None
+
+    from app.core.services.storage import S3StorageService
+
+    safe_label = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in label)[:48] or "frame"
+    dest_path = S3StorageService.build_media_path(
+        user_id or "system",
+        "continuity-frames",
+        f"{safe_label}-{uuid.uuid4().hex[:12]}",
+        "jpg",
+    )
+    source_for_download = normalize_media_url_for_internal_access(source_url)
+    storage = S3StorageService(force_s3=True)
+    provider_url = await storage.persist_from_url(
+        source_for_download,
+        dest_path,
+        content_type="image/jpeg",
+        timeout_seconds=120,
+    )
+    parsed_provider_url = urlparse(provider_url or "")
+    if parsed_provider_url.scheme != "https" or _is_provider_unsafe_url(provider_url):
+        raise ProviderMediaUrlConfigurationError(
+            "Direct continuity-frame provider persistence returned a non-provider-readable URL; "
+            "configure existing S3 storage/public URL to return HTTPS public media before ModelsLab calls: "
+            f"{_redact_media_url_for_log(provider_url)}"
+        )
+    return provider_url
+
+
 def log_provider_media_url_normalization(kind: str, original_url: Optional[str], provider_url: Optional[str]) -> None:
     """Diagnostic log for provider media URLs without leaking signed query data."""
     if original_url != provider_url:
@@ -1626,7 +1685,14 @@ async def generate_scene_videos(
     # original image/reference policy and never inherit unrelated prior-scene
     # frames; suggested shots consume the previous shot video's extracted frame.
     previous_scene_number = None
+    # Canonical local/internal URL retained for DB/UI metadata. Never send this
+    # directly to external providers unless provider normalization proves it is
+    # externally reachable.
     previous_shot_frame_url = None
+    # Provider-readable HTTPS/CDN URL for the continuity frame. Suggested-shot
+    # provider calls consume this fail-closed value instead of silently falling
+    # back to local MinIO.
+    previous_shot_frame_provider_url = None
     previous_shot_frame_metadata: Optional[Dict[str, Any]] = None
 
     db_user_id = _safe_uuid_string(user_id)
@@ -1652,6 +1718,7 @@ async def generate_scene_videos(
 
             if previous_scene_number != scene_num:
                 previous_shot_frame_url = None
+                previous_shot_frame_provider_url = None
                 previous_shot_frame_metadata = None
                 previous_scene_number = scene_num
 
@@ -1670,14 +1737,39 @@ async def generate_scene_videos(
                 # Suggested shot: enforced dependency on previous shot video's
                 # extracted/upscaled frame. Do not silently fall back to a base
                 # image if the dependency is missing.
+                dependency_metadata = previous_shot_frame_metadata or {}
                 if not previous_shot_frame_url:
+                    readiness_error = dependency_metadata.get("provider_readiness_error")
+                    if readiness_error:
+                        raise Exception(
+                            f"continuity-frame provider-readiness error for {scene_id} shot {target_shot_index}: {readiness_error}"
+                        )
                     raise Exception(
                         f"Missing previous shot frame dependency for {scene_id} shot {target_shot_index}"
                     )
+                if not previous_shot_frame_provider_url:
+                    readiness_error = dependency_metadata.get("provider_readiness_error") or "no provider-readable continuity frame URL"
+                    readiness_message = (
+                        f"continuity-frame provider-readiness error for {scene_id} shot {target_shot_index}: {readiness_error}"
+                    )
+                    provider_attempt = _build_provider_attempt_diagnostic(
+                        scene_id=scene_id,
+                        scene_number=scene_num,
+                        original_image_url=previous_shot_frame_url,
+                        provider_image_url=None,
+                        original_audio_url=None,
+                        provider_audio_url=None,
+                        model=primary_model_id,
+                        status="configuration_error",
+                        exception=readiness_message,
+                        canonical_image_url=previous_shot_frame_url,
+                        canonical_audio_url=None,
+                    )
+                    raise Exception(readiness_message)
                 starting_image_url = previous_shot_frame_url
-                dependency_metadata = previous_shot_frame_metadata or {}
                 print(
-                    f"[SCENE VIDEOS V7] Using previous shot frame for {scene_id} shot {target_shot_index}: {starting_image_url}"
+                    f"[SCENE VIDEOS V7] Using previous shot frame for {scene_id} shot {target_shot_index}: "
+                    f"canonical={starting_image_url}, provider={previous_shot_frame_provider_url}"
                 )
 
             # Determine model ID before audio check (needed for duration limits)
@@ -1794,10 +1886,18 @@ async def generate_scene_videos(
             # be localhost/docker-internal URLs; ModelsLab needs externally
             # reachable URLs, while earlier probes/downloads use internal URLs.
             try:
-                provider_source_image_url = select_provider_media_source(
-                    starting_image_url,
-                    (scene_image_for_prompt or scene_image) if int(target_shot_index or 0) == 0 else None,
-                )
+                if int(target_shot_index or 0) > 0:
+                    provider_source_image_url = previous_shot_frame_provider_url
+                    if not provider_source_image_url:
+                        raise ProviderMediaUrlConfigurationError(
+                            f"continuity-frame provider-readiness error for {scene_id} shot {target_shot_index}: "
+                            "no provider-readable continuity frame URL"
+                        )
+                else:
+                    provider_source_image_url = select_provider_media_source(
+                        starting_image_url,
+                        scene_image_for_prompt or scene_image,
+                    )
                 provider_source_audio_url = select_provider_media_source(
                     init_audio_url,
                     scene_audio,
@@ -1930,41 +2030,89 @@ async def generate_scene_videos(
                             "shot_index": target_shot_index,
                             "next_scene_number": next_scene_num,
                             "next_shot_index": next_shot_index,
+                            # Canonical storage/internal URLs retained for UI/diagnostics.
                             "extracted_frame_url": None,
                             "upscaled_frame_url": None,
+                            "continuity_frame_url": None,
+                            # Provider-safe URLs only; provider calls must use these fields.
+                            "provider_extracted_frame_url": None,
+                            "provider_upscaled_frame_url": None,
+                            "continuity_frame_provider_url": None,
                             "upscale_service": "modelslab",
                         }
                         try:
                             key_scene_shot_url = await extract_last_frame(video_url, user_id)
                             frame_metadata["extracted_frame_url"] = key_scene_shot_url
+                            frame_metadata["continuity_frame_url"] = key_scene_shot_url
 
                             if not key_scene_shot_url:
                                 frame_metadata["error"] = "last_frame_extraction_failed"
                                 previous_shot_frame_url = None
+                                previous_shot_frame_provider_url = None
                                 previous_shot_frame_metadata = frame_metadata
                                 print(f"[SCENE VIDEOS V7] ⚠️ Failed to extract shot frame for {scene_id}")
                             else:
                                 try:
-                                    upscaled_key_scene_shot_url = await upscale_frame(
-                                        key_scene_shot_url, user_tier="BASIC", user_id=user_id
+                                    persisted_provider_frame_url = await persist_continuity_frame_for_provider(
+                                        key_scene_shot_url,
+                                        user_id,
+                                        label=f"scene-{scene_num}-shot-{target_shot_index}-extracted",
                                     )
-                                    frame_metadata["upscaled_frame_url"] = upscaled_key_scene_shot_url
-                                except Exception as upscale_error:
-                                    frame_metadata["upscale_error"] = str(upscale_error)[:500]
-                                    upscaled_key_scene_shot_url = key_scene_shot_url
+                                    if persisted_provider_frame_url:
+                                        frame_metadata["provider_persisted_extracted_frame_url"] = persisted_provider_frame_url
+                                    provider_extracted_frame_url = persisted_provider_frame_url or normalize_media_url_for_provider(key_scene_shot_url)
+                                    frame_metadata["provider_extracted_frame_url"] = provider_extracted_frame_url
+                                except ProviderMediaUrlConfigurationError as provider_frame_error:
+                                    frame_metadata["provider_readiness_error"] = (
+                                        f"continuity-frame provider-readiness error: {provider_frame_error}"
+                                    )[:500]
+                                    previous_shot_frame_url = key_scene_shot_url
+                                    previous_shot_frame_provider_url = None
+                                    previous_shot_frame_metadata = frame_metadata
+                                    print(
+                                        f"[SCENE VIDEOS V7] ⚠️ Continuity frame not provider-ready for {scene_id}: "
+                                        f"{provider_frame_error}"
+                                    )
+                                else:
+                                    try:
+                                        upscaled_key_scene_shot_url = await upscale_frame(
+                                            provider_extracted_frame_url, user_tier="BASIC", user_id=user_id
+                                        )
+                                        frame_metadata["upscaled_frame_url"] = upscaled_key_scene_shot_url
+                                        if upscaled_key_scene_shot_url and _is_provider_unsafe_url(upscaled_key_scene_shot_url):
+                                            persisted_upscaled_frame_url = await persist_continuity_frame_for_provider(
+                                                upscaled_key_scene_shot_url,
+                                                user_id,
+                                                label=f"scene-{scene_num}-shot-{target_shot_index}-upscaled",
+                                            )
+                                            if persisted_upscaled_frame_url:
+                                                frame_metadata["provider_persisted_upscaled_frame_url"] = persisted_upscaled_frame_url
+                                                frame_metadata["provider_upscaled_frame_url"] = persisted_upscaled_frame_url
+                                            else:
+                                                frame_metadata["provider_upscaled_frame_url"] = normalize_media_url_for_provider(upscaled_key_scene_shot_url)
+                                        else:
+                                            frame_metadata["provider_upscaled_frame_url"] = upscaled_key_scene_shot_url
+                                    except Exception as upscale_error:
+                                        frame_metadata["upscale_error"] = str(upscale_error)[:500]
+                                        upscaled_key_scene_shot_url = None
 
-                                previous_shot_frame_url = upscaled_key_scene_shot_url or key_scene_shot_url
-                                previous_shot_frame_metadata = frame_metadata
-                                print(
-                                    f"[SCENE VIDEOS V7] ✅ Prepared continuity frame for {scene_id}: {previous_shot_frame_url}"
-                                )
+                                    previous_shot_frame_url = key_scene_shot_url
+                                    previous_shot_frame_provider_url = frame_metadata.get("provider_upscaled_frame_url") or provider_extracted_frame_url
+                                    frame_metadata["continuity_frame_provider_url"] = previous_shot_frame_provider_url
+                                    previous_shot_frame_metadata = frame_metadata
+                                    print(
+                                        f"[SCENE VIDEOS V7] ✅ Prepared continuity frame for {scene_id}: "
+                                        f"canonical={previous_shot_frame_url}, provider={previous_shot_frame_provider_url}"
+                                    )
                         except Exception as frame_error:
                             frame_metadata["error"] = str(frame_error)[:500]
                             previous_shot_frame_url = None
+                            previous_shot_frame_provider_url = None
                             previous_shot_frame_metadata = frame_metadata
                             print(f"[SCENE VIDEOS V7] ⚠️ Error preparing continuity frame for {scene_id}: {frame_error}")
                     else:
                         previous_shot_frame_url = None
+                        previous_shot_frame_provider_url = None
                         previous_shot_frame_metadata = None
 
                     # Store in database
@@ -2021,6 +2169,7 @@ async def generate_scene_videos(
                             "extracted_frame_url": key_scene_shot_url,
                             "upscaled_frame_url": upscaled_key_scene_shot_url,
                             "continuity_frame_url": previous_shot_frame_url,
+                            "continuity_frame_provider_url": previous_shot_frame_provider_url,
                             "frame_dependency": dependency_metadata,
                             "frame_metadata": frame_metadata,
                             "duration": 5.0,

@@ -90,18 +90,6 @@ async def generate_plot_overview(
                         detail="Invalid refinement prompt. Please use prompts related to plot and character development only.",
                     )
 
-        # Check subscription limits
-        subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(
-            current_user.id, "plot"
-        )
-
-        if not usage_check["can_generate"]:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Plot generation limit exceeded. You have used {usage_check['plots_used']} out of {usage_check['plots_limit']} plots. Please upgrade your subscription.",
-            )
-
         plot_service = PlotService(session)
 
         # If refinement is requested, fetch existing plot for context
@@ -154,7 +142,8 @@ async def generate_plot_overview(
                 existing_characters=existing_characters,
             )
 
-        # ✅ Record usage for billing/limits
+        # ✅ Record usage for analytics
+        subscription_manager = SubscriptionManager(session)
         await subscription_manager.record_usage(
             user_id=current_user.id,
             resource_type="plot",
@@ -261,18 +250,6 @@ async def auto_add_characters(
         if book.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this book"
-            )
-
-        # Check subscription limits
-        subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(
-            current_user.id, "plot"
-        )
-
-        if not usage_check["can_generate"]:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Character generation limit exceeded. Please upgrade your subscription.",
             )
 
         plot_service = PlotService(session)
@@ -527,18 +504,6 @@ async def generate_project_plot_overview(
                 status_code=403, detail="Not authorized to access this project"
             )
 
-        # Check subscription limits
-        subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(
-            current_user.id, "plot"
-        )
-
-        if not usage_check["can_generate"]:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Plot generation limit exceeded. You have used {usage_check['plots_used']} out of {usage_check['plots_limit']} plots. Please upgrade your subscription.",
-            )
-
         # If refinement is requested, fetch existing plot
         existing_plot = None
         if request.refinement_prompt:
@@ -576,7 +541,8 @@ async def generate_project_plot_overview(
                 book_id=project.book_id,  # Use linked book for character extraction
             )
 
-        # ✅ Record usage for billing/limits
+        # ✅ Record usage for analytics
+        subscription_manager = SubscriptionManager(session)
         await subscription_manager.record_usage(
             user_id=current_user.id,
             resource_type="plot",
@@ -669,18 +635,6 @@ async def auto_add_project_characters(
         if project.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this project"
-            )
-
-        # Check subscription limits
-        subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(
-            current_user.id, "plot"
-        )
-
-        if not usage_check["can_generate"]:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Character generation limit exceeded. Please upgrade your subscription.",
             )
 
         plot_service = PlotService(session)
