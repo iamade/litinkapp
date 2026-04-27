@@ -1,4 +1,4 @@
-.PHONY: help tunnel-dev tunnel-staging start-dev start-staging dev staging frontend logs logs-api logs-worker ps ps-backend stop-backend down docker-down down-backend restart-dev restart-staging recreate-backend migrate current-migration history
+.PHONY: help tunnel-dev tunnel-staging start-vps-dev start-vps-staging start-dev start-staging vps-dev vps-staging dev staging frontend logs logs-api logs-worker ps ps-backend stop-backend down docker-down down-backend restart-dev restart-staging recreate-backend migrate current-migration history
 
 help:
 	@echo "LitInkAI local/VPS tunnel commands"
@@ -8,13 +8,15 @@ help:
 	@echo "  make tunnel-dev       - Open SSH tunnel to VPS dev services"
 	@echo "  make tunnel-staging   - Open SSH tunnel to VPS staging services"
 	@echo ""
-	@echo "Start commands (run in second terminal):"
-	@echo "  make start-dev        - Start local backend against VPS dev tunnel"
-	@echo "  make start-staging    - Start local backend against VPS staging tunnel"
+	@echo "VPS tunnel start commands (run in second terminal):"
+	@echo "  make start-vps-dev    - Start local backend against VPS dev tunnel"
+	@echo "  make start-vps-staging - Start local backend against VPS staging tunnel"
+	@echo "  make vps-dev          - Alias for start-vps-dev"
+	@echo "  make vps-staging      - Alias for start-vps-staging"
 	@echo ""
-	@echo "Short aliases:"
-	@echo "  make dev              - Alias for start-dev"
-	@echo "  make staging          - Alias for start-staging"
+	@echo "Normal local commands:"
+	@echo "  make dev              - Run the existing backend Makefile dev target"
+	@echo "  make staging          - Not mapped to VPS tunnel; use make vps-staging explicitly"
 	@echo "  make frontend         - Start local Vite frontend on localhost:5173"
 	@echo ""
 	@echo "Backend Docker helpers:"
@@ -32,9 +34,9 @@ help:
 	@echo "  make current-migration - Show current Alembic revision"
 	@echo "  make history          - Show Alembic history"
 	@echo ""
-	@echo "Recommended dev flow:"
+	@echo "Recommended VPS tunnel dev flow:"
 	@echo "  Terminal 1: make tunnel-dev"
-	@echo "  Terminal 2: make start-dev"
+	@echo "  Terminal 2: make start-vps-dev"
 	@echo "  Terminal 3: make frontend"
 
 # Tunnel commands intentionally block while active. Leave the terminal open.
@@ -44,15 +46,28 @@ tunnel-dev:
 tunnel-staging:
 	bash scripts/tunnel-staging.sh
 
-start-dev:
-	bash scripts/start-dev.sh
+start-vps-dev:
+	bash scripts/start-vps-dev.sh
 
-start-staging:
+start-vps-staging:
 	bash scripts/start-staging.sh
 
-dev: start-dev
+# Backward-compatible explicit names. Prefer vps-dev/vps-staging for tunnel mode.
+start-dev: start-vps-dev
 
-staging: start-staging
+start-staging: start-vps-staging
+
+vps-dev: start-vps-dev
+
+vps-staging: start-vps-staging
+
+# Preserve the pre-existing local backend Makefile flow; do not overwrite local env with VPS tunnel env.
+dev:
+	cd backend && $(MAKE) dev
+
+staging:
+	@echo "Use 'make vps-staging' for VPS tunnel staging. No default staging alias is provided to avoid accidental env overwrite."
+	@exit 1
 
 frontend:
 	cd frontend && npm run dev

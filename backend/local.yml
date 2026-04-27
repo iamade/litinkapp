@@ -33,7 +33,7 @@ services:
       - SERVICE_ROLE=api
       - RUN_MIGRATIONS=true
     env_file:
-      - ./.envs/.env.local
+      - ${ENV_FILE:-./.envs/.env.local}
     depends_on:
       - redis
       - mailpit
@@ -75,7 +75,7 @@ services:
     volumes:
       - litinkai_local_db:/var/lib/postgresql/data
     env_file:
-      - ./.envs/.env.local
+      - ${ENV_FILE:-./.envs/.env.local}
     networks:
       - litinkai_local_nw
 
