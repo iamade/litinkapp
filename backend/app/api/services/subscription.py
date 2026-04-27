@@ -27,12 +27,6 @@ class SubscriptionManager:
 
     TIER_LIMITS = {
         SubscriptionTier.FREE: {
-            "videos_per_month": 2,
-            "images_per_month": 50,  # For testing character images
-            "audio_per_month": 10,  # Audio/voiceover generations
-            "scripts_per_month": 5,  # Script generations
-            "plots_per_month": 3,  # Plot overview generations
-            "ai_assists_per_month": 20,  # AI chat/assist requests
             "books_upload_limit": 3,
             "video_books_limit": 1,
             "chapters_per_book": 2,
@@ -51,12 +45,6 @@ class SubscriptionManager:
             "description": "Perfect for trying out the platform",
         },
         SubscriptionTier.BASIC: {
-            "videos_per_month": 8,
-            "images_per_month": 200,  # Character and scene images
-            "audio_per_month": 50,  # Audio/voiceover generations
-            "scripts_per_month": 25,  # Script generations
-            "plots_per_month": 15,  # Plot overview generations
-            "ai_assists_per_month": 100,  # AI chat/assist requests
             "books_upload_limit": 10,
             "video_books_limit": 3,
             "chapters_per_book": "unlimited",
@@ -75,12 +63,6 @@ class SubscriptionManager:
             "description": "Great for casual creators",
         },
         SubscriptionTier.PRO: {
-            "videos_per_month": 20,
-            "images_per_month": 500,  # Character and scene images
-            "audio_per_month": 150,  # Audio/voiceover generations
-            "scripts_per_month": 75,  # Script generations
-            "plots_per_month": 50,  # Plot overview generations
-            "ai_assists_per_month": 300,  # AI chat/assist requests
             "books_upload_limit": 25,
             "video_books_limit": 10,
             "chapters_per_book": "unlimited",
@@ -99,12 +81,6 @@ class SubscriptionManager:
             "description": "For serious content creators",
         },
         SubscriptionTier.PREMIUM: {
-            "videos_per_month": 60,
-            "images_per_month": 2000,  # Character and scene images
-            "audio_per_month": 500,  # Audio/voiceover generations
-            "scripts_per_month": 200,  # Script generations
-            "plots_per_month": 150,  # Plot overview generations
-            "ai_assists_per_month": 1000,  # AI chat/assist requests
             "books_upload_limit": 100,
             "video_books_limit": 50,
             "chapters_per_book": "unlimited",
@@ -123,12 +99,6 @@ class SubscriptionManager:
             "description": "For power users",
         },
         SubscriptionTier.PROFESSIONAL: {
-            "videos_per_month": 150,
-            "images_per_month": 5000,  # Character and scene images
-            "audio_per_month": 2000,  # Audio/voiceover generations
-            "scripts_per_month": 500,  # Script generations
-            "plots_per_month": 400,  # Plot overview generations
-            "ai_assists_per_month": 5000,  # AI chat/assist requests
             "books_upload_limit": "unlimited",
             "video_books_limit": "unlimited",
             "chapters_per_book": "unlimited",
@@ -147,12 +117,6 @@ class SubscriptionManager:
             "description": "For studios & agencies",
         },
         SubscriptionTier.ENTERPRISE: {
-            "videos_per_month": "unlimited",
-            "images_per_month": "unlimited",  # Character and scene images
-            "audio_per_month": "unlimited",  # Audio/voiceover generations
-            "scripts_per_month": "unlimited",  # Script generations
-            "plots_per_month": "unlimited",  # Plot overview generations
-            "ai_assists_per_month": "unlimited",  # AI chat/assist requests
             "books_upload_limit": "unlimited",
             "video_books_limit": "unlimited",
             "chapters_per_book": "unlimited",
@@ -215,8 +179,6 @@ class SubscriptionManager:
             feature_highlights = []
 
             # Build feature highlights for display
-            if limits.get("videos_per_month"):
-                feature_highlights.append(f"{limits['videos_per_month']} videos/month")
             if limits.get("books_upload_limit"):
                 feature_highlights.append(
                     f"{limits['books_upload_limit']} book uploads"
@@ -249,7 +211,7 @@ class SubscriptionManager:
                     "can_remove_watermark": limits.get("can_remove_watermark", False),
                     "can_download": limits.get("can_download", False),
                     "max_video_duration": limits.get("max_video_duration"),
-                    "monthly_video_limit": limits.get("videos_per_month", 0),
+                    "monthly_video_limit": "unlimited",
                     "priority_processing": limits.get("priority", 0) >= 2,
                     "features": limits,
                     "feature_highlights": feature_highlights,
@@ -397,12 +359,13 @@ class SubscriptionManager:
         self, user_id: uuid.UUID, resource_type: str = "video"
     ) -> Dict[str, Any]:
         """
-        Check if user has exceeded their usage limits
+        DEPRECATED: monthly cap gating removed (KAN-265).
+        Retained for period usage analytics only; generation gating is credit-only.
         """
         tier = await self.get_user_tier(user_id)
         limits = self.TIER_LIMITS.get(tier, self.TIER_LIMITS[SubscriptionTier.FREE])
 
-        # Get current month's usage
+        # Get current month's usage (analytics only, not gating)
         current_period_start = datetime.now().replace(day=1, hour=0, minute=0, second=0)
 
         statement = select(UsageLog).where(
@@ -415,18 +378,7 @@ class SubscriptionManager:
 
         usage_count = len(usage_logs)
 
-        # Use correct limit key based on resource type
-        limit_key = f"{resource_type}s_per_month"  # e.g., "videos_per_month", "images_per_month"
-        limit_count = limits.get(limit_key, limits.get("videos_per_month", 0))
-
-        is_unlimited = limit_count == "unlimited"
-        can_generate = True
-        remaining = "unlimited"
-
-        if not is_unlimited:
-            can_generate = usage_count < limit_count
-            remaining = max(0, limit_count - usage_count)
-
+        # KAN-265: per-month caps removed from TIER_LIMITS; always allow generation
         return {
             "tier": tier.value,
             "limits": limits,
@@ -435,8 +387,8 @@ class SubscriptionManager:
                 "period_start": current_period_start.isoformat(),
                 "period_end": (current_period_start + timedelta(days=30)).isoformat(),
             },
-            "can_generate": can_generate,
-            f"{resource_type}s_remaining": remaining,
+            "can_generate": True,  # credit-only gating; monthly caps removed
+            f"{resource_type}s_remaining": "unlimited",  # no monthly cap
         }
 
     async def create_checkout_session(
@@ -512,7 +464,6 @@ class SubscriptionManager:
                     status=SubscriptionStatus.ACTIVE,
                     stripe_customer_id=session_data["customer"],
                     stripe_subscription_id=session_data["subscription"],
-                    monthly_video_limit=tier_limits["videos_per_month"],
                     video_quality=tier_limits.get("max_resolution", "720p"),
                     has_watermark=True,  # Watermark ON by default for all tiers
                     current_period_start=datetime.now(),
@@ -524,7 +475,6 @@ class SubscriptionManager:
                 subscription.status = SubscriptionStatus.ACTIVE
                 subscription.stripe_customer_id = session_data["customer"]
                 subscription.stripe_subscription_id = session_data["subscription"]
-                subscription.monthly_video_limit = tier_limits["videos_per_month"]
                 subscription.video_quality = tier_limits.get("max_resolution", "720p")
                 subscription.has_watermark = tier_limits.get("watermark", False)
                 subscription.current_period_start = datetime.now()
@@ -589,21 +539,7 @@ class SubscriptionManager:
         except Exception as e:
             logger.error(f"Error recording usage: {str(e)}")
 
-    async def can_user_generate_video(self, user_id: uuid.UUID) -> Dict[str, Any]:
-        """
-        Check if user can generate a video based on their subscription limits
-        """
-        usage_check = await self.check_usage_limits(user_id, "video")
 
-        return {
-            "can_generate": usage_check["can_generate"],
-            "tier": usage_check["tier"],
-            "videos_used": usage_check["current_usage"][
-                "video"
-            ],  # Fixed: key is "video" not "videos"
-            "videos_limit": usage_check["limits"].get("videos_per_month"),
-            "videos_remaining": usage_check["videos_remaining"],
-        }
 
     async def get_download_status(self, user_id: uuid.UUID) -> Dict[str, Any]:
         """

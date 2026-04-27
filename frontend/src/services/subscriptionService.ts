@@ -7,7 +7,7 @@ export interface SubscriptionTier {
   monthly_price: number;
   stripe_price_id?: string;
   stripe_product_id?: string;
-  monthly_video_limit: number | "unlimited";
+  monthly_video_limit: number | "unlimited";  // DEPRECATED: credit-only (KAN-265)
   video_quality: string;
   has_watermark: boolean;
   max_video_duration?: number | "unlimited";
@@ -26,12 +26,12 @@ export interface UserSubscription {
   stripe_customer_id?: string;
   stripe_subscription_id?: string;
   stripe_price_id?: string;
-  monthly_video_limit: number | "unlimited";
+  monthly_video_limit: number | "unlimited";  // DEPRECATED: credit-only (KAN-265)
   video_quality: string;
   has_watermark: boolean;
   current_period_start?: string;
   current_period_end?: string;
-  videos_generated_this_period: number;
+  videos_generated_this_period: number;  // DEPRECATED: credit-only (KAN-265)
   next_billing_date?: string;
   cancel_at_period_end: boolean;
   cancelled_at?: string;
@@ -53,11 +53,10 @@ export interface CheckoutSessionResponse {
 
 export interface SubscriptionUsageStats {
   current_period_videos: number;
-  period_limit: number;
-  remaining_videos: number;
+  effective_balance: number;
+  available_credits: number;
   period_start?: string;
   period_end?: string;
-  can_generate_video: boolean;
 }
 
 export interface SubscriptionCancelRequest {
@@ -128,21 +127,21 @@ export const subscriptionService = {
     return apiClient.post<{ message: string }>("/subscriptions/reactivate", {});
   },
 
-  // Check if user can generate video based on limits
+  // Check if user can generate video (credit-based)
   canGenerateVideo: async (): Promise<boolean> => {
     try {
       const usage = await subscriptionService.getUsageStats();
-      return usage.can_generate_video;
+      return usage.available_credits > 0;
     } catch (error) {
       return false;
     }
   },
 
-  // Get remaining videos for current period
+  // Get remaining credits for current user
   getRemainingVideos: async (): Promise<number> => {
     try {
       const usage = await subscriptionService.getUsageStats();
-      return usage.remaining_videos;
+      return usage.available_credits;
     } catch (error) {
       return 0;
     }

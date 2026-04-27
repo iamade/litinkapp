@@ -192,12 +192,6 @@ export default function SubscriptionPage() {
                 </p>
               </div>
               <div>
-                <span className="text-sm text-gray-600 dark:text-gray-400">Monthly Limit</span>
-                <p className="font-semibold text-gray-900 dark:text-white">
-                  {currentSubscription.monthly_video_limit} videos
-                </p>
-              </div>
-              <div>
                 <span className="text-sm text-gray-600 dark:text-gray-400">Quality</span>
                 <p className="font-semibold text-gray-900 dark:text-white">
                   {currentSubscription.video_quality}

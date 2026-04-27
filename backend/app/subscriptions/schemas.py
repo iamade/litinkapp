@@ -30,7 +30,7 @@ class SubscriptionTierInfo(BaseModel):
     monthly_price: float
     stripe_price_id: Optional[str] = None
     stripe_product_id: Optional[str] = None
-    monthly_video_limit: Union[int, str]  # Allow "unlimited" or integer
+    monthly_video_limit: Union[int, str] = "unlimited"  # DEPRECATED: credit-only migration (KAN-265)
     video_quality: str
     has_watermark: bool
     max_video_duration: Optional[Union[int, str]] = None  # Allow "unlimited" or integer
@@ -53,12 +53,14 @@ class UserSubscriptionBase(BaseModel):
     stripe_customer_id: Optional[str] = None
     stripe_subscription_id: Optional[str] = None
     stripe_price_id: Optional[str] = None
-    monthly_video_limit: int
+    # DEPRECATED: credit-only migration (KAN-265)
+    monthly_video_limit: Optional[int] = None
     video_quality: str
     has_watermark: bool
     current_period_start: Optional[datetime] = None
     current_period_end: Optional[datetime] = None
-    videos_generated_this_period: int = 0
+    # DEPRECATED: credit-only migration (KAN-265)
+    videos_generated_this_period: Optional[int] = 0
     next_billing_date: Optional[datetime] = None
     cancel_at_period_end: bool = False
     cancelled_at: Optional[datetime] = None
@@ -78,11 +80,13 @@ class UserSubscriptionUpdate(BaseModel):
     stripe_customer_id: Optional[str] = None
     stripe_subscription_id: Optional[str] = None
     stripe_price_id: Optional[str] = None
+    # DEPRECATED: credit-only migration (KAN-265)
     monthly_video_limit: Optional[int] = None
     video_quality: Optional[str] = None
     has_watermark: Optional[bool] = None
     current_period_start: Optional[datetime] = None
     current_period_end: Optional[datetime] = None
+    # DEPRECATED: credit-only migration (KAN-265)
     videos_generated_this_period: Optional[int] = None
     next_billing_date: Optional[datetime] = None
     cancel_at_period_end: Optional[bool] = None
@@ -167,11 +171,10 @@ class SubscriptionUsageStats(BaseModel):
     """Current usage statistics"""
 
     current_period_videos: int
-    period_limit: int
-    remaining_videos: int
+    effective_balance: float = 0
+    available_credits: float = 0
     period_start: Optional[datetime] = None
     period_end: Optional[datetime] = None
-    can_generate_video: bool
 
 
 class SubscriptionHistoryBase(BaseModel):
