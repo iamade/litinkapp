@@ -1590,7 +1590,7 @@ async def generate_scene_videos(
     scene_images = image_data.get("scene_images", [])  # Fixed key mismatch
 
     # Determine Model ID from Config or fallback
-    primary_model_id = "seedance-1-5-pro"  # Default fallback
+    primary_model_id = "wan2.6-i2v"  # KAN-tier-mapping: patched stale seedance default (was seedance-1-5-pro, not in VIDEO_MODEL_CONFIG)
     if model_config and model_config.primary:
         primary_model_id = model_config.primary
 
