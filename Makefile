@@ -9,7 +9,7 @@ help:
 	@echo "  make tunnel-staging   - Open SSH tunnel to VPS staging services"
 	@echo ""
 	@echo "VPS tunnel start commands (run in second terminal):"
-	@echo "  make start-vps-dev    - Start local backend against VPS dev tunnel"
+	@echo "  make start-vps-dev     - Start local backend against VPS dev tunnel"
 	@echo "  make start-vps-staging - Start local backend against VPS staging tunnel"
 	@echo "  make vps-dev          - Alias for start-vps-dev"
 	@echo "  make vps-staging      - Alias for start-vps-staging"
@@ -37,6 +37,7 @@ help:
 	@echo "Recommended VPS tunnel dev flow:"
 	@echo "  Terminal 1: make tunnel-dev"
 	@echo "  Terminal 2: make start-vps-dev"
+	@echo "  For staging: make tunnel-staging, then make start-vps-staging"
 	@echo "  Terminal 3: make frontend"
 
 # Tunnel commands intentionally block while active. Leave the terminal open.
@@ -50,7 +51,7 @@ start-vps-dev:
 	bash scripts/start-vps-dev.sh
 
 start-vps-staging:
-	bash scripts/start-staging.sh
+	bash scripts/start-vps-staging.sh
 
 # Backward-compatible explicit names. Prefer vps-dev/vps-staging for tunnel mode.
 start-dev: start-vps-dev
