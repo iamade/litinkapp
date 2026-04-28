@@ -82,15 +82,6 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         cost_per_1k_input=0.00250,
         cost_per_1k_output=0.01000,
     ),
-    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
-        primary="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
-        fallback="openai/gpt-5.4",  # $17.50/1M, 1M ctx, latest OpenAI
-        fallback2="anthropic/claude-sonnet-4.6",  # $18.00/1M, 1M ctx
-        max_tokens=16000,
-        temperature=0.8,
-        cost_per_1k_input=0.00250,
-        cost_per_1k_output=0.01000,
-    ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
         fallback="openai/gpt-5.4",  # $17.50/1M, 1M ctx, latest OpenAI
