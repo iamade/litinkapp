@@ -23,8 +23,8 @@ class S3StorageService:
     This is memory-efficient as it streams files rather than loading them entirely into memory.
     """
 
-    def __init__(self):
-        self.use_minio = settings.USE_MINIO  # Set in config based on environment
+    def __init__(self, *, force_s3: bool = False):
+        self.use_minio = settings.USE_MINIO and not force_s3  # Set in config based on environment
 
         import os as _os
 

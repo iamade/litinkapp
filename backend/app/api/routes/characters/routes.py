@@ -188,17 +188,6 @@ async def generate_character_details_with_ai(
         if not character_name or not character_name.strip():
             raise HTTPException(status_code=400, detail="Character name is required")
 
-        # Check AI assist usage limits
-        subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(
-            current_user.id, "ai_assist"
-        )
-        if not usage_check["can_generate"]:
-            raise HTTPException(
-                status_code=402,
-                detail=f"AI assist limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
-            )
-
         character_service = CharacterService(session)
         credit_service = CreditService(session)
 
@@ -213,6 +202,7 @@ async def generate_character_details_with_ai(
             )
 
         # Record usage after successful generation
+        subscription_manager = SubscriptionManager(session)
         await subscription_manager.record_usage(
             user_id=current_user.id,
             resource_type="ai_assist",

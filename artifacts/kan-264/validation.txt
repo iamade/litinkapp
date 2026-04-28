@@ -1,0 +1,28 @@
+KAN-264 validation (2026-04-27 UTC)
+
+Commands run from /opt/openclaw/repos/litinkapp-dev:
+
+1) docker compose -f docker-compose.yml -f docker-compose.mailpit.yml config >/tmp/kan264-compose-base.out
+Result: PASS (Docker Compose warning only: base file version attribute obsolete)
+Evidence:
+- mailpit service renders with image axllent/mailpit:v1.24
+- SMTP exposed only on compose network: expose 1025
+- UI published privately: host_ip 127.0.0.1, published 8025 -> target 8025
+- backend/celery env includes MAIL_SERVICE=mailpit, SMTP_HOST=mailpit, SMTP_PORT=1025
+
+2) docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.mailpit.yml --env-file .env.dev config >/tmp/kan264-compose-dev.out
+Result: PASS (Docker Compose warning only: base file version attribute obsolete)
+Evidence:
+- override composes with dev port env file
+- litink_dev_litink-mailpit-data volume rendered
+- mailpit UI remains 127.0.0.1:8025
+
+3) grep -R "resend-activation-link\|activate/{token}\|send_activation_email" -n backend/app/api/routes/auth/activate.py backend/app/api/routes/auth/__init__.py backend/app/core/services/activation_email.py backend/app/core/emails/config.py
+Result: PASS
+Evidence:
+- POST /auth/resend-activation-link exists and calls send_activation_email
+- GET /auth/activate/{token} exists
+- activation email service builds activation URL and sends through FastAPI-Mail
+- non-production email config uses SMTP_HOST/SMTP_PORT (defaults mailpit/1025)
+
+No Python files were changed, so py_compile was not applicable. Frontend was not touched; build not run.

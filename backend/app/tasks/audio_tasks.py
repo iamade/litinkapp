@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional
 from app.core.services.script_parser import ScriptParser
 from app.core.database import get_session
 from app.core.config import settings
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.services.pipeline import PipelineManager, PipelineStep
 from app.core.services.modelslab_v7_audio import ModelsLabV7AudioService
 from app.videos.models import VideoGeneration, AudioGeneration, Script
@@ -25,6 +25,28 @@ CHAPTER_AUDIO_TTS_MODEL_CHAIN = [
     "elevenlabs/eleven_multilingual_v2",
     "elevenlabs/eleven_english_v1",
 ]
+
+
+def build_provider_audio_metadata(original_cdn_url: Optional[str]) -> Dict[str, str]:
+    """Build durable ModelsLab provider URL metadata for later provider reuse.
+
+    Video prereq selection only promotes provider/CDN URLs when paired with a
+    fresh creation timestamp, so every persisted ModelsLab audio row must carry
+    both the provider URL aliases and freshness markers.
+    """
+    if not original_cdn_url:
+        return {}
+
+    created_at = datetime.now(timezone.utc).isoformat()
+    return {
+        "provider_audio_url": original_cdn_url,
+        "original_cdn_url": original_cdn_url,
+        "provider_cdn_url": original_cdn_url,
+        "cdn_url": original_cdn_url,
+        "provider_url_created_at": created_at,
+        "provider_audio_url_created_at": created_at,
+        "original_cdn_url_created_at": created_at,
+    }
 
 
 @asynccontextmanager
@@ -863,7 +885,7 @@ async def generate_narrator_audio(
                         "shot_type": shot_type,
                         "shot_index": shot_index,
                         "service": "modelslab_v7",
-                        "original_cdn_url": original_cdn_url,
+                        **build_provider_audio_metadata(original_cdn_url),
                         "model_used": result.get(
                             "model_used", "eleven_multilingual_v2"
                         ),
@@ -1470,7 +1492,7 @@ async def generate_character_audio(
                         "shot_type": shot_type,
                         "shot_index": shot_index,
                         "service": result.get("service", "modelslab_v7"),
-                        "original_cdn_url": original_cdn_url,
+                        **build_provider_audio_metadata(original_cdn_url),
                         "model_used": result.get(
                             "model_used", "eleven_multilingual_v2"
                         ),
@@ -1707,7 +1729,7 @@ async def generate_sound_effects_audio(
                             "shot_index": shot_index,
                             "effect_type": effect.get("type", "sound_effect"),
                             "service": "modelslab_v7",
-                            "original_cdn_url": original_cdn_url,
+                            **build_provider_audio_metadata(original_cdn_url),
                             "model_used": result.get(
                                 "model_used", "eleven_sound_effect"
                             ),
@@ -1854,7 +1876,7 @@ async def generate_background_music(
                             "shot_type": shot_type,
                             "shot_index": shot_index,
                             "service": "modelslab_v7",
-                            "original_cdn_url": original_cdn_url,
+                            **build_provider_audio_metadata(original_cdn_url),
                             "model_used": result.get("model_used", "music_v1"),
                         },
                     )
@@ -2113,7 +2135,7 @@ def generate_chapter_audio_task(
                             "voice_id": resolved_voice_id,
                             "emotion": emotion,
                             "speed": speed,
-                            "original_cdn_url": original_cdn_url,
+                            **build_provider_audio_metadata(original_cdn_url),
                             "service_used": service_used,
                         }
                         session.add(audio_record)

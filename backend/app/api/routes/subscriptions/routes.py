@@ -19,6 +19,7 @@ from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.api.services.subscription import SubscriptionManager, SubscriptionTier
 from app.core.services.stripe import stripe_service
+from app.credits.service import CreditService
 from app.auth.models import User
 
 router = APIRouter()
@@ -42,7 +43,6 @@ async def get_current_subscription(
             "user_id": str(current_user.id),
             "tier": SubscriptionTier.FREE,
             "status": "active",
-            "monthly_video_limit": 2,  # Hardcoded for now, ideally from TIER_LIMITS
             "video_quality": "720p",
             "has_watermark": True,
             "created_at": current_user.created_at,
@@ -58,12 +58,10 @@ async def get_current_subscription(
         "stripe_customer_id": subscription.stripe_customer_id,
         "stripe_subscription_id": subscription.stripe_subscription_id,
         "stripe_price_id": subscription.stripe_price_id,
-        "monthly_video_limit": subscription.monthly_video_limit,
         "video_quality": subscription.video_quality,
         "has_watermark": subscription.has_watermark,
         "current_period_start": subscription.current_period_start,
         "current_period_end": subscription.current_period_end,
-        "videos_generated_this_period": subscription.videos_generated_this_period,
         "next_billing_date": subscription.next_billing_date,
         "cancel_at_period_end": subscription.cancel_at_period_end,
         "cancelled_at": subscription.cancelled_at,
@@ -140,31 +138,30 @@ async def handle_stripe_webhook(
         raise HTTPException(status_code=500, detail="Webhook processing failed")
 
 
-@router.get("/usage", response_model=SubscriptionUsageStats)
+@router.get("/usage")
 async def get_usage_stats(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
 ):
-    """Get current usage statistics"""
+    """Get current usage statistics with credit balance"""
     try:
         manager = SubscriptionManager(session)
         usage_stats = await manager.check_usage_limits(current_user.id)
 
+        # Get credit balance via CreditService
+        credit_service = CreditService(session)
+        effective_balance = await credit_service.get_effective_balance(current_user.id)
+
         return {
             "current_period_videos": usage_stats["current_usage"]["video"],
-            "period_limit": usage_stats["limits"]["videos_per_month"],
-            "remaining_videos": (
-                usage_stats["videos_remaining"]
-                if isinstance(usage_stats["videos_remaining"], int)
-                else -1
-            ),  # -1 for unlimited? or handle schema
+            "effective_balance": effective_balance,
+            "available_credits": effective_balance,
             "period_start": datetime.fromisoformat(
                 usage_stats["current_usage"]["period_start"]
             ),
             "period_end": datetime.fromisoformat(
                 usage_stats["current_usage"]["period_end"]
             ),
-            "can_generate_video": usage_stats["can_generate"],
         }
 
     except Exception as e:
@@ -191,7 +188,7 @@ async def get_subscription_tiers(session: AsyncSession = Depends(get_session)):
                 ),
                 "description": tier_info.get("description", ""),
                 "monthly_price": tier_info.get("monthly_price", 0),
-                "monthly_video_limit": features.get("videos_per_month", 0),
+                "monthly_video_limit": "unlimited",
                 "video_quality": tier_info.get(
                     "video_quality", features.get("max_resolution", "720p")
                 ),

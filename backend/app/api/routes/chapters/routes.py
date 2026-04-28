@@ -601,20 +601,9 @@ async def generate_scene_image(
         if request.scene_description:
             scene_description = request.scene_description
 
-        # Get user tier for model selection and check limits
+        # Get user tier for model selection
         subscription_manager = SubscriptionManager(session)
-        usage_check = await subscription_manager.check_usage_limits(
-            current_user.id, "image"
-        )
-
-        # Enforce image generation limits
-        if not usage_check["can_generate"]:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Image generation limit exceeded for {usage_check['tier']} tier. Please upgrade your subscription.",
-            )
-
-        user_tier = usage_check["tier"]
+        user_tier = await subscription_manager.get_user_tier(current_user.id)
 
         # Create pending record in database
         # We use ImageGeneration model directly via session
