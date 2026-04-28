@@ -11,6 +11,7 @@ class ModelTier(Enum):
     BASIC = "basic"
     STANDARD = "standard"
     PREMIUM = "premium"
+    PRO = "pro"  # KAN-tier-mapping: alias for PROFESSIONAL (SubscriptionTier uses "pro")
     PROFESSIONAL = "professional"
     ENTERPRISE = "enterprise"
 
@@ -72,6 +73,24 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         cost_per_1k_input=0.00150,
         cost_per_1k_output=0.00600,
     ),
+    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
+        primary="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
+        fallback="openai/gpt-5.4",  # $17.50/1M, 1M ctx, latest OpenAI
+        fallback2="anthropic/claude-sonnet-4.6",  # $18.00/1M, 1M ctx
+        max_tokens=16000,
+        temperature=0.8,
+        cost_per_1k_input=0.00250,
+        cost_per_1k_output=0.01000,
+    ),
+    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
+        primary="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
+        fallback="openai/gpt-5.4",  # $17.50/1M, 1M ctx, latest OpenAI
+        fallback2="anthropic/claude-sonnet-4.6",  # $18.00/1M, 1M ctx
+        max_tokens=16000,
+        temperature=0.8,
+        cost_per_1k_input=0.00250,
+        cost_per_1k_output=0.01000,
+    ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
         fallback="openai/gpt-5.4",  # $17.50/1M, 1M ctx, latest OpenAI
@@ -120,6 +139,12 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="nano-banana-pro",  #  nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         # fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
     ),
+    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
+        primary="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
+        fallback="imagen-4.0-ultra",  #  imagen-4.0-ultra (ModelsLab API) Per image generation will cost 0.072$
+        fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
+        #  fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API
+    ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
         fallback="imagen-4.0-ultra",  #  imagen-4.0-ultra (ModelsLab API) Per image generation will cost 0.072$
@@ -157,6 +182,11 @@ IMAGE_I2I_SINGLE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="seedream-4.5-i2i",
         fallback="seededit-i2i",  # seededit (ModelsLab) $0.04
     ),
+    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
+        primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback2="seededit-i2i",
+    ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
         fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
@@ -191,6 +221,11 @@ IMAGE_I2I_MULTI_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         primary="nano-banana",  # Nano Banana (ModelsLab) $0.0468
         fallback="seedream-4.0-i2i",  # Seedream (ModelsLab) $0.033
         fallback2="seedream-4.5-i2i",
+    ),
+    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
+        primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
+        fallback="nano-banana",  # Nano Banana (ModelsLab) $0.0468
+        fallback2="seedream-4.0-i2i",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="seedream-4.5-i2i",  # seedream-4.5 (ModelsLab) $0.06
@@ -230,6 +265,12 @@ VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="omni-human",  # Omni-Human (ModelsLab) - high quality talking head
+        fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
+        fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
+        fallback3=None,
+    ),
+    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
+        primary="omni-human",  # Omni-Human (ModelsLab) - professional quality
         fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
         fallback3=None,
@@ -313,6 +354,11 @@ AUDIO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
         fallback2="eleven_english_v1",
     ),
+    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
+        primary="eleven_multilingual_v2",
+        fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
+        fallback2=None,
+    ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
@@ -348,6 +394,12 @@ TTS_TIER_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback="openai/tts-1-hd",
         fallback2="google/text-to-speech",
         fallback3="fish-speech/default",
+    ),
+    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
+        primary="elevenlabs/eleven_multilingual_v2",
+        fallback="openai/tts-1-hd",
+        fallback2="fish-speech/default",
+        fallback3="google/text-to-speech",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
@@ -387,6 +439,11 @@ UPSCALE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.PREMIUM: ModelConfig(
         primary="RealESRGAN_x4plus",  # 4x high quality
         fallback="ultra_resolution",  # 4K+ fallback
+        fallback2="realesr-general-x4v3",  # 4x general fallback
+    ),
+    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
+        primary="ultra_resolution",  # 4K+ upscaling - best quality
+        fallback="RealESRGAN_x4plus",  # 4x fallback
         fallback2="realesr-general-x4v3",  # 4x general fallback
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
