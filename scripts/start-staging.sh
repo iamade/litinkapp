@@ -1,17 +1,34 @@
 #!/bin/bash
-# Start staging with VPS tunnel
-# PREREQUISITE: bash scripts/tunnel-staging.sh in another terminal
+# =============================================================================
+# Start LitInkAI local backend against VPS staging tunneled services.
+# PREREQUISITE: Run in another terminal and leave open:
+#   make tunnel-staging
+# Uses canonical env: backend/.envs/.env.vps-staging
+# =============================================================================
+set -euo pipefail
 
-echo "Starting LitInkAI staging (tunnel mode)..."
+ENV_FILE=${ENV_FILE:-./.envs/.env.vps-staging}
+REPO_ENV_FILE="backend/${ENV_FILE#./}"
 
-# Check tunnel
-pgrep -f "ssh -N.*72.62.97.111.*5432" > /dev/null || { echo "❌ Run tunnel-staging.sh first!"; exit 1; }
+echo "Starting LitInkAI VPS staging tunnel backend..."
 
-# Use staging env
-cp scripts/env.staging backend/.envs/.env.local
+if ! pgrep -f "5432:127.0.0.1:5432.*72.62.97.111" > /dev/null; then
+  echo "❌ ERROR: SSH staging tunnel not running. Run this FIRST in another terminal:"
+  echo "  make tunnel-staging"
+  exit 1
+fi
 
-# Start only backend + frontend (tunnel to VPS for DB/redis/minio)
+[ -f "$REPO_ENV_FILE" ] || { echo "❌ Missing env file: $REPO_ENV_FILE"; exit 1; }
+cp "$REPO_ENV_FILE" backend/.envs/.env.local
+chmod 600 backend/.envs/.env.local
+
+echo "  ✅ SSH staging tunnel detected"
+echo "  ✅ Activated env: $REPO_ENV_FILE -> backend/.envs/.env.local"
+
 cd backend
-docker compose -f local.yml -f local-tunnel.yml up --build -d
+# --no-deps is intentional: VPS tunnel mode must not start local postgres/redis/minio.
+ENV_FILE="$ENV_FILE" docker compose -f local.yml up --build -d --no-deps api
+ENV_FILE="$ENV_FILE" docker compose -f local.yml up --build -d --no-deps celeryworker celerybeat
 
-echo "✅ Staging running: http://localhost:5173"
+echo "✅ VPS staging backend is running against VPS staging DB/Redis/MinIO."
+echo "Frontend: make frontend | Backend: http://localhost:8000 | Docs: http://localhost:8000/docs"

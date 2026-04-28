@@ -1,40 +1,34 @@
 #!/bin/bash
 # =============================================================================
-# Start LitInkAI dev (tunnel mode)
-# Connects to VPS dev services via SSH tunnel
+# Start LitInkAI local backend against VPS dev tunneled services.
+# PREREQUISITE: Run in another terminal and leave open:
+#   make tunnel-dev
+# Uses canonical env: backend/.envs/.env.vps-dev
 # =============================================================================
-# PREREQUISITE: Run tunnel-dev.sh FIRST in another terminal:
-#   bash scripts/tunnel-dev.sh
-# =============================================================================
+set -euo pipefail
 
-set -e
+ENV_FILE=${ENV_FILE:-./.envs/.env.vps-dev}
+REPO_ENV_FILE="backend/${ENV_FILE#./}"
 
-echo "Starting LitInkAI dev (tunnel mode)..."
+echo "Starting LitInkAI VPS dev tunnel backend..."
 
-# Check if tunnel is running
-if ! pgrep -f "ssh -N.*72.62.97.111.*5433" > /dev/null; then
-    echo "❌ ERROR: SSH tunnel not running!"
-    echo "Run this FIRST in another terminal:"
-    echo "  bash scripts/tunnel-dev.sh"
-    exit 1
+if ! pgrep -f "5433:127.0.0.1:5433.*72.62.97.111" > /dev/null; then
+  echo "❌ ERROR: SSH dev tunnel not running. Run this FIRST in another terminal:"
+  echo "  make tunnel-dev"
+  exit 1
 fi
 
-echo "  ✅ SSH tunnel detected"
+[ -f "$REPO_ENV_FILE" ] || { echo "❌ Missing env file: $REPO_ENV_FILE"; exit 1; }
+cp "$REPO_ENV_FILE" backend/.envs/.env.local
+chmod 600 backend/.envs/.env.local
 
-# Copy dev env
-cp scripts/env.dev backend/.envs/.env.local
-echo "  ✅ Using dev env file"
+echo "  ✅ SSH dev tunnel detected"
+echo "  ✅ Activated env: $REPO_ENV_FILE -> backend/.envs/.env.local"
 
-# Start only backend services (not postgres/redis/minio — they're on VPS)
 cd backend
-docker compose -f local.yml \
-    --profile backend-only \
-    up --build -d api celery-worker celery-beat
+# --no-deps is intentional: VPS tunnel mode must not start local postgres/redis/minio.
+ENV_FILE="$ENV_FILE" docker compose -f local.yml up --build -d --no-deps api
+ENV_FILE="$ENV_FILE" docker compose -f local.yml up --build -d --no-deps celeryworker celerybeat
 
-echo ""
-echo "✅ Dev is running!"
-echo "  Frontend: http://localhost:5173"
-echo "  Backend:  http://localhost:8000"
-echo "  API Docs: http://localhost:8000/docs"
-echo ""
-echo "To see logs: docker compose -f backend/local.yml logs -f api"
+echo "✅ VPS dev backend is running against VPS dev DB/Redis/MinIO."
+echo "Frontend: make frontend | Backend: http://localhost:8000 | Docs: http://localhost:8000/docs"
