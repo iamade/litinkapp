@@ -104,7 +104,7 @@ down-backend: down
 
 # Safe recreate: does not run down -v and does not delete database/Redis/MinIO volumes.
 recreate-backend:
-	cd backend && docker compose -f local.yml up --build -d --force-recreate api celeryworker celerybeat
+	cd backend && docker compose -f local.yml up --build -d --force-recreate --no-deps api celeryworker celerybeat
 
 migrate:
 	cd backend && docker compose -f local.yml exec api alembic upgrade head

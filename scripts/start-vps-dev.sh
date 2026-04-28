@@ -28,7 +28,8 @@ chmod 600 backend/.envs/.env.local
 echo "  ✅ SSH tunnel detected"
 echo "  ✅ Activated env: $REPO_ENV_FILE -> backend/.envs/.env.local"
 cd backend
-ENV_FILE="$ENV_FILE" docker compose -f local.yml up --build -d api
+# --no-deps is intentional: VPS tunnel mode must not start local postgres/redis/minio/mailpit/rabbitmq/traefik.
+ENV_FILE="$ENV_FILE" docker compose -f local.yml up --build -d --no-deps api
 
 echo "  ⏳ Waiting for API startup..."
 for i in {1..60}; do
@@ -49,7 +50,7 @@ for i in {1..60}; do
   fi
   sleep 2
 done
-ENV_FILE="$ENV_FILE" docker compose -f local.yml up --build -d celeryworker celerybeat
+ENV_FILE="$ENV_FILE" docker compose -f local.yml up --build -d --no-deps celeryworker celerybeat
 
 echo "✅ VPS dev backend is running against VPS dev DB/Redis/MinIO."
 echo "Frontend: make frontend | Backend: http://localhost:8000 | Docs: http://localhost:8000/docs"
