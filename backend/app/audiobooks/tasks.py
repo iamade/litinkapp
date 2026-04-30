@@ -25,17 +25,25 @@ async def session_scope():
 
 
 @celery_app.task(bind=True)
-def generate_audiobook_task(self, audiobook_id: str):
-    """Generate audiobook by processing each chapter through TTS."""
+def generate_audiobook_task(
+    self, audiobook_id: str, reservation_id: Optional[str] = None
+):
+    """Generate audiobook by processing each chapter through TTS.
+
+    KAN-176: ``reservation_id`` is propagated from the /listen/generate route
+    so this task can settle the existing credit reservation instead of creating
+    a fresh deduction transaction (which double-charged and leaked reservations).
+    """
 
     async def _generate():
-        logger.info(f"[AUDIOBOOK] Starting generation for audiobook: {audiobook_id}")
+        logger.info(
+            f"[AUDIOBOOK] Starting generation for audiobook: {audiobook_id} "
+            f"reservation={reservation_id}"
+        )
 
         async with session_scope() as session:
             # Fetch audiobook with metadata
-            ab_stmt = select(Audiobook).where(
-                Audiobook.id == uuid.UUID(audiobook_id)
-            )
+            ab_stmt = select(Audiobook).where(Audiobook.id == uuid.UUID(audiobook_id))
             ab_result = await session.exec(ab_stmt)
             audiobook = ab_result.first()
 
@@ -85,13 +93,9 @@ def generate_audiobook_task(self, audiobook_id: str):
 
                     if not source_chapter or not source_chapter.content:
                         logger.warning(
-                            f"[AUDIOBOOK] Chapter {ab_chapter.chapter_number} has no content, skipping"
+                            f"[AUDIOBOOK] Chapter {ab_chapter.chapter_number} has no content"
                         )
-                        ab_chapter.status = "failed"
-                        ab_chapter.error_message = "No content available"
-                        session.add(ab_chapter)
-                        await session.commit()
-                        continue
+                        raise Exception("No content available")
 
                     content = source_chapter.content
                     audio_urls = []
@@ -120,32 +124,20 @@ def generate_audiobook_task(self, audiobook_id: str):
                             audio_urls.append(audio_url)
                             total_duration += duration
 
-                    # Calculate credits
+                    # Calculate credits. Do not deduct per chapter here.
+                    # KAN-176: settle the route-created reservation once at
+                    # finalization with the actual total credits used.
                     chapter_credits = credits_for_audio_duration(total_duration)
-
-                    # Deduct credits
-                    try:
-                        await credit_service.deduct_for_operation(
-                            user_id=user_id,
-                            operation_type="audio_gen",
-                            amount=chapter_credits,
-                            metadata={
-                                "audiobook_id": str(audiobook.id),
-                                "chapter_number": ab_chapter.chapter_number,
-                                "duration_seconds": total_duration,
-                            },
-                        )
-                    except Exception as credit_err:
-                        logger.error(
-                            f"[AUDIOBOOK] Credit deduction failed for chapter {ab_chapter.chapter_number}: {credit_err}"
-                        )
 
                     # Update chapter with primary audio URL (first chunk or concatenated)
                     primary_url = audio_urls[0] if audio_urls else None
                     if len(audio_urls) > 1:
                         # Store all URLs as JSON string for future concatenation
                         import json
-                        primary_url = audio_urls[0]  # Frontend can request merge separately
+
+                        primary_url = audio_urls[
+                            0
+                        ]  # Frontend can request merge separately
 
                     if primary_url:
                         # Re-fetch to avoid stale session issues
@@ -162,15 +154,13 @@ def generate_audiobook_task(self, audiobook_id: str):
                         session.add(fresh_chapter)
 
                         # Update audiobook progress
-                        ab_stmt2 = select(Audiobook).where(
-                            Audiobook.id == audiobook.id
-                        )
+                        ab_stmt2 = select(Audiobook).where(Audiobook.id == audiobook.id)
                         ab_result2 = await session.exec(ab_stmt2)
                         fresh_ab = ab_result2.first()
                         fresh_ab.completed_chapters += 1
                         fresh_ab.total_duration_seconds = (
-                            (fresh_ab.total_duration_seconds or 0) + total_duration
-                        )
+                            fresh_ab.total_duration_seconds or 0
+                        ) + total_duration
                         fresh_ab.credits_used += chapter_credits
 
                         if fresh_ab.completed_chapters >= fresh_ab.total_chapters:
@@ -202,9 +192,7 @@ def generate_audiobook_task(self, audiobook_id: str):
                         session.add(fresh_ch)
 
                         # Update audiobook progress even on failure
-                        ab_stmt3 = select(Audiobook).where(
-                            Audiobook.id == audiobook.id
-                        )
+                        ab_stmt3 = select(Audiobook).where(Audiobook.id == audiobook.id)
                         ab_result3 = await session.exec(ab_stmt3)
                         fresh_ab = ab_result3.first()
                         fresh_ab.completed_chapters += 1
@@ -217,7 +205,9 @@ def generate_audiobook_task(self, audiobook_id: str):
                         session.add(fresh_ab)
                         await session.commit()
                     except Exception as update_err:
-                        logger.error(f"[AUDIOBOOK] Failed to update chapter error: {update_err}")
+                        logger.error(
+                            f"[AUDIOBOOK] Failed to update chapter error: {update_err}"
+                        )
 
             # Final status check
             ab_final = select(Audiobook).where(Audiobook.id == audiobook.id)
@@ -237,8 +227,28 @@ def generate_audiobook_task(self, audiobook_id: str):
                     final_ab.status = "failed"
                     final_ab.error_message = "All chapters failed"
                     session.add(final_ab)
+                    if reservation_id:
+                        released = await credit_service.release_reservation(
+                            uuid.UUID(reservation_id)
+                        )
+                        if not released:
+                            logger.warning(
+                                "[AUDIOBOOK] Credit reservation release failed for %s",
+                                reservation_id,
+                            )
                     await session.commit()
                 else:
+                    if reservation_id:
+                        confirmed = await credit_service.confirm_deduction(
+                            uuid.UUID(reservation_id),
+                            actual_amount=final_ab.credits_used or 0,
+                        )
+                        if not confirmed:
+                            logger.error(
+                                "[AUDIOBOOK] Credit reservation confirmation failed for %s",
+                                reservation_id,
+                            )
+                        await session.commit()
                     logger.info(
                         f"[AUDIOBOOK] ✅ Audiobook complete: {len(successful)}/{final_ab.total_chapters} chapters, "
                         f"{final_ab.total_duration_seconds:.1f}s total, {final_ab.credits_used} credits used"
