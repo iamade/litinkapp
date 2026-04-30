@@ -23,7 +23,9 @@ from sqlmodel import select
 router = APIRouter()
 
 
-@router.post("/generate", response_model=AudiobookResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/generate", response_model=AudiobookResponse, status_code=status.HTTP_202_ACCEPTED
+)
 async def generate_audiobook(
     request: AudiobookGenerateRequest,
     user=Depends(get_current_user),
@@ -33,9 +35,7 @@ async def generate_audiobook(
 
     async for session in get_session():
         # Get user tier for credit estimation
-        sub_stmt = select(UserSubscription).where(
-            UserSubscription.user_id == user_id
-        )
+        sub_stmt = select(UserSubscription).where(UserSubscription.user_id == user_id)
         sub_result = await session.exec(sub_stmt)
         subscription = sub_result.first()
         user_tier = subscription.tier if subscription else "free"
@@ -78,11 +78,15 @@ async def generate_audiobook(
             # If credit reservation fails, delete the audiobook
             await session.delete(audiobook)
             await session.commit()
-            raise HTTPException(status_code=402, detail=f"Insufficient credits: {str(e)}")
+            raise HTTPException(
+                status_code=402, detail=f"Insufficient credits: {str(e)}"
+            )
 
-        # Dispatch Celery task
+        # Dispatch Celery task with reservation_id so the task can
+        # confirm_deduction (not deduct_for_operation) — KAN-176 fix.
         from app.audiobooks.tasks import generate_audiobook_task
-        generate_audiobook_task.delay(str(audiobook.id))
+
+        generate_audiobook_task.delay(str(audiobook.id), str(reservation))
 
         return audiobook
 
@@ -96,9 +100,7 @@ async def list_voices(
 
     async for session in get_session():
         # Get user tier
-        sub_stmt = select(UserSubscription).where(
-            UserSubscription.user_id == user_id
-        )
+        sub_stmt = select(UserSubscription).where(UserSubscription.user_id == user_id)
         sub_result = await session.exec(sub_stmt)
         subscription = sub_result.first()
         user_tier = subscription.tier if subscription else "free"
@@ -114,6 +116,19 @@ async def list_voices(
         )
         for v in voices
     ]
+
+
+@router.get("/", response_model=List[AudiobookResponse])
+async def list_audiobooks(
+    user=Depends(get_current_user),
+):
+    """List all audiobooks for the authenticated user."""
+    user_id = uuid.UUID(user["id"])
+
+    async for session in get_session():
+        service = AudiobookService(session)
+        audiobooks = await service.list_user_audiobooks(user_id)
+        return audiobooks
 
 
 @router.get("/{audiobook_id}", response_model=AudiobookDetailResponse)
