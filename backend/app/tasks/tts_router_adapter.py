@@ -11,10 +11,10 @@ async def _generate_tts_via_router(
     style: float = 0.0,
     **kwargs: Any
 ) -> Dict[str, Any]:
-    \"\"\"
+    """
     Adapter to route TTS requests through the TTSRouter.
     Ensures consistency with the current result shape expected by audio_tasks.py.
-    \"\"\"
+    """
     try:
         # The router.synthesize returns a dict via TTSResult.to_dict()
         result = await tts_router.synthesize(
