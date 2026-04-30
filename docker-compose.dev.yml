@@ -25,6 +25,8 @@ services:
     container_name: litink-dev-backend
     ports:
       - "${DEV_BACKEND_PORT}:8000"
+    env_file:
+      - ./backend/.envs/.env.dev
 
   frontend:
     container_name: litink-dev-frontend
@@ -35,9 +37,13 @@ services:
 
   celery-worker:
     container_name: litink-dev-celery-worker
+    env_file:
+      - ./backend/.envs/.env.dev
 
   celery-beat:
     container_name: litink-dev-celery-beat
+    env_file:
+      - ./backend/.envs/.env.dev
 
 volumes:
   litink-dev-pgdata:
