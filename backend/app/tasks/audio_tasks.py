@@ -763,52 +763,31 @@ async def generate_narrator_audio(
             # Generate audio
             result = {}
             try:
-                result = await audio_service.generate_tts_audio(
+                from app.tasks.tts_router_adapter import _generate_tts_via_router
+                
+                # Get user tier for router
+                user_tier = "free"
+                if user_id:
+                    async with session_scope() as session:
+                        from app.subscriptions.models import UserSubscription
+                        sub_stmt = select(UserSubscription).where(UserSubscription.user_id == uuid.UUID(user_id))
+                        sub_res = await session.exec(sub_stmt)
+                        sub = sub_res.first()
+                        user_tier = sub.tier if sub else "free"
+
+                result = await _generate_tts_via_router(
+                    user_id=user_id,
+                    user_tier=user_tier,
                     text=segment["text"],
                     voice_id=narrator_voice,
-                    model_id="eleven_multilingual_v2",
+                    model="elevenlabs/eleven_multilingual_v2",
                     speed=1.0,
                 )
             except Exception as e:
-                # Check for Fallback
-                fallback_success = False
-                if (
-                    model_config
-                    and model_config.fallback
-                    and model_config.fallback.startswith("elevenlabs/")
-                ):
-                    print(
-                        f"[NARRATOR AUDIO] ⚠️ Primary service failed: {e}. Attempting fallback to Direct ElevenLabs..."
-                    )
-                    try:
-                        eleven_service = ElevenLabsService()
-                        # Use voice mapping or default
-                        fallback_result = await eleven_service.generate_enhanced_speech(
-                            text=segment["text"],
-                            voice_id=narrator_voice,  # Re-use same ID as they are ElevenLabs IDs
-                            user_id=user_id,
-                        )
+                # Handle adapter failure
+                print(f"[NARRATOR AUDIO] ❌ Router Adapter failed: {e}")
+                raise e
 
-                        if fallback_result and fallback_result.get("audio_url"):
-                            print(f"[NARRATOR AUDIO] ✅ Fallback successful!")
-                            result = {
-                                "status": "success",
-                                "audio_url": fallback_result.get("audio_url"),
-                                "audio_time": 0,  # KAN-166: Duration probed after persist below
-                                "model_used": "direct_eleven_multilingual_v2",
-                                "service": "elevenlabs_direct",
-                            }
-                            fallback_success = True
-                        else:
-                            print(
-                                f"[NARRATOR AUDIO] ❌ Fallback failed: {fallback_result.get('error')}"
-                            )
-
-                    except Exception as fallback_e:
-                        print(f"[NARRATOR AUDIO] ❌ Fallback exception: {fallback_e}")
-
-                if not fallback_success:
-                    raise e  # Re-raise original error if fallback didn't work
 
             # Extract audio URL from response
             audio_url = None
@@ -1379,47 +1358,32 @@ async def generate_character_audio(
             # Generate audio
             result = {}
             try:
-                result = await audio_service.generate_tts_audio(
+                from app.tasks.tts_router_adapter import _generate_tts_via_router
+                
+                # Get user tier for router
+                user_tier = "free"
+                if user_id:
+                    async with session_scope() as session:
+                        from app.subscriptions.models import UserSubscription
+                        sub_stmt = select(UserSubscription).where(UserSubscription.user_id == uuid.UUID(user_id))
+                        sub_res = await session.exec(sub_stmt)
+                        sub = sub_res.first()
+                        user_tier = sub.tier if sub else "free"
+
+                result = await _generate_tts_via_router(
+                    user_id=user_id,
+                    user_tier=user_tier,
                     text=dialogue["text"],
                     voice_id=voice_info["voice_id"],
-                    model_id="eleven_multilingual_v2",
+                    model="elevenlabs/eleven_multilingual_v2",
                     speed=1.0,
                     style=style_value,
                 )
             except Exception as e:
-                # Check for Fallback
-                fallback_success = False
-                if (
-                    model_config
-                    and model_config.fallback
-                    and model_config.fallback.startswith("elevenlabs/")
-                ):
-                    print(
-                        f"[CHARACTER AUDIO] ⚠️ Primary service failed: {e}. Attempting fallback to Direct ElevenLabs..."
-                    )
-                    try:
-                        eleven_service = ElevenLabsService()
-                        fallback_result = await eleven_service.generate_enhanced_speech(
-                            text=dialogue["text"],
-                            voice_id=voice_info["voice_id"],
-                            user_id=user_id,
-                        )
+                # Handle adapter failure
+                print(f"[CHARACTER AUDIO] ❌ Router Adapter failed: {e}")
+                raise e
 
-                        if fallback_result and fallback_result.get("audio_url"):
-                            print(f"[CHARACTER AUDIO] ✅ Fallback successful!")
-                            result = {
-                                "status": "success",
-                                "audio_url": fallback_result.get("audio_url"),
-                                "audio_time": 0,
-                                "model_used": "direct_eleven_multilingual_v2",
-                                "service": "elevenlabs_direct",
-                            }
-                            fallback_success = True
-                    except Exception as fallback_e:
-                        print(f"[CHARACTER AUDIO] ❌ Fallback exception: {fallback_e}")
-
-                if not fallback_success:
-                    raise e
 
             audio_url = None
             duration = 0
