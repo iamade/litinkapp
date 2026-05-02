@@ -90,149 +90,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
 
                 print(f"[VIDEO AUDIO DEBUG] Video generation ID: {video_generation_id}")
 
-                # ... (rest of main logic implicitly included here by user request,
-                # but since I must replace the WHOLE function to move the try/except,
-                # I need to be careful. Providing the specific block to verify structure.)
-                # WAIT. replacing the whole function body with `async for` will indent everything.
-                # If I don't provide the *entire* content in `ReplacementContent`, I might truncate the logic.
-                # Since I am limited in token output and want to be safe:
-
-                # I will essentially "wrap" the existing logic.
-                # But since `replace_file_content` replaces a specific range, I have to match correctly.
-                # I see the previous edit changed lines 27 onwards.
-
-                # RE-STRATEGIZING:
-                # I will replace the start of the function up to the first logic block,
-                # AND the exception handler at the end.
-                # But I cannot easily "indent" the middle part without replacing it.
-                # This dictates I SHOULD probably read the whole file content for that function or take a risk with a large replace.
-                # Given the previous failure, I will try to be very precise or use `sed` / `run_command`? No, `replace_file_content` is safer.
-
-                # The issue is indentation.
-                # If I change `async with` to `async for`, the indentation level is the same!
-                # `async with session_scope() as session:` -> `async for session in get_session():`
-                # The body block is indented by 1 tab/4spaces relative to this line regardless.
-                # So I just need to replace the line `async with session_scope() as session:` with `async for session in get_session():`
-
-                # AND I need to handle the `UnboundLocalError` in the exception block.
-                # The exception block is currently OUTSIDE the session context.
-                # If I change to `async for`, I still need the exception block INSIDE to access `session`.
-                # BUT if I just change the line 30, the exception block (lines 313+) is structurally *after* the loop,
-                # so it would only run after the loop finishes (unlikely if exception raises inside).
-                # Actually, `async for` raises exceptions out of the body just like `with`.
-
-                # So to access `session` in `except`, the `try/except` MUST be inside the `async for`.
-                # Currently structure is:
-                # try:
-                #    async with session:
-                #       ...
-                # except:
-                #    use session (CRASH)
-
-                # New structure needed:
-                # async for session in get_session():
-                #    try:
-                #       ...
-                #    except:
-                #       use session (OK)
-                #    return (break loop)
-
-                # This requires re-indenting the entire `try` block or moving the `async for` outside.
-                # Moving `async for` outside means `try` is inside `async for`.
-                # But `try` is already indented at level 2 (inside function).
-                # `async for` would be level 2.
-                # So `try` body needs to be level 3.
-                # Currently `async with` is level 3, and its body is level 4.
-
-                # Code structure:
-                # def async_generate_audio():
-                #    pipeline = ...
-                #    try: (Lv 2)
-                #       async with ...: (Lv 3) - wait, my previous edit put async with at Lv 3?
-                #       Line 30: `            async with session_scope() as session:` (Lv 3)
-
-                # Yes.
-                # So if I change:
-                # 25: try:
-                # ...
-                # 30: async with ...
-                # TO
-                # 25: async for session in get_session():
-                # 26:    try:
-                # ...
-                # I effectively have to shift lines 26+ (which are currently `print`, `async with`...)
-
-                # This is messy for `replace_file_content` without re-writing the whole function.
-                # Is there a simpler way?
-                # Use `contextlib.asynccontextmanager` on a helper function?
-                # Or just `session = async_session(); try: ... finally: await session.close()`?
-                # This avoids indentation changes for the main logic if I just assign `session` and manage it manually.
-                # Line 23: `pipeline_manager = PipelineManager()`
-                # Line 24: `session = async_session()` (imported from db)
-                # Line 25: `try:`
-                # ... rewrite usage ...
-
-                # But `get_session` has nice error handling / rollback logic I want to reuse.
-                # Maybe I just import `asynccontextmanager` and wrap `get_session` locally?
-                # `from contextlib import asynccontextmanager`
-                # `@asynccontextmanager`
-                # `async def get_session_context(): async for s in get_session(): yield s`
-
-                # Then `async with get_session_context() as session:` works and I don't change indentation!
-                # AND I can wrap the *entire* function body in a `try/except` inside that context?
-                # No, I still have the issue that the `except` block is after the `try` block.
-                # If `async with` wraps the `try`, then `except` is outside `async with`.
-                # So `session` is closed.
-
-                # Ideally, we want the `except` block to have access to the session *before* it closes.
-                # So the `try/except` should be INSIDE the `async with`.
-                # Which means I MUST indent the try/except block.
-                # OR I define the session variable outside.
-
-                # PROPOSAL:
-                # Use explicit session management to avoid massive re-indentation risk.
-
-                # from app.core.database import async_session
-                # session = async_session()
-                # try:
-                #    # logic using session
-                # except Exception as e:
-                #    # handle error using session
-                #    await session.rollback()
-                # finally:
-                #    await session.close()
-
-                # This allows `session` to be available in explicit `except` and `finally`.
-                # I just need to remove the `async with` line and un-indent the block inside it by one level
-                # OR just leave it `if True:` to keep indentation (hacky).
-                # OR just replace `async with ...` with `if True: # wrapper to keep indentation` ? No.
-
-                # Let's try to do it right. I will replace the wrapper code.
-                pass
-
-                # Get video generation data
-                stmt = select(VideoGeneration).where(
-                    VideoGeneration.id == uuid.UUID(video_generation_id)
-                )
-                result = await session.exec(stmt)
-                video_gen = result.first()
-
-                if not video_gen:
-                    raise Exception(f"Video generation {video_generation_id} not found")
-                logger.warning(
-                    f"[VIDEO AUDIO DEBUG] Video generation ID: {video_generation_id}"
-                )
-                logger.warning(
-                    f"[VIDEO AUDIO DEBUG] Retrieved chapter_id from video_gen: {chapter_id}"
-                )
-                logger.warning(
-                    f"[VIDEO AUDIO DEBUG] Retrieved user_id from video_gen: {user_id}"
-                )
-
-                if not script_data:
-                    raise Exception("No script data found for audio generation")
-
-                # Get script_style from the scripts table
+                # KAN-267: Get script_style from the scripts table
                 script_id = video_gen.script_id
                 script_style = "cinematic_movie"  # Default fallback
 
@@ -259,6 +117,11 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                         f"[SCRIPT STYLE] No script_id found, using default: {script_style}"
                     )
 
+                # KAN-267: Persist self Celery task.id for durable execution tracking
+                task_meta = dict(video_gen.task_meta or {})
+                task_meta["audio_task_id"] = self.request.id
+                video_gen.audio_task_id = self.request.id
+                video_gen.task_meta = task_meta
                 video_gen.generation_status = "generating_audio"
                 session.add(video_gen)
                 await session.commit()
