@@ -1071,8 +1071,8 @@ async def generate_character_audio(
                 if script_record and script_record.emotional_map:
                     for entry in script_record.emotional_map:
                         # Build emotional lookup for dialogue
-                        char_key = entry.get("character", "").upper().strip()
-                        text_key = entry.get("dialogue", "")[:30].strip()
+                        char_key = _safe_str(entry.get("character", "")).upper().strip()
+                        text_key = _safe_str(entry.get("dialogue", ""))[:30].strip()
                         emotional_map_lookup[(char_key, text_key)] = {
                             "emotional_state": entry.get("emotional_state", "neutral"),
                             "emotional_intensity": entry.get("emotional_intensity", 5),
@@ -1103,11 +1103,20 @@ async def generate_character_audio(
         except Exception as e:
             logger.warning(f"[CHARACTER AUDIO] Could not load emotional map: {e}")
 
+    def _safe_str(val):
+        """KAN-267: Coerce any value to str — prevents .strip() crash on nested dict."""
+        if val is None:
+            return ""
+        if isinstance(val, dict):
+            import json as _json
+            return _json.dumps(val)
+        return str(val)
+
     for i, dialogue in enumerate(character_dialogues):
         try:
-            character_name = dialogue["character"]
+            character_name = _safe_str(dialogue.get("character", ""))
             scene_id = dialogue.get("scene", 1)
-            dialogue_text = dialogue.get("text", "")
+            dialogue_text = _safe_str(dialogue.get("text", ""))
             shot_type = dialogue.get(
                 "shot_type", "key_scene"
             )  # key_scene or suggested_shot
@@ -1122,8 +1131,8 @@ async def generate_character_audio(
             emotion_info = "neutral"
 
             # Lookup in emotional map
-            char_key = character_name.upper().strip()
-            text_key = dialogue_text.strip()[:30]
+            char_key = _safe_str(character_name).upper().strip()
+            text_key = _safe_str(dialogue_text).strip()[:30]
 
             # Try exact match first, then fuzzy
             map_entry = emotional_map_lookup.get((char_key, text_key))
@@ -1150,7 +1159,7 @@ async def generate_character_audio(
                 gender = detect_character_gender(character_name)
 
                 # Try getting accent from DB
-                char_key_for_desc = character_name.upper().strip()
+                char_key_for_desc = _safe_str(character_name).upper().strip()
                 accent = "neutral"
                 if char_key_for_desc in character_descriptions:
                     accent = (
