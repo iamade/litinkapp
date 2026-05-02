@@ -24,6 +24,7 @@ async def _generate_tts_via_router(
             model=model,
             model_chain=model_chain,
             style=style,
+            user_id=user_id,
             **kwargs
         )
         
