@@ -2771,6 +2771,14 @@ async def generate_audio_for_script(
 
             task = generate_all_audio_for_video.delay(video_gen_id)
 
+            # KAN-267: Persist Celery task id durably for execution tracking
+            task_meta = dict(video_gen.task_meta or {})
+            task_meta["audio_task_id"] = task.id
+            video_gen.audio_task_id = task.id
+            video_gen.task_meta = task_meta
+            session.add(video_gen)
+            await session.commit()
+
             return {
                 "status": "processing",
                 "message": "Audio generation started",
@@ -5006,6 +5014,20 @@ async def trigger_task_for_step(
             task = generate_all_audio_for_video.delay(video_gen_id)
             task_id = task.id
             print(f"🎵 Started audio generation task: {task_id}")
+
+            # KAN-267: Persist audio_task_id for durable execution tracking
+            stmt = select(VideoGeneration).where(
+                VideoGeneration.id == uuid.UUID(video_gen_id)
+            )
+            result = await session.exec(stmt)
+            video_gen = result.first()
+            if video_gen:
+                task_meta = dict(video_gen.task_meta or {})
+                task_meta["audio_task_id"] = task_id
+                video_gen.audio_task_id = task_id
+                video_gen.task_meta = task_meta
+                session.add(video_gen)
+                await session.commit()
 
         elif step == PipelineStep.IMAGE_GENERATION:
             from app.tasks.image_tasks import generate_all_images_for_video

@@ -2,6 +2,24 @@ from celery import Celery
 from app.core.config import settings
 
 
+def _task_queue_routes(queue_name: str) -> dict[str, dict[str, str]]:
+    return {
+        "app.tasks.image_tasks.*": {"queue": queue_name},
+        "app.tasks.video_tasks.*": {"queue": queue_name},
+        "app.tasks.audio_tasks.*": {"queue": queue_name},
+        "app.tasks.ai_tasks.*": {"queue": queue_name},
+        "app.tasks.blockchain_tasks.*": {"queue": queue_name},
+        "app.tasks.merge_tasks.*": {"queue": queue_name},
+        "app.tasks.lipsync_tasks.*": {"queue": queue_name},
+        "app.tasks.embedding_tasks.*": {"queue": queue_name},
+        "app.tasks.plot_tasks.*": {"queue": queue_name},
+        "send_email_task": {"queue": queue_name},
+    }
+
+
+CELERY_QUEUE_NAME = settings.CELERY_TASK_DEFAULT_QUEUE
+
+
 # Create Celery app using environment-configured broker and backend
 # This supports both RabbitMQ (local) and Redis (production/Render)
 celery_app = Celery(
@@ -39,21 +57,10 @@ celery_app.conf.update(
     task_default_retry_delay=300,  # 5 minutes between retries
     task_max_retries=3,
     # Queue settings
-    task_default_queue="litink_tasks",
+    task_default_queue=CELERY_QUEUE_NAME,
     task_create_missing_queues=True,
     # Explicit task routes to ensure correct queue
-    task_routes={
-        "app.tasks.image_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.video_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.audio_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.ai_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.blockchain_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.merge_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.lipsync_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.embedding_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.plot_tasks.*": {"queue": "litink_tasks"},
-        "send_email_task": {"queue": "litink_tasks"},
-    },
+    task_routes=_task_queue_routes(CELERY_QUEUE_NAME),
     # Timezone settings (from original config)
     timezone="UTC",
     enable_utc=True,

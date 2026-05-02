@@ -94,7 +94,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: litink-dev-celery-worker
-    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    command: ["sh", "-c", "celery -A app.tasks.celery_app worker -Q $${CELERY_TASK_DEFAULT_QUEUE:-litink_tasks} --loglevel=info --concurrency=2"]
     env_file:
       - ./backend/.envs/.env.local
     depends_on:

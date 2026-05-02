@@ -198,6 +198,7 @@ class Settings(BaseSettings):
     # Celery
     CELERY_BROKER_URL: str = "redis://redis:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://redis:6379/0"
+    CELERY_TASK_DEFAULT_QUEUE: str = "litink_tasks"
 
     # Book processing limits
     MAX_CHUNKS_PER_BOOK: int = 50  # Back to original limit
