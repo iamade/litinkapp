@@ -1056,6 +1056,15 @@ async def generate_character_audio(
                 return val
         return 0.0
 
+    def _safe_str(val):
+        """KAN-267: Coerce any value to str — prevents .strip() crash on nested dict."""
+        if val is None:
+            return ""
+        if isinstance(val, dict):
+            import json as _json
+            return _json.dumps(val)
+        return str(val)
+
     # Load emotional map from script record (includes audio design)
     emotional_map_lookup = {}
     audio_design_by_scene = {}  # scene_num -> {sound_effects: [], music: ""}
@@ -1102,15 +1111,6 @@ async def generate_character_audio(
                     )
         except Exception as e:
             logger.warning(f"[CHARACTER AUDIO] Could not load emotional map: {e}")
-
-    def _safe_str(val):
-        """KAN-267: Coerce any value to str — prevents .strip() crash on nested dict."""
-        if val is None:
-            return ""
-        if isinstance(val, dict):
-            import json as _json
-            return _json.dumps(val)
-        return str(val)
 
     for i, dialogue in enumerate(character_dialogues):
         try:
