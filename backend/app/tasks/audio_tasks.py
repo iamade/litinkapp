@@ -1265,25 +1265,25 @@ async def generate_character_audio(
                 duration = result.get("audio_time", 0)
 
                 if not audio_url:
-                    raise Exception("No audio URL in V7 response")
+                    raise Exception("No audio URL in response")
 
-                # Persist audio from CDN to our own S3 storage
-                original_cdn_url = audio_url
-                try:
-                    from app.core.services.storage import get_storage_service, S3StorageService
-                    import uuid as _uuid_mod
-                    storage = get_storage_service()
-                    s3_path = S3StorageService.build_media_path(
-                        user_id=str(user_id) if user_id else 'system',
-                        media_type='audio',
-                        record_id=str(_uuid_mod.uuid4()),
-                        extension='mp3',
-                    )
-                    audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
-                    logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
-                except Exception as persist_error:
-                    logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
-                    raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+                # ElevenLabs pre-persists to S3; other providers return external URLs
+                if "minio" not in (audio_url or "").lower():
+                    try:
+                        from app.core.services.storage import get_storage_service, S3StorageService
+                        import uuid as _uuid_mod
+                        storage = get_storage_service()
+                        s3_path = S3StorageService.build_media_path(
+                            user_id=str(user_id) if user_id else 'system',
+                            media_type='audio',
+                            record_id=str(_uuid_mod.uuid4()),
+                            extension='mp3',
+                        )
+                        audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                        logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
+                    except Exception as persist_error:
+                        logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
+                        raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
 
                 # KAN-166: If API didn't report duration (fallback paths return audio_time:0),
                 # probe the actual audio file to get real duration
