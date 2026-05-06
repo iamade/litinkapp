@@ -78,6 +78,7 @@ class VideoGeneration(SQLModel, table=True):
 
     video_url: Optional[str] = Field(default=None)
     audio_task_id: Optional[str] = Field(default=None)
+    continuity_frame_url: Optional[str] = Field(default=None)
 
     can_resume: bool = Field(default=False)
     retry_count: int = Field(default=0)
