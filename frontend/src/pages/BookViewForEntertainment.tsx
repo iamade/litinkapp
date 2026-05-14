@@ -818,9 +818,9 @@ if (!selectedChapter) {
             onUpdateScript={updateScript}
             onDeleteScript={deleteScript}
             plotOverview={plotOverview}
-            onCreatePlotCharacter={async (name: string) => {
+            onCreatePlotCharacter={async (name: string, entityType: 'character' | 'object' | 'location' = 'character') => {
               if (!id) throw new Error('No book ID');
-              const result = await userService.createPlotCharacter(id, name);
+              const result = await userService.createPlotCharacter(id, name, entityType);
               // Refresh plot overview to get updated characters list
               await loadPlot();
               return result;
