@@ -489,13 +489,14 @@ class SubscriptionManager:
             # KAN-314: grant tier credits on subscription activation
             credit_amount = TIER_CREDIT_GRANTS_BY_ENUM.get(tier.value)
             if credit_amount and credit_amount > 0:
+                grant_type = GrantType.FREE_TIER.value if tier == SubscriptionTier.FREE else GrantType.PURCHASE.value
                 tier_credit_grant = CreditGrant(
                     user_id=user_id,
                     credits_remaining=credit_amount,
                     credits_used=0,
                     expires_at=datetime.now() + timedelta(days=365),
                     promo_code_id=None,
-                    grant_type="subscription",
+                    grant_type=grant_type,
                 )
                 self.session.add(tier_credit_grant)
                 await self.session.commit()
