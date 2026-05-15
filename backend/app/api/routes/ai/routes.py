@@ -3528,14 +3528,6 @@ async def generate_script_and_scenes(
                         status_code=404,
                         detail=f"Chapter or Project not found with ID {chapter_id}"
                     )
-                                book_id = project.book_id  # Use real book ID
-                                # Update content from real chapter to be safe
-                                chapter_content = real_chapter.content
-                                chapter_title = real_chapter.title
-                else:
-                    raise HTTPException(status_code=404, detail="Project not found")
-            else:
-                raise HTTPException(status_code=404, detail="Chapter not found")
 
         # Check access permissions (for regular chapters with books)
         if book_data:
