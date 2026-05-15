@@ -38,21 +38,21 @@ celery_app.conf.update(
     # Retry settings
     task_default_retry_delay=300,  # 5 minutes between retries
     task_max_retries=3,
-    # Queue settings
-    task_default_queue="litink_tasks",
+    # Queue settings (KAN-265: read from config to prevent worker queue mismatch)
+    task_default_queue=settings.CELERY_TASK_DEFAULT_QUEUE,
     task_create_missing_queues=True,
     # Explicit task routes to ensure correct queue
     task_routes={
-        "app.tasks.image_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.video_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.audio_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.ai_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.blockchain_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.merge_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.lipsync_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.embedding_tasks.*": {"queue": "litink_tasks"},
-        "app.tasks.plot_tasks.*": {"queue": "litink_tasks"},
-        "send_email_task": {"queue": "litink_tasks"},
+        "app.tasks.image_tasks.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        "app.tasks.video_tasks.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        "app.tasks.audio_tasks.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        "app.tasks.ai_tasks.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        "app.tasks.blockchain_tasks.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        "app.tasks.merge_tasks.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        "app.tasks.lipsync_tasks.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        "app.tasks.embedding_tasks.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        "app.tasks.plot_tasks.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        "send_email_task": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
     },
     # Timezone settings (from original config)
     timezone="UTC",
