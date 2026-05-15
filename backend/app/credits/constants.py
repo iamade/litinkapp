@@ -25,6 +25,31 @@ CHARACTER_IMAGE_GEN = 1 # per character image
 ENHANCED_SPEECH = 1     # per enhanced speech
 CHAPTER_GEN = 2         # per chapter generation
 
+# Monthly credit grants per subscription tier (KAN-314 — synced with Stripe pricing metadata)
+# NOTE: Tier names follow Stripe product IDs; SubscriptionTier enum mapping:
+#   FREE -> SubscriptionTier.FREE
+#   BASIC -> SubscriptionTier.BASIC
+#   STANDARD -> SubscriptionTier.PRO
+#   PREMIUM -> SubscriptionTier.PREMIUM
+#   PRO -> SubscriptionTier.PROFESSIONAL
+TIER_CREDIT_GRANTS = {
+    "FREE": 300,
+    "BASIC": 1500,
+    "STANDARD": 4800,
+    "PREMIUM": 13100,
+    "PRO": 33100,
+}
+
+# Convenience: SubscriptionTier enum key → credit grant amount
+# (KAN-314: supersedes KAN-309 — constants must match Stripe metadata exactly)
+TIER_CREDIT_GRANTS_BY_ENUM = {
+    "free": 300,        # FREE
+    "basic": 1500,      # BASIC
+    "pro": 4800,        # STANDARD
+    "premium": 13100,   # PREMIUM
+    "professional": 33100,  # PRO
+}
+
 
 class OperationType(str, Enum):
     IMAGE_GEN = "image_gen"

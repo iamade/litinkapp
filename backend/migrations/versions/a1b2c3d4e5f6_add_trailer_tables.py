@@ -22,33 +22,34 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Create Enums
-    trailer_status_enum = sa.Enum(
+    # Create Enums explicitly and reuse the PostgreSQL enum objects in table columns.
+    # This keeps the migration idempotent when a prior failed run left the enum type behind.
+    trailer_status_enum = pg.ENUM(
         'ANALYZING', 'SCENES_SELECTED', 'SCRIPT_GENERATING', 'SCRIPT_READY',
         'AUDIO_GENERATING', 'AUDIO_READY', 'ASSEMBLING', 'COMPLETED', 'FAILED',
         name='trailer_status',
         create_type=False,
     )
     trailer_status_enum.create(op.get_bind(), checkfirst=True)
-    
-    selection_method_enum = sa.Enum(
+
+    selection_method_enum = pg.ENUM(
         'AI_AUTO', 'USER_MANUAL', 'AI_SUGGESTED_USER_APPROVED',
         name='selection_method',
         create_type=False,
     )
     selection_method_enum.create(op.get_bind(), checkfirst=True)
-    
+
     # Create trailer_generations table
     op.create_table(
         'trailer_generations',
         sa.Column('id', pg.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('project_id', pg.UUID(as_uuid=True), sa.ForeignKey('projects.id', ondelete='CASCADE'), nullable=False, index=True),
-        sa.Column('user_id', pg.UUID(as_uuid=True), sa.ForeignKey('"user".id', ondelete='CASCADE'), nullable=False, index=True),
+        sa.Column('project_id', pg.UUID(as_uuid=True), sa.ForeignKey('projects.id', ondelete='CASCADE'), nullable=False),
+        sa.Column('user_id', pg.UUID(as_uuid=True), sa.ForeignKey('user.id', ondelete='CASCADE'), nullable=False),
         sa.Column('target_duration_seconds', sa.Integer, nullable=False, server_default='90'),
         sa.Column('tone', sa.String(50), nullable=False, server_default='epic'),
         sa.Column('style', sa.String(50), nullable=False, server_default='cinematic'),
-        sa.Column('status', sa.Enum('ANALYZING', 'SCENES_SELECTED', 'SCRIPT_GENERATING', 'SCRIPT_READY', 'AUDIO_GENERATING', 'AUDIO_READY', 'ASSEMBLING', 'COMPLETED', 'FAILED', name='trailer_status', create_type=False), nullable=False, server_default='ANALYZING'),
-        sa.Column('selection_method', sa.Enum('AI_AUTO', 'USER_MANUAL', 'AI_SUGGESTED_USER_APPROVED', name='selection_method', create_type=False), nullable=False, server_default='AI_AUTO'),
+        sa.Column('status', trailer_status_enum, nullable=False, server_default='ANALYZING'),
+        sa.Column('selection_method', selection_method_enum, nullable=False, server_default='AI_AUTO'),
         sa.Column('trailer_script', sa.TEXT, nullable=True),
         sa.Column('narration_text', sa.TEXT, nullable=True),
         sa.Column('narration_audio_url', sa.String(500), nullable=True),
@@ -68,7 +69,7 @@ def upgrade() -> None:
     op.create_table(
         'trailer_scenes',
         sa.Column('id', pg.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('trailer_generation_id', pg.UUID(as_uuid=True), sa.ForeignKey('trailer_generations.id', ondelete='CASCADE'), nullable=False, index=True),
+        sa.Column('trailer_generation_id', pg.UUID(as_uuid=True), sa.ForeignKey('trailer_generations.id', ondelete='CASCADE'), nullable=False),
         sa.Column('chapter_id', pg.UUID(as_uuid=True), nullable=True),
         sa.Column('artifact_id', pg.UUID(as_uuid=True), nullable=True),
         sa.Column('scene_number', sa.Integer, nullable=False),
