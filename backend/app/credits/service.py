@@ -234,11 +234,20 @@ class CreditService:
             await self.confirm_deduction(reservation_id, amount)
             await self.session.commit()
         except Exception as e:
+            logger.error(
+                "[CREDIT_TX_DEBUG] credit_transaction except reached for reservation %s: %s",
+                reservation_id,
+                e,
+            )
             await self.session.rollback()
             try:
                 await self.session.rollback()  # Clear aborted transaction state before release
                 await self.release_reservation(reservation_id)
                 await self.session.commit()
+                logger.info(
+                    "[CREDIT_TX_DEBUG] reservation %s released after exception",
+                    reservation_id,
+                )
             except Exception as release_err:
                 logger.warning(
                     "credit_transaction: release failed for reservation %s: %s",
