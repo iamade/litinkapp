@@ -14,6 +14,8 @@ from app.subscriptions.models import (
     UsageLog,
     SubscriptionHistory,
 )
+from app.credits.constants import TIER_CREDIT_GRANTS_BY_ENUM
+from app.promo.models import CreditGrant, GrantType
 import logging
 import uuid
 
@@ -483,6 +485,29 @@ class SubscriptionManager:
 
             await self.session.commit()
             logger.info(f"Subscription activated for user {user_id}: {tier}")
+
+            # KAN-314: grant tier credits on subscription activation
+            credit_amount = TIER_CREDIT_GRANTS_BY_ENUM.get(tier.value)
+            if credit_amount and credit_amount > 0:
+                tier_credit_grant = CreditGrant(
+                    user_id=user_id,
+                    credits_remaining=credit_amount,
+                    credits_used=0,
+                    expires_at=datetime.now() + timedelta(days=365),
+                    promo_code_id=None,
+                    grant_type="subscription",
+                )
+                self.session.add(tier_credit_grant)
+                await self.session.commit()
+                logger.info(
+                    f"KAN-314: granted {credit_amount} credits to user {user_id} "
+                    f"for tier {tier.value}"
+                )
+            else:
+                logger.warning(
+                    f"KAN-314: no credit grant amount found for tier {tier.value}, "
+                    f"user {user_id} — skipping credit grant"
+                )
 
         elif event_type == "customer.subscription.deleted":
             subscription_data = event_data["object"]
