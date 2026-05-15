@@ -233,7 +233,8 @@ class CreditService:
             yield
             await self.confirm_deduction(reservation_id, amount)
             await self.session.commit()
-        except Exception:
+        except Exception as e:
+            await self.session.rollback()
             try:
                 await self.release_reservation(reservation_id)
                 await self.session.commit()
