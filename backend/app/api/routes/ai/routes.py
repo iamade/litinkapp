@@ -3498,14 +3498,36 @@ async def generate_script_and_scenes(
                                     real_chapter.id
                                 )  # Switch to real Chapter ID
                                 is_artifact = False  # Treat as normal chapter for RAG
-                                book_id = project.book_id  # Use real book ID
-                                # Update content from real chapter to be safe
-                                chapter_content = real_chapter.content
-                                chapter_title = real_chapter.title
-                else:
-                    raise HTTPException(status_code=404, detail="Project not found")
             else:
-                raise HTTPException(status_code=404, detail="Chapter not found")
+                # Final fallback: Check if chapter_id is actually a Project.id (Prompt-only project)
+                stmt = select(Project).where(Project.id == chapter_id)
+                result = await session.exec(stmt)
+                project_data = result.first()
+
+                if project_data:
+                    if project_data.user_id != current_user.id:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Not authorized to access this project",
+                        )
+                    
+                    is_artifact = True
+                    chapter_id = project_data.id
+                    book_id = project_data.id
+                    chapter_title = project_data.title or "Project Prompt"
+                    chapter_content = project_data.input_prompt
+                    
+                    if not chapter_content:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Project prompt is empty; cannot generate script"
+                        )
+                else:
+                    # Both Chapter, Artifact, and Project lookup failed
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Chapter or Project not found with ID {chapter_id}"
+                    )
 
         # Check access permissions (for regular chapters with books)
         if book_data:

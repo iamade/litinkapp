@@ -4,8 +4,9 @@
 #   make tunnel-dev && make vps-dev
 #   make tunnel-staging && make vps-staging
 #
-# The start scripts use `docker compose ... up --no-deps api celeryworker celerybeat`
-# so local Postgres/Redis/MinIO are not launched in VPS tunnel mode.
+# The start-vps-* scripts now avoid local Postgres/Redis/MinIO by starting only:
+#   api, celeryworker, celerybeat
+# so this override is normally not needed.
 # =============================================================================
 services:
   api:
