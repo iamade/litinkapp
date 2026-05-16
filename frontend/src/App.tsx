@@ -133,7 +133,12 @@ function App() {
                       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                       <Route path="/author" element={<ProtectedRoute><AuthorPanel /></ProtectedRoute>} />
                       <Route path="/learn" element={<LearningMode />} />
-                      <Route path="/explore" element={<EntertainmentMode />} />
+                      {/* KAN-315: Explorer mode gated behind feature flag */}
+                      {import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false' ? (
+                        <Route path="/explore" element={<EntertainmentMode />} />
+                      ) : (
+                        <Route path="/explore" element={<Navigate to="/dashboard" replace />} />
+                      )}
                       <Route path="/creator" element={<ProtectedRoute><CreatorMode /></ProtectedRoute>} />
                       <Route path="/project/:id" element={<ProtectedRoute><ProjectView /></ProtectedRoute>} />
                       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
