@@ -56,9 +56,18 @@ export default function Navbar() {
       : []),
   ];
 
-  // Filter nav items based on authentication status
+  // Filter nav items based on authentication status + KAN-315 feature flag
   const visibleNavItems = navItems.filter(
-    (item) => !item.showWhenLoggedIn || user
+    (item) => {
+      if (!item.showWhenLoggedIn || user) {
+        // KAN-315: Hide explorer nav when feature flag is disabled
+        if (item.path === '/explore' && import.meta.env.VITE_FEATURE_EXPLORER_MODE === 'false') {
+          return false;
+        }
+        return true;
+      }
+      return false;
+    }
   );
 
   return (
@@ -92,7 +101,8 @@ export default function Navbar() {
                 {/* Mode Switcher - Show for all users based on their roles */}
                 {(canAccessCreatorMode || canAccessExplorerMode) && (
                   <div className="flex items-center bg-gray-100 dark:bg-white/5 rounded-lg p-1 border border-gray-200 dark:border-white/10">
-                    {canAccessExplorerMode && (
+                    {/* KAN-315: Explorer mode gated behind feature flag */}
+                    {(canAccessExplorerMode && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false') && (
                       <button
                         onClick={async () => {
                           await switchMode('explorer');
@@ -275,7 +285,8 @@ export default function Navbar() {
                     <div className="px-2 py-3 border-t border-b border-gray-200 dark:border-gray-700">
                       <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 px-2">Switch Mode</p>
                       <div className="flex space-x-2">
-                        {canAccessExplorerMode && (
+                        {/* KAN-315: Explorer mode gated behind feature flag */}
+                        {(canAccessExplorerMode && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false') && (
                           <button
                             onClick={async () => {
                               await switchMode('explorer');
