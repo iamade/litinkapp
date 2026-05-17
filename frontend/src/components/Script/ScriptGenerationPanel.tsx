@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User, Activity, Mic, Play, Smile, Wand2, Upload } from 'lucide-react';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
@@ -232,6 +232,50 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const { balance: creditBalance } = useCreditBalance({ enabled: true });
   const scriptCreditCost = estimateScriptCredits();
   const hasScriptCredits = creditBalance >= scriptCreditCost;
+
+  // Auto-link ref to prevent re-processing the same script+characters combination
+  const autoLinkProcessedRef = useRef<Set<string>>(new Set());
+
+  // KAN-331: Auto-link script characters to Plot Overview characters on exact name match
+  useEffect(() => {
+    if (!selectedScript || !plotOverview?.characters?.length) return;
+
+    const characters = selectedScript.characters || [];
+    if (characters.length === 0) return;
+
+    // Build a stable key from script id + character names to prevent re-processing
+    const scriptKey = `${selectedScript.id}|${characters.join(',')}`;
+    if (autoLinkProcessedRef.current.has(scriptKey)) return;
+
+    const plotChars = plotOverview.characters;
+    const currentCharIds = [...(selectedScript.character_ids || [])];
+
+    // Pad character_ids to match characters length
+    while (currentCharIds.length < characters.length) {
+      currentCharIds.push('');
+    }
+
+    let updated = false;
+
+    characters.forEach((name, idx) => {
+      // Skip already-linked characters
+      if (currentCharIds[idx]) return;
+
+      // Case-insensitive exact match against plot overview characters
+      const match = plotChars.find(
+        (pc) => pc.name.toLowerCase().trim() === name.toLowerCase().trim()
+      );
+      if (match) {
+        currentCharIds[idx] = match.id;
+        updated = true;
+      }
+    });
+
+    if (updated) {
+      autoLinkProcessedRef.current.add(scriptKey);
+      onUpdateScript(selectedScript.id, { character_ids: currentCharIds });
+    }
+  }, [selectedScript?.id, selectedScript?.characters, selectedScript?.character_ids, plotOverview?.characters, onUpdateScript]);
   
   const addManualEntity = async (script: ChapterScript) => {
     const entityName = newCharacterName.trim();
