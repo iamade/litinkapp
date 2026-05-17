@@ -235,6 +235,7 @@ class CreditService:
             await self.session.commit()
         except Exception:
             try:
+                await self.session.rollback()  # Clear aborted transaction state before release
                 await self.release_reservation(reservation_id)
                 await self.session.commit()
             except Exception as release_err:
