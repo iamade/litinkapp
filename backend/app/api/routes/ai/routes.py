@@ -42,7 +42,7 @@ from app.books.models import (
     Chapter,
     LearningContent,
 )
-from app.plots.models import PlotOverview
+from app.plots.models import PlotOverview, Character
 from app.auth.models import User
 import time
 
@@ -4121,6 +4121,28 @@ async def generate_script_and_scenes_with_gpt(
         script = script_result.get("script", "")
         characters = script_result.get("characters", [])
         character_details = script_result.get("character_details", "")
+
+        # KAN-265: Resolve character IDs against Plot Overview characters
+        character_ids = []
+        if characters:
+            plot_stmt = select(PlotOverview).where(
+                PlotOverview.book_id == book_data.id
+            )
+            plot_result = await session.exec(plot_stmt)
+            plot_overview = plot_result.first()
+            if plot_overview:
+                char_stmt = select(Character).where(
+                    Character.plot_overview_id == plot_overview.id
+                )
+                char_result = await session.exec(char_stmt)
+                plot_characters = char_result.all()
+                plot_char_map = {
+                    pc.name.lower().strip(): str(pc.id) for pc in plot_characters
+                }
+                for name in characters:
+                    match_id = plot_char_map.get(name.lower().strip(), "")
+                    character_ids.append(match_id)
+
         # Parse script for scene descriptions
         video_service = VideoService()
         parsed = video_service._parse_script_for_services(script, script_style)
@@ -4165,6 +4187,7 @@ async def generate_script_and_scenes_with_gpt(
             "script": script,
             "scene_descriptions": scene_descriptions,
             "characters": characters,
+            "character_ids": character_ids,  # KAN-265: linked entity IDs
             "character_details": character_details,
             "metadata": script_data["metadata"],
             "status": "ready",
@@ -4238,6 +4261,7 @@ async def generate_script_and_scenes_with_gpt(
             "script": script,
             "scene_descriptions": scene_descriptions,
             "characters": characters,
+            "character_ids": character_ids,
             "character_details": character_details,
             "script_style": script_style,
             "metadata": script_data["metadata"],
