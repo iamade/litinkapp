@@ -154,6 +154,7 @@ export const useScriptGeneration = (chapterId: string) => {
         script: result.script,
         scene_descriptions: (result.scene_descriptions || []) as unknown as SceneDescription[],
         characters: result.characters || [],
+        character_ids: result.character_ids || [],  // KAN-331: include linked character IDs from backend
         character_details: result.character_details || '',
         acts: [],
         beats: [],
