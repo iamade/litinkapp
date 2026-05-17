@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: litink-postgres
     environment:
       POSTGRES_USER: litink
@@ -24,7 +24,7 @@ services:
     container_name: litink-minio
     environment:
       MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_PASSWORD: dG1iSLjaOAzxgTxAt6u7H1LFjZUyCuWN
     ports:
       - "${DEV_MINIO_API_PORT:-9000}:9000"
       - "${DEV_MINIO_CONSOLE_PORT:-9001}:9001"
