@@ -4123,6 +4123,8 @@ async def generate_script_and_scenes_with_gpt(
         character_details = script_result.get("character_details", "")
 
         # KAN-265: Resolve character IDs against Plot Overview characters
+        # Bug 2 fix: Always produce character_ids matching characters length so frontend
+        # can distinguish "no PlotOverview" from "no match". Empty string = not yet linked.
         character_ids = []
         if characters:
             plot_stmt = select(PlotOverview).where(
@@ -4142,6 +4144,9 @@ async def generate_script_and_scenes_with_gpt(
                 for name in characters:
                     match_id = plot_char_map.get(name.lower().strip(), "")
                     character_ids.append(match_id)
+            else:
+                # No PlotOverview exists yet — return empty slots so frontend can auto-link later
+                character_ids = ["" for _ in characters]
 
         # Parse script for scene descriptions
         video_service = VideoService()

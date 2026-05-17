@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileText, Edit2, Trash2, Camera, ChevronDown, ChevronRight, AlertTriangle, Check, X, Box, MapPin, User, Activity, Mic, Play, Smile, Wand2, Upload } from 'lucide-react';
 import { useScriptSelection } from '../../contexts/ScriptSelectionContext';
 import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
@@ -233,8 +233,9 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const scriptCreditCost = estimateScriptCredits();
   const hasScriptCredits = creditBalance >= scriptCreditCost;
 
-  // Auto-link ref to prevent re-processing the same script+characters combination
-  const autoLinkProcessedRef = useRef<Set<string>>(new Set());
+  // KAN-331/KAN-265 Bug 1 fix: Remove Set guard — it prevented re-linking when
+  // plotOverview loaded after first render or when character data became available later.
+  // Now always attempts linking for any unlinked slot; already-linked slots are skipped inline.
 
   // KAN-331: Auto-link script characters to Plot Overview characters on exact name match
   useEffect(() => {
@@ -242,10 +243,6 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
 
     const characters = selectedScript.characters || [];
     if (characters.length === 0) return;
-
-    // Build a stable key from script id + character names to prevent re-processing
-    const scriptKey = `${selectedScript.id}|${characters.join(',')}`;
-    if (autoLinkProcessedRef.current.has(scriptKey)) return;
 
     const plotChars = plotOverview.characters;
     const currentCharIds = [...(selectedScript.character_ids || [])];
@@ -258,7 +255,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     let updated = false;
 
     characters.forEach((name, idx) => {
-      // Skip already-linked characters
+      // Skip already-linked characters (non-empty id = already resolved)
       if (currentCharIds[idx]) return;
 
       // Case-insensitive exact match against plot overview characters
@@ -272,7 +269,6 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     });
 
     if (updated) {
-      autoLinkProcessedRef.current.add(scriptKey);
       onUpdateScript(selectedScript.id, { character_ids: currentCharIds });
     }
   }, [selectedScript?.id, selectedScript?.characters, selectedScript?.character_ids, plotOverview?.characters, onUpdateScript]);
