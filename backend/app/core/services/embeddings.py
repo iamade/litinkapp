@@ -154,6 +154,7 @@ class EmbeddingsService:
             return True
 
         except Exception as e:
+            await self.session.rollback()
             logger.error(f"Error creating chapter embeddings: {e}")
             return False
 
@@ -228,6 +229,7 @@ class EmbeddingsService:
             return True
 
         except Exception as e:
+            await self.session.rollback()
             logger.error(f"Error creating book embeddings: {e}")
             return False
 
