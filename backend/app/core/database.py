@@ -1,5 +1,6 @@
 import asyncio
 from typing import AsyncGenerator
+from urllib.parse import urlparse
 from app.core.config import settings
 from app.core.logging import get_logger
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -59,6 +60,27 @@ async def init_db() -> None:
     try:
         load_models()
         logger.info("Models loaded successfully")
+
+        # db-url-routing-fix 2026-05-21 (Change 5): make the chosen DB target
+        # loud at startup so a wrong/leaked env file is visible immediately
+        # instead of surfacing later as a confusing auth error. Password is
+        # never logged.
+        try:
+            _u = urlparse(settings.DATABASE_URL.replace("+asyncpg", ""))
+            logger.info(
+                f"DB target: {_u.hostname}:{_u.port}{_u.path} | "
+                f"ENVIRONMENT={settings.ENVIRONMENT}"
+            )
+            if settings.ENVIRONMENT == "development" and _u.hostname not in (
+                "127.0.0.1",
+                "localhost",
+            ):
+                logger.warning(
+                    f"ENVIRONMENT=development but DB host is '{_u.hostname}' - "
+                    "a tunnel/remote DATABASE_URL may have leaked into a local run."
+                )
+        except Exception as _db_target_log_err:
+            logger.warning(f"Could not log DB target: {_db_target_log_err}")
 
         max_retries = 3
         retry_delay = 2
