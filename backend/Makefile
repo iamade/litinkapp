@@ -4,8 +4,12 @@
 # ============================================
 
 # Run in development mode WITHOUT debugger
+# ENV_FILE points compose's `env_file: ${ENV_FILE:-...}` (local.yml) at the
+# fully-dockerized env file. .env.docker uses Compose service-name hosts
+# (postgres/redis/minio) so containers reach each other; .env.local stays the
+# Mac-native/tunnel env. This is the ENV_FILE mechanism added in commit 051fc69.
 dev:
-	DEBUG=false ENVIRONMENT=development docker compose -f local.yml up --build -d --remove-orphans
+	DEBUG=false ENVIRONMENT=development ENV_FILE=./.envs/.env.docker docker compose -f local.yml up --build -d --remove-orphans
 # 	@cd scripts && ./start-local-dev.sh
 
 # Run in production mode
