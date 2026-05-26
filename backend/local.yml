@@ -157,8 +157,8 @@ services:
 
 networks:
   litinkai_local_nw:
-    external: true
-  
+    name: litinkai_local_nw
+
 volumes:   
   litinkai_local_db:
   litinkai_redis_data:
