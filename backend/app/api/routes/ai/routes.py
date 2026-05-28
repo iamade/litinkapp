@@ -784,13 +784,8 @@ async def generate_tutorial_video(
 
 @router.post("/generate-entertainment-video", response_model=VideoGenerationResponse)
 async def generate_entertainment_video(
-    request: VideoGenerationRequest,
-    # request: dict = Body(...),
-    session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_active_user),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VIDEO_GEN, VIDEO_PER_SECOND * 30)),  # Reserve for ~30s video upfront; actual deducted on completion
 ):
-    """Generate entertainment video using already saved script — DEPRECATED: Explorer mode removed (KAN-315)"""
+    """DEPRECATED: Explorer mode removed (KAN-315)"""
     raise HTTPException(status_code=404, detail="Explorer mode is no longer available")
     try:
         script_id = request.script_id
