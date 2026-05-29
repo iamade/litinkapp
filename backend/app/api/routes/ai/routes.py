@@ -42,7 +42,7 @@ from app.books.models import (
     Chapter,
     LearningContent,
 )
-from app.plots.models import PlotOverview
+from app.plots.models import PlotOverview, Character
 from app.auth.models import User
 import time
 
@@ -2771,6 +2771,14 @@ async def generate_audio_for_script(
 
             task = generate_all_audio_for_video.delay(video_gen_id)
 
+            # KAN-267: Persist Celery task id durably for execution tracking
+            task_meta = dict(video_gen.task_meta or {})
+            task_meta["audio_task_id"] = task.id
+            video_gen.audio_task_id = task.id
+            video_gen.task_meta = task_meta
+            session.add(video_gen)
+            await session.commit()
+
             return {
                 "status": "processing",
                 "message": "Audio generation started",
@@ -4113,6 +4121,33 @@ async def generate_script_and_scenes_with_gpt(
         script = script_result.get("script", "")
         characters = script_result.get("characters", [])
         character_details = script_result.get("character_details", "")
+
+        # KAN-265: Resolve character IDs against Plot Overview characters
+        # Bug 2 fix: Always produce character_ids matching characters length so frontend
+        # can distinguish "no PlotOverview" from "no match". Empty string = not yet linked.
+        character_ids = []
+        if characters:
+            plot_stmt = select(PlotOverview).where(
+                PlotOverview.book_id == book_data.id
+            )
+            plot_result = await session.exec(plot_stmt)
+            plot_overview = plot_result.first()
+            if plot_overview:
+                char_stmt = select(Character).where(
+                    Character.plot_overview_id == plot_overview.id
+                )
+                char_result = await session.exec(char_stmt)
+                plot_characters = char_result.all()
+                plot_char_map = {
+                    pc.name.lower().strip(): str(pc.id) for pc in plot_characters
+                }
+                for name in characters:
+                    match_id = plot_char_map.get(name.lower().strip(), "")
+                    character_ids.append(match_id)
+            else:
+                # No PlotOverview exists yet — return empty slots so frontend can auto-link later
+                character_ids = ["" for _ in characters]
+
         # Parse script for scene descriptions
         video_service = VideoService()
         parsed = video_service._parse_script_for_services(script, script_style)
@@ -4157,6 +4192,7 @@ async def generate_script_and_scenes_with_gpt(
             "script": script,
             "scene_descriptions": scene_descriptions,
             "characters": characters,
+            "character_ids": character_ids,  # KAN-265: linked entity IDs
             "character_details": character_details,
             "metadata": script_data["metadata"],
             "status": "ready",
@@ -4230,6 +4266,7 @@ async def generate_script_and_scenes_with_gpt(
             "script": script,
             "scene_descriptions": scene_descriptions,
             "characters": characters,
+            "character_ids": character_ids,
             "character_details": character_details,
             "script_style": script_style,
             "metadata": script_data["metadata"],
@@ -5028,6 +5065,20 @@ async def trigger_task_for_step(
             task = generate_all_audio_for_video.delay(video_gen_id)
             task_id = task.id
             print(f"🎵 Started audio generation task: {task_id}")
+
+            # KAN-267: Persist audio_task_id for durable execution tracking
+            stmt = select(VideoGeneration).where(
+                VideoGeneration.id == uuid.UUID(video_gen_id)
+            )
+            result = await session.exec(stmt)
+            video_gen = result.first()
+            if video_gen:
+                task_meta = dict(video_gen.task_meta or {})
+                task_meta["audio_task_id"] = task_id
+                video_gen.audio_task_id = task_id
+                video_gen.task_meta = task_meta
+                session.add(video_gen)
+                await session.commit()
 
         elif step == PipelineStep.IMAGE_GENERATION:
             from app.tasks.image_tasks import generate_all_images_for_video
