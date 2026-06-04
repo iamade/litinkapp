@@ -1,7 +1,10 @@
-
 # ============================================
 # Application Service Commands
 # ============================================
+# Project naming: -p mac-dev isolates local Mac dev containers
+# from VPS tunnel containers (-p vps-dev in scripts/).
+# This prevents container name clashes and ensures `make down`
+# only stops its own group.
 
 # Run in development mode WITHOUT debugger
 # ENV_FILE points compose's `env_file: ${ENV_FILE:-...}` (local.yml) at the
@@ -9,60 +12,60 @@
 # (postgres/redis/minio) so containers reach each other; .env.local stays the
 # Mac-native/tunnel env. This is the ENV_FILE mechanism added in commit 051fc69.
 dev:
-	DEBUG=false ENVIRONMENT=development ENV_FILE=./.envs/.env.docker docker compose -f local.yml up --build -d --remove-orphans
+	DEBUG=false ENVIRONMENT=development ENV_FILE=./.envs/.env.docker docker compose -p mac-dev -f local.yml up --build -d --remove-orphans
 # 	@cd scripts && ./start-local-dev.sh
 
 # Run in production mode
 up:
-	DEBUG=false ENVIRONMENT=production docker compose -f local.yml up --build -d
+	DEBUG=false ENVIRONMENT=production docker compose -p mac-dev -f local.yml up --build -d
 
 # Run in development mode WITH debugger
 debug:
-	DEBUG=true ENVIRONMENT=development docker compose -f local.yml up --build -d
+	DEBUG=true ENVIRONMENT=development docker compose -p mac-dev -f local.yml up --build -d
 
-# Stop application containers only
+# Stop application containers only (mac-dev project)
 down:
-	docker-compose -f local.yml down
+	docker compose -p mac-dev -f local.yml down
 # 	@cd scripts && ./stop-local-dev.sh
 
 # Rebuild development without debugger
 rebuild-dev:
-	DEBUG=false ENVIRONMENT=development docker compose -f local.yml build --no-cache
+	DEBUG=false ENVIRONMENT=development docker compose -p mac-dev -f local.yml build --no-cache
 
 # Rebuild production
 rebuild:
-	DEBUG=false ENVIRONMENT=production docker compose -f local.yml up --build -d --remove-orphans
+	DEBUG=false ENVIRONMENT=production docker compose -p mac-dev -f local.yml up --build -d --remove-orphans
 
 # Rebuild development with debugger
 rebuild-debug:
-	DEBUG=true ENVIRONMENT=development docker compose -f local.yml up --build -d --remove-orphans
+	DEBUG=true ENVIRONMENT=development docker compose -p mac-dev -f local.yml up --build -d --remove-orphans
 
 # Show logs
 logs:
-	docker-compose -f local.yml logs -f api
+	docker compose -p mac-dev -f local.yml logs -f api
 
 # Show all service logs
 logs-all:
-	docker-compose -f local.yml logs -f
+	docker compose -p mac-dev -f local.yml logs -f
 
 # Show Postgres db
 psql:
-	docker-compose -f local.yml exec postgres psql -U adesegun -d litinkai
+	docker compose -p mac-dev -f local.yml exec postgres psql -U adesegun -d litinkai
 
 makemigrations:
-	docker compose -f local.yml  exec -it api alembic revision --autogenerate -m "$(name)"
+	docker compose -p mac-dev -f local.yml exec -it api alembic revision --autogenerate -m "$(name)"
 
 migrate:
-	docker compose -f local.yml exec -it api alembic upgrade head
+	docker compose -p mac-dev -f local.yml exec -it api alembic upgrade head
 
 history:
-	docker compose -f local.yml exec -it api alembic history
+	docker compose -p mac-dev -f local.yml exec -it api alembic history
 
 current-migration:
-	docker compose -f local.yml exec -it api alembic current
+	docker compose -p mac-dev -f local.yml exec -it api alembic current
 
 downgrade:
-	docker compose -f local.yml exec -it api alembic downgrade $(version)
+	docker compose -p mac-dev -f local.yml exec -it api alembic downgrade $(version)
 
 
 
@@ -72,7 +75,7 @@ downgrade:
 
 # Show Docker Compose configuration
 config:
-	docker compose -f local.yml config
+	docker compose -p mac-dev -f local.yml config
 
 # Inspect Docker network
 inspect-network:
@@ -88,10 +91,10 @@ help:
 	@echo "=============================="
 	@echo ""
 	@echo "Application Commands:"
-	@echo "  make dev               - Start app in development mode (requires Supabase running)"
+	@echo "  make dev               - Start app in development mode (mac-dev project)"
 	@echo "  make up                - Start app in production mode"
 	@echo "  make debug             - Start app with debugger enabled"
-	@echo "  make down              - Stop application services"
+	@echo "  make down              - Stop mac-dev project services"
 	@echo "  make rebuild-dev       - Rebuild and start app in dev mode"
 	@echo "  make logs              - Show API logs"
 	@echo "  make logs-all          - Show all service logs"
