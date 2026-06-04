@@ -1,4 +1,4 @@
-.PHONY: help tunnel-dev tunnel-staging start-vps-dev start-vps-staging start-dev start-staging vps-dev vps-staging dev staging frontend logs logs-api logs-worker ps ps-backend stop-backend down docker-down down-backend restart-dev restart-staging recreate-backend migrate current-migration history
+.PHONY: help tunnel-dev tunnel-staging start-vps-dev start-vps-staging start-dev start-staging vps-dev vps-staging vps-down vps-logs vps-ps dev staging frontend logs logs-api logs-worker ps ps-backend stop-backend down docker-down down-backend restart-dev restart-staging recreate-backend migrate current-migration history
 
 help:
 	@echo "LitInkAI local/VPS tunnel commands"
@@ -13,6 +13,9 @@ help:
 	@echo "  make start-vps-staging - Start local backend against VPS staging tunnel"
 	@echo "  make vps-dev          - Alias for start-vps-dev"
 	@echo "  make vps-staging      - Alias for start-vps-staging"
+	@echo "  make vps-down         - Stop VPS dev project containers"
+	@echo "  make vps-logs         - Follow VPS dev service logs"
+	@echo "  make vps-ps           - Show VPS dev compose services"
 	@echo ""
 	@echo "Normal local commands:"
 	@echo "  make dev              - Run the existing backend Makefile dev target"
@@ -62,6 +65,15 @@ vps-dev: start-vps-dev
 
 vps-staging: start-vps-staging
 
+vps-down:
+	cd backend && docker compose -p vps-dev -f local.yml down
+
+vps-logs:
+	cd backend && docker compose -p vps-dev -f local.yml logs -f
+
+vps-ps:
+	cd backend && docker compose -p vps-dev -f local.yml ps
+
 # Preserve the pre-existing local backend Makefile flow; do not overwrite local env with VPS tunnel env.
 dev:
 	cd backend && $(MAKE) dev
@@ -78,25 +90,25 @@ restart-dev: start-dev
 restart-staging: start-staging
 
 logs:
-	cd backend && docker compose -f local.yml logs -f
+	cd backend && docker compose -p mac-dev -f local.yml logs -f
 
 logs-api:
-	cd backend && docker compose -f local.yml logs -f api
+	cd backend && docker compose -p mac-dev -f local.yml logs -f api
 
 logs-worker:
-	cd backend && docker compose -f local.yml logs -f celeryworker
+	cd backend && docker compose -p mac-dev -f local.yml logs -f celeryworker
 
 ps:
-	cd backend && docker compose -f local.yml ps
+	cd backend && docker compose -p mac-dev -f local.yml ps
 
 ps-backend: ps
 
 stop-backend:
-	cd backend && docker compose -f local.yml stop api celeryworker celerybeat
+	cd backend && docker compose -p mac-dev -f local.yml stop api celeryworker celerybeat
 
 # Safe down: removes containers/networks, but does not delete volumes. Never uses -v.
 down:
-	cd backend && docker compose -f local.yml down
+	cd backend && docker compose -p mac-dev -f local.yml down
 
 docker-down: down
 
@@ -104,13 +116,13 @@ down-backend: down
 
 # Safe recreate: does not run down -v and does not delete database/Redis/MinIO volumes.
 recreate-backend:
-	cd backend && docker compose -f local.yml up --build -d --force-recreate --no-deps api celeryworker celerybeat
+	cd backend && docker compose -p mac-dev -f local.yml up --build -d --force-recreate --no-deps api celeryworker celerybeat
 
 migrate:
-	cd backend && docker compose -f local.yml exec api alembic upgrade head
+	cd backend && docker compose -p mac-dev -f local.yml exec api alembic upgrade head
 
 current-migration:
-	cd backend && docker compose -f local.yml exec api alembic current
+	cd backend && docker compose -p mac-dev -f local.yml exec api alembic current
 
 history:
-	cd backend && docker compose -f local.yml exec api alembic history
+	cd backend && docker compose -p mac-dev -f local.yml exec api alembic history
