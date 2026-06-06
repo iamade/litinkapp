@@ -1301,7 +1301,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       </div>
 
        {/* Objects & Locations Section */}
-       {(filteredCharacters.some((c: Character) => c.entity_type === 'object') || mode === 'creator') && (
+       {(filteredCharacters.some((c: Character) => c.entity_type === 'object' || c.entity_type === 'location') || mode === 'creator') && (
         <div className="space-y-4 pt-8 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -1408,7 +1408,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                 />
               ))}
               
-              {filteredCharacters.filter((c: Character) => c.entity_type === 'object').length === 0 && (
+              {filteredCharacters.filter((c: Character) => c.entity_type === 'object' || c.entity_type === 'location').length === 0 && (
                 <div className="col-span-full py-8 text-center text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
                   <p>No objects or locations added yet.</p>
                 </div>
