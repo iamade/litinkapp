@@ -253,6 +253,30 @@ class PlotService:
                     plot_data=generated_plot,
                     model_tier=model_tier,
                 )
+                logger.info(
+                    "[PlotService] Generating objects and locations from prompt context"
+                )
+                prompt_book_context = {
+                    "book": {
+                        "title": (input_prompt or generated_plot.get("title") or "Untitled")[:100],
+                        "genre": genre or generated_plot.get("genre") or "entertainment",
+                    },
+                    "chapters_summary": "\n".join(
+                        part
+                        for part in [
+                            input_prompt or "",
+                            generated_plot.get("logline", ""),
+                            generated_plot.get("creative_directive", ""),
+                        ]
+                        if part
+                    )[:2000],
+                }
+                generated_objects_locations = await self._generate_objects_and_locations(
+                    book_context=prompt_book_context,
+                    plot_data=generated_plot,
+                    model_tier=model_tier,
+                )
+                generated_characters.extend(generated_objects_locations)
 
             # 6. Store results (using project_id as a pseudo book_id for now)
             result = await self._store_plot_overview(
