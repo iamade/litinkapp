@@ -60,6 +60,7 @@ vite.config.*.timestamp-*
 
 # AI tool files
 CLAUDE.md
+CLAUDE.local.md
 frontend/SKILL.md
 
 # Docker compose files - should not be on GitHub (contain dev credentials)

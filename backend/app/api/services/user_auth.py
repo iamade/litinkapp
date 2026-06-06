@@ -232,10 +232,10 @@ class UserAuthService:
         await session.commit()
         await session.refresh(new_user)
 
-        # Grant 100 free-tier credits on account creation (base entitlement, not promo)
+        # Grant 300 free-tier credits on account creation (base entitlement, not promo)
         free_tier_grant = CreditGrant(
             user_id=new_user.id,
-            credits_remaining=100,
+            credits_remaining=300,
             credits_used=0,
             expires_at=datetime.now(timezone.utc) + timedelta(days=365),
             promo_code_id=None,
