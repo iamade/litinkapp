@@ -185,17 +185,9 @@ class BookStructureDetector:
         ]
 
         # Special sections that should be treated as standalone
-        self.SPECIAL_SECTIONS = [
-            r"(?i)^preface[\s\-:]*(.*)$",
-            r"(?i)^introduction[\s\-:]*(.*)$",
-            r"(?i)^foreword[\s\-:]*(.*)$",
-            r"(?i)^prologue[\s\-:]*(.*)$",
-            r"(?i)^epilogue[\s\-:]*(.*)$",
-            r"(?i)^conclusion[\s\-:]*(.*)$",
-            r"(?i)^appendix[\s\-:]*(.*)$",
-        ]
-
         # Special sections that should be treated as standalone or excluded
+        # KAN-367: Added etymology, extracts, epigraph, acknowledgments, afterword, dedication
+        # to prevent front-matter/back-matter from being counted as chapters (off-by-N regression)
         self.SPECIAL_SECTIONS = [
             r"(?i)^preface[\s\-:]*(.*)$",
             r"(?i)^introduction[\s\-:]*(.*)$",
@@ -204,6 +196,12 @@ class BookStructureDetector:
             r"(?i)^epilogue[\s\-:]*(.*)$",
             r"(?i)^conclusion[\s\-:]*(.*)$",
             r"(?i)^appendix[\s\-:]*(.*)$",
+            r"(?i)^etymology[\s\-:]*(.*)$",
+            r"(?i)^extracts?[\s\-:]*(.*)$",
+            r"(?i)^epigraph[\s\-:]*(.*)$",
+            r"(?i)^acknowledgments?[\s\-:]*(.*)$",
+            r"(?i)^afterword[\s\-:]*(.*)$",
+            r"(?i)^dedication[\s\-:]*(.*)$",
             r"(?i)^notes[\s\-:]*(.*)$",
             r"(?i)^suggested\s+reading[\s\-:]*(.*)$",
             r"(?i)^bibliography[\s\-:]*(.*)$",
@@ -918,6 +916,11 @@ class BookStructureDetector:
 
             # Skip TOC entries (e.g. "1. Title  23")
             if self._is_toc_entry(line):
+                continue
+
+            # KAN-367: Skip special sections (preface, etymology, extracts, etc.)
+            # so front-matter/back-matter doesn't get counted as chapters
+            if self._match_special_sections(line):
                 continue
 
             chapter_match = self._match_chapter_patterns(line)
