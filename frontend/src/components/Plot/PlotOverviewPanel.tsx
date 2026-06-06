@@ -451,7 +451,13 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       return;
     }
 
-    const charactersWithoutImages = plotOverview.characters.filter(
+    // KAN-372: Only generate for actual characters, skip objects and locations
+    // Objects/locations should be generated individually from their own section
+    const actualCharacters = plotOverview.characters.filter(
+      (char: Character) => !char.entity_type || char.entity_type === 'character'
+    );
+
+    const charactersWithoutImages = actualCharacters.filter(
       (char: Character) => !char.image_url
     );
 
@@ -784,7 +790,11 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   }
 
   const normalizedGenre = plotOverview.genre?.toLowerCase() || "";
-  const charactersWithoutImages = plotOverview.characters?.filter((char: Character) => !char.image_url).length || 0;
+  // KAN-372: Count only actual characters (not objects/locations) for the "without images" display
+  const actualCharactersForDisplay = plotOverview.characters?.filter(
+    (char: Character) => !char.entity_type || char.entity_type === 'character'
+  ) || [];
+  const charactersWithoutImages = actualCharactersForDisplay.filter((char: Character) => !char.image_url).length;
   const hasCharacters = plotOverview.characters && plotOverview.characters.length > 0;
   const normalizedStoryType = plotOverview.story_type?.toLowerCase().replace(/'/g, "") || "";
 
