@@ -60,4 +60,5 @@ vite.config.*.timestamp-*
 
 # AI tool files
 CLAUDE.md
+CLAUDE.local.md
 frontend/SKILL.md

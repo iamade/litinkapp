@@ -35,14 +35,34 @@ interface SubscriptionTierCardProps {
   compact?: boolean;
 }
 
-// Credit estimates per tier (matches backend TIER_LIMITS)
+// Credit estimates per tier (matches backend configurations & pricing strategy)
 const TIER_CREDITS: Record<string, { label: string; amount: string }> = {
-  free: { label: "Credits included", amount: "100" },
+  free: { label: "Credits included", amount: "300" },
   basic: { label: "Credits/month", amount: "1,500" },
-  pro: { label: "Credits/month", amount: "5,000" },
-  premium: { label: "Credits/month", amount: "15,000" },
-  professional: { label: "Credits/month", amount: "50,000" },
+  pro: { label: "Credits/month", amount: "4,800" },
+  premium: { label: "Credits/month", amount: "13,100" },
+  professional: { label: "Credits/month", amount: "33,100" },
   enterprise: { label: "Credits", amount: "Unlimited" },
+};
+
+const getAnnualPrice = (tierName: string): number => {
+  switch (tierName) {
+    case "basic": return 108;
+    case "pro": return 228;
+    case "premium": return 828;
+    case "professional": return 2268;
+    default: return 0;
+  }
+};
+
+const getDiscountLabel = (tierName: string): string => {
+  switch (tierName) {
+    case "basic": return "Save 50%";
+    case "pro": return "Save 34%";
+    case "premium": return "Save 13%";
+    case "professional": return "Save 5%";
+    default: return "";
+  }
 };
 
 export default function SubscriptionTierCard({
@@ -57,7 +77,7 @@ export default function SubscriptionTierCard({
   const isPopular = tier.tier === "pro";
   const isEnterprise = tier.tier === "enterprise";
 
-  const annualPrice = Math.round(tier.monthly_price * 12 * 0.8);
+  const annualPrice = getAnnualPrice(tier.tier);
   const displayPrice = billingPeriod === "monthly" ? tier.monthly_price : annualPrice;
   const periodLabel = billingPeriod === "monthly" ? "/mo" : "/yr";
 
@@ -246,9 +266,11 @@ export default function SubscriptionTierCard({
                   }`}
                 >
                   Annual
-                  <span className="ml-1 text-[10px] text-green-600 dark:text-green-400 font-bold">
-                    -20%
-                  </span>
+                  {getDiscountLabel(tier.tier) && (
+                    <span className="ml-1 text-[10px] text-green-600 dark:text-green-400 font-bold">
+                      {getDiscountLabel(tier.tier)}
+                    </span>
+                  )}
                 </button>
               </div>
             )}
