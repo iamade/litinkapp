@@ -73,6 +73,11 @@ class TestSpecialSectionsPattern:
         assert not self.processor._match_special_sections("CHAPTER I")
         assert not self.processor._match_special_sections("1. The Looming Crisis")
 
+    def test_special_section_matching_is_stateless(self):
+        """Repeated special headings should still match during nested parser scans."""
+        assert self.processor._match_special_sections("ACKNOWLEDGMENTS")
+        assert self.processor._match_special_sections("ACKNOWLEDGMENTS")
+
     def test_special_sections_completeness(self):
         """Verify all expected special sections are present."""
         expected = [
@@ -119,7 +124,7 @@ I stuffed my shirt...
                 continue  # Skip special sections (KAN-367 fix)
             chapter_match = self.processor._match_chapter_patterns(line)
             if chapter_match:
-                chapters.append(chapter_match.group(0))
+                chapters.append(line)
 
         # Chapter 1 should be first, not Chapter 3
         assert len(chapters) >= 2
@@ -139,8 +144,50 @@ I stuffed my shirt...
             if not self.processor._match_special_sections(line):
                 match = self.processor._match_chapter_patterns(line)
                 if match:
-                    chapters.append(match.group(0))
+                    chapters.append(line)
 
         assert len(chapters) == 3
         assert "CHAPTER 1" in chapters[0]
         assert "CHAPTER 3" in chapters[2]
+
+
+class TestSpecialSectionExtraction:
+    """Special-section books should stay sectioned in preview extraction."""
+
+    def setup_method(self):
+        self.processor = EPUBProcessor()
+
+    @pytest.mark.asyncio
+    async def test_special_only_book_preserves_sections(self):
+        filler = " ".join(["section content"] * 80)
+        content = "\n\n".join(
+            f"{title}\n{filler} for {title}."
+            for title in [
+                "ETYMOLOGY",
+                "EXTRACTS",
+                "EPIGRAPH",
+                "ACKNOWLEDGMENTS",
+                "AFTERWORD",
+                "DEDICATION",
+                "NOTES",
+            ]
+        )
+
+        result = await self.processor.extract_chapters_with_new_flow(
+            content=content,
+            book_type="entertainment",
+            original_filename="special-sections.txt",
+            storage_path="",
+        )
+
+        assert len(result) == 7
+        assert all("chapters" in section for section in result)
+        assert [section["title"] for section in result] == [
+            "ETYMOLOGY",
+            "EXTRACTS",
+            "EPIGRAPH",
+            "ACKNOWLEDGMENTS",
+            "AFTERWORD",
+            "DEDICATION",
+            "NOTES",
+        ]

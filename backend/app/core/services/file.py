@@ -378,9 +378,6 @@ class BookStructureDetector:
         if not sections:
             flat_chapters = self._extract_flat_chapters(content)
 
-        # Determine structure type
-        has_sections = len(sections) > 0
-
         # Add deduplication logic
         seen_titles = set()
         unique_sections = []
@@ -401,6 +398,7 @@ class BookStructureDetector:
 
         # Update the sections variable to use filtered_sections
         sections = filtered_sections
+        has_sections = len(sections) > 0
 
         return {
             "has_sections": has_sections,
@@ -757,23 +755,9 @@ class BookStructureDetector:
 
     def _match_special_sections(self, line: str) -> Optional[Dict]:
         """Match line against special section patterns"""
-        # Add tracking for already processed special sections
-        if not hasattr(self, "_processed_specials"):
-            self._processed_specials = set()
-
         for pattern in self.SPECIAL_SECTIONS:
             match = re.match(pattern, line)
             if match:
-                # Create unique key for this special section
-                section_key = f"{pattern}_{match.group(0)}"
-
-                # Skip if we've already processed this special section
-                if section_key in self._processed_specials:
-                    return None  # Skip duplicates
-
-                # Mark as processed
-                self._processed_specials.add(section_key)
-
                 return {
                     "number": "0",  # Special sections don't have numbers
                     "title": (
@@ -5779,7 +5763,8 @@ Chapters:
         pre_filter_count = len(extracted_chapters)
         extracted_chapters = [
             ch for ch in extracted_chapters
-            if len(ch.get("content", "").strip()) >= 500
+            if ch.get("section_type") == "special"
+            or len(ch.get("content", "").strip()) >= 500
         ]
         if len(extracted_chapters) < pre_filter_count:
             print(
@@ -5794,8 +5779,12 @@ Chapters:
         for ch in extracted_chapters:
             title = ch.get("title", "")
             word_count = len(ch.get("content", "").split())
-            should_drop, drop_reason = self._is_front_back_matter(
-                title, "", word_count  # no href available in fallback path
+            should_drop, drop_reason = (
+                (False, "")
+                if ch.get("section_type") == "special"
+                else self._is_front_back_matter(
+                    title, "", word_count  # no href available in fallback path
+                )
             )
             if should_drop:
                 print(
@@ -5829,6 +5818,12 @@ Chapters:
             )
 
         print(f"[CHAPTER EXTRACTION] FINAL: {len(final_chapters)} chapters extracted")
+        if any(ch.get("section_title") for ch in final_chapters):
+            sectioned_chapters = self._organize_chapters_into_sections(final_chapters)
+            print(
+                f"[CHAPTER EXTRACTION] Returning {len(sectioned_chapters)} preserved sections"
+            )
+            return sectioned_chapters
         return final_chapters
 
     def _chunk_content_by_words(
