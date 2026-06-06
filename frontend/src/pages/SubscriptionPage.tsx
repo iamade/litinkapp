@@ -332,7 +332,7 @@ export default function SubscriptionPage() {
                 Is there a free plan?
               </h3>
               <p className="text-gray-600 dark:text-gray-400">
-                Yes! Our Free plan includes 100 credits so you can try AI video generation, image creation, and voiceover before upgrading. No credit card required.
+                Yes! Our Free plan includes 300 credits so you can try AI video generation, image creation, and voiceover before upgrading. No credit card required.
               </p>
             </div>
             <div>
@@ -340,7 +340,7 @@ export default function SubscriptionPage() {
                 How does billing work?
               </h3>
               <p className="text-gray-600 dark:text-gray-400">
-                Plans are billed monthly or annually (save 20% with annual). You can cancel anytime and retain access until the end of your billing period.
+                Plans are billed monthly or annually (save up to 50% with annual). You can cancel anytime and retain access until the end of your billing period.
               </p>
             </div>
           </div>
