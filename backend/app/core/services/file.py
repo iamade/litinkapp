@@ -1971,9 +1971,12 @@ class FileService:
             return True, f"unconditional href match: '{href_basename}'"
 
         # Conditional drops (skip if < 3000 words)
+        # KAN-367: Added etymology, extracts, epigraph, dedication, afterword
         CONDITIONAL_TITLE = {
             "acknowledgments", "acknowledgements", "about the author",
             "index", "bibliography", "glossary", "endnotes", "footnotes",
+            "etymology", "extracts", "extract", "epigraph",
+            "dedication", "afterword",
         }
         for pattern in CONDITIONAL_TITLE:
             if title_lower == pattern or title_lower.startswith(pattern):
