@@ -585,7 +585,17 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 )
                 character_results = []
 
-            # Generate sound effects
+            # KAN-373: Compute per-scene dialogue duration before generating SFX/BG.
+            # Capped SFX/BG durations prevent overcharging when dialogue is very short.
+            scene_dialogue_durations: Dict[int, float] = {}
+            for r in narrator_results:
+                scene_num = r.get("scene_number", r.get("scene", 1))
+                scene_dialogue_durations[scene_num] = scene_dialogue_durations.get(scene_num, 0.0) + float(r.get("duration", 0))
+            for r in character_results:
+                scene_num = r.get("scene_number", r.get("scene", 1))
+                scene_dialogue_durations[scene_num] = scene_dialogue_durations.get(scene_num, 0.0) + float(r.get("duration", 0))
+
+            # Generate sound effects (KAN-373: pass dialogue durations for proportional SFX)
             sound_effect_results = await generate_sound_effects_audio(
                 audio_service,
                 video_generation_id,
@@ -593,9 +603,10 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 chapter_id,
                 user_id,
                 script_id=script_id_str,
+                scene_dialogue_durations=scene_dialogue_durations,
             )
 
-            # Generate background music
+            # Generate background music (KAN-373: pass dialogue durations for proportional music)
             background_music_results = await generate_background_music(
                 audio_service,
                 video_generation_id,
@@ -603,6 +614,7 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 chapter_id,
                 user_id,
                 script_id=script_id_str,
+                scene_dialogue_durations=scene_dialogue_durations,
             )
 
             # Compile results
@@ -1612,25 +1624,46 @@ async def generate_sound_effects_audio(
     chapter_id: Optional[str],
     user_id: Optional[str],
     script_id: Optional[str] = None,
+    scene_dialogue_durations: Optional[Dict[int, float]] = None,
 ) -> List[Dict[str, Any]]:
-    """Generate sound effects audio"""
+    """Generate sound effects audio.
+
+    KAN-373: Accepts scene_dialogue_durations to cap SFX duration proportionally
+    to the scene's actual dialogue length, preventing credit overcharging.
+    """
 
     print(f"[SOUND EFFECTS] Generating sound effects...")
     effects_results = []
+    _total_sfx_credits = 0  # KAN-373: track credits for SFX
 
     for i, effect in enumerate(sound_effects):
         try:
             scene_id = effect.get("scene", 1)
             shot_type = effect.get("shot_type", "key_scene")
             shot_index = effect.get("shot_index", 0)
+
+            # KAN-373: Cap SFX duration to dialogue * 1.5 (min 3s, max 30s)
+            requested_dur = effect.get("duration", 10.0)
+            actual_dur = min(30.0, max(3.0, requested_dur))
+            if scene_dialogue_durations:
+                dialogue_dur = scene_dialogue_durations.get(scene_id, 0.0)
+                if dialogue_dur > 0:
+                    cap = max(3.0, dialogue_dur * 1.5)
+                    actual_dur = min(actual_dur, cap)
+                    if actual_dur < requested_dur:
+                        print(
+                            f"[SOUND EFFECTS] KAN-373: Capped SFX from {requested_dur}s to {actual_dur}s "
+                            f"(dialogue {dialogue_dur}s * 1.5)"
+                        )
+
             print(
-                f"[SOUND EFFECTS] Processing effect {i+1}/{len(sound_effects)}: {effect['description']} (scene {scene_id}, {shot_type})"
+                f"[SOUND EFFECTS] Processing effect {i+1}/{len(sound_effects)}: {effect['description']} (scene {scene_id}, {shot_type}, dur={actual_dur}s)"
             )
 
-            # Use V7 sound effects generation
+            # Use V7 sound effects generation (KAN-373: uses capped actual_dur)
             result = await audio_service.generate_sound_effect(
                 description=effect["description"],
-                duration=min(30.0, max(3.0, effect.get("duration", 10.0))),
+                duration=actual_dur,
                 model_id="eleven_sound_effect",
             )
 
@@ -1717,6 +1750,24 @@ async def generate_sound_effects_audio(
                         }
                     )
 
+                    # KAN-373: Track credits for actual SFX duration
+                    if user_id and duration and float(duration) > 0:
+                        try:
+                            from app.credits.service import CreditService, credits_for_audio_duration
+                            from app.credits.constants import OperationType
+                            credit_cost = credits_for_audio_duration(float(duration))
+                            _total_sfx_credits += credit_cost
+                            credit_svc = CreditService(session)
+                            await credit_svc.deduct_for_operation(
+                                user_id=uuid.UUID(user_id),
+                                amount=credit_cost,
+                                operation_type=OperationType.AUDIO_GEN,
+                                ref_id=f"audio_sfx:{audio_record.id}",
+                            )
+                            await session.commit()
+                        except Exception as credit_err:
+                            logger.warning("[CREDITS] SFX credit deduction failed: %s", credit_err)
+
                 print(f"[SOUND EFFECTS] ✅ Effect {i+1} completed: {audio_url}")
             else:
                 raise Exception(
@@ -1759,26 +1810,47 @@ async def generate_background_music(
     chapter_id: Optional[str],
     user_id: Optional[str],
     script_id: Optional[str] = None,
+    scene_dialogue_durations: Optional[Dict[int, float]] = None,
 ) -> List[Dict[str, Any]]:
-    """Generate background music"""
+    """Generate background music.
+
+    KAN-373: Accepts scene_dialogue_durations to cap music duration proportionally
+    to the scene's actual dialogue length, preventing credit overcharging.
+    """
 
     logger.info(f"[BACKGROUND MUSIC] Generating background music...")
     music_results = []
+    _total_bg_credits = 0  # KAN-373: track credits for BG music
 
     for i, music_cue in enumerate(music_cues):
         try:
             scene_id = music_cue["scene"]
             shot_type = music_cue.get("shot_type", "key_scene")
             shot_index = music_cue.get("shot_index", 0)
+
+            # KAN-373: Cap music duration to dialogue * 1.2 (min 5s to avoid zero-duration)
+            requested_dur = music_cue.get("duration", 15.0)
+            actual_dur = requested_dur
+            if scene_dialogue_durations:
+                dialogue_dur = scene_dialogue_durations.get(scene_id, 0.0)
+                if dialogue_dur > 0:
+                    cap = max(5.0, dialogue_dur * 1.2)
+                    actual_dur = min(requested_dur, cap)
+                    if actual_dur < requested_dur:
+                        print(
+                            f"[BACKGROUND MUSIC] KAN-373: Capped music from {requested_dur}s to {actual_dur}s "
+                            f"(dialogue {dialogue_dur}s * 1.2)"
+                        )
+
             logger.info(
-                f"[BACKGROUND MUSIC] Processing scene {scene_id} ({shot_type}): {music_cue['description']}"
+                f"[BACKGROUND MUSIC] Processing scene {scene_id} ({shot_type}): {music_cue['description']} dur={actual_dur}s"
             )
 
-            # Use V7 music generation
+            # Use V7 music generation (KAN-373: uses capped actual_dur instead of hard-coded 15.0)
             result = await audio_service.generate_background_music(
                 description=music_cue["description"],
                 model_id="music_v1",
-                duration=15.0,  # Reduced from 30s to avoid overshadowing dialogue
+                duration=actual_dur,
             )
 
             if result.get("status") == "success":
@@ -1858,6 +1930,24 @@ async def generate_background_music(
                             "duration": duration,
                         }
                     )
+
+                    # KAN-373: Track credits for actual BG music duration
+                    if user_id and duration and float(duration) > 0:
+                        try:
+                            from app.credits.service import CreditService, credits_for_audio_duration
+                            from app.credits.constants import OperationType
+                            credit_cost = credits_for_audio_duration(float(duration))
+                            _total_bg_credits += credit_cost
+                            credit_svc = CreditService(session)
+                            await credit_svc.deduct_for_operation(
+                                user_id=uuid.UUID(user_id),
+                                amount=credit_cost,
+                                operation_type=OperationType.AUDIO_GEN,
+                                ref_id=f"audio_bg:{audio_record.id}",
+                            )
+                            await session.commit()
+                        except Exception as credit_err:
+                            logger.warning("[CREDITS] BG music credit deduction failed: %s", credit_err)
 
                 print(f"[BACKGROUND MUSIC] ✅ Generated for Scene {music_cue['scene']}")
             else:
