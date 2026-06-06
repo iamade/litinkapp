@@ -154,6 +154,7 @@ class EmbeddingsService:
             return True
 
         except Exception as e:
+            await self.session.rollback()
             logger.error(f"Error creating chapter embeddings: {e}")
             return False
 
@@ -228,6 +229,7 @@ class EmbeddingsService:
             return True
 
         except Exception as e:
+            await self.session.rollback()
             logger.error(f"Error creating book embeddings: {e}")
             return False
 
@@ -285,6 +287,11 @@ class EmbeddingsService:
 
         except Exception as e:
             logger.error(f"Error searching similar chapters: {e}")
+            try:
+                await self.session.rollback()
+                logger.info("[RAG_DB_DEBUG] rolled back session after non-fatal similar-chapter search failure")
+            except Exception as rollback_err:
+                logger.warning(f"[RAG_DB_DEBUG] rollback after similar-chapter search failure failed: {rollback_err}")
             return []
 
     async def search_similar_books(
