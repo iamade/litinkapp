@@ -2530,7 +2530,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           setSelectedSceneForGeneration(prev => prev ? { ...prev, referenceSceneImageUrl: imageUrl } : prev);
         }}
         isSuggestedShot={selectedSceneForGeneration?.isSuggestedShot}
-        userTier={userTier}
+        userTier={normalizedTier}
         estimatedCreditCost={perImageCost}
         insufficientCreditsMessage={singleImageInsufficientReason || undefined}
         onInsufficientCredits={() => openInsufficientCreditsModal(perImageCost, 'Image Generation')}
