@@ -79,6 +79,48 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   const [isCreatingCharacter, setIsCreatingCharacter] = useState(false);
   const [isGeneratingWithAI, setIsGeneratingWithAI] = useState(false);
   const [isAutoAddingCharacters, setIsAutoAddingCharacters] = useState(false);
+  
+  // KAN-370: Persist AI-generated character details to survive refresh
+  const [draftRestored, setDraftRestored] = useState(false);
+  const DRAFT_KEY = `litinkai_char_draft_${bookId}`;
+  const DRAFT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+  // Restore draft when modal opens
+  useEffect(() => {
+    if (showCreateModal) {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        try {
+          const draft = JSON.parse(raw);
+          if (draft.timestamp && Date.now() - draft.timestamp < DRAFT_TTL_MS) {
+            setNewCharacter(prev => ({
+              ...prev,
+              name: draft.characterName || prev.name,
+              physical_description: draft.characterDetails?.physical_description || prev.physical_description,
+              personality: draft.characterDetails?.personality || prev.personality,
+              character_arc: draft.characterDetails?.character_arc || prev.character_arc,
+              want: draft.characterDetails?.want || prev.want,
+              need: draft.characterDetails?.need || prev.need,
+              lie: draft.characterDetails?.lie || prev.lie,
+              ghost: draft.characterDetails?.ghost || prev.ghost,
+            }));
+            setDraftRestored(true);
+          } else {
+            localStorage.removeItem(DRAFT_KEY);
+          }
+        } catch {
+          localStorage.removeItem(DRAFT_KEY);
+        }
+      }
+    }
+  }, [showCreateModal, bookId]);
+
+  // Clear draft helper
+  const clearDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    setDraftRestored(false);
+  };
+
   const [newCharacter, setNewCharacter] = useState({
     name: '',
     role: '',
@@ -668,6 +710,13 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
           ghost: response.character_details.ghost || prev.ghost,
         }));
 
+        // KAN-370: Persist AI-generated character details to localStorage
+        localStorage.setItem(DRAFT_KEY, JSON.stringify({
+          characterName: newCharacter.name,
+          characterDetails: response.character_details,
+          timestamp: Date.now(),
+        }));
+
         toast.success("Character details generated successfully! Review and edit as needed.", {
           id: loadingToast,
           duration: 4000
@@ -680,6 +729,8 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       toast.error(error?.message || "Failed to generate character details with AI", {
         id: loadingToast
       });
+      // KAN-370: Credit refund notification — backend credit_transaction releases reservations on exception
+      toast.success("Credits refunded — you haven't been charged.", { duration: 5000 });
     } finally {
       setIsGeneratingWithAI(false);
     }
@@ -717,6 +768,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       }
 
       toast.success(`Character "${newCharacter.name}" created successfully`);
+      clearDraft();
       setShowCreateModal(false);
       setNewCharacter({
         name: '',
@@ -1425,13 +1477,28 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">Create New Character</h3>
               <button
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => { clearDraft(); setShowCreateModal(false); }}
                 disabled={isCreatingCharacter}
                 className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl font-bold"
               >
                 ×
               </button>
             </div>
+
+            {/* KAN-370: Draft restoration banner */}
+            {draftRestored && (
+              <div className="flex items-center justify-between px-3 py-2 mb-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-md">
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  Restored unsaved AI-generated details
+                </p>
+                <button
+                  onClick={clearDraft}
+                  className="text-xs text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 underline"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
 
             <div className="space-y-4">
               <div>
@@ -1654,7 +1721,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
 
             <div className="flex gap-3 mt-6">
               <button
-                onClick={() => setShowCreateModal(false)}
+                onClick={() => { clearDraft(); setShowCreateModal(false); }}
                 disabled={isCreatingCharacter || isGeneratingWithAI}
                 className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl font-medium hover:bg-gray-300 dark:hover:bg-gray-600 transition-all disabled:opacity-50"
               >
