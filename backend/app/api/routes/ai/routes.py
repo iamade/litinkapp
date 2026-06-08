@@ -42,7 +42,7 @@ from app.books.models import (
     Chapter,
     LearningContent,
 )
-from app.plots.models import PlotOverview
+from app.plots.models import PlotOverview, Character
 from app.auth.models import User
 import time
 
@@ -784,13 +784,9 @@ async def generate_tutorial_video(
 
 @router.post("/generate-entertainment-video", response_model=VideoGenerationResponse)
 async def generate_entertainment_video(
-    request: VideoGenerationRequest,
-    # request: dict = Body(...),
-    session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_active_user),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.VIDEO_GEN, VIDEO_PER_SECOND * 30)),  # Reserve for ~30s video upfront; actual deducted on completion
 ):
-    """Generate entertainment video using already saved script"""
+    """DEPRECATED: Explorer mode removed (KAN-315)"""
+    raise HTTPException(status_code=404, detail="Explorer mode is no longer available")
     try:
         script_id = request.script_id
         chapter_id = request.chapter_id
@@ -2405,7 +2401,8 @@ async def enhance_entertainment_content(
     current_user: User = Depends(get_current_active_user),
     reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
 ):
-    """Enhance entertainment content using PlotDrive service"""
+    """Enhance entertainment content using PlotDrive service — DEPRECATED: Explorer mode removed (KAN-315)"""
+    raise HTTPException(status_code=404, detail="Explorer mode is no longer available")
     credit_service = CreditService(session)
     try:
         # Verify chapter access
@@ -2770,6 +2767,14 @@ async def generate_audio_for_script(
             from app.tasks.audio_tasks import generate_all_audio_for_video
 
             task = generate_all_audio_for_video.delay(video_gen_id)
+
+            # KAN-267: Persist Celery task id durably for execution tracking
+            task_meta = dict(video_gen.task_meta or {})
+            task_meta["audio_task_id"] = task.id
+            video_gen.audio_task_id = task.id
+            video_gen.task_meta = task_meta
+            session.add(video_gen)
+            await session.commit()
 
             return {
                 "status": "processing",
@@ -3498,14 +3503,36 @@ async def generate_script_and_scenes(
                                     real_chapter.id
                                 )  # Switch to real Chapter ID
                                 is_artifact = False  # Treat as normal chapter for RAG
-                                book_id = project.book_id  # Use real book ID
-                                # Update content from real chapter to be safe
-                                chapter_content = real_chapter.content
-                                chapter_title = real_chapter.title
-                else:
-                    raise HTTPException(status_code=404, detail="Project not found")
             else:
-                raise HTTPException(status_code=404, detail="Chapter not found")
+                # Final fallback: Check if chapter_id is actually a Project.id (Prompt-only project)
+                stmt = select(Project).where(Project.id == chapter_id)
+                result = await session.exec(stmt)
+                project_data = result.first()
+
+                if project_data:
+                    if project_data.user_id != current_user.id:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Not authorized to access this project",
+                        )
+                    
+                    is_artifact = True
+                    chapter_id = project_data.id
+                    book_id = project_data.id
+                    chapter_title = project_data.title or "Project Prompt"
+                    chapter_content = project_data.input_prompt
+                    
+                    if not chapter_content:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Project prompt is empty; cannot generate script"
+                        )
+                else:
+                    # Both Chapter, Artifact, and Project lookup failed
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Chapter or Project not found with ID {chapter_id}"
+                    )
 
         # Check access permissions (for regular chapters with books)
         if book_data:
@@ -4091,6 +4118,33 @@ async def generate_script_and_scenes_with_gpt(
         script = script_result.get("script", "")
         characters = script_result.get("characters", [])
         character_details = script_result.get("character_details", "")
+
+        # KAN-265: Resolve character IDs against Plot Overview characters
+        # Bug 2 fix: Always produce character_ids matching characters length so frontend
+        # can distinguish "no PlotOverview" from "no match". Empty string = not yet linked.
+        character_ids = []
+        if characters:
+            plot_stmt = select(PlotOverview).where(
+                PlotOverview.book_id == book_data.id
+            )
+            plot_result = await session.exec(plot_stmt)
+            plot_overview = plot_result.first()
+            if plot_overview:
+                char_stmt = select(Character).where(
+                    Character.plot_overview_id == plot_overview.id
+                )
+                char_result = await session.exec(char_stmt)
+                plot_characters = char_result.all()
+                plot_char_map = {
+                    pc.name.lower().strip(): str(pc.id) for pc in plot_characters
+                }
+                for name in characters:
+                    match_id = plot_char_map.get(name.lower().strip(), "")
+                    character_ids.append(match_id)
+            else:
+                # No PlotOverview exists yet — return empty slots so frontend can auto-link later
+                character_ids = ["" for _ in characters]
+
         # Parse script for scene descriptions
         video_service = VideoService()
         parsed = video_service._parse_script_for_services(script, script_style)
@@ -4135,6 +4189,7 @@ async def generate_script_and_scenes_with_gpt(
             "script": script,
             "scene_descriptions": scene_descriptions,
             "characters": characters,
+            "character_ids": character_ids,  # KAN-265: linked entity IDs
             "character_details": character_details,
             "metadata": script_data["metadata"],
             "status": "ready",
@@ -4208,6 +4263,7 @@ async def generate_script_and_scenes_with_gpt(
             "script": script,
             "scene_descriptions": scene_descriptions,
             "characters": characters,
+            "character_ids": character_ids,
             "character_details": character_details,
             "script_style": script_style,
             "metadata": script_data["metadata"],
@@ -5006,6 +5062,20 @@ async def trigger_task_for_step(
             task = generate_all_audio_for_video.delay(video_gen_id)
             task_id = task.id
             print(f"🎵 Started audio generation task: {task_id}")
+
+            # KAN-267: Persist audio_task_id for durable execution tracking
+            stmt = select(VideoGeneration).where(
+                VideoGeneration.id == uuid.UUID(video_gen_id)
+            )
+            result = await session.exec(stmt)
+            video_gen = result.first()
+            if video_gen:
+                task_meta = dict(video_gen.task_meta or {})
+                task_meta["audio_task_id"] = task_id
+                video_gen.audio_task_id = task_id
+                video_gen.task_meta = task_meta
+                session.add(video_gen)
+                await session.commit()
 
         elif step == PipelineStep.IMAGE_GENERATION:
             from app.tasks.image_tasks import generate_all_images_for_video
