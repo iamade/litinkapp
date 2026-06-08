@@ -61,3 +61,14 @@ vite.config.*.timestamp-*
 # AI tool files
 CLAUDE.md
 frontend/SKILL.md
+
+# Docker compose files - should not be on GitHub (contain dev credentials)
+docker-compose*.yml
+
+# Render/infra blueprints - should not be on GitHub (secret var references)
+backend/render.yaml
+
+# Docker compose overlays with hardcoded credentials - should not be on GitHub
+backend/local.yml
+backend/production.yml
+backend/local-tunnel.yml
