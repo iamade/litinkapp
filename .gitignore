@@ -68,7 +68,6 @@ docker-compose*.yml
 # Render/infra blueprints - should not be on GitHub (secret var references)
 backend/render.yaml
 
-# Docker compose overlays with hardcoded credentials - should not be on GitHub
-backend/local.yml
-backend/production.yml
+# Docker compose overlays deleted from GitHub — local.yml + production.yml restored (KAN-314 infra fix)
+# backend/local-tunnel.yml stays ignored (deprecated tunnel override)
 backend/local-tunnel.yml
