@@ -68,6 +68,9 @@ vps-staging: start-vps-staging
 vps-down:
 	cd backend && docker compose -p vps-dev -f local.yml down
 
+vps-staging-down:
+	cd backend && docker compose -p vps-staging -f local.yml down
+
 vps-logs:
 	cd backend && docker compose -p vps-dev -f local.yml logs -f
 
