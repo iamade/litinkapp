@@ -117,6 +117,12 @@ class PlotService:
                     book_context, generated_plot, model_tier
                 )
 
+                # 4.5. Generate objects and locations from book content
+                generated_objects_locations = await self._generate_objects_and_locations(
+                    book_context, generated_plot, model_tier
+                )
+                generated_characters.extend(generated_objects_locations)
+
             # 5. Store results
             result = await self._store_plot_overview(
                 generated_plot,
@@ -230,6 +236,15 @@ class PlotService:
                     plot_data=generated_plot,
                     model_tier=model_tier,
                 )
+
+                # Also generate objects and locations from book content
+                logger.info("[PlotService] Extracting objects and locations from book content")
+                generated_objects_locations = await self._generate_objects_and_locations(
+                    book_context=book_context,
+                    plot_data=generated_plot,
+                    model_tier=model_tier,
+                )
+                generated_characters.extend(generated_objects_locations)
             else:
                 # No book - generate characters from prompt (AI invents)
                 logger.info("[PlotService] Generating characters from prompt")
@@ -238,6 +253,30 @@ class PlotService:
                     plot_data=generated_plot,
                     model_tier=model_tier,
                 )
+                logger.info(
+                    "[PlotService] Generating objects and locations from prompt context"
+                )
+                prompt_book_context = {
+                    "book": {
+                        "title": (input_prompt or generated_plot.get("title") or "Untitled")[:100],
+                        "genre": genre or generated_plot.get("genre") or "entertainment",
+                    },
+                    "chapters_summary": "\n".join(
+                        part
+                        for part in [
+                            input_prompt or "",
+                            generated_plot.get("logline", ""),
+                            generated_plot.get("creative_directive", ""),
+                        ]
+                        if part
+                    )[:2000],
+                }
+                generated_objects_locations = await self._generate_objects_and_locations(
+                    book_context=prompt_book_context,
+                    plot_data=generated_plot,
+                    model_tier=model_tier,
+                )
+                generated_characters.extend(generated_objects_locations)
 
             # 6. Store results (using project_id as a pseudo book_id for now)
             result = await self._store_plot_overview(
@@ -1158,6 +1197,91 @@ Focus on characters who actually appear in the story, not locations or objects.
             logger.warning(f"[PlotService] Character generation failed: {error_msg}")
             return []
 
+    async def _generate_objects_and_locations(
+        self,
+        book_context: Dict[str, Any],
+        plot_data: Dict[str, Any],
+        model_tier: ModelTier,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate objects and locations from book content.
+        KAN-372: Previously the prompt explicitly told the AI to ignore locations and objects.
+        This method generates them separately with proper entity_type tagging.
+        """
+        book = book_context.get("book", {})
+        chapters_summary = book_context.get("chapters_summary", "")[:2000]
+        creative_direction = plot_data.get("creative_directive") or plot_data.get(
+            "logline", ""
+        )
+
+        prompt = f"""
+Based on the book content and creative direction, identify key objects and locations that are important to the story.
+
+BOOK: {book.get('title', '')}
+CREATIVE DIRECTION: {creative_direction}
+MEDIUM: {plot_data.get('medium', 'Not specified')}
+VIBE/STYLE: {plot_data.get('vibe_style', 'Not specified')}
+
+CONTENT SUMMARY:
+{chapters_summary}
+
+TASK:
+Identify 3-8 important OBJECTS and LOCATIONS from the story. These are NOT characters - they are physical items and places that play a significant role in the narrative.
+
+LOCATIONS = places where key scenes happen (e.g., "The Castle", "The Forest", "The School")
+OBJECTS = significant items in the story (e.g., "The Magic Sword", "The Ancient Book", "The Spaceship")
+
+For each, provide:
+- name: Clear, memorable name for the object or location
+- entity_type: "location" or "object"
+- physical_description: Visual description designed for the {plot_data.get('medium', 'medium')} with {plot_data.get('vibe_style', 'vibe/style')}
+- role: Why this item/place matters to the story (e.g., "setting", "mcguffin", "tool", "symbol")
+
+RESPONSE FORMAT:
+Return ONLY a valid JSON array of objects:
+[
+    {{
+        "name": "Item or Location Name",
+        "entity_type": "location",
+        "role": "setting",
+        "physical_description": "Visual description suited to the medium and style",
+        "personality": "Atmosphere or significance of this item/place"
+    }}
+]
+
+Focus ONLY on locations and significant physical objects. Do NOT include characters.
+"""
+
+        response = await self.openrouter.analyze_content(
+            content=prompt, user_tier=model_tier, analysis_type="character_generation"
+        )
+
+        if response.get("status") == "success":
+            result = response.get("result", "")
+            if result:
+                items = self._parse_character_generation_response(result)
+                # Tag all items with their entity_type and fill defaults
+                for item in items:
+                    item.setdefault("entity_type", "object")
+                    item.setdefault("character_arc", "")
+                    item.setdefault("want", "")
+                    item.setdefault("need", "")
+                    item.setdefault("lie", "")
+                    item.setdefault("ghost", "")
+                logger.info(
+                    f"[PlotService] Generated {len(items)} objects/locations"
+                )
+                return items
+            else:
+                logger.warning(
+                    "[PlotService] Objects/locations generation returned empty result"
+                )
+                return []
+        else:
+            error_msg = response.get("error", "Unknown error")
+            logger.warning(f"[PlotService] Objects/locations generation failed: {error_msg}")
+            return []
+
     def _parse_character_generation_response(
         self, ai_response: str
     ) -> List[Dict[str, Any]]:
@@ -1516,6 +1640,7 @@ Return a JSON object with:
                     user_id=user_id,
                     name=char_data.get("name", "Unknown"),
                     role=char_data.get("role", "supporting"),
+                    entity_type=char_data.get("entity_type", "character"),
                     character_arc=char_data.get("character_arc", ""),
                     physical_description=char_data.get("physical_description", ""),
                     personality=char_data.get("personality", ""),
@@ -1538,6 +1663,7 @@ Return a JSON object with:
                     book_id=str(book_id),
                     user_id=str(user_id),
                     name=character.name,
+                    entity_type=character.entity_type or "character",
                     role=character.role,
                     character_arc=character.character_arc,
                     physical_description=character.physical_description,

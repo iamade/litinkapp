@@ -270,14 +270,11 @@ export const useImageGeneration = (
         shot_index: shotIndex // Store shotIndex for temp image
       };
 
-      // Use composite key if possible to match loadImages logic
-      const sceneKey = selectedScriptId 
-        ? `${selectedScriptId}_${sceneNumber}` 
-        : sceneNumber;
+      const sceneKey = Number(sceneNumber);
 
       setSceneImages((prev) => ({ 
         ...prev, 
-        [Number(sceneKey)]: [tempImage, ...(prev[Number(sceneKey)] || [])]
+        [sceneKey]: [tempImage, ...(prev[sceneKey] || [])]
       }));
 
       const customPrompt = [
@@ -308,7 +305,7 @@ export const useImageGeneration = (
         startPollingSceneImage(sceneNumber, result.record_id);
       } else {
         setSceneImages((prev) => {
-            const currentImages = prev[Number(sceneKey)] || [];
+            const currentImages = prev[sceneKey] || [];
             // Replace the temp generated image with the real one, or just prepend if not found?
             // Actually simpler to just map:
             const updatedImages = currentImages.map((img: SceneImage) => 
@@ -552,7 +549,7 @@ export const useImageGeneration = (
 
     const pollInterval = setInterval(async () => {
       try {
-        const status = await userService.getSceneImageStatus(chapterId, sceneNumber);
+        const status = await userService.getImageGenerationStatus(chapterId, recordId);
 
         const resolvedStatusUrl = resolvePreviewAssetUrl(status as any);
         if (status.status === 'completed' && resolvedStatusUrl) {
@@ -677,7 +674,7 @@ export const useImageGeneration = (
       setGeneratingScenes((prev) => {
         if (prev.has(sceneNumber)) {
           setSceneImages((prevImages: Record<string | number, SceneImage[]>) => {
-              const sceneKey = selectedScriptId ? `${selectedScriptId}_${sceneNumber}` : sceneNumber;
+              const sceneKey = Number(sceneNumber);
               const currentImages = prevImages[sceneKey] || [];
                const updatedImages = currentImages.map(img => 
                 (img.id === recordId || img.generationStatus === 'generating') 

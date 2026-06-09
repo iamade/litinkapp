@@ -22,11 +22,13 @@ if ! pgrep -f "ssh .*5432:127.0.0.1:5432.*72.62.97.111" > /dev/null; then
   exit 1
 fi
 [ -f "$REPO_ENV_FILE" ] || { echo "❌ Missing env file: $REPO_ENV_FILE"; exit 1; }
-cp "$REPO_ENV_FILE" backend/.envs/.env.local
-chmod 600 backend/.envs/.env.local
+# db-url-routing-fix 2026-05-21 (Change 2): no longer copy the tunnel env over
+# backend/.envs/.env.local. local.yml reads ${ENV_FILE} directly and config.py
+# now honours ENV_FILE too, so .env.local stays a stable "Mac native" file and
+# is never clobbered by a tunnel run.
 
 echo "  ✅ SSH tunnel detected"
-echo "  ✅ Activated env: $REPO_ENV_FILE -> backend/.envs/.env.local"
+echo "  ✅ Activated env: $REPO_ENV_FILE (via ENV_FILE=$ENV_FILE)"
 cd backend
 # --no-deps is intentional: VPS tunnel mode must not start local postgres/redis/minio/mailpit/rabbitmq/traefik.
 ENV_FILE="$ENV_FILE" docker compose -f local.yml up --build -d --no-deps api

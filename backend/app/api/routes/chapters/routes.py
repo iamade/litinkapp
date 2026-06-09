@@ -1184,7 +1184,7 @@ async def get_image_generation_status(
             status = "completed"
         elif status == "failed":
             status = "failed"
-        elif status in ["processing", "generating"]:
+        elif status in ["processing", "generating", "in_progress"]:
             status = "processing"
         else:
             status = "pending"
@@ -1270,7 +1270,7 @@ async def get_scene_image_status(
             status = "completed"
         elif status == "failed":
             status = "failed"
-        elif status in ["processing", "generating"]:
+        elif status in ["processing", "generating", "in_progress"]:
             status = "processing"
         else:
             status = "pending"

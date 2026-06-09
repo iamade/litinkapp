@@ -5,11 +5,28 @@ from pathlib import Path
 import json
 from pydantic import field_validator
 
-# Calculate absolute path to .env.local from this file's location
-# config.py is in backend/app/core/, .env.local is in backend/.envs/
-_CONFIG_DIR = Path(__file__).parent  # backend/app/core/
-_BACKEND_ROOT = _CONFIG_DIR.parent.parent  # backend/
-_ENV_FILE = _BACKEND_ROOT / ".envs" / ".env.local"
+# --- Environment file resolution -------------------------------------------
+# Resolution order (db-url-routing-fix 2026-05-21):
+#   1. ENV_FILE  - explicit path, relative to backend/ (matches local.yml + VPS scripts)
+#   2. APP_ENV   - short name, maps to backend/.envs/.env.<APP_ENV>
+#   3. default   - backend/.envs/.env.local  (Mac native local dev)
+# This makes the native Python config path honour the same ENV_FILE variable
+# that local.yml and the VPS tunnel scripts already use, so Docker and native
+# always agree on which env file drives DATABASE_URL.
+_CONFIG_DIR = Path(__file__).parent           # backend/app/core/
+_BACKEND_ROOT = _CONFIG_DIR.parent.parent     # backend/
+_ENVS_DIR = _BACKEND_ROOT / ".envs"
+
+_env_file_override = os.getenv("ENV_FILE")
+_app_env = os.getenv("APP_ENV")
+
+if _env_file_override:
+    _candidate = Path(_env_file_override)
+    _ENV_FILE = _candidate if _candidate.is_absolute() else (_BACKEND_ROOT / _env_file_override.lstrip("./"))
+elif _app_env:
+    _ENV_FILE = _ENVS_DIR / f".env.{_app_env}"
+else:
+    _ENV_FILE = _ENVS_DIR / ".env.local"
 
 
 class Settings(BaseSettings):

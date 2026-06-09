@@ -20,7 +20,7 @@ echo "============================================"
 echo ""
 
 # Check if we're in the right directory
-if [ ! -f "docker-compose.yml" ]; then
+if [ ! -f "backend/local.yml" ]; then
     echo "❌ Run this from the litinkapp directory: cd ~/My_app_projects/People-Protocol-apps/litinkapp"
     exit 1
 fi
