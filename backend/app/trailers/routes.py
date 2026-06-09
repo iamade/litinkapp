@@ -9,7 +9,7 @@ Endpoints:
 """
 
 from typing import List
-from uuid import UUID
+from uuid import UUID, uuid4
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,6 +29,11 @@ from app.trailers.schemas import (
 from app.trailers.service import TrailerSceneService, TrailerGenerationService
 from app.auth.models import User
 
+# KAN-314: credit gating for trailer operations
+from app.credits.dependencies import require_credits
+from app.credits.constants import TRAILER_ANALYZE, OperationType
+from app.credits.service import CreditService
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/trailers", tags=["trailers"])
@@ -39,6 +44,7 @@ async def analyze_project_for_trailer(
     request: TrailerAnalyzeRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    reservation_id: UUID = Depends(require_credits(OperationType.TRAILER_ANALYZE, TRAILER_ANALYZE)),
 ):
     """
     KAN-149: Analyze a project for trailer scene selection.
@@ -95,6 +101,11 @@ async def analyze_project_for_trailer(
                 selection_reason=scene.selection_reason,
             ))
         
+        # KAN-314: confirm credit deduction on success
+        credit_service = CreditService(session)
+        await credit_service.confirm_deduction(reservation_id, TRAILER_ANALYZE)
+        await session.commit()
+
         return TrailerAnalyzeResponse(
             trailer_generation_id=trailer_gen.id,
             project_id=trailer_gen.project_id,
@@ -108,6 +119,10 @@ async def analyze_project_for_trailer(
         
     except Exception as e:
         logger.error(f"[KAN-149] Analysis failed: {e}")
+        # KAN-314: release credit reservation on failure
+        credit_service = CreditService(session)
+        await credit_service.release_reservation(reservation_id)
+        await session.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Trailer analysis failed: {str(e)}",
@@ -216,6 +231,7 @@ async def regenerate_scene_selection(
     request: TrailerAnalyzeRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    reservation_id: UUID = Depends(require_credits(OperationType.TRAILER_ANALYZE, TRAILER_ANALYZE)),
 ):
     """
     Re-run scene selection with different criteria.
@@ -223,54 +239,72 @@ async def regenerate_scene_selection(
     Keep same trailer_id but re-analyze with new parameters.
     """
     service = TrailerSceneService(session)
-    
-    # Get existing trailer generation
-    existing = await service.session.execute(
-        """
-        SELECT * FROM trailer_generations WHERE id = :id
-        """,
-        {"id": str(trailer_id)},
-    )
-    trailer_gen = existing.scalar_one_or_none()
-    
-    if not trailer_gen:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Trailer generation {trailer_id} not found",
+    credit_service = CreditService(session)
+
+    try:
+        # Get existing trailer generation
+        existing = await service.session.execute(
+            """
+            SELECT * FROM trailer_generations WHERE id = :id
+            """,
+            {"id": str(trailer_id)},
         )
-    
-    # Delete existing scenes
-    await service.session.execute(
-        """
-        DELETE FROM trailer_scenes WHERE trailer_generation_id = :tg_id
-        """,
-        {"tg_id": str(trailer_id)},
-    )
-    await service.session.commit()
-    
-    # Re-analyze with new criteria
-    new_trailer = await service.analyze_project_for_trailer(
-        project_id=trailer_gen.project_id,
-        user_id=current_user.id,
-        config=request,
-    )
-    
-    # Update existing record instead of creating new one
-    trailer_gen.status = new_trailer.status
-    trailer_gen.tone = request.tone
-    trailer_gen.style = request.style
-    trailer_gen.target_duration_seconds = request.target_duration_seconds
-    trailer_gen.actual_duration_seconds = new_trailer.actual_duration_seconds
-    trailer_gen.scenes_selected_count = new_trailer.scenes_selected_count
-    
-    await service.session.commit()
-    
-    return {
-        "trailer_id": str(trailer_id),
-        "status": "regenerated",
-        "new_scene_count": trailer_gen.scenes_selected_count,
-        "estimated_duration": trailer_gen.actual_duration_seconds,
-    }
+        trailer_gen = existing.scalar_one_or_none()
+
+        if not trailer_gen:
+            await credit_service.release_reservation(reservation_id)
+            await session.commit()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Trailer generation {trailer_id} not found",
+            )
+
+        # Delete existing scenes
+        await service.session.execute(
+            """
+            DELETE FROM trailer_scenes WHERE trailer_generation_id = :tg_id
+            """,
+            {"tg_id": str(trailer_id)},
+        )
+        await service.session.commit()
+
+        # Re-analyze with new criteria
+        new_trailer = await service.analyze_project_for_trailer(
+            project_id=trailer_gen.project_id,
+            user_id=current_user.id,
+            config=request,
+        )
+
+        # Update existing record instead of creating new one
+        trailer_gen.status = new_trailer.status
+        trailer_gen.tone = request.tone
+        trailer_gen.style = request.style
+        trailer_gen.target_duration_seconds = request.target_duration_seconds
+        trailer_gen.actual_duration_seconds = new_trailer.actual_duration_seconds
+        trailer_gen.scenes_selected_count = new_trailer.scenes_selected_count
+
+        await service.session.commit()
+
+        # KAN-314: confirm credit deduction on successful regeneration
+        await credit_service.confirm_deduction(reservation_id, TRAILER_ANALYZE)
+        await session.commit()
+
+        return {
+            "trailer_id": str(trailer_id),
+            "status": "regenerated",
+            "new_scene_count": trailer_gen.scenes_selected_count,
+            "estimated_duration": trailer_gen.actual_duration_seconds,
+        }
+
+    except Exception as e:
+        logger.error(f"[KAN-150] Regeneration failed: {e}")
+        # KAN-314: release credit reservation on failure
+        await credit_service.release_reservation(reservation_id)
+        await session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Trailer regeneration failed: {str(e)}",
+        )
 
 
 def _get_status_description(status: TrailerStatus) -> str:
