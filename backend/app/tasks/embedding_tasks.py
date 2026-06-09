@@ -74,6 +74,7 @@ async def _async_generate_project_embeddings(task, project_id: str, book_id: str
                     )
                 except Exception as e:
                     failed += 1
+                    await session.rollback()
                     logger.error(
                         "[EMBED TASK] Failed to embed chapter %d/%d (id=%s): %s",
                         idx + 1,
@@ -114,6 +115,7 @@ async def _async_generate_project_embeddings(task, project_id: str, book_id: str
             }
 
         except Exception as e:
+            await session.rollback()
             logger.error(
                 "[EMBED TASK] Unexpected error for project=%s: %s", project_id, e
             )

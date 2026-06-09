@@ -371,20 +371,8 @@ async def get_books(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Get books uploaded by the current user, optionally filtered by book_type"""
-    # Only show Explorer mode books (hide Creator mode books)
-    stmt = select(BookModel).where(
-        BookModel.user_id == current_user.id,
-        BookModel.source_mode == "explorer",  # Filter: only Explorer books
-    )
-
-    # Filter by book_type if provided
-    if book_type:
-        stmt = stmt.where(BookModel.book_type == book_type)
-
-    result = await session.exec(stmt)
-    books = result.all()
-    return [book.model_dump(mode="json") for book in books]
+    """Explorer book listing — DEPRECATED: Explorer mode removed (KAN-315)"""
+    raise HTTPException(status_code=404, detail="Explorer mode is no longer available")
 
 
 @router.get("/my-books", response_model=List[BookSchema], tags=["Authors"])
@@ -392,18 +380,8 @@ async def get_my_books(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_author),
 ):
-    """Get books by current user"""
-    try:
-        # Only show Explorer mode books (hide Creator mode books)
-        stmt = select(BookModel).where(
-            BookModel.user_id == current_user.id,
-            BookModel.source_mode == "explorer",  # Filter: only Explorer books
-        )
-        result = await session.exec(stmt)
-        books = result.all()
-        return [book.model_dump(mode="json") for book in books]
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    """Author explorer book listing — DEPRECATED: Explorer mode removed (KAN-315)"""
+    raise HTTPException(status_code=404, detail="Explorer mode is no longer available")
 
 
 @router.get("/{book_id}", response_model=BookWithChapters)

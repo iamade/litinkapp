@@ -232,6 +232,46 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const { balance: creditBalance } = useCreditBalance({ enabled: true });
   const scriptCreditCost = estimateScriptCredits();
   const hasScriptCredits = creditBalance >= scriptCreditCost;
+
+  // KAN-331/KAN-265 Bug 1 fix: Remove Set guard — it prevented re-linking when
+  // plotOverview loaded after first render or when character data became available later.
+  // Now always attempts linking for any unlinked slot; already-linked slots are skipped inline.
+
+  // KAN-331: Auto-link script characters to Plot Overview characters on exact name match
+  useEffect(() => {
+    if (!selectedScript || !plotOverview?.characters?.length) return;
+
+    const characters = selectedScript.characters || [];
+    if (characters.length === 0) return;
+
+    const plotChars = plotOverview.characters;
+    const currentCharIds = [...(selectedScript.character_ids || [])];
+
+    // Pad character_ids to match characters length
+    while (currentCharIds.length < characters.length) {
+      currentCharIds.push('');
+    }
+
+    let updated = false;
+
+    characters.forEach((name, idx) => {
+      // Skip already-linked characters (non-empty id = already resolved)
+      if (currentCharIds[idx]) return;
+
+      // Case-insensitive exact match against plot overview characters
+      const match = plotChars.find(
+        (pc) => pc.name.toLowerCase().trim() === name.toLowerCase().trim()
+      );
+      if (match) {
+        currentCharIds[idx] = match.id;
+        updated = true;
+      }
+    });
+
+    if (updated) {
+      onUpdateScript(selectedScript.id, { character_ids: currentCharIds });
+    }
+  }, [selectedScript?.id, selectedScript?.characters, selectedScript?.character_ids, plotOverview?.characters, onUpdateScript]);
   
   const addManualEntity = async (script: ChapterScript) => {
     const entityName = newCharacterName.trim();
