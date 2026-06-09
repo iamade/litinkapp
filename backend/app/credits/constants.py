@@ -24,6 +24,8 @@ SCENE_IMAGE_GEN = 1     # per scene image
 CHARACTER_IMAGE_GEN = 1 # per character image
 ENHANCED_SPEECH = 1     # per enhanced speech
 CHAPTER_GEN = 2         # per chapter generation
+TRAILER_ANALYZE = 5     # per trailer scene analysis (LLM-heavy)
+TRAILER_VIDEO_PER_SECOND = 8  # per second of trailer video (KAN-150)
 
 # Monthly credit grants per subscription tier (KAN-314 — synced with Stripe pricing metadata)
 # NOTE: Tier names follow Stripe product IDs; SubscriptionTier enum mapping:
@@ -72,3 +74,5 @@ class OperationType(str, Enum):
     CHARACTER_IMAGE_GEN = "character_image_gen"
     ENHANCED_SPEECH = "enhanced_speech"
     CHAPTER_GEN = "chapter_gen"
+    TRAILER_ANALYZE = "trailer_analyze"
+    TRAILER_VIDEO_GEN = "trailer_video_gen"
