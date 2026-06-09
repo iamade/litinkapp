@@ -827,7 +827,12 @@ export default function BookUpload() {
           const sectionsData = uploadResponse.preview_chapters;
           
           // ✅ FIX: Better structure detection using the backend's data
-          const isHierarchical = uploadResponse.total_preview_chapters > sectionsData.length;
+          const isHierarchical = Boolean(
+            uploadResponse.has_sections ||
+            uploadResponse.structure_data?.has_sections ||
+            (Array.isArray(sectionsData) && sectionsData.some((item: any) => Array.isArray(item?.chapters))) ||
+            uploadResponse.total_preview_chapters > sectionsData.length
+          );
           
         
           if (isHierarchical) {

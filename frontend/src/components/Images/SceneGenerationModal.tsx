@@ -265,16 +265,26 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
               )}
             </div>
             <div className="flex items-center gap-2">
-              <label className="px-3 py-2 text-xs border border-gray-600 rounded text-gray-300 hover:bg-gray-800 cursor-pointer">
+              <label 
+                className={`px-3 py-2 text-xs border rounded cursor-pointer transition-colors ${
+                  userTier === 'free' 
+                    ? 'border-gray-700 bg-gray-800/50 text-gray-500 cursor-not-allowed' 
+                    : 'border-gray-600 text-gray-300 hover:bg-gray-800'
+                }`}
+                title={userTier === 'free' ? 'Upgrade to Standard+ to upload custom reference images' : 'Upload Custom Reference'}
+              >
                 Upload Custom Reference
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={handleCustomReferenceUpload}
+                  onChange={userTier === 'free' ? undefined : handleCustomReferenceUpload}
                   className="hidden"
+                  disabled={userTier === 'free'}
                 />
               </label>
-              <span className="text-xs text-gray-500">Supports local upload for custom continuity source</span>
+              <span className={`text-xs ${userTier === 'free' ? 'text-gray-600' : 'text-gray-500'}`}>
+                {userTier === 'free' ? 'Standard+ only' : 'Supports local upload for custom continuity source'}
+              </span>
             </div>
             {parentSceneImageUrl && (
               <div className="relative rounded-lg overflow-hidden border border-gray-700 w-48 h-28">

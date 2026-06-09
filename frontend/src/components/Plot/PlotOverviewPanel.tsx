@@ -451,7 +451,13 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       return;
     }
 
-    const charactersWithoutImages = plotOverview.characters.filter(
+    // KAN-372: Only generate for actual characters, skip objects and locations
+    // Objects/locations should be generated individually from their own section
+    const actualCharacters = plotOverview.characters.filter(
+      (char: Character) => !char.entity_type || char.entity_type === 'character'
+    );
+
+    const charactersWithoutImages = actualCharacters.filter(
       (char: Character) => !char.image_url
     );
 
@@ -784,7 +790,11 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   }
 
   const normalizedGenre = plotOverview.genre?.toLowerCase() || "";
-  const charactersWithoutImages = plotOverview.characters?.filter((char: Character) => !char.image_url).length || 0;
+  // KAN-372: Count only actual characters (not objects/locations) for the "without images" display
+  const actualCharactersForDisplay = plotOverview.characters?.filter(
+    (char: Character) => !char.entity_type || char.entity_type === 'character'
+  ) || [];
+  const charactersWithoutImages = actualCharactersForDisplay.filter((char: Character) => !char.image_url).length;
   const hasCharacters = plotOverview.characters && plotOverview.characters.length > 0;
   const normalizedStoryType = plotOverview.story_type?.toLowerCase().replace(/'/g, "") || "";
 
@@ -1291,7 +1301,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       </div>
 
        {/* Objects & Locations Section */}
-       {(filteredCharacters.some((c: Character) => c.entity_type === 'object') || mode === 'creator') && (
+       {(filteredCharacters.some((c: Character) => c.entity_type === 'object' || c.entity_type === 'location') || mode === 'creator') && (
         <div className="space-y-4 pt-8 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
@@ -1398,7 +1408,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                 />
               ))}
               
-              {filteredCharacters.filter((c: Character) => c.entity_type === 'object').length === 0 && (
+              {filteredCharacters.filter((c: Character) => c.entity_type === 'object' || c.entity_type === 'location').length === 0 && (
                 <div className="col-span-full py-8 text-center text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
                   <p>No objects or locations added yet.</p>
                 </div>

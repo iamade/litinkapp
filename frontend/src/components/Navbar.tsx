@@ -101,19 +101,19 @@ export default function Navbar() {
                 {/* Mode Switcher - Show for all users based on their roles */}
                 {(canAccessCreatorMode || canAccessExplorerMode) && (
                   <div className="flex items-center bg-gray-100 dark:bg-white/5 rounded-lg p-1 border border-gray-200 dark:border-white/10">
-                    {/* KAN-315: Explorer mode gated behind feature flag */}
-                    {(canAccessExplorerMode && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false') && (
+                      {/* KAN-393: KAN-393: Hide Explorer button in creator mode — explore-mode gated behind current mode AND feature flag */}
+                      {(canAccessExplorerMode && mode === 'explorer' && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false') && (
                       <button
                         onClick={async () => {
                           await switchMode('explorer');
                           navigate('/dashboard');
                         }}
                         className={`flex items-center space-x-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                          location.pathname.startsWith('/dashboard') || 
+                              location.pathname.startsWith('/dashboard') || 
                           location.pathname.startsWith('/explore') || 
                           location.pathname.startsWith('/learn') || 
                           location.pathname.startsWith('/book') ||
-                          (mode === 'explorer' && !location.pathname.startsWith('/creator') && !location.pathname.startsWith('/author') && !location.pathname.startsWith('/upload') && !location.pathname.startsWith('/project') && !location.pathname.startsWith('/profile') && !location.pathname.startsWith('/subscription'))
+                          (!location.pathname.startsWith('/creator') && !location.pathname.startsWith('/author') && !location.pathname.startsWith('/upload') && !location.pathname.startsWith('/project') && !location.pathname.startsWith('/profile') && !location.pathname.startsWith('/subscription'))
                             ? 'bg-purple-600 text-white shadow-sm'
                             : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
                         }`}
@@ -285,8 +285,8 @@ export default function Navbar() {
                     <div className="px-2 py-3 border-t border-b border-gray-200 dark:border-gray-700">
                       <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 px-2">Switch Mode</p>
                       <div className="flex space-x-2">
-                        {/* KAN-315: Explorer mode gated behind feature flag */}
-                        {(canAccessExplorerMode && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false') && (
+                        {/* KAN-315/KAN-393: Explorer mode gated behind feature flag + current mode */}
+                        {(canAccessExplorerMode && mode === 'explorer' && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false') && (
                           <button
                             onClick={async () => {
                               await switchMode('explorer');
