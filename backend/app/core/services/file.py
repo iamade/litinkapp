@@ -1951,9 +1951,11 @@ class FileService:
         title_lower = title.lower().strip() if title else ""
         href_lower = item_href.lower() if item_href else ""
 
-        # Unconditional drops — by title
+        # Unconditional drops — by title (pure structural artifacts, 1-2 lines max)
+        # KAN-367 B1: Moved imprint/copyright/colophon to conditional — they contain
+        # publishable legal metadata needed by KAN-395
         UNCONDITIONAL_TITLE = {
-            "imprint", "copyright", "colophon", "uncopyright",
+            "uncopyright",
             "halftitlepage", "titlepage", "half title", "title page",
             "also available", "copyright page",
         }
@@ -1962,9 +1964,10 @@ class FileService:
                 return True, f"unconditional title match: '{pattern}'"
 
         # Unconditional drops — by href filename
+        # KAN-367 B1: Moved imprint/colophon/copyright to conditional — keep for KAN-395
         UNCONDITIONAL_HREF = {
-            "imprint.xhtml", "colophon.xhtml", "uncopyright.xhtml",
-            "titlepage.xhtml", "halftitlepage.xhtml", "copyright.xhtml",
+            "uncopyright.xhtml",
+            "titlepage.xhtml", "halftitlepage.xhtml",
         }
         href_basename = href_lower.rsplit("/", 1)[-1]
         if href_basename in UNCONDITIONAL_HREF:
@@ -1972,11 +1975,13 @@ class FileService:
 
         # Conditional drops (skip if < 3000 words)
         # KAN-367: Added etymology, extracts, epigraph, dedication, afterword
+        # KAN-367 B1: Moved imprint/copyright/colophon from unconditional → conditional
         CONDITIONAL_TITLE = {
             "acknowledgments", "acknowledgements", "about the author",
             "index", "bibliography", "glossary", "endnotes", "footnotes",
             "etymology", "extracts", "extract", "epigraph",
             "dedication", "afterword",
+            "imprint", "copyright", "colophon",
         }
         for pattern in CONDITIONAL_TITLE:
             if title_lower == pattern or title_lower.startswith(pattern):
@@ -2007,6 +2012,13 @@ class FileService:
             return True
         # Common numbered patterns: just a number followed by a title
         if re.match(r"^\d{1,3}[\.\s]\s*\S", t):
+            return True
+        # KAN-367 B2: Standalone Roman numerals (e.g. "I. Moby Dick", "II. The Carpet-Bag")
+        # Multi-char Roman (II, III, IV...) followed by dot/space — unambiguous
+        if re.match(r"^[IVXLCDM]{2,}[\.\s]", t):
+            return True
+        # Single "I" — only when followed by dot+space or space+capital (vs pronoun "I")
+        if re.match(r"^I\.[\s]\S", t) or re.match(r"^I\s+[A-Z]", t):
             return True
         return False
 
@@ -2202,8 +2214,8 @@ class FileService:
                 print(f"[EPUB] Item {idx} (id: {item_id}): type = {item_type}")
 
                 if item_type == ebooklib.ITEM_DOCUMENT:
-                    # Parse HTML content
-                    soup = BeautifulSoup(item.get_content(), "html.parser")
+                    # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
+                    soup = BeautifulSoup(item.get_content(), "lxml")
 
                     # Remove script and style elements
                     for script in soup(["script", "style"]):
@@ -2373,8 +2385,8 @@ class FileService:
 
             for item in book.get_items():
                 if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                    # Parse HTML content
-                    soup = BeautifulSoup(item.get_content(), "html.parser")
+                    # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
+                    soup = BeautifulSoup(item.get_content(), "lxml")
 
                     # Remove script and style elements
                     for script in soup(["script", "style"]):

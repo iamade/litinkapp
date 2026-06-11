@@ -340,6 +340,11 @@ Based on the above scripts and the user's creative direction, provide your cinem
         """
         files_text = ""
         epub_context_lines = []
+
+        # KAN-367 B4: Detect multi-file upload and inject decision prompt
+        file_count = len(file_contents)
+        epub_file_count = sum(1 for f in file_contents if f.get("is_epub"))
+
         for i, file in enumerate(file_contents, 1):
             files_text += f"\n\n--- FILE {i}: {file['filename']} ---\n"
             files_text += self._truncate_for_summary(str(file.get("content", "")), max_chars=3000)
@@ -352,6 +357,24 @@ Based on the above scripts and the user's creative direction, provide your cinem
                     f"- EPUB '{metadata_title}' has {chapter_count} detected chapters. "
                     "Offer adaptation options: 'Create as cinematic universe' and 'Single story adaptation'."
                 )
+
+        # B4: Multi-file detection — inject explicit user-facing question
+        if file_count >= 2:
+            multi_file_notice = (
+                f"\n\n⚠️ IMPORTANT: The user uploaded {file_count} files. "
+                f"({epub_file_count} EPUB{'s' if epub_file_count != 1 else ''}, {file_count - epub_file_count} other). "
+                "In your ai_message, you MUST ask the user one question: "
+                "'Do you want these treated as a single book, or as separate parts of a cinematic universe?' "
+                "Do not assume either answer — let the user decide."
+            )
+        elif file_count == 1 and epub_file_count == 1:
+            multi_file_notice = (
+                "\n\nNOTE: The user uploaded a single EPUB. In your ai_message, ask: "
+                "'Would you like to adapt this as a single book, or as a cinematic universe with multiple films/parts?' "
+                "Do not assume — let the user decide."
+            )
+        else:
+            multi_file_notice = ""
 
         system_prompt = f"""{CONSULTATION_GUARDRAILS}
 
@@ -418,6 +441,7 @@ Be conversational and helpful. Detect what the user needs based on their content
         user_message = f"""Analyze the following uploaded content and provide guidance:
 
 USER'S PROMPT: {user_prompt or "(No prompt provided - ask what they want to do)"}
+{multi_file_notice}
 
 EPUB CONTEXT:
 {epub_context}
