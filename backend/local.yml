@@ -38,6 +38,8 @@ services:
       - redis
       - mailpit
       - rabbitmq
+      - minio
+      - postgres
     command: /start.sh
     networks:
       - litinkai_local_nw
