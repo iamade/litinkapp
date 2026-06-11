@@ -63,6 +63,10 @@ CLAUDE.md
 CLAUDE.local.md
 frontend/SKILL.md
 
+# Scratch/summary files — do not commit to repo
+kan-*-summary.md
+kan-*-fix-summary.md
+
 # Docker compose files - should not be on GitHub (contain dev credentials)
 docker-compose*.yml
 
