@@ -34,7 +34,7 @@ export default function AuthPage() {
   const [searchParams] = useSearchParams();
   const [isLogin, setIsLogin] = useState(searchParams.get('mode') !== 'register');
   const [showPasswordReset, setShowPasswordReset] = useState(false);
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(searchParams.get('email') ?? "");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);

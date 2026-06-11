@@ -1,7 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { toast } from "react-hot-toast";
 import { apiClient } from "../lib/api";
 import { CheckCircle, XCircle, Loader2 } from "lucide-react";
+
+const INVALID_TOKEN_MESSAGE =
+  "This activation link is invalid or expired. Please register again or request a new link.";
+
+// Build the login URL, pre-filling the email when the backend gave us one
+// (AuthPage reads ?email= to populate the login form — same pattern used after registration).
+const loginUrl = (email?: string) =>
+  email ? `/auth?mode=login&email=${encodeURIComponent(email)}` : "/auth?mode=login";
 
 export default function ActivationPage() {
   const { token } = useParams<{ token: string }>();
@@ -13,28 +22,48 @@ export default function ActivationPage() {
     const activateAccount = async () => {
       if (!token) {
         setStatus("error");
-        setMessage("Invalid activation link");
+        setMessage(INVALID_TOKEN_MESSAGE);
         return;
       }
 
       try {
+        // 200 OK — token validated and account activated now.
         const response = await apiClient.get<{ message: string; email: string }>(
           `/auth/activate/${token}`
         );
         setStatus("success");
-        setMessage(response.message || "Account activated successfully!");
-        
-        // Redirect to login after 3 seconds
+        setMessage("Your account is activated. Please login.");
+        toast.success("Your account is activated. Please login.");
+
         setTimeout(() => {
-          navigate("/auth?mode=login");
-        }, 3000);
+          navigate(loginUrl(response.email));
+        }, 1500);
       } catch (error) {
-        setStatus("error");
-        if (error instanceof Error) {
-          setMessage(error.message.replace(/^\[\d+\]\s*/, ""));
-        } else {
-          setMessage("Failed to activate account. The link may be invalid or expired.");
+        // apiClient throws Error("[<status>] <message>"); parse both so we can
+        // tell "already activated" (user is fine) apart from a truly bad token.
+        const raw = error instanceof Error ? error.message : "";
+        const statusCode = Number(raw.match(/^\[(\d+)\]/)?.[1] ?? 0);
+        const detail = raw.replace(/^\[\d+\]\s*/, "").trim();
+
+        const alreadyActivated =
+          statusCode === 409 || /already activated/i.test(detail);
+
+        if (alreadyActivated) {
+          // 409 Conflict, or 400 with "already activated" — account is already
+          // active, so this is informational, not an error.
+          setStatus("success");
+          setMessage("Account already activated. Please login.");
+          toast("Account already activated. Please login.", { icon: "ℹ️" });
+
+          setTimeout(() => {
+            navigate(loginUrl());
+          }, 1500);
+          return;
         }
+
+        // 400 (invalid) / 410 (expired) / 404 — keep the red error UI.
+        setStatus("error");
+        setMessage(INVALID_TOKEN_MESSAGE);
       }
     };
 
