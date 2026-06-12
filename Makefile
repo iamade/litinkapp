@@ -1,4 +1,4 @@
-.PHONY: help tunnel-dev tunnel-staging start-vps-dev start-vps-staging start-dev start-staging vps-dev vps-staging vps-down vps-logs vps-ps dev staging frontend logs logs-api logs-worker ps ps-backend stop-backend down docker-down down-backend restart-dev restart-staging recreate-backend migrate current-migration history
+.PHONY: help tunnel-dev tunnel-staging start-vps-dev start-vps-staging start-dev start-staging vps-dev vps-staging vps-staging-up vps-staging-down vps-staging-logs vps-staging-ps vps-staging-migrate vps-down vps-logs vps-ps dev staging frontend logs logs-api logs-worker ps ps-backend stop-backend down docker-down down-backend restart-dev restart-staging recreate-backend migrate current-migration history
 
 help:
 	@echo "LitInkAI local/VPS tunnel commands"
@@ -65,11 +65,30 @@ vps-dev: start-vps-dev
 
 vps-staging: start-vps-staging
 
+# =============================================================================
+# VPS-Staging Traefik Tunnel (compose-based, Mac dev → VPS staging API)
+# Uses backend/vps-staging.yml with isolated vps_staging_nw network.
+# =============================================================================
+vps-staging-up:
+	cd backend && docker compose -p vps-staging -f vps-staging.yml up -d
+
+vps-staging-down:
+	cd backend && docker compose -p vps-staging -f vps-staging.yml down
+
+vps-staging-logs:
+	cd backend && docker compose -p vps-staging -f vps-staging.yml logs -f
+
+vps-staging-ps:
+	cd backend && docker compose -p vps-staging -f vps-staging.yml ps
+
+vps-staging-migrate:
+	cd backend && docker compose -p vps-staging -f vps-staging.yml exec api alembic upgrade head
+
 vps-down:
 	cd backend && docker compose -p vps-dev -f local.yml down
 
 vps-staging-down:
-	cd backend && docker compose -p vps-staging -f local.yml down
+	cd backend && docker compose -p vps-staging -f vps-staging.yml down
 
 vps-logs:
 	cd backend && docker compose -p vps-dev -f local.yml logs -f

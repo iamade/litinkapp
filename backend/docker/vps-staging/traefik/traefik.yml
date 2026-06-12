@@ -1,0 +1,54 @@
+# =============================================================================
+# Traefik config for VPS-staging tunnel (Mac dev → VPS staging API)
+# Network: vps_staging_nw (isolated from litinkai_local_nw)
+# =============================================================================
+
+api:
+  dashboard: true
+  insecure: true
+
+log:
+  level: DEBUG
+  format: json
+
+accessLog:
+  format: json
+  filePath: /var/log/traefik/access.log
+
+middlewares:
+  retry:
+    retry:
+      attempts: 3
+      initialInterval: "500ms"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    watch: true
+    exposedByDefault: false
+    network: vps_staging_nw
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: selfsigned
+
+certificatesResolvers:
+  selfsigned:
+    acme:
+      email: admin@litinkai.com
+      storage: /etc/traefik/certs/acme.json
+      caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"
+      httpChallenge:
+        entryPoint: web
