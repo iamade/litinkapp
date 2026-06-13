@@ -592,21 +592,7 @@ async def create_chapter(
                 title=chapter_data.title,
                 content=chapter_data.content,
                 chapter_number=chapter_data.chapter_number,
-                # ai_generated_content is not in Chapter model?
-                # Let's check Chapter model in app/books/models.py
-                # It has: title, content, chapter_number, summary, duration, section_id
-                # It DOES NOT have ai_generated_content.
-                # Maybe it should be stored in summary or content?
-                # Or maybe the model needs update.
-                # The original code: chapter_insert["ai_generated_content"] = ai_content
-                # If the Supabase table has it, I should add it to the model.
-                # But for now I will skip it or put it in summary if appropriate, but summary is string.
-                # ai_content is likely a dict or string.
-                # I will assume for now we drop it or it's not critical, OR I should add it to the model.
-                # Given I can't easily change the model right now without another migration,
-                # and I want to proceed, I will omit it for now but log a TODO.
-                # Wait, if I omit it, the feature might break.
-                # Let's assume ai_content goes into summary if it's a summary.
+                content_type=getattr(chapter_data, 'content_type', 'chapter'),
                 # But generate_chapter_ai_elements likely returns more than just summary.
                 # I'll check if I can add it to the model later.
                 # For now, I'll proceed without it to unblock.

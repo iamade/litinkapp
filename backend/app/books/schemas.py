@@ -34,6 +34,7 @@ class ChapterInput(BaseModel):
     chapter_number: Optional[int] = None
     summary: Optional[str] = ""
     order_index: Optional[int] = None
+    content_type: Optional[str] = "chapter"  # "chapter", "front_matter", "back_matter", "metadata"
 
     # Section-related fields for hierarchical books
     section_title: Optional[str] = None
@@ -128,7 +129,9 @@ class ChapterBase(BaseModel):
 class Chapter(ChapterBase):
     id: str
     book_id: str
-    chapter_number: int
+    chapter_number: Optional[int] = None
+    content_type: Optional[str] = "chapter"
+    order_index: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -190,7 +193,8 @@ class BookWithSections(Book):
 
 
 class ChapterCreate(ChapterBase):
-    chapter_number: int
+    chapter_number: Optional[int] = None
+    content_type: Optional[str] = "chapter"
     book_id: str
 
 

@@ -879,10 +879,26 @@ class BookStructureDetector:
         return "\n".join(content_lines).strip()
 
     def _extract_flat_chapters(self, content: str) -> List[Dict]:
-        """Extract chapters when no hierarchical structure is detected"""
+        """Extract chapters when no hierarchical structure is detected.
+
+        KAN-367 v3: Preserves front_matter/back_matter items instead of skipping.
+        Chapter numbering starts at 1 for the first content_type=chapter item.
+        """
         lines = content.split("\n")
-        chapters = []
+        all_items = []  # Collect all items first, classify later
         in_toc_section = False
+
+        FRONT_MATTER_TITLES = {
+            "etymology", "extracts", "extract", "epigraph",
+            "preface", "foreword", "introduction", "dedication",
+            "acknowledgments", "acknowledgements",
+        }
+        BACK_MATTER_TITLES = {
+            "epilogue", "afterword", "appendix",
+            "index", "bibliography", "glossary", "endnotes", "footnotes",
+            "colophon", "imprint", "copyright",
+            "about the author", "suggested reading", "references", "notes",
+        }
 
         for line_num, line in enumerate(lines):
             line = line.strip()
@@ -902,9 +918,42 @@ class BookStructureDetector:
             if self._is_toc_entry(line):
                 continue
 
-            # KAN-367: Skip special sections (preface, etymology, extracts, etc.)
-            # so front-matter/back-matter doesn't get counted as chapters
-            if self._match_special_sections(line):
+            # KAN-367 v3: Check for special sections — PRESERVE, don't skip
+            special_match = self._match_special_sections(line)
+            if special_match and self._has_substantial_following_content(lines, line_num):
+                special_title = line
+                # Classify as front_matter or back_matter based on title
+                title_lower = special_title.lower().strip()
+                content_type = "front_matter"  # default for special sections
+                for pattern in BACK_MATTER_TITLES:
+                    if title_lower == pattern or title_lower.startswith(pattern):
+                        content_type = "back_matter"
+                        break
+                for pattern in FRONT_MATTER_TITLES:
+                    if title_lower == pattern or title_lower.startswith(pattern):
+                        content_type = "front_matter"
+                        break
+
+                chapter_info = {
+                    "title": special_title,
+                    "title_line_num": line_num,
+                    "line_num": line_num,
+                    "number": None,
+                    "raw_title": special_title,
+                }
+                extracted_content = self._extract_chapter_content(
+                    content, chapter_info, lines
+                )
+                if len(extracted_content.strip()) >= 100:
+                    all_items.append({
+                        "title": special_title,
+                        "number": None,
+                        "content": extracted_content,
+                        "content_type": content_type,
+                    })
+                    print(
+                        f"[FLAT CHAPTERS] Preserved as {content_type}: {special_title} ({len(extracted_content)} chars)"
+                    )
                 continue
 
             chapter_match = self._match_chapter_patterns(line)
@@ -922,19 +971,14 @@ class BookStructureDetector:
 
                 # Create a readable title
                 if chapter_subtitle:
-                    # Has a subtitle: "Chapter 19: The Adventure"
                     chapter_title = f"Chapter {chapter_number}: {chapter_subtitle}"
                 else:
-                    # No subtitle, look for title in next few lines
                     title_found = None
                     for i in range(line_num + 1, min(line_num + 5, len(lines))):
                         next_line = lines[i].strip()
-                        # Skip empty lines
                         if not next_line:
                             continue
-                        # Check if this looks like a title (short, not all caps unless reasonable length)
                         if 10 < len(next_line) < 100:
-                            # Not another chapter marker
                             if not self._match_chapter_patterns(next_line):
                                 title_found = next_line
                                 break
@@ -944,7 +988,6 @@ class BookStructureDetector:
                     else:
                         chapter_title = f"Chapter {chapter_number}"
 
-                # FIX: Create chapter_info dict for the new method
                 chapter_info = {
                     "title": chapter_title,
                     "title_line_num": line_num,
@@ -956,23 +999,34 @@ class BookStructureDetector:
                     content, chapter_info, lines
                 )
 
-                # Only add chapters with substantial content (< 500 chars = likely not a real chapter)
                 if len(extracted_content.strip()) >= 500:
-                    chapter_data = {
+                    all_items.append({
                         "title": chapter_title,
                         "number": chapter_number,
                         "content": extracted_content,
-                    }
-                    chapters.append(chapter_data)
+                        "content_type": "chapter",
+                    })
                     print(
-                        f"[FLAT CHAPTERS] Added chapter {chapter_number} ({len(extracted_content)} chars): {chapter_title}"
+                        f"[FLAT CHAPTERS] Added chapter ({len(extracted_content)} chars): {chapter_title}"
                     )
                 else:
                     print(
                         f"[FLAT CHAPTERS] Skipped short content ({len(extracted_content)} chars) for: {chapter_title}"
                     )
 
-        return chapters
+        # KAN-367 v3: Renumber only chapters sequentially from 1
+        chapter_seq = 0
+        for item in all_items:
+            if item.get("content_type") == "chapter":
+                chapter_seq += 1
+                item["number"] = str(chapter_seq)
+
+        print(
+            f"[FLAT CHAPTERS] Total: {len(all_items)} items — "
+            f"{chapter_seq} chapters, "
+            f"{sum(1 for i in all_items if i.get('content_type') != 'chapter')} front/back matter"
+        )
+        return all_items
 
     def _analyze_content_for_structure(
         self, sections: List[Dict], structure_type: str
@@ -2022,22 +2076,74 @@ class FileService:
             return True
         return False
 
+    def _classify_spine_item(self, title: str, item_href: str, word_count: int) -> str:
+        """KAN-367 v3: Classify a spine item as front_matter, back_matter, metadata, or chapter.
+
+        Returns one of: 'chapter', 'front_matter', 'back_matter', 'metadata'.
+        Does NOT drop items — preserves all content with proper classification.
+        """
+        title_lower = title.lower().strip() if title else ""
+        href_lower = item_href.lower() if item_href else ""
+
+        # Metadata — pure structural artifacts (always metadata)
+        METADATA_TITLES = {
+            "uncopyright", "halftitlepage", "titlepage", "half title", "title page",
+            "also available", "copyright page",
+        }
+        for pattern in METADATA_TITLES:
+            if title_lower == pattern or title_lower.startswith(pattern):
+                return "metadata"
+
+        METADATA_HREFS = {
+            "uncopyright.xhtml", "titlepage.xhtml", "halftitlepage.xhtml",
+        }
+        href_basename = href_lower.rsplit("/", 1)[-1] if href_lower else ""
+        if href_basename in METADATA_HREFS:
+            return "metadata"
+
+        # Front/back matter keywords
+        FRONT_MATTER_TITLES = {
+            "etymology", "extracts", "extract", "epigraph",
+            "preface", "foreword", "introduction", "dedication",
+            "acknowledgments", "acknowledgements",
+        }
+        BACK_MATTER_TITLES = {
+            "epilogue", "afterword", "appendix",
+            "index", "bibliography", "glossary", "endnotes", "footnotes",
+            "colophon", "imprint", "copyright",
+            "about the author", "suggested reading", "references", "notes",
+        }
+
+        for pattern in FRONT_MATTER_TITLES:
+            if title_lower == pattern or title_lower.startswith(pattern):
+                return "front_matter"
+
+        for pattern in BACK_MATTER_TITLES:
+            if title_lower == pattern or title_lower.startswith(pattern):
+                return "back_matter"
+
+        # Gutenberg-style boilerplate
+        GENERIC_BOILERPLATE = [
+            r"(?i)project.?gutenberg",
+            r"(?i)\blicense\b",
+            r"(?i)produced by.*(?:project gutenberg|distributed proof)",
+            r"(?i)start of (?:the )?project gutenberg",
+            r"(?i)end of (?:the )?project gutenberg",
+            r"(?i)small print",
+        ]
+        for pat in GENERIC_BOILERPLATE:
+            if re.search(pat, title_lower):
+                return "metadata"
+
+        return "chapter"
+
     def _filter_front_back_matter_structural(
         self, chapters: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """Remove front matter (before first real chapter) and back matter
-        (after last real chapter) using structural detection, not hardcoded
-        title lists.
+        """KAN-367 v3: Classify items as front_matter/back_matter/metadata/chapter.
 
-        Strategy:
-        1. Find the first and last items whose titles match a chapter pattern.
-        2. Everything before first = front matter -> drop.
-        3. Everything after last = back matter -> drop.
-        4. Items between first and last that do NOT match a chapter pattern
-           are kept (they may be interludes, intermezzi, etc.).
-        5. Known generic boilerplate (Gutenberg license, copyright) is also
-           dropped even if it lands between chapters.
-        6. Renumber remaining chapters sequentially.
+        PRESERVES all items with content_type classification instead of dropping.
+        Only items with content_type='chapter' get sequential chapter numbers.
         """
         if not chapters:
             return chapters
@@ -2048,13 +2154,14 @@ class FileService:
             if self._is_chapter_like(ch.get("title", "")):
                 chapter_indices.append(i)
 
-        # If no numbered chapters found, fall back to the original list
-        # (maybe this book uses section titles instead of chapters)
+        # If no numbered chapters found, classify all as chapters (fallback)
         if len(chapter_indices) < 2:
             print(
                 f"[EPUB-STRUCTURAL] Fewer than 2 numbered chapters found ({len(chapter_indices)}), "
-                "skipping structural front/back filter"
+                "classifying all items as chapters"
             )
+            for ch in chapters:
+                ch.setdefault("content_type", "chapter")
             return chapters
 
         first_chapter_idx = chapter_indices[0]
@@ -2069,62 +2176,54 @@ class FileService:
             f"'{chapters[last_chapter_idx].get('title', '')}'"
         )
 
-        # --- Step 2: Generic boilerplate patterns (always drop) ---
-        GENERIC_BOILERPLATE = [
-            r"(?i)project.?gutenberg",
-            r"(?i)\\blicense\\b",
-            r"(?i)\\bcopyright\\b",
-            r"(?i)produced by.*(?:project gutenberg|distributed proof)",
-            r"(?i)start of (?:the )?project gutenberg",
-            r"(?i)end of (?:the )?project gutenberg",
-            r"(?i)small print",
-        ]
-
-        def _is_generic_boilerplate(title: str) -> bool:
-            for pat in GENERIC_BOILERPLATE:
-                if re.search(pat, title):
-                    return True
-            return False
-
-        # --- Step 3: Build filtered list ---
-        filtered = []
-        dropped_front = 0
-        dropped_back = 0
-        dropped_boiler = 0
+        # --- Step 2: Classify all items (PRESERVE, don't drop) ---
+        chapter_count = 0
+        front_count = 0
+        back_count = 0
+        meta_count = 0
 
         for i, ch in enumerate(chapters):
             title = ch.get("title", "")
 
-            # Drop generic boilerplate regardless of position
-            if _is_generic_boilerplate(title):
-                dropped_boiler += 1
-                print(f"[EPUB-STRUCTURAL] Dropping boilerplate: '{title[:60]}'")
+            # Use the classifier for known front/back/metadata titles
+            classified_type = self._classify_spine_item(title, "", len(ch.get("content", "").split()))
+
+            if classified_type != "chapter":
+                ch["content_type"] = classified_type
+                ch["number"] = None
+                if classified_type == "front_matter":
+                    front_count += 1
+                elif classified_type == "back_matter":
+                    back_count += 1
+                elif classified_type == "metadata":
+                    meta_count += 1
+                print(f"[EPUB-STRUCTURAL] Classified '{title[:60]}' as {classified_type}")
                 continue
 
-            # Drop everything before first numbered chapter (front matter)
+            # Position-based classification for items not caught by title classifier
             if i < first_chapter_idx:
-                dropped_front += 1
-                print(f"[EPUB-STRUCTURAL] Dropping front matter: '{title[:60]}'")
-                continue
-
-            # Drop everything after last numbered chapter (back matter)
-            if i > last_chapter_idx:
-                dropped_back += 1
-                print(f"[EPUB-STRUCTURAL] Dropping back matter: '{title[:60]}'")
-                continue
-
-            filtered.append(ch)
-
-        # --- Step 4: Renumber ---
-        for i, ch in enumerate(filtered, 1):
-            ch["number"] = str(i)
+                ch["content_type"] = "front_matter"
+                ch["number"] = None
+                front_count += 1
+                print(f"[EPUB-STRUCTURAL] Classified '{title[:60]}' as front_matter (positional)")
+            elif i > last_chapter_idx:
+                ch["content_type"] = "back_matter"
+                ch["number"] = None
+                back_count += 1
+                print(f"[EPUB-STRUCTURAL] Classified '{title[:60]}' as back_matter (positional)")
+            else:
+                # Between first and last chapter — it's a chapter
+                ch["content_type"] = "chapter"
+                chapter_count += 1
+                ch["number"] = str(chapter_count)
 
         print(
-            f"[EPUB-STRUCTURAL] Filtered: {len(chapters)} -> {len(filtered)} chapters "
-            f"(dropped {dropped_front} front, {dropped_back} back, {dropped_boiler} boilerplate)"
+            f"[EPUB-STRUCTURAL] Classified: {len(chapters)} total items — "
+            f"{chapter_count} chapters, {front_count} front_matter, "
+            f"{back_count} back_matter, {meta_count} metadata"
         )
 
-        return filtered
+        return chapters
 
     def _split_spine_item_by_headings(self, soup, item_idx: int) -> List[Dict[str, Any]]:
         """Split a single spine item into sub-chapters by heading elements.
@@ -2238,23 +2337,31 @@ class FileService:
                                 print(f"[EPUB] Skipping sub-chapter '{sub_title}': too short")
                                 continue
 
-                            # Filter front/back matter
-                            should_drop, drop_reason = self._is_front_back_matter(
+                            # KAN-367 v3: Classify BEFORE incrementing chapter_number
+                            content_type = self._classify_spine_item(
                                 sub_title, item_href, sub_word_count
                             )
-                            if should_drop:
-                                skipped_count += 1
-                                print(f"[EPUB] Skipping sub-chapter '{sub_title}': {drop_reason}")
-                                continue
 
-                            chapter_number += 1
-                            chapters.append({
-                                "number": str(chapter_number),
-                                "title": sub_title,
-                                "content": sub_content,
-                                "type": "chapter",
-                            })
-                            print(f"[EPUB] ✓ Added chapter {chapter_number}: {sub_title}")
+                            if content_type == "chapter":
+                                chapter_number += 1
+                                chapters.append({
+                                    "number": str(chapter_number),
+                                    "title": sub_title,
+                                    "content": sub_content,
+                                    "type": "chapter",
+                                    "content_type": "chapter",
+                                })
+                                print(f"[EPUB] ✓ Added chapter {chapter_number}: {sub_title}")
+                            else:
+                                # Preserve front_matter/back_matter/metadata — no chapter_number
+                                chapters.append({
+                                    "number": None,
+                                    "title": sub_title,
+                                    "content": sub_content,
+                                    "type": content_type,
+                                    "content_type": content_type,
+                                })
+                                print(f"[EPUB] ✓ Classified as {content_type}: {sub_title}")
                         continue  # Move to next spine item
 
                     # Fall through to original single-chapter logic
@@ -2306,32 +2413,37 @@ class FileService:
                                 print(f"[EPUB] Using first line as title: {title}")
                                 break
 
-                    # Generate title if still none
-                    if not title:
-                        chapter_number += 1
-                        title = f"Chapter {chapter_number}"
-                    else:
-                        chapter_number += 1
-
-                    # Filter front/back matter
+                    # KAN-367 v3: Classify BEFORE incrementing chapter_number
                     item_href = item.get_name() if hasattr(item, "get_name") else ""
                     word_count = len(clean_text.split())
-                    should_drop, drop_reason = self._is_front_back_matter(
-                        title, item_href, word_count
+                    content_type = self._classify_spine_item(
+                        title or "", item_href, word_count
                     )
-                    if should_drop:
-                        chapter_number -= 1
-                        skipped_count += 1
-                        print(f"[EPUB] Skipping item {idx} '{title}': {drop_reason}")
-                        continue
 
-                    chapters.append({
-                        "number": str(chapter_number),
-                        "title": title,
-                        "content": clean_text,
-                        "type": "chapter",
-                    })
-                    print(f"[EPUB] ✓ Added chapter {chapter_number}: {title}")
+                    if content_type == "chapter":
+                        chapter_number += 1
+                        if not title:
+                            title = f"Chapter {chapter_number}"
+                        chapters.append({
+                            "number": str(chapter_number),
+                            "title": title,
+                            "content": clean_text,
+                            "type": "chapter",
+                            "content_type": "chapter",
+                        })
+                        print(f"[EPUB] ✓ Added chapter {chapter_number}: {title}")
+                    else:
+                        # Preserve front_matter/back_matter/metadata — no chapter_number
+                        if not title:
+                            title = f"Untitled {content_type}"
+                        chapters.append({
+                            "number": None,
+                            "title": title,
+                            "content": clean_text,
+                            "type": content_type,
+                            "content_type": content_type,
+                        })
+                        print(f"[EPUB] ✓ Classified as {content_type}: {title}")
 
             # --- Dynamic front/back matter filter (structural) ---
             chapters = self._filter_front_back_matter_structural(chapters)
@@ -5053,20 +5165,31 @@ class FileService:
                     else:
                         section_id = section_id_map[section_key]
 
-                # Create chapter
+                # KAN-367 v3: Preserve content_type from detection
+                content_type = ch.get("content_type", "chapter")
+                chapter_number = ch.get("chapter_number") or ch.get("number")
+                # Only set chapter_number for actual chapters
+                if content_type != "chapter":
+                    chapter_number = None
+                else:
+                    # Use sequential numbering if not provided
+                    if chapter_number is None:
+                        chapter_number = order
+
                 chapter = Chapter(
                     book_id=book_uuid,
                     section_id=section_id,
-                    chapter_number=order,
+                    chapter_number=chapter_number,
                     title=ch.get("title", f"Chapter {order}"),
                     content=self._clean_text_content(ch.get("content", "")),
                     summary=self._clean_text_content(ch.get("summary", "")),
+                    content_type=content_type,
                     order_index=order,
                 )
                 session.add(chapter)
                 await session.flush()
                 await session.refresh(chapter)
-                yield f"Created chapter: {chapter.title}"
+                yield f"Created {content_type}: {chapter.title}"
 
                 # Create embeddings (best-effort)
                 try:

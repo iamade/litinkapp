@@ -160,7 +160,9 @@ class Chapter(SQLModel, table=True):
 
     title: str = Field(nullable=False)
     content: str = Field(nullable=False)
-    chapter_number: int = Field(nullable=False)
+    chapter_number: Optional[int] = Field(default=None)
+    content_type: str = Field(default="chapter", nullable=False)  # "chapter", "front_matter", "back_matter", "metadata"
+    order_index: Optional[int] = Field(default=None)
     summary: Optional[str] = Field(default=None)
     duration: Optional[int] = Field(default=None)
 
