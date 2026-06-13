@@ -58,6 +58,7 @@ interface ChapterArtifact {
     chapter_number: number;
     summary?: string;
     chapter_id?: string;  // Actual chapter ID from books.chapters table
+    content_type?: string; // KAN-367 v3: "chapter", "front_matter", "back_matter", "metadata"
   };
   version: number;
   project_id: string;
@@ -309,10 +310,21 @@ const ProjectView: React.FC = () => {
     }
   };
 
-  // Get chapter artifacts
-  const chapters = artifacts
+  // Get chapter artifacts — KAN-367 v3: separate front_matter/back_matter from real chapters
+  const allChapterArtifacts = artifacts
     .filter(a => a.artifact_type === 'CHAPTER' || a.artifact_type === 'chapter')
     .sort((a, b) => (a.content.chapter_number || 0) - (b.content.chapter_number || 0));
+
+  // KAN-367 v3: Split into front_matter, chapters, and back_matter
+  const frontMatter = allChapterArtifacts.filter(
+    a => a.content.content_type === 'front_matter' || a.content.content_type === 'metadata'
+  );
+  const backMatter = allChapterArtifacts.filter(
+    a => a.content.content_type === 'back_matter'
+  );
+  const chapters = allChapterArtifacts.filter(
+    a => !a.content.content_type || a.content.content_type === 'chapter'
+  );
 
   // Detect prompt-only project (no chapters, has input_prompt, no source material)
   const isPromptOnlyProject = chapters.length === 0 && 
@@ -992,6 +1004,36 @@ const ProjectView: React.FC = () => {
                 )}
               </div>
 
+              {/* KAN-367 v3: Front Matter card */}
+              {frontMatter.length > 0 && !sidebarCollapsed && (
+                <div className="mx-2 mb-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wider">
+                      Front Matter
+                    </h3>
+                  </div>
+                  <div className="space-y-1">
+                    {frontMatter.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setSelectedChapter(item);
+                          selectChapter(getActualChapterId(item), { reason: 'user' });
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-md transition-colors text-sm ${
+                          selectedChapter?.id === item.id
+                            ? "bg-amber-100 dark:bg-amber-800/30 text-amber-900 dark:text-amber-200"
+                            : "hover:bg-amber-100/50 dark:hover:bg-amber-800/20 text-amber-700 dark:text-amber-300"
+                        }`}
+                      >
+                        <span className="truncate block">{item.content.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="p-2">
                 {chapters.map((chapter, index) => {
                   const chapterProgress = workflowProgress[chapter.id];
@@ -1058,6 +1100,36 @@ const ProjectView: React.FC = () => {
                   );
                 })}
               </div>
+
+              {/* KAN-367 v3: Back Matter card */}
+              {backMatter.length > 0 && !sidebarCollapsed && (
+                <div className="mx-2 mt-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-600">
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                    <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300 uppercase tracking-wider">
+                      Back Matter
+                    </h3>
+                  </div>
+                  <div className="space-y-1">
+                    {backMatter.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setSelectedChapter(item);
+                          selectChapter(getActualChapterId(item), { reason: 'user' });
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-md transition-colors text-sm ${
+                          selectedChapter?.id === item.id
+                            ? "bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-slate-200"
+                            : "hover:bg-slate-100/50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-300"
+                        }`}
+                      >
+                        <span className="truncate block">{item.content.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1194,7 +1266,7 @@ const ProjectView: React.FC = () => {
               </button>
             </div>
 
-            {chapters.length === 0 ? (
+            {chapters.length === 0 && frontMatter.length === 0 && backMatter.length === 0 ? (
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
                 <FileText size={48} className="mx-auto text-gray-300 mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No Content Yet</h3>
@@ -1204,6 +1276,49 @@ const ProjectView: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-4">
+                {/* KAN-367 v3: Front Matter card */}
+                {frontMatter.length > 0 && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl shadow-sm border border-amber-200 dark:border-amber-700 p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <FileText className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wider">
+                        Front Matter
+                      </h3>
+                    </div>
+                    <div className="space-y-2">
+                      {frontMatter.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => setViewChapter(item)}
+                          className="group bg-white/50 dark:bg-gray-800/50 rounded-lg p-3 hover:shadow-sm transition-shadow cursor-pointer"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                {item.content.title}
+                              </h4>
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+                                {item.content.content}
+                              </p>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewChapter(item);
+                              }}
+                              className="p-1 text-gray-400 hover:text-amber-600 dark:hover:text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="View content"
+                            >
+                              <ExternalLink size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Chapters list */}
                 {chapters.map((chapter) => (
                   <div 
                     key={chapter.id}
@@ -1236,6 +1351,48 @@ const ProjectView: React.FC = () => {
                     </div>
                   </div>
                 ))}
+
+                {/* KAN-367 v3: Back Matter card */}
+                {backMatter.length > 0 && (
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl shadow-sm border border-slate-200 dark:border-slate-600 p-5">
+                    <div className="flex items-center gap-2 mb-3">
+                      <FileText className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                      <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-300 uppercase tracking-wider">
+                        Back Matter
+                      </h3>
+                    </div>
+                    <div className="space-y-2">
+                      {backMatter.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => setViewChapter(item)}
+                          className="group bg-white/50 dark:bg-gray-800/50 rounded-lg p-3 hover:shadow-sm transition-shadow cursor-pointer"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                {item.content.title}
+                              </h4>
+                              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 line-clamp-1">
+                                {item.content.content}
+                              </p>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewChapter(item);
+                              }}
+                              className="p-1 text-gray-400 hover:text-slate-600 dark:hover:text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="View content"
+                            >
+                              <ExternalLink size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
