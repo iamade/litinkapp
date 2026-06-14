@@ -204,8 +204,8 @@ export default function Dashboard() {
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          {/* Show Learning Mode only for explorer users + KAN-315 feature flag */}
-          {hasRole(user, "explorer") && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false' && (
+          {/* Show Learning Mode only for explorer users + KAN-315/KAN-393 opt-in feature flag */}
+          {hasRole(user, "explorer") && import.meta.env.VITE_FEATURE_EXPLORER_MODE === 'true' && (
             <Link
               to="/learn"
               className="group bg-gradient-to-br from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 p-6 rounded-2xl border border-green-100 dark:border-green-800 hover:border-green-200 dark:hover:border-green-700 transition-all transform hover:scale-105 hover:shadow-lg"
@@ -218,8 +218,8 @@ export default function Dashboard() {
             </Link>
           )}
 
-          {/* Show Entertainment only for explorer users + KAN-315 feature flag */}
-          {hasRole(user, "explorer") && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false' && (
+          {/* Show Entertainment only for explorer users + KAN-315/KAN-393 opt-in feature flag */}
+          {hasRole(user, "explorer") && import.meta.env.VITE_FEATURE_EXPLORER_MODE === 'true' && (
             <Link
               to="/explore"
               className="group bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 p-6 rounded-2xl border border-purple-100 dark:border-purple-800 hover:border-purple-200 dark:hover:border-purple-700 transition-all transform hover:scale-105 hover:shadow-lg"
