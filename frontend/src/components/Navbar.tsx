@@ -60,8 +60,8 @@ export default function Navbar() {
   const visibleNavItems = navItems.filter(
     (item) => {
       if (!item.showWhenLoggedIn || user) {
-        // KAN-315: Hide explorer nav when feature flag is disabled
-        if (item.path === '/explore' && import.meta.env.VITE_FEATURE_EXPLORER_MODE === 'false') {
+        // KAN-315/KAN-393: Hide explorer nav unless explicitly enabled (opt-in only)
+        if (item.path === '/explore' && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'true') {
           return false;
         }
         return true;
@@ -101,8 +101,8 @@ export default function Navbar() {
                 {/* Mode Switcher - Show for all users based on their roles */}
                 {(canAccessCreatorMode || canAccessExplorerMode) && (
                   <div className="flex items-center bg-gray-100 dark:bg-white/5 rounded-lg p-1 border border-gray-200 dark:border-white/10">
-                      {/* KAN-393: KAN-393: Hide Explorer button in creator mode — explore-mode gated behind current mode AND feature flag */}
-                      {(canAccessExplorerMode && mode === 'explorer' && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false') && (
+                      {/* KAN-393: Hide Explorer button in creator mode — gated behind current mode AND opt-in feature flag */}
+                      {(canAccessExplorerMode && mode === 'explorer' && import.meta.env.VITE_FEATURE_EXPLORER_MODE === 'true') && (
                       <button
                         onClick={async () => {
                           await switchMode('explorer');
@@ -285,8 +285,8 @@ export default function Navbar() {
                     <div className="px-2 py-3 border-t border-b border-gray-200 dark:border-gray-700">
                       <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 px-2">Switch Mode</p>
                       <div className="flex space-x-2">
-                        {/* KAN-315/KAN-393: Explorer mode gated behind feature flag + current mode */}
-                        {(canAccessExplorerMode && mode === 'explorer' && import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false') && (
+                        {/* KAN-315/KAN-393: Explorer mode gated behind opt-in feature flag + current mode */}
+                        {(canAccessExplorerMode && mode === 'explorer' && import.meta.env.VITE_FEATURE_EXPLORER_MODE === 'true') && (
                           <button
                             onClick={async () => {
                               await switchMode('explorer');

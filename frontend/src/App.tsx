@@ -133,8 +133,8 @@ function App() {
                       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                       <Route path="/author" element={<ProtectedRoute><AuthorPanel /></ProtectedRoute>} />
                       <Route path="/learn" element={<LearningMode />} />
-                      {/* KAN-315: Explorer mode gated behind feature flag */}
-                      {import.meta.env.VITE_FEATURE_EXPLORER_MODE !== 'false' ? (
+                      {/* KAN-315/KAN-393: Explorer mode disabled by default — opt-in only via VITE_FEATURE_EXPLORER_MODE='true' */}
+                      {import.meta.env.VITE_FEATURE_EXPLORER_MODE === 'true' ? (
                         <Route path="/explore" element={<EntertainmentMode />} />
                       ) : (
                         <Route path="/explore" element={<Navigate to="/dashboard" replace />} />
