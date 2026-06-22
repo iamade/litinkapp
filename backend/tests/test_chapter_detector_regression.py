@@ -221,9 +221,10 @@ class TestHierarchicalSectionAssignment:
 
     def test_book_a_etymology_then_chapters(self):
         """Book A: ETYMOLOGY special section, then Chapter 1-3."""
+        etymology_body = " whales are big fish. " + _long_filler(80)
         content = self._book([
             "ETYMOLOGY",
-            _long_filler(),
+            etymology_body,
             "CHAPTER 1. Loomings.",
             _long_filler(),
             "CHAPTER 2. The Carpet-Bag.",
@@ -239,7 +240,11 @@ class TestHierarchicalSectionAssignment:
         assert [s["title"] for s in sections] == ["ETYMOLOGY", "Chapters"]
         assert sections[0]["type"] == "special"
         assert sections[0]["chapters"] == []
+        assert sections[0].get("content_type") == "front_matter"
+        # ETYMOLOGY content must not bleed into chapter text
+        assert "Carpet-Bag" not in sections[0]["content"]
         assert [c["number"] for c in sections[1]["chapters"]] == ["1", "2", "3"]
+        assert all(c.get("content_type") == "chapter" for c in sections[1]["chapters"])
 
     def test_book_b_chapters_then_epilogue(self):
         """Book B: Chapter 1-2 first, then EPILOGUE special section."""
@@ -259,7 +264,7 @@ class TestHierarchicalSectionAssignment:
         assert [s["title"] for s in sections] == ["Chapters", "EPILOGUE"]
         assert [c["number"] for c in sections[0]["chapters"]] == ["1", "2"]
         assert sections[1]["type"] == "special"
-        assert sections[1]["chapters"] == []
+        assert sections[1].get("content_type") == "back_matter"
 
     def test_book_c_etymology_chapters_epilogue(self):
         """Book C: ETYMOLOGY, Chapter 1-2, EPILOGUE."""
@@ -280,8 +285,15 @@ class TestHierarchicalSectionAssignment:
         sections = result["sections"]
         assert [s["title"] for s in sections] == ["ETYMOLOGY", "Chapters", "EPILOGUE"]
         assert sections[0]["type"] == "special"
+        assert sections[0].get("content_type") == "front_matter"
         assert [c["number"] for c in sections[1]["chapters"]] == ["1", "2"]
         assert sections[2]["type"] == "special"
+        assert sections[2].get("content_type") == "back_matter"
+
+    def test_garbage_year_not_chapter(self):
+        """Standalone 4-digit years like '2026.' must not be treated as chapters."""
+        assert not self.processor._match_chapter_patterns("2026.")
+        assert not self.processor._match_chapter_patterns("2026")
 
     def test_normal_section_with_chapters_still_nests(self):
         """Non-special sections (PART I, BOOK I) continue to nest their chapters."""
@@ -308,14 +320,17 @@ class TestHierarchicalSectionAssignment:
         assert len(sections[1]["chapters"]) == 1
 
     @pytest.mark.asyncio
-    async def test_extract_hierarchical_chapters_content_type(self):
-        """Special sections carry front_matter/back_matter content_type."""
+    async def test_extract_hierarchical_chapters_content_type_and_number(self):
+        """Special sections carry front_matter/back_matter content_type and real chapters keep raw numbers."""
         from app.core.services.file import FileService
         file_service = FileService()
+        etymology_body = " whales are big fish. " + _long_filler(80)
         content = self._book([
             "ETYMOLOGY",
-            _long_filler(),
+            etymology_body,
             "CHAPTER 1. Loomings.",
+            _long_filler(),
+            "CHAPTER 2. The Carpet-Bag.",
             _long_filler(),
             "EPILOGUE",
             _long_filler(),
@@ -328,5 +343,15 @@ class TestHierarchicalSectionAssignment:
 
         # ETYMOLOGY = front_matter, Chapters = chapter, EPILOGUE = back_matter
         assert chapters[0]["content_type"] == "front_matter"
-        assert "content_type" not in chapters[1] or chapters[1]["content_type"] == "chapter"
-        assert chapters[2]["content_type"] == "back_matter"
+        assert chapters[0]["chapter_number"] == 1
+        assert chapters[1]["content_type"] == "chapter"
+        assert chapters[1]["chapter_number"] == 2
+        assert chapters[1]["number"] == "1"
+        assert chapters[2]["content_type"] == "chapter"
+        assert chapters[2]["chapter_number"] == 3
+        assert chapters[2]["number"] == "2"
+        assert chapters[3]["content_type"] == "back_matter"
+        assert chapters[3]["chapter_number"] == 4
+
+        # ETYMOLOGY content must not contain chapter body text
+        assert "Carpet-Bag" not in chapters[0]["content"]

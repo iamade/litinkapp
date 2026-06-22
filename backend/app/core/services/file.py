@@ -142,7 +142,7 @@ class BookStructureDetector:
             r"^\s*Chapter\s+(\d+)[\.\s]*(.+)$",  # Chapter 1. Title
             # Standalone Roman numerals or numbers (for minimalist books)
             r"^\s*([IVXLCDM]+)\.?\s*$",  # Just "XIX." or "I."
-            r"^\s*(\d+)\.?\s*$",  # Just "19." or "1."
+            r"^\s*(\d{1,3})\.?\s*$",  # Just "19." or "1." (max 3 digits to avoid years/IDs)
             # Spelled out standalone numbers (e.g. "ONE", "TWENTY-ONE")
             rf"^\s*{self.SPELLED_NUMBER_RE}\.?\s*$",
             # With separators (colon, dash)
@@ -151,7 +151,7 @@ class BookStructureDetector:
             r"^\s*Chapter\s+(\d+)[\s\-:]+(.+)$",  # Chapter 1: Title
             r"^\s*Chapter\s+([IVXLCDM]+)[\s\-:]+(.+)$",  # Chapter I: Title
             # Number/Roman with period and title
-            r"^\s*(\d+)\.\s+(.+)$",  # "1. Chapter Title"
+            r"^\s*(\d{1,3})\.\s+(.+)$",  # "1. Chapter Title" (max 3 digits to avoid matching years)
             r"^\s*([IVXLCDM]+)\.\s+(.+)$",  # "I. Chapter Title"
             # Word-based chapters
             r"^\s*CHAPTER\s+([A-Z][a-z]+)\s*(.*)$",  # CHAPTER One, CHAPTER Two
@@ -248,6 +248,28 @@ class BookStructureDetector:
         chapter_group = []  # Orphan real chapters that occur outside sections
         in_toc_section = False
 
+        FRONT_MATTER_TITLES = {
+            "etymology", "extracts", "extract", "epigraph", "preface",
+            "foreword", "introduction", "dedication", "acknowledgments",
+            "acknowledgements", "prologue",
+        }
+        BACK_MATTER_TITLES = {
+            "epilogue", "afterword", "appendix", "index", "bibliography",
+            "glossary", "endnotes", "footnotes", "colophon", "imprint",
+            "copyright", "about the author", "suggested reading",
+            "references", "notes", "conclusion",
+        }
+
+        def _classify_section_type(line_or_title: str) -> str:
+            title_lower = line_or_title.lower().strip()
+            for pattern in BACK_MATTER_TITLES:
+                if title_lower == pattern or title_lower.startswith(pattern):
+                    return "back_matter"
+            for pattern in FRONT_MATTER_TITLES:
+                if title_lower == pattern or title_lower.startswith(pattern):
+                    return "front_matter"
+            return "special"
+
         def _flush_chapter_group():
             nonlocal chapter_group
             if not chapter_group:
@@ -330,6 +352,7 @@ class BookStructureDetector:
                     "content": self._extract_section_content(
                         content, line, lines, line_num
                     ),
+                    "content_type": _classify_section_type(line),
                 }
                 continue
 
@@ -380,6 +403,7 @@ class BookStructureDetector:
                         "title": chapter_title,
                         "number": chapter_number,
                         "content": chapter_content,
+                        "content_type": "chapter",
                     }
 
                     # KAN-367 v3: Special sections (ETYMOLOGY, EPILOGUE, etc.) must NOT
@@ -907,8 +931,14 @@ class BookStructureDetector:
         for i in range(start_line + 1, len(lines)):
             line = lines[i].strip()
 
-            # Stop if we hit another section
-            if self._match_section_patterns(line) or self._match_special_sections(line):
+            # Stop if we hit another section or a real chapter heading
+            # KAN-367 v3: chapter headings must close the previous special section
+            # so ETYMOLOGY/EPILOGUE content does not bleed into real chapters.
+            if (
+                self._match_section_patterns(line)
+                or self._match_special_sections(line)
+                or self._match_chapter_patterns(line)
+            ):
                 break
 
             content_lines.append(line)
@@ -6089,10 +6119,11 @@ Chapters:
                 "id": f"chapter_{len(sections_map[section_key]['chapters']) + 1}",
                 "book_id": "",
                 "section_id": sections_map[section_key]["id"],
-                "chapter_number": chapter.get("number", 1),
+                "chapter_number": chapter.get("chapter_number", chapter.get("number", 1)),
                 "title": chapter["title"],
                 "content": chapter.get("content", ""),
                 "summary": chapter.get("summary", ""),
+                "content_type": chapter.get("content_type", "chapter"),
                 "order_index": len(sections_map[section_key]["chapters"]),
             }
 
@@ -6209,63 +6240,15 @@ Chapters:
         all_chapters = []
         chapter_counter = 1
 
-        # KAN-367 v3: Classify special sections as front/back matter so the upload
-        # path can assign the correct content_type and skip numbering.
-        FRONT_MATTER_TITLES = {
-            "etymology",
-            "extracts",
-            "extract",
-            "epigraph",
-            "preface",
-            "foreword",
-            "introduction",
-            "dedication",
-            "acknowledgments",
-            "acknowledgements",
-            "prologue",
-        }
-        BACK_MATTER_TITLES = {
-            "epilogue",
-            "afterword",
-            "appendix",
-            "index",
-            "bibliography",
-            "glossary",
-            "endnotes",
-            "footnotes",
-            "colophon",
-            "imprint",
-            "copyright",
-            "about the author",
-            "suggested reading",
-            "references",
-            "notes",
-            "conclusion",
-        }
-
-        def _classify_section_type(title: str, section_type: str) -> str:
-            if section_type != "special":
-                return section_type
-            title_lower = title.lower().strip()
-            for pattern in BACK_MATTER_TITLES:
-                if title_lower == pattern or title_lower.startswith(pattern):
-                    return "back_matter"
-            for pattern in FRONT_MATTER_TITLES:
-                if title_lower == pattern or title_lower.startswith(pattern):
-                    return "front_matter"
-            return "special"
-
         # Add null check for structure
         if not structure or not structure.get("sections"):
             print("[HIERARCHICAL EXTRACTION] No sections found in structure")
             return []
 
         for section_index, section in enumerate(structure["sections"]):
-            section_type = section.get("type", "section")  # Add fallback
-            section_title = section.get(
-                "title", f"Section {section_index + 1}"
-            )  # Add fallback
-            classified_content_type = _classify_section_type(section_title, section_type)
+            section_type = section.get("type", "section")
+            section_title = section.get("title", f"Section {section_index + 1}")
+            section_content_type = section.get("content_type", section_type)
 
             print(
                 f"[HIERARCHICAL EXTRACTION] Processing {section_type}: {section_title}"
@@ -6274,25 +6257,23 @@ Chapters:
             # If section has chapters within it, extract them
             if section.get("chapters"):
                 for chapter in section["chapters"]:
+                    raw_number = chapter.get("number", str(chapter_counter))
                     chapter_data = {
-                        "title": chapter.get(
-                            "title", f"Chapter {chapter_counter}"
-                        ),  # Add fallback
+                        "title": chapter.get("title", f"Chapter {chapter_counter}"),
                         "content": chapter.get("content", ""),
-                        "summary": chapter.get(
-                            "summary", f"Chapter from {section_title}"
-                        ),  # Use existing or create
+                        "summary": chapter.get("summary", f"Chapter from {section_title}"),
                         "section_title": section_title,
                         "section_type": section_type,
-                        "section_number": section.get(
-                            "number", str(section_index + 1)
-                        ),  # Add fallback
+                        "section_number": section.get("number", str(section_index + 1)),
                         "chapter_number": chapter_counter,
+                        "number": raw_number,
                     }
-                    # KAN-367 v3: Real chapters nested under a normal section are chapters;
-                    # only mark content_type explicitly for front/back matter sections.
-                    if classified_content_type in ("front_matter", "back_matter"):
-                        chapter_data["content_type"] = classified_content_type
+                    # KAN-367 v3: propagate content_type from the parent section
+                    # so the project upload path can distinguish front/back matter.
+                    if section_content_type in ("front_matter", "back_matter"):
+                        chapter_data["content_type"] = section_content_type
+                    elif chapter.get("content_type"):
+                        chapter_data["content_type"] = chapter["content_type"]
                     all_chapters.append(chapter_data)
                     chapter_counter += 1
             else:
@@ -6306,20 +6287,17 @@ Chapters:
                     "section_number": section.get("number", str(section_index + 1)),
                     "chapter_number": chapter_counter,
                 }
-                # KAN-367 v3: Special sections should carry front_matter/back_matter
-                # content_type so the project upload path does not number them.
-                if classified_content_type in ("front_matter", "back_matter"):
-                    chapter_data["content_type"] = classified_content_type
+                # KAN-367 v3: propagate content_type from the section level
+                if section_content_type in ("front_matter", "back_matter"):
+                    chapter_data["content_type"] = section_content_type
                 all_chapters.append(chapter_data)
                 chapter_counter += 1
 
         print(f"[HIERARCHICAL EXTRACTION] Extracted {len(all_chapters)} total chapters")
 
         # Skip AI validation if we have reasonable number of chapters
-        if 3 <= len(all_chapters) <= 20:  # Reasonable chapter count
-            print(
-                "[AI VALIDATION] Skipping AI validation - chapter count looks reasonable"
-            )
+        if 3 <= len(all_chapters) <= 20:
+            print("[AI VALIDATION] Skipping AI validation - chapter count looks reasonable")
             return all_chapters
 
         # Apply AI validation if needed
