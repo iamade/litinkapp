@@ -246,6 +246,7 @@ async def _process_project_upload_background(
                             "chapter_number": idx + 1,
                             "summary": f"Uploaded script from {fd['filename']}",
                             "chapter_id": str(book_chapter.id),
+                            "content_type": book_chapter.content_type,
                             "original_filename": fd["filename"],
                         },
                         generation_metadata={
@@ -379,6 +380,7 @@ async def _process_project_upload_background(
                             "chapter_number": chapter_number,
                             "summary": chapter_summary,
                             "chapter_id": str(book_chapter.id),
+                            "content_type": book_chapter.content_type,
                         },
                         generation_metadata={
                             "source": "upload_extraction",
@@ -855,6 +857,7 @@ class ProjectService:
                             "chapter_number": idx + 1,
                             "summary": f"Uploaded script from {file_data['filename']}",
                             "chapter_id": str(book_chapter.id),
+                            "content_type": book_chapter.content_type,
                             "original_filename": file_data["filename"],
                         },
                         generation_metadata={
@@ -976,6 +979,7 @@ class ProjectService:
                             "chapter_number": chapter_number,
                             "summary": chapter_summary,
                             "chapter_id": str(book_chapter.id),
+                            "content_type": book_chapter.content_type,
                         },
                         generation_metadata={
                             "source": "upload_extraction",
