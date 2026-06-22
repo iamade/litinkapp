@@ -360,6 +360,7 @@ async def _process_project_upload_background(
                 section_id_map: dict = {}
 
                 save_start = time.time()
+                chapter_only_idx = 0
                 for idx, chapter in enumerate(chapters):
                     chapter_title = chapter.get("title", f"Chapter {idx + 1}")
                     chapter_content = chapter.get("content", "")
@@ -370,7 +371,16 @@ async def _process_project_upload_background(
 
                     # Only real 'chapter' content gets sequential numbering 1..N.
                     if content_type == "chapter":
-                        chapter_number = int(extracted_number) if extracted_number is not None else idx + 1
+                        chapter_only_idx += 1
+                        # Prefer the extracted number when available, otherwise use the
+                        # chapter-only counter so front/back matter don't shift numbering.
+                        if extracted_number is not None:
+                            try:
+                                chapter_number = int(extracted_number)
+                            except ValueError:
+                                chapter_number = chapter_only_idx
+                        else:
+                            chapter_number = chapter_only_idx
                     else:
                         chapter_number = None
 
