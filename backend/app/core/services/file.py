@@ -2306,6 +2306,21 @@ class FileService:
                 item = book.get_item_with_id(item_id)
 
                 if not item:
+                    # Fallback: some EPUBs use the manifest href as the spine idref
+                    for manifest_item in book.get_items():
+                        if (
+                            manifest_item.get_id() == item_id
+                            or manifest_item.get_name() == item_id
+                            or manifest_item.get_name().endswith("/" + item_id)
+                        ):
+                            item = manifest_item
+                            print(
+                                f"[EPUB] Item {idx}: Resolved idref '{item_id}' via manifest name "
+                                f"'{manifest_item.get_name()}'"
+                            )
+                            break
+
+                if not item:
                     print(f"[EPUB] Item {idx}: Could not get item with id '{item_id}'")
                     continue
 

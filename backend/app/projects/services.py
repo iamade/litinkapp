@@ -330,10 +330,12 @@ async def _process_project_upload_background(
 
                 chapters = []
                 structure_type = "flat"
+                sections = []
                 if extracted_data and isinstance(extracted_data, list):
                     first_item = extracted_data[0] if extracted_data else {}
                     if "chapters" in first_item:
                         structure_type = "hierarchical"
+                        sections = extracted_data
                         for section in extracted_data:
                             chapters.extend(section.get("chapters", []))
                     else:
@@ -353,19 +355,33 @@ async def _process_project_upload_background(
 
                 file_names = [fd["filename"] for fd in file_data_list]
 
+                # Build a map from section artifact title to section_id if we create Section rows.
+                # For project uploads we currently save flat chapters only, so we keep section_id=None.
+                section_id_map: dict = {}
+
                 save_start = time.time()
                 for idx, chapter in enumerate(chapters):
                     chapter_title = chapter.get("title", f"Chapter {idx + 1}")
                     chapter_content = chapter.get("content", "")
-                    chapter_number = int(chapter.get("number", idx + 1))
+                    extracted_number = chapter.get("number")
                     chapter_summary = chapter.get("summary", "")
+                    content_type = chapter.get("content_type") or chapter.get("type") or "chapter"
+                    section_title = chapter.get("section_title")
+
+                    # Only real 'chapter' content gets sequential numbering 1..N.
+                    if content_type == "chapter":
+                        chapter_number = int(extracted_number) if extracted_number is not None else idx + 1
+                    else:
+                        chapter_number = None
 
                     book_chapter = ChapterModel(
                         book_id=book_uuid,
                         title=chapter_title,
                         content=chapter_content,
                         chapter_number=chapter_number,
+                        content_type=content_type,
                         summary=chapter_summary,
+                        order_index=idx,
                     )
                     session.add(book_chapter)
                     await session.flush()
@@ -380,12 +396,12 @@ async def _process_project_upload_background(
                             "chapter_number": chapter_number,
                             "summary": chapter_summary,
                             "chapter_id": str(book_chapter.id),
-                            "content_type": book_chapter.content_type,
+                            "content_type": content_type,
                         },
                         generation_metadata={
                             "source": "upload_extraction",
                             "original_structure": structure_type,
-                            "section_title": chapter.get("section_title"),
+                            "section_title": section_title,
                             "book_chapter_id": str(book_chapter.id),
                             "source_files": file_names,
                         },
