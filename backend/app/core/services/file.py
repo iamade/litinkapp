@@ -245,8 +245,26 @@ class BookStructureDetector:
 
         sections = []
         current_section = None
-        flat_chapters = []
+        chapter_group = []  # Orphan real chapters that occur outside sections
         in_toc_section = False
+
+        def _flush_chapter_group():
+            nonlocal chapter_group
+            if not chapter_group:
+                return
+            sections.append(
+                {
+                    "title": "Chapters",
+                    "number": "1",
+                    "type": "section",
+                    "chapters": chapter_group,
+                    "content": "",
+                }
+            )
+            print(
+                f"[HIERARCHICAL] Flushed {len(chapter_group)} orphan chapters into standalone 'Chapters' section"
+            )
+            chapter_group = []
 
         for line_num, line in enumerate(lines):
             line = line.strip()
@@ -276,6 +294,7 @@ class BookStructureDetector:
             if section_match:
                 # Verify this isn't a TOC entry by checking following content
                 if self._has_substantial_following_content(lines, line_num):
+                    _flush_chapter_group()
                     # Save previous section if exists
                     if current_section:
                         sections.append(current_section)
@@ -297,6 +316,7 @@ class BookStructureDetector:
             if special_match and self._has_substantial_following_content(
                 lines, line_num
             ):
+                _flush_chapter_group()
                 # Save previous section if exists
                 if current_section:
                     sections.append(current_section)
@@ -313,68 +333,83 @@ class BookStructureDetector:
                 }
                 continue
 
-            # Check if line matches chapter pattern (only if we're in a section)
-            if current_section:
-                chapter_match = self._match_chapter_patterns(line)
-                if chapter_match and self._has_substantial_following_content(
-                    lines, line_num
-                ):
-                    # Build a proper title
-                    chapter_number = chapter_match["number"]
-                    chapter_subtitle = chapter_match.get("title", "").strip()
+            # Check if line matches chapter pattern
+            chapter_match = self._match_chapter_patterns(line)
+            if chapter_match and self._has_substantial_following_content(
+                lines, line_num
+            ):
+                # Build a proper title
+                chapter_number = chapter_match["number"]
+                chapter_subtitle = chapter_match.get("title", "").strip()
 
-                    # Create a readable title
-                    if chapter_subtitle:
-                        chapter_title = f"Chapter {chapter_number}: {chapter_subtitle}"
+                # Create a readable title
+                if chapter_subtitle:
+                    chapter_title = f"Chapter {chapter_number}: {chapter_subtitle}"
+                else:
+                    # No subtitle, look for title in next few lines
+                    title_found = None
+                    for i in range(line_num + 1, min(line_num + 5, len(lines))):
+                        next_line = lines[i].strip()
+                        if not next_line:
+                            continue
+                        if 10 < len(next_line) < 100:
+                            if not self._match_chapter_patterns(next_line):
+                                title_found = next_line
+                                break
+
+                    if title_found:
+                        chapter_title = f"Chapter {chapter_number}: {title_found}"
                     else:
-                        # No subtitle, look for title in next few lines
-                        title_found = None
-                        for i in range(line_num + 1, min(line_num + 5, len(lines))):
-                            next_line = lines[i].strip()
-                            if not next_line:
-                                continue
-                            if 10 < len(next_line) < 100:
-                                if not self._match_chapter_patterns(next_line):
-                                    title_found = next_line
-                                    break
+                        chapter_title = f"Chapter {chapter_number}"
 
-                        if title_found:
-                            chapter_title = f"Chapter {chapter_number}: {title_found}"
-                        else:
-                            chapter_title = f"Chapter {chapter_number}"
+                # Create chapter_info for extraction
+                chapter_info = {
+                    "title": chapter_title,
+                    "title_line_num": line_num,
+                    "line_num": line_num,
+                    "number": chapter_number,
+                    "raw_title": line,
+                }
+                chapter_content = self._extract_chapter_content(
+                    content, chapter_info, lines
+                )
 
-                    # Create chapter_info for extraction
-                    chapter_info = {
+                # Only add if content is substantial
+                if len(chapter_content.strip()) > 500:  # Minimum content length
+                    chapter_data = {
                         "title": chapter_title,
-                        "title_line_num": line_num,
-                        "line_num": line_num,
                         "number": chapter_number,
-                        "raw_title": line,
+                        "content": chapter_content,
                     }
-                    chapter_content = self._extract_chapter_content(
-                        content, chapter_info, lines
-                    )
 
-                    # Only add if content is substantial
-                    if len(chapter_content.strip()) > 500:  # Minimum content length
-                        chapter_data = {
-                            "title": chapter_title,
-                            "number": chapter_number,
-                            "content": chapter_content,
-                        }
+                    # KAN-367 v3: Special sections (ETYMOLOGY, EPILOGUE, etc.) must NOT
+                    # swallow real chapters. Close the special section and place the
+                    # chapter into an orphan chapter group instead.
+                    if current_section and current_section.get("type") == "special":
+                        sections.append(current_section)
+                        current_section = None
+
+                    if current_section:
                         current_section["chapters"].append(chapter_data)
                         print(
                             f"[HIERARCHICAL] Added chapter {chapter_number} to section '{current_section['title']}'"
+                        )
+                    else:
+                        chapter_group.append(chapter_data)
+                        print(
+                            f"[HIERARCHICAL] Added chapter {chapter_number} to standalone 'Chapters' section (after special/front matter)"
                         )
 
         # Add last section
         if current_section:
             sections.append(current_section)
+        _flush_chapter_group()
 
         # Remove duplicate chapters based on normalized numbers
         sections = self._remove_duplicate_chapters(sections)
 
         # If no sections found, try to extract flat chapters
+        flat_chapters = []
         if not sections:
             flat_chapters = self._extract_flat_chapters(content)
 
@@ -389,11 +424,13 @@ class BookStructureDetector:
                 unique_sections.append(section)
 
         # Also add minimum content length validation
+        # KAN-367 v3: Sections that contain chapters must be preserved even if their
+        # own section-level content is short/empty (e.g. synthetic "Chapters" section).
         filtered_sections = []
         for section in unique_sections:
-            if (
-                len(section.get("content", "").strip()) > 100
-            ):  # Minimum content threshold
+            if section.get("chapters") or len(
+                section.get("content", "").strip()
+            ) > 100:  # Minimum content threshold
                 filtered_sections.append(section)
 
         # Update the sections variable to use filtered_sections
@@ -6172,6 +6209,52 @@ Chapters:
         all_chapters = []
         chapter_counter = 1
 
+        # KAN-367 v3: Classify special sections as front/back matter so the upload
+        # path can assign the correct content_type and skip numbering.
+        FRONT_MATTER_TITLES = {
+            "etymology",
+            "extracts",
+            "extract",
+            "epigraph",
+            "preface",
+            "foreword",
+            "introduction",
+            "dedication",
+            "acknowledgments",
+            "acknowledgements",
+            "prologue",
+        }
+        BACK_MATTER_TITLES = {
+            "epilogue",
+            "afterword",
+            "appendix",
+            "index",
+            "bibliography",
+            "glossary",
+            "endnotes",
+            "footnotes",
+            "colophon",
+            "imprint",
+            "copyright",
+            "about the author",
+            "suggested reading",
+            "references",
+            "notes",
+            "conclusion",
+        }
+
+        def _classify_section_type(title: str, section_type: str) -> str:
+            if section_type != "special":
+                return section_type
+            title_lower = title.lower().strip()
+            for pattern in BACK_MATTER_TITLES:
+                if title_lower == pattern or title_lower.startswith(pattern):
+                    return "back_matter"
+            for pattern in FRONT_MATTER_TITLES:
+                if title_lower == pattern or title_lower.startswith(pattern):
+                    return "front_matter"
+            return "special"
+
         # Add null check for structure
         if not structure or not structure.get("sections"):
             print("[HIERARCHICAL EXTRACTION] No sections found in structure")
@@ -6182,6 +6265,7 @@ Chapters:
             section_title = section.get(
                 "title", f"Section {section_index + 1}"
             )  # Add fallback
+            classified_content_type = _classify_section_type(section_title, section_type)
 
             print(
                 f"[HIERARCHICAL EXTRACTION] Processing {section_type}: {section_title}"
@@ -6205,10 +6289,14 @@ Chapters:
                         ),  # Add fallback
                         "chapter_number": chapter_counter,
                     }
+                    # KAN-367 v3: Real chapters nested under a normal section are chapters;
+                    # only mark content_type explicitly for front/back matter sections.
+                    if classified_content_type in ("front_matter", "back_matter"):
+                        chapter_data["content_type"] = classified_content_type
                     all_chapters.append(chapter_data)
                     chapter_counter += 1
             else:
-                # Treat the entire section as a chapter (like tablets)
+                # Treat the entire section as a chapter (like tablets or special sections)
                 chapter_data = {
                     "title": section_title,
                     "content": section.get("content", ""),
@@ -6218,6 +6306,10 @@ Chapters:
                     "section_number": section.get("number", str(section_index + 1)),
                     "chapter_number": chapter_counter,
                 }
+                # KAN-367 v3: Special sections should carry front_matter/back_matter
+                # content_type so the project upload path does not number them.
+                if classified_content_type in ("front_matter", "back_matter"):
+                    chapter_data["content_type"] = classified_content_type
                 all_chapters.append(chapter_data)
                 chapter_counter += 1
 

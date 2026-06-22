@@ -10,14 +10,22 @@ Chapter 1 to position 3 (off-by-2).
 """
 
 import pytest
-from app.core.services.file import EPUBProcessor
+import re
+from app.core.services.file import BookStructureDetector
+
+
+def _long_filler(word_count: int = 80) -> str:
+    """Generate a block of text long enough to pass substantial-content checks."""
+    words_per_line = 10
+    line_count = (word_count // words_per_line) + 2
+    return "\n".join([" ".join([f"content{i}"] * words_per_line) for i in range(line_count)])
 
 
 class TestSpecialSectionsPattern:
     """Test that SPECIAL_SECTIONS correctly identifies front-matter/back-matter."""
 
     def setup_method(self):
-        self.processor = EPUBProcessor()
+        self.processor = BookStructureDetector()
 
     def test_etymology_matched(self):
         """Etymology section should be recognized as special (not a chapter)."""
@@ -80,6 +88,8 @@ class TestSpecialSectionsPattern:
 
     def test_special_sections_completeness(self):
         """Verify all expected special sections are present."""
+        import re
+
         expected = [
             "preface", "introduction", "foreword", "prologue", "epilogue",
             "conclusion", "appendix", "etymology", "extracts", "epigraph",
@@ -88,15 +98,18 @@ class TestSpecialSectionsPattern:
         ]
         patterns = self.processor.SPECIAL_SECTIONS
         for section in expected:
-            assert any(section in p.lower() for p in patterns), \
-                f"Missing pattern for '{section}' in SPECIAL_SECTIONS"
+            section_words = section.split()
+            assert any(
+                all(word in p.lower() for word in section_words)
+                for p in patterns
+            ), f"Missing pattern for '{section}' in SPECIAL_SECTIONS"
 
 
 class TestExtractFlatChapters:
     """Test that _extract_flat_chapters skips special sections."""
 
     def setup_method(self):
-        self.processor = EPUBProcessor()
+        self.processor = BookStructureDetector()
 
     def test_moby_dick_frontmatter_skipped(self):
         """
@@ -155,13 +168,13 @@ class TestSpecialSectionExtraction:
     """Special-section books should stay sectioned in preview extraction."""
 
     def setup_method(self):
-        self.processor = EPUBProcessor()
+        from app.core.services.file import FileService
+        self.processor = FileService()
 
     @pytest.mark.asyncio
     async def test_special_only_book_preserves_sections(self):
-        filler = " ".join(["section content"] * 80)
         content = "\n\n".join(
-            f"{title}\n{filler} for {title}."
+            f"{title}\n{_long_filler()} for {title}."
             for title in [
                 "ETYMOLOGY",
                 "EXTRACTS",
@@ -191,3 +204,129 @@ class TestSpecialSectionExtraction:
             "DEDICATION",
             "NOTES",
         ]
+
+
+class TestHierarchicalSectionAssignment:
+    """
+    KAN-367 v3: Special sections (ETYMOLOGY, EPILOGUE, etc.) must not swallow
+    real chapters. Real chapters should be extracted into a separate group and
+    special sections should be tagged with front_matter/back_matter content_type.
+    """
+
+    def setup_method(self):
+        self.processor = BookStructureDetector()
+
+    def _book(self, lines: list) -> str:
+        return "\n\n".join(lines)
+
+    def test_book_a_etymology_then_chapters(self):
+        """Book A: ETYMOLOGY special section, then Chapter 1-3."""
+        content = self._book([
+            "ETYMOLOGY",
+            _long_filler(),
+            "CHAPTER 1. Loomings.",
+            _long_filler(),
+            "CHAPTER 2. The Carpet-Bag.",
+            _long_filler(),
+            "CHAPTER 3. The Spouter-Inn.",
+            _long_filler(),
+        ])
+
+        result = self.processor.detect_structure(content)
+
+        assert result["has_sections"] is True
+        sections = result["sections"]
+        assert [s["title"] for s in sections] == ["ETYMOLOGY", "Chapters"]
+        assert sections[0]["type"] == "special"
+        assert sections[0]["chapters"] == []
+        assert [c["number"] for c in sections[1]["chapters"]] == ["1", "2", "3"]
+
+    def test_book_b_chapters_then_epilogue(self):
+        """Book B: Chapter 1-2 first, then EPILOGUE special section."""
+        content = self._book([
+            "CHAPTER 1. The Beginning.",
+            _long_filler(),
+            "CHAPTER 2. The Middle.",
+            _long_filler(),
+            "EPILOGUE",
+            _long_filler(),
+        ])
+
+        result = self.processor.detect_structure(content)
+
+        assert result["has_sections"] is True
+        sections = result["sections"]
+        assert [s["title"] for s in sections] == ["Chapters", "EPILOGUE"]
+        assert [c["number"] for c in sections[0]["chapters"]] == ["1", "2"]
+        assert sections[1]["type"] == "special"
+        assert sections[1]["chapters"] == []
+
+    def test_book_c_etymology_chapters_epilogue(self):
+        """Book C: ETYMOLOGY, Chapter 1-2, EPILOGUE."""
+        content = self._book([
+            "ETYMOLOGY",
+            _long_filler(),
+            "CHAPTER 1. Loomings.",
+            _long_filler(),
+            "CHAPTER 2. The Carpet-Bag.",
+            _long_filler(),
+            "EPILOGUE",
+            _long_filler(),
+        ])
+
+        result = self.processor.detect_structure(content)
+
+        assert result["has_sections"] is True
+        sections = result["sections"]
+        assert [s["title"] for s in sections] == ["ETYMOLOGY", "Chapters", "EPILOGUE"]
+        assert sections[0]["type"] == "special"
+        assert [c["number"] for c in sections[1]["chapters"]] == ["1", "2"]
+        assert sections[2]["type"] == "special"
+
+    def test_normal_section_with_chapters_still_nests(self):
+        """Non-special sections (PART I, BOOK I) continue to nest their chapters."""
+        content = self._book([
+            "PART I The Departure",
+            _long_filler(),
+            "CHAPTER 1. Leaving Home.",
+            _long_filler(),
+            "CHAPTER 2. On the Road.",
+            _long_filler(),
+            "PART II The Return",
+            _long_filler(),
+            "CHAPTER 3. Arrival.",
+            _long_filler(),
+        ])
+
+        result = self.processor.detect_structure(content)
+
+        assert result["has_sections"] is True
+        sections = result["sections"]
+        assert len(sections) == 2
+        assert [s["type"] for s in sections] == ["part", "part"]
+        assert len(sections[0]["chapters"]) == 2
+        assert len(sections[1]["chapters"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_extract_hierarchical_chapters_content_type(self):
+        """Special sections carry front_matter/back_matter content_type."""
+        from app.core.services.file import FileService
+        file_service = FileService()
+        content = self._book([
+            "ETYMOLOGY",
+            _long_filler(),
+            "CHAPTER 1. Loomings.",
+            _long_filler(),
+            "EPILOGUE",
+            _long_filler(),
+        ])
+
+        structure = self.processor.detect_structure(content)
+        chapters = await file_service._extract_hierarchical_chapters(
+            structure, book_type="entertainment", book_content=content
+        )
+
+        # ETYMOLOGY = front_matter, Chapters = chapter, EPILOGUE = back_matter
+        assert chapters[0]["content_type"] == "front_matter"
+        assert "content_type" not in chapters[1] or chapters[1]["content_type"] == "chapter"
+        assert chapters[2]["content_type"] == "back_matter"
