@@ -9,4 +9,6 @@ ENV HOST=0.0.0.0
 ENV PORT=5173
 EXPOSE 5173
 
-CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173"]
+# Production build + static serve (Vite dev mode breaks staging hydration/tests)
+RUN npm run build
+CMD ["npx", "serve", "-s", "dist", "-l", "tcp://0.0.0.0:5173"]
