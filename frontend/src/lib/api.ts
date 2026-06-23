@@ -1,8 +1,8 @@
 import { dispatchCreditsRefresh, dispatchInsufficientCredits } from "./credits";
 
-export const API_BASE_URL = import.meta.env.PROD 
-  ? "https://api.litinkai.com/api/v1"
-  : "http://localhost:8000/api/v1";
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.PROD ? "https://api.litinkai.com/api/v1" : "http://localhost:8000/api/v1");
 export const AUTH_EXPIRED_EVENT = "auth:expired";
 
 // Suppress AUTH_EXPIRED_EVENT during login flow to prevent race condition
