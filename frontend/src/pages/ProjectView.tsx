@@ -286,6 +286,13 @@ const ProjectView: React.FC = () => {
       const data = await projectService.getProject(projectId);
       setProject(data);
       if (data.artifacts) {
+        // KAN-367 v3: instrument live API payload for debugging sidebar grouping
+        console.log("[KAN-367 v3] ProjectView loadProject artifacts:", data.artifacts);
+        if (data.artifacts[0]) {
+          console.log("[KAN-367 v3] first artifact artifact_type:", data.artifacts[0].artifact_type);
+          console.log("[KAN-367 v3] first artifact content:", data.artifacts[0].content);
+          console.log("[KAN-367 v3] first artifact content.content_type:", data.artifacts[0].content?.content_type);
+        }
         setArtifacts(data.artifacts);
         // Set first chapter as selected
         const chapters = data.artifacts
