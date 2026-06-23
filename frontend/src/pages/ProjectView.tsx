@@ -312,18 +312,23 @@ const ProjectView: React.FC = () => {
 
   // Get chapter artifacts — KAN-367 v3: separate front_matter/back_matter from real chapters
   const allChapterArtifacts = artifacts
-    .filter(a => a.artifact_type === 'CHAPTER' || a.artifact_type === 'chapter')
-    .sort((a, b) => (a.content.chapter_number || 0) - (b.content.chapter_number || 0));
+    .filter(a => (a.artifact_type || '').toString().toLowerCase() === 'chapter')
+    .sort((a, b) => {
+      // Stable sort: front/back matter (null chapter_number) sorts before/after real chapters
+      const an = a.content?.chapter_number ?? Infinity;
+      const bn = b.content?.chapter_number ?? Infinity;
+      return (an === Infinity ? Number.MAX_SAFE_INTEGER : an) - (bn === Infinity ? Number.MAX_SAFE_INTEGER : bn);
+    });
 
   // KAN-367 v3: Split into front_matter, chapters, and back_matter
   const frontMatter = allChapterArtifacts.filter(
-    a => a.content.content_type === 'front_matter' || a.content.content_type === 'metadata'
+    a => (a.content?.content_type || 'chapter') === 'front_matter' || (a.content?.content_type || 'chapter') === 'metadata'
   );
   const backMatter = allChapterArtifacts.filter(
-    a => a.content.content_type === 'back_matter'
+    a => (a.content?.content_type || 'chapter') === 'back_matter'
   );
   const chapters = allChapterArtifacts.filter(
-    a => !a.content.content_type || a.content.content_type === 'chapter'
+    a => !a.content?.content_type || (a.content?.content_type || 'chapter') === 'chapter'
   );
 
   // Detect prompt-only project (no chapters, has input_prompt, no source material)
