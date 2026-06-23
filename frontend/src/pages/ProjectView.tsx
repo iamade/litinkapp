@@ -71,7 +71,7 @@ interface ChapterArtifact {
 // Helper to get dynamic label for chapters/scripts
 const getDynamicLabel = (artifact: ChapterArtifact, index: number): { label: string; plural: string } => {
   const label = artifact.content_type_label || 'Chapter';
-  const number = artifact.script_order || artifact.content.chapter_number || index + 1;
+  const number = artifact.script_order || Number(artifact.content.chapter_number || index + 1);
   
   // Map labels to plurals
   const pluralMap: Record<string, string> = {
@@ -289,8 +289,12 @@ const ProjectView: React.FC = () => {
         setArtifacts(data.artifacts);
         // Set first chapter as selected
         const chapters = data.artifacts
-          .filter((a: any) => a.artifact_type === 'CHAPTER' || a.artifact_type === 'chapter')
-          .sort((a: any, b: any) => (a.content.chapter_number || 0) - (b.content.chapter_number || 0));
+          .filter((a: any) => (a.artifact_type || '').toString().toLowerCase() === 'chapter')
+          .sort((a: any, b: any) => {
+            const an = Number(a.content?.chapter_number ?? Infinity);
+            const bn = Number(b.content?.chapter_number ?? Infinity);
+            return (Number.isFinite(an) ? an : Number.MAX_SAFE_INTEGER) - (Number.isFinite(bn) ? bn : Number.MAX_SAFE_INTEGER);
+          });
         if (chapters.length > 0) {
           setSelectedChapter(chapters[0]);
           // Sync chapter selection with ScriptSelectionContext so
@@ -312,18 +316,23 @@ const ProjectView: React.FC = () => {
 
   // Get chapter artifacts — KAN-367 v3: separate front_matter/back_matter from real chapters
   const allChapterArtifacts = artifacts
-    .filter(a => a.artifact_type === 'CHAPTER' || a.artifact_type === 'chapter')
-    .sort((a, b) => (a.content.chapter_number || 0) - (b.content.chapter_number || 0));
+    .filter(a => (a.artifact_type || '').toString().toLowerCase() === 'chapter')
+    .sort((a, b) => {
+      // KAN-367 v3: chapter_number comes from JSONB as string; coerce to Number for stable sort.
+      const an = Number(a.content?.chapter_number ?? Infinity);
+      const bn = Number(b.content?.chapter_number ?? Infinity);
+      return (Number.isFinite(an) ? an : Number.MAX_SAFE_INTEGER) - (Number.isFinite(bn) ? bn : Number.MAX_SAFE_INTEGER);
+    });
 
   // KAN-367 v3: Split into front_matter, chapters, and back_matter
   const frontMatter = allChapterArtifacts.filter(
-    a => a.content.content_type === 'front_matter' || a.content.content_type === 'metadata'
+    a => (a.content?.content_type || 'chapter') === 'front_matter' || (a.content?.content_type || 'chapter') === 'metadata'
   );
   const backMatter = allChapterArtifacts.filter(
-    a => a.content.content_type === 'back_matter'
+    a => (a.content?.content_type || 'chapter') === 'back_matter'
   );
   const chapters = allChapterArtifacts.filter(
-    a => !a.content.content_type || a.content.content_type === 'chapter'
+    a => !a.content?.content_type || (a.content?.content_type || 'chapter') === 'chapter'
   );
 
   // Detect prompt-only project (no chapters, has input_prompt, no source material)
@@ -1086,7 +1095,7 @@ const ProjectView: React.FC = () => {
                       ) : (
                         <div className="flex flex-col items-center">
                           <span className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                            {chapter.script_order || chapter.content.chapter_number || index + 1}
+                            {chapter.script_order || Number(chapter.content.chapter_number || index + 1)}
                           </span>
                           <div className="w-8 bg-gray-200 dark:bg-gray-600 rounded-full h-1">
                             <div
@@ -1328,7 +1337,7 @@ const ProjectView: React.FC = () => {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">
-                            Chapter {chapter.content.chapter_number}
+                            Chapter {Number(chapter.content.chapter_number)}
                           </span>
                         </div>
                         <h3 className="text-lg font-medium text-gray-900 dark:text-white truncate pr-4">
