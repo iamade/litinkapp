@@ -640,9 +640,20 @@ class BookStructureDetector:
             if re.match(r"^\d+$", line) or len(line) < 3:
                 continue
 
-            # Stop at bibliography sections
-            if line.upper() in ["NOTES", "BIBLIOGRAPHY", "REFERENCES", "FOOTNOTES"]:
-                print(f"[CONTENT EXTRACTION] Stopped at bibliography: {line}")
+            # Stop at bibliography/back-matter sections that should not bleed into the
+            # current chapter. KAN-367 v3: EPILOGUE/AFTERWORD/etc. content must be captured
+            # by its own special section, not appended to the last chapter.
+            if line.upper() in [
+                "NOTES", "BIBLIOGRAPHY", "REFERENCES", "FOOTNOTES",
+                "EPILOGUE", "AFTERWORD", "APPENDIX", "INDEX",
+                "ACKNOWLEDGMENTS", "ACKNOWLEDGEMENTS",
+            ]:
+                print(f"[CONTENT EXTRACTION] Stopped at back-matter boundary: {line}")
+                break
+
+            # KAN-367 v3: Also stop when any special section heading is encountered
+            if self._match_special_sections(line):
+                print(f"[CONTENT EXTRACTION] Stopped at special section: {line}")
                 break
 
             # Add content line

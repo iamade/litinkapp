@@ -248,13 +248,14 @@ class TestHierarchicalSectionAssignment:
 
     def test_book_b_chapters_then_epilogue(self):
         """Book B: Chapter 1-2 first, then EPILOGUE special section."""
+        epilogue_body = "iris lived to be ninety-three. " + _long_filler(80)
         content = self._book([
             "CHAPTER 1. The Beginning.",
             _long_filler(),
             "CHAPTER 2. The Middle.",
             _long_filler(),
             "EPILOGUE",
-            _long_filler(),
+            epilogue_body,
         ])
 
         result = self.processor.detect_structure(content)
@@ -265,9 +266,13 @@ class TestHierarchicalSectionAssignment:
         assert [c["number"] for c in sections[0]["chapters"]] == ["1", "2"]
         assert sections[1]["type"] == "special"
         assert sections[1].get("content_type") == "back_matter"
+        # Chapter 2 must not contain EPILOGUE body text
+        assert "iris" not in sections[0]["chapters"][1]["content"].lower()
+        assert "ninety-three" not in sections[0]["chapters"][1]["content"].lower()
 
     def test_book_c_etymology_chapters_epilogue(self):
         """Book C: ETYMOLOGY, Chapter 1-2, EPILOGUE."""
+        epilogue_body = "iris lived to be ninety-three. " + _long_filler(80)
         content = self._book([
             "ETYMOLOGY",
             _long_filler(),
@@ -276,7 +281,7 @@ class TestHierarchicalSectionAssignment:
             "CHAPTER 2. The Carpet-Bag.",
             _long_filler(),
             "EPILOGUE",
-            _long_filler(),
+            epilogue_body,
         ])
 
         result = self.processor.detect_structure(content)
@@ -289,6 +294,11 @@ class TestHierarchicalSectionAssignment:
         assert [c["number"] for c in sections[1]["chapters"]] == ["1", "2"]
         assert sections[2]["type"] == "special"
         assert sections[2].get("content_type") == "back_matter"
+        # Chapters must not contain ETYMOLOGY or EPILOGUE body text
+        for ch in sections[1]["chapters"]:
+            assert "iris" not in ch["content"].lower()
+            assert "ninety-three" not in ch["content"].lower()
+        assert "Carpet-Bag" not in sections[0]["content"]
 
     def test_garbage_year_not_chapter(self):
         """Standalone 4-digit years like '2026.' must not be treated as chapters."""
