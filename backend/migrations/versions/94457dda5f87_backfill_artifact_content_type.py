@@ -83,13 +83,9 @@ def upgrade() -> None:
     # valid JSON string value even if chapters.content_type is an enum.
     op.execute(
         """
-        UPDATE artifacts a
-        SET content = jsonb_set(
-            content,
-            '{content_type}',
-            to_jsonb(c.content_type::text)
-        )
-        FROM chapters c
+        UPDATE artifacts AS a
+        SET content = jsonb_set(a.content, '{content_type}', to_jsonb(c.content_type::text))
+        FROM chapters AS c
         WHERE a.artifact_type::text = 'CHAPTER'
           AND jsonb_typeof(a.content) = 'object'
           AND a.content->>'chapter_id' IS NOT NULL
@@ -121,11 +117,11 @@ def downgrade() -> None:
 
     op.execute(
         """
-        UPDATE artifacts
-        SET content = content - 'content_type'
-        WHERE artifact_type::text = 'CHAPTER'
-          AND jsonb_typeof(content) = 'object'
-          AND content->>'chapter_id' IS NOT NULL
-          AND content->>'content_type' IS NOT NULL;
+        UPDATE artifacts AS a
+        SET content = a.content - 'content_type'
+        WHERE a.artifact_type::text = 'CHAPTER'
+          AND jsonb_typeof(a.content) = 'object'
+          AND a.content->>'chapter_id' IS NOT NULL
+          AND a.content->>'content_type' IS NOT NULL;
         """
     )
