@@ -404,7 +404,9 @@ class SubscriptionManager:
             price_ids = {
                 SubscriptionTier.FREE: settings.STRIPE_FREE_PRICE_ID,
                 SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID,
-                SubscriptionTier.PRO: settings.STRIPE_STANDARD_PRICE_ID,
+                SubscriptionTier.PRO: (
+                    settings.STRIPE_STANDARD_PRICE_ID or settings.STRIPE_PRO_PRICE_ID
+                ),
                 SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID,
                 SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID,
                 SubscriptionTier.ENTERPRISE: settings.STRIPE_ENTERPRISE_PRICE_ID,
@@ -412,7 +414,17 @@ class SubscriptionManager:
 
             price_id = price_ids.get(tier)
             if not price_id:
-                raise ValueError(f"No price ID configured for tier: {tier.value}")
+                missing_env = {
+                    SubscriptionTier.FREE: "STRIPE_FREE_PRICE_ID",
+                    SubscriptionTier.BASIC: "STRIPE_BASIC_PRICE_ID",
+                    SubscriptionTier.PRO: "STRIPE_STANDARD_PRICE_ID or STRIPE_PRO_PRICE_ID",
+                    SubscriptionTier.PREMIUM: "STRIPE_PREMIUM_PRICE_ID",
+                    SubscriptionTier.PROFESSIONAL: "STRIPE_PROFESSIONAL_PRICE_ID",
+                    SubscriptionTier.ENTERPRISE: "STRIPE_ENTERPRISE_PRICE_ID",
+                }.get(tier, "STRIPE_*_PRICE_ID")
+                raise ValueError(
+                    f"No price ID configured for tier '{tier.value}'. Missing {missing_env}"
+                )
 
             # Create Stripe checkout session
             session = stripe.checkout.Session.create(

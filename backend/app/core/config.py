@@ -116,6 +116,13 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
 
+    # Featherless.ai (OpenAI-compatible fallback for free/basic text generation)
+    FEATHERLESS_API_KEY: Optional[str] = None
+    FEATHERLESS_BASE_URL: str = "https://api.featherless.ai/v1"
+    FEATHERLESS_FREE_MODEL: str = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+    FEATHERLESS_BASIC_MODEL: str = "Qwen/Qwen2.5-32B-Instruct"
+    FEATHERLESS_CONCURRENCY_LIMIT: int = 4
+
     # Social Auth
     OAUTH_REDIRECT_BASE_URL: str = (
         ""  # e.g. https://api.litinkai.com/api/v1/auth/callback
@@ -252,6 +259,7 @@ class Settings(BaseSettings):
     # Ollama API
     OLLAMA_API_KEY: Optional[str] = None
     OLLAMA_BASE_URL: str = "https://ollama.com/v1"
+    OLLAMA_RATE_LIMITED: bool = False
 
     # xAI Grok Video (prepared for future use)
     # Get your API key from: https://console.x.ai/

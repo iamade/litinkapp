@@ -2,6 +2,7 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 from app.core.logging import get_logger
+from app.core.config import settings
 
 logger = get_logger()
 
@@ -35,21 +36,21 @@ class ModelConfig:
 # Primary: Ollama Cloud (KAN-181) | Fallbacks: Ollama Cloud models
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="ollama/gemma4:31b",  # Ollama Cloud API — valid model ID (KAN-239 fix)
-        fallback="ollama/ministral-3:8b",  # Ollama Cloud, 8B params, Mistral (KAN-239)
-        fallback2="ollama/gemma3:12b",  # Ollama Cloud, 12B params, Gemma 3 (KAN-239)
-        fallback3="ollama/gemma3:4b",  # Ollama Cloud, 4B params, lightweight backup (KAN-239)
-        fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
+        primary=f"featherless/{settings.FEATHERLESS_FREE_MODEL}",  # Featherless fallback while Ollama weekly limits recover
+        fallback="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net before Ollama retries
+        fallback2="ollama/ministral-3:8b",  # Ollama Cloud, 8B params, Mistral (KAN-239)
+        fallback3="ollama/gemma3:12b",  # Ollama Cloud, 12B params, Gemma 3 (KAN-239)
+        fallback4="ollama/gemma3:4b",  # Ollama Cloud, 4B params, lightweight backup (KAN-239)
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.0,
         cost_per_1k_output=0.0,
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="ollama/deepseek-v3.2",  # Ollama Cloud, DeepSeek V3.2 (KAN-239)
-        fallback="ollama/gemma3:27b",  # Ollama Cloud, 27B params, high quality (KAN-239)
-        fallback2="ollama/ministral-3:14b",  # Ollama Cloud, 14B params, Mistral (KAN-239)
-        fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
+        primary=f"featherless/{settings.FEATHERLESS_BASIC_MODEL}",  # Featherless fallback while Ollama weekly limits recover
+        fallback="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net before Ollama retries
+        fallback2="ollama/gemma3:27b",  # Ollama Cloud, 27B params, high quality (KAN-239)
+        fallback3="ollama/ministral-3:14b",  # Ollama Cloud, 14B params, Mistral (KAN-239)
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.00014,

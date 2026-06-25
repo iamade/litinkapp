@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Tuple
 from openai import AsyncOpenAI
 from app.core.config import settings
@@ -33,6 +34,17 @@ class ProviderRouter:
                 base_url=settings.OLLAMA_BASE_URL,
             )
 
+        # Featherless.ai (OpenAI-compatible, for featherless/ prefixed models)
+        self.featherless_client = None
+        if settings.FEATHERLESS_API_KEY:
+            self.featherless_client = AsyncOpenAI(
+                api_key=settings.FEATHERLESS_API_KEY,
+                base_url=settings.FEATHERLESS_BASE_URL,
+            )
+        self.featherless_semaphore = asyncio.Semaphore(
+            max(1, settings.FEATHERLESS_CONCURRENCY_LIMIT)
+        )
+
         # Google AI Studio (direct, for google/ prefixed models)
         self.google_client = None
         if settings.GOOGLE_AI_STUDIO_API_KEY:
@@ -51,10 +63,21 @@ class ProviderRouter:
 
     def get_client_and_model(self, model: str) -> Tuple[AsyncOpenAI, str]:
         """Returns (client, resolved_model) based on model prefix."""
+        if model.startswith("ollama/") and settings.OLLAMA_RATE_LIMITED:
+            raise ValueError(
+                "Ollama routing disabled by OLLAMA_RATE_LIMITED; skipping "
+                f"model '{model}'"
+            )
+
         if model.startswith("ollama/") and self.ollama_client:
             resolved = model[len("ollama/"):]
             logger.info(f"[ProviderRouter] Routing {model} → Ollama Cloud as {resolved}")
             return self.ollama_client, resolved
+
+        if model.startswith("featherless/") and self.featherless_client:
+            resolved = model[len("featherless/"):]
+            logger.info(f"[ProviderRouter] Routing {model} → Featherless as {resolved}")
+            return self.featherless_client, resolved
 
         if model.startswith("google/") and self.google_client:
             resolved = model[len("google/"):]
@@ -78,6 +101,11 @@ class ProviderRouter:
     async def chat_completion(self, model: str, messages: list, **kwargs) -> Any:
         """Route a chat completion to the correct provider."""
         client, resolved_model = self.get_client_and_model(model)
+        if model.startswith("featherless/"):
+            async with self.featherless_semaphore:
+                return await client.chat.completions.create(
+                    model=resolved_model, messages=messages, **kwargs
+                )
         return await client.chat.completions.create(
             model=resolved_model, messages=messages, **kwargs
         )

@@ -18,7 +18,6 @@ from app.subscriptions.schemas import (
 from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.api.services.subscription import SubscriptionManager, SubscriptionTier
-from app.core.services.stripe import stripe_service
 from app.credits.service import CreditService
 from app.auth.models import User
 
@@ -88,13 +87,6 @@ async def create_checkout_session(
         # if checkout_data.tier == SubscriptionTier.PRO:
         #     raise HTTPException(status_code=400, detail="Pro tier is coming soon")
 
-        # Create or get Stripe customer
-        customer_id = await stripe_service.create_or_get_customer(
-            user_id=current_user.id,
-            email=current_user.email,
-            name=current_user.full_name,
-        )
-
         # Create checkout session
         session_data = await manager.create_checkout_session(
             user_id=str(current_user.id),
@@ -108,7 +100,10 @@ async def create_checkout_session(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        print(f"[SubscriptionsAPI] Error creating checkout session: {e}")
+        print(
+            "[SubscriptionsAPI] Error creating checkout session "
+            f"tier={checkout_data.tier.value} user_id={current_user.id}: {e}"
+        )
         raise HTTPException(status_code=500, detail="Failed to create checkout session")
 
 
@@ -123,6 +118,8 @@ async def handle_stripe_webhook(
 
         if not signature:
             raise HTTPException(status_code=400, detail="Missing Stripe signature")
+
+        from app.core.services.stripe import stripe_service
 
         # Handle webhook signature verification via stripe_service
         event_data = await stripe_service.handle_webhook(payload, signature)
