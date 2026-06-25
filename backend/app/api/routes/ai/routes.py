@@ -83,6 +83,7 @@ from app.credits.constants import (
 from app.credits.service import CreditService
 from app.core.services.file import FileService
 from app.core.services.redis import redis_client
+from app.projects.models import Project
 
 
 def parse_scene_descriptions(analysis_result: str) -> list:
@@ -276,6 +277,35 @@ def extract_characters(
         ]
 
     return characters[:10]
+
+
+def _ids_match(left: Any, right: Any) -> bool:
+    return str(left) == str(right)
+
+
+async def _user_can_modify_chapter_script(
+    session: AsyncSession,
+    chapter_data: Chapter,
+    current_user: User,
+) -> bool:
+    """Authorize script writes through either direct book or linked project ownership."""
+    book_data = getattr(chapter_data, "book", None)
+    if not book_data:
+        return False
+
+    if _ids_match(book_data.user_id, current_user.id):
+        return True
+
+    project_filters = [Project.book_id == book_data.id]
+    book_project_id = getattr(book_data, "project_id", None)
+    if book_project_id:
+        project_filters.append(Project.id == book_project_id)
+
+    result = await session.exec(select(Project).where(or_(*project_filters)))
+    linked_projects = result.all()
+    return any(
+        _ids_match(project.user_id, current_user.id) for project in linked_projects
+    )
 
 
 def validate_script_style(script_style: str) -> str:
@@ -4298,8 +4328,9 @@ async def save_script_and_scenes(
         if not chapter_data:
             raise HTTPException(status_code=404, detail="Chapter not found")
 
-        book_data = chapter_data.book
-        if str(book_data.user_id) != current_user.id:
+        if not await _user_can_modify_chapter_script(
+            session, chapter_data, current_user
+        ):
             raise HTTPException(
                 status_code=403, detail="Not authorized to modify this chapter"
             )
@@ -4361,6 +4392,8 @@ async def save_script_and_scenes(
             "script_name": script_name,
             "script_style": script_style,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error saving script and scenes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
