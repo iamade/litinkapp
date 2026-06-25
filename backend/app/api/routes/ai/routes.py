@@ -4285,8 +4285,12 @@ async def save_script_and_scenes(
 ):
     """Save a new AI-generated script and scene descriptions for a chapter."""
     try:
-        # Verify chapter access
-        # Verify chapter access
+        # KAN-405: Resolve chapter_id through Chapter, Artifact, or Project
+        # (mirrors generate_script_and_scenes id resolution)
+        resolved_chapter_id = None
+        is_artifact = False
+
+        # 1. Try Chapter table first (Explorer mode)
         stmt = (
             select(Chapter)
             .options(selectinload(Chapter.book))
@@ -4295,21 +4299,80 @@ async def save_script_and_scenes(
         result = await session.exec(stmt)
         chapter_data = result.first()
 
-        if not chapter_data:
-            raise HTTPException(status_code=404, detail="Chapter not found")
+        if chapter_data:
+            book_data = chapter_data.book
+            # KAN-405 fix: normalize UUID comparison (str vs UUID mismatch)
+            if str(book_data.user_id) != str(current_user.id):
+                raise HTTPException(
+                    status_code=403, detail="Not authorized to modify this chapter"
+                )
+            resolved_chapter_id = chapter_id
+        else:
+            # 2. Not in Chapter table — check Artifacts (Creator mode)
+            from app.projects.models import Artifact, Project
 
-        book_data = chapter_data.book
-        if str(book_data.user_id) != current_user.id:
-            raise HTTPException(
-                status_code=403, detail="Not authorized to modify this chapter"
-            )
+            stmt = select(Artifact).where(Artifact.id == chapter_id)
+            result = await session.exec(stmt)
+            artifact_data = result.first()
+
+            if artifact_data:
+                is_artifact = True
+                # Get project for access control
+                stmt = select(Project).where(Project.id == artifact_data.project_id)
+                result = await session.exec(stmt)
+                project = result.first()
+
+                if project:
+                    if str(project.user_id) != str(current_user.id):
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Not authorized to access this chapter",
+                        )
+                    # Try to resolve to real Chapter if project has linked book
+                    if project.book_id:
+                        content_data = artifact_data.content or {}
+                        chapter_num = content_data.get("chapter_number")
+                        if chapter_num:
+                            stmt = select(Chapter).where(
+                                Chapter.book_id == project.book_id,
+                                Chapter.chapter_number == chapter_num,
+                            )
+                            real_chapter = (await session.exec(stmt)).first()
+                            if real_chapter:
+                                resolved_chapter_id = str(real_chapter.id)
+                                is_artifact = False
+                    if resolved_chapter_id is None:
+                        resolved_chapter_id = chapter_id
+                else:
+                    raise HTTPException(status_code=404, detail="Project not found")
+            else:
+                # 3. Final fallback: check if chapter_id is a Project.id (Prompt-only)
+                from app.projects.models import Project
+
+                stmt = select(Project).where(Project.id == chapter_id)
+                result = await session.exec(stmt)
+                project_data = result.first()
+
+                if project_data:
+                    if str(project_data.user_id) != str(current_user.id):
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Not authorized to access this project",
+                        )
+                    is_artifact = True
+                    resolved_chapter_id = chapter_id
+                else:
+                    raise HTTPException(status_code=404, detail="Chapter not found")
+
+        if resolved_chapter_id is None:
+            raise HTTPException(status_code=404, detail="Chapter not found")
 
         # Generate default script name if not provided
         if not script_name:
             try:
                 # Count existing scripts for this chapter
                 statement = select(func.count()).where(
-                    Script.chapter_id == uuid.UUID(chapter_id)
+                    Script.chapter_id == uuid.UUID(resolved_chapter_id)
                 )
                 result = await session.exec(statement)
                 count = result.one()
@@ -4330,11 +4393,12 @@ async def save_script_and_scenes(
 
         # Create new script record (allow multiple scripts)
         script_record = {
-            "chapter_id": chapter_id,
+            "chapter_id": resolved_chapter_id,
             "user_id": current_user.id,
             "script_style": script_style,
             "script_name": script_name,
             "script": script,
+            "video_style": script_style,  # KAN-405: required field — use script_style as default
             "scene_descriptions": scene_descriptions,
             "characters": characters,
             "character_details": character_details,
@@ -4361,6 +4425,8 @@ async def save_script_and_scenes(
             "script_name": script_name,
             "script_style": script_style,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error saving script and scenes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
