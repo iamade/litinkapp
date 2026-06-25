@@ -4367,12 +4367,14 @@ async def save_script_and_scenes(
         if resolved_chapter_id is None:
             raise HTTPException(status_code=404, detail="Chapter not found")
 
+        resolved_chapter_uuid = uuid.UUID(str(resolved_chapter_id))
+
         # Generate default script name if not provided
         if not script_name:
             try:
                 # Count existing scripts for this chapter
                 statement = select(func.count()).where(
-                    Script.chapter_id == uuid.UUID(resolved_chapter_id)
+                    Script.chapter_id == resolved_chapter_uuid
                 )
                 result = await session.exec(statement)
                 count = result.one()
@@ -4393,7 +4395,7 @@ async def save_script_and_scenes(
 
         # Create new script record (allow multiple scripts)
         script_record = {
-            "chapter_id": resolved_chapter_id,
+            "chapter_id": resolved_chapter_uuid,
             "user_id": current_user.id,
             "script_style": script_style,
             "script_name": script_name,
