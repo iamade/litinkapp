@@ -394,20 +394,28 @@ class SubscriptionManager:
         }
 
     async def create_checkout_session(
-        self, user_id: str, tier: SubscriptionTier, success_url: str, cancel_url: str
+        self,
+        user_id: str,
+        tier: SubscriptionTier,
+        success_url: str,
+        cancel_url: str,
+        customer_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create Stripe checkout session for subscription
         """
         try:
+            if tier == SubscriptionTier.FREE:
+                raise ValueError("Free tier does not require checkout")
+            if tier == SubscriptionTier.ENTERPRISE:
+                raise ValueError("Enterprise tier requires a custom sales flow")
+
             # Get price ID for tier (you need to create these in Stripe Dashboard)
             price_ids = {
-                SubscriptionTier.FREE: settings.STRIPE_FREE_PRICE_ID,
                 SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID,
                 SubscriptionTier.PRO: settings.STRIPE_STANDARD_PRICE_ID,
                 SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID,
                 SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID,
-                SubscriptionTier.ENTERPRISE: settings.STRIPE_ENTERPRISE_PRICE_ID,
             }
 
             price_id = price_ids.get(tier)
@@ -415,19 +423,23 @@ class SubscriptionManager:
                 raise ValueError(f"No price ID configured for tier: {tier.value}")
 
             # Create Stripe checkout session
-            session = stripe.checkout.Session.create(
-                payment_method_types=["card"],
-                line_items=[
+            session_payload = {
+                "payment_method_types": ["card"],
+                "line_items": [
                     {
                         "price": price_id,
                         "quantity": 1,
                     }
                 ],
-                mode="subscription",
-                success_url=success_url,
-                cancel_url=cancel_url,
-                metadata={"user_id": str(user_id), "tier": tier.value},
-            )
+                "mode": "subscription",
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+                "metadata": {"user_id": str(user_id), "tier": tier.value},
+            }
+            if customer_id:
+                session_payload["customer"] = customer_id
+
+            session = stripe.checkout.Session.create(**session_payload)
 
             return {"checkout_url": session.url, "session_id": session.id}
 

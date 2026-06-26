@@ -101,6 +101,7 @@ async def create_checkout_session(
             tier=checkout_data.tier,
             success_url=str(checkout_data.success_url),
             cancel_url=str(checkout_data.cancel_url),
+            customer_id=customer_id,
         )
 
         return session_data
