@@ -11,6 +11,7 @@ class ProviderRouter:
 
     Routing rules:
         ollama/  → Ollama Cloud API (strip prefix)
+        piapi/   → PiAPI OpenAI-compatible API (strip prefix)
         google/  → Google AI Studio (strip prefix)
         groq/    → Groq (strip prefix)
         *        → OpenRouter (keep full model string)
@@ -31,6 +32,14 @@ class ProviderRouter:
             self.ollama_client = AsyncOpenAI(
                 api_key=settings.OLLAMA_API_KEY,
                 base_url=settings.OLLAMA_BASE_URL,
+            )
+
+        # PiAPI (OpenAI-compatible, for piapi/ prefixed models)
+        self.piapi_client = None
+        if settings.piapi_api_key:
+            self.piapi_client = AsyncOpenAI(
+                api_key=settings.piapi_api_key,
+                base_url=settings.PIAPI_BASE_URL,
             )
 
         # Google AI Studio (direct, for google/ prefixed models)
@@ -55,6 +64,16 @@ class ProviderRouter:
             resolved = model[len("ollama/"):]
             logger.info(f"[ProviderRouter] Routing {model} → Ollama Cloud as {resolved}")
             return self.ollama_client, resolved
+
+        if model.startswith("piapi/"):
+            if self.piapi_client:
+                resolved = model[len("piapi/"):]
+                logger.info(f"[ProviderRouter] Routing {model} → PiAPI as {resolved}")
+                return self.piapi_client, resolved
+            raise ValueError(
+                f"PiAPI routing unavailable for model '{model}'. "
+                "PIAPI_API_KEY_LITINKAI is not configured."
+            )
 
         if model.startswith("google/") and self.google_client:
             resolved = model[len("google/"):]

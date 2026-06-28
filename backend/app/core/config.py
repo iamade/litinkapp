@@ -253,6 +253,22 @@ class Settings(BaseSettings):
     OLLAMA_API_KEY: Optional[str] = None
     OLLAMA_BASE_URL: str = "https://ollama.com/v1"
 
+    # PiAPI runtime wiring (KAN-401)
+    PIAPI_API_KEY: Optional[str] = None
+    PIAPI_API_KEY_LITINKAI: Optional[str] = None
+    PIPAP_API_KEY_LITINKAI: Optional[str] = None
+    PIAPI_BASE_URL: str = "https://api.piapi.ai/v1"
+    PIAPI_FREE_MODEL: str = "gpt-4o-mini"
+    PIAPI_BASIC_MODEL: str = "gpt-4o-mini"
+
+    @property
+    def piapi_api_key(self) -> Optional[str]:
+        return (
+            self.PIAPI_API_KEY_LITINKAI
+            or self.PIPAP_API_KEY_LITINKAI
+            or self.PIAPI_API_KEY
+        )
+
     # xAI Grok Video (prepared for future use)
     # Get your API key from: https://console.x.ai/
     GROK_API_KEY: str = os.getenv("GROK_API_KEY", "")

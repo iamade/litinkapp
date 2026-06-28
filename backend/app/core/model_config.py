@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
+from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger()
@@ -47,7 +48,7 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ),
     ModelTier.BASIC: ModelConfig(
         primary="ollama/deepseek-v3.2",  # Ollama Cloud, DeepSeek V3.2 (KAN-239)
-        fallback="ollama/gemma3:27b",  # Ollama Cloud, 27B params, high quality (KAN-239)
+        fallback=f"piapi/{settings.PIAPI_BASIC_MODEL}",  # PiAPI runtime fallback (KAN-401)
         fallback2="ollama/ministral-3:14b",  # Ollama Cloud, 14B params, Mistral (KAN-239)
         fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
         max_tokens=4000,
