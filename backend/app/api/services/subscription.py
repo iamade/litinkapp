@@ -394,36 +394,53 @@ class SubscriptionManager:
         }
 
     async def create_checkout_session(
-        self, user_id: str, tier: SubscriptionTier, success_url: str, cancel_url: str
+        self, user_id: str, tier: SubscriptionTier, success_url: str, cancel_url: str,
+        billing_period: str = "monthly",
     ) -> Dict[str, Any]:
         """
         Create Stripe checkout session for subscription
         """
         try:
-            # Get price ID for tier (you need to create these in Stripe Dashboard)
-            price_ids = {
-                SubscriptionTier.FREE: settings.STRIPE_FREE_PRICE_ID,
-                SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID,
-                SubscriptionTier.PRO: (
-                    settings.STRIPE_STANDARD_PRICE_ID or settings.STRIPE_PRO_PRICE_ID
-                ),
-                SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID,
-                SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID,
-                SubscriptionTier.ENTERPRISE: settings.STRIPE_ENTERPRISE_PRICE_ID,
-            }
+            # Select monthly vs annual price IDs based on billing_period
+            annual = billing_period == "annual"
+            if annual:
+                price_ids = {
+                    SubscriptionTier.FREE: settings.STRIPE_FREE_PRICE_ID_ANNUAL,
+                    SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID_ANNUAL,
+                    SubscriptionTier.PRO: (
+                        settings.STRIPE_STANDARD_PRICE_ID_ANNUAL
+                        or settings.STRIPE_PRO_PRICE_ID
+                    ),
+                    SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID_ANNUAL,
+                    SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID_ANNUAL,
+                    SubscriptionTier.ENTERPRISE: settings.STRIPE_ENTERPRISE_PRICE_ID_ANNUAL,
+                }
+            else:
+                price_ids = {
+                    SubscriptionTier.FREE: settings.STRIPE_FREE_PRICE_ID,
+                    SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID,
+                    SubscriptionTier.PRO: (
+                        settings.STRIPE_STANDARD_PRICE_ID or settings.STRIPE_PRO_PRICE_ID
+                    ),
+                    SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID,
+                    SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID,
+                    SubscriptionTier.ENTERPRISE: settings.STRIPE_ENTERPRISE_PRICE_ID,
+                }
 
             price_id = price_ids.get(tier)
             if not price_id:
+                suffix = "_ANNUAL" if annual else ""
                 missing_env = {
-                    SubscriptionTier.FREE: "STRIPE_FREE_PRICE_ID",
-                    SubscriptionTier.BASIC: "STRIPE_BASIC_PRICE_ID",
-                    SubscriptionTier.PRO: "STRIPE_STANDARD_PRICE_ID or STRIPE_PRO_PRICE_ID",
-                    SubscriptionTier.PREMIUM: "STRIPE_PREMIUM_PRICE_ID",
-                    SubscriptionTier.PROFESSIONAL: "STRIPE_PROFESSIONAL_PRICE_ID",
-                    SubscriptionTier.ENTERPRISE: "STRIPE_ENTERPRISE_PRICE_ID",
-                }.get(tier, "STRIPE_*_PRICE_ID")
+                    SubscriptionTier.FREE: f"STRIPE_FREE_PRICE_ID{suffix}",
+                    SubscriptionTier.BASIC: f"STRIPE_BASIC_PRICE_ID{suffix}",
+                    SubscriptionTier.PRO: f"STRIPE_STANDARD_PRICE_ID{suffix} or STRIPE_PRO_PRICE_ID",
+                    SubscriptionTier.PREMIUM: f"STRIPE_PREMIUM_PRICE_ID{suffix}",
+                    SubscriptionTier.PROFESSIONAL: f"STRIPE_PROFESSIONAL_PRICE_ID{suffix}",
+                    SubscriptionTier.ENTERPRISE: f"STRIPE_ENTERPRISE_PRICE_ID{suffix}",
+                }.get(tier, f"STRIPE_*_PRICE_ID{suffix}")
                 raise ValueError(
-                    f"No price ID configured for tier '{tier.value}'. Missing {missing_env}"
+                    f"No {billing_period} price ID configured for tier "
+                    f"'{tier.value}'. Missing {missing_env}"
                 )
 
             # Create Stripe checkout session

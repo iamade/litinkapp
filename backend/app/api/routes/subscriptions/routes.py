@@ -93,6 +93,7 @@ async def create_checkout_session(
             tier=checkout_data.tier,
             success_url=str(checkout_data.success_url),
             cancel_url=str(checkout_data.cancel_url),
+            billing_period=checkout_data.billing_period or "monthly",
         )
 
         return session_data

@@ -175,13 +175,21 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
     STRIPE_PRICE_ID: Optional[str] = None
 
-    # Stripe Price IDs for subscription tiers
+    # Stripe Price IDs for subscription tiers (monthly)
     STRIPE_FREE_PRICE_ID: Optional[str] = None
     STRIPE_BASIC_PRICE_ID: Optional[str] = None
     STRIPE_STANDARD_PRICE_ID: Optional[str] = None
     STRIPE_PREMIUM_PRICE_ID: Optional[str] = None
     STRIPE_PROFESSIONAL_PRICE_ID: Optional[str] = None
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = None
+
+    # Stripe Price IDs for subscription tiers (annual)
+    STRIPE_FREE_PRICE_ID_ANNUAL: Optional[str] = None
+    STRIPE_BASIC_PRICE_ID_ANNUAL: Optional[str] = None
+    STRIPE_STANDARD_PRICE_ID_ANNUAL: Optional[str] = None
+    STRIPE_PREMIUM_PRICE_ID_ANNUAL: Optional[str] = None
+    STRIPE_PROFESSIONAL_PRICE_ID_ANNUAL: Optional[str] = None
+    STRIPE_ENTERPRISE_PRICE_ID_ANNUAL: Optional[str] = None
     STRIPE_PRO_PRICE_ID: Optional[str] = None  # Keep for backward compatibility
 
     # Rate Limiting per Tier (requests per minute)
