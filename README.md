@@ -244,6 +244,13 @@ npm run build        # Production build
 npm run lint         # ESLint
 ```
 
+From the repo root, use the Makefile wrappers during local testing:
+
+```bash
+make frontend        # Start Vite; expects :5173 when free
+make frontend-down   # Stop Vite listeners on :5173 and :5174
+```
+
 The frontend proxies API requests to the backend via `VITE_API_URL` (set in `frontend/.env`).
 
 ---
@@ -254,7 +261,15 @@ Use this guide to test subscription upgrades locally via Stripe test mode. **Do 
 
 ### 1. Start the Stripe CLI listener
 
-Before testing subscriptions, start the Stripe CLI to forward webhook events to your local backend:
+Creating a Checkout Session and redirecting to Stripe does **not** require the listener. The listener is required after you complete a local test payment, because Stripe needs a public way to send `checkout.session.completed`, subscription, and invoice webhook events back to your local backend. Without it, Checkout can open, but the local database will not receive the webhook that activates the subscription and grants the expected plan state.
+
+Before testing end-to-end subscription activation locally, start the Stripe CLI in a separate terminal:
+
+```bash
+make stripe-listen
+```
+
+Equivalent direct command:
 
 ```bash
 stripe listen --forward-to localhost:8000/api/subscriptions/webhook
@@ -275,11 +290,16 @@ Ensure the following Stripe Price IDs are set in `backend/.envs/.env.local`:
 | Env Var | Tier | Required |
 |---------|------|----------|
 | `STRIPE_FREE_PRICE_ID` | Free | No (default tier) |
-| `STRIPE_BASIC_PRICE_ID` | Basic | Yes |
-| `STRIPE_STANDARD_PRICE_ID` | Standard | Yes |
-| `STRIPE_PREMIUM_PRICE_ID` | Premium | Yes |
-| `STRIPE_PROFESSIONAL_PRICE_ID` | Professional | Yes |
-| `STRIPE_ENTERPRISE_PRICE_ID` | Enterprise | Yes |
+| `STRIPE_BASIC_MONTHLY_PRICE_ID` | Basic monthly | Yes |
+| `STRIPE_BASIC_ANNUAL_PRICE_ID` | Basic annual | Yes |
+| `STRIPE_STANDARD_MONTHLY_PRICE_ID` | Standard monthly | Yes |
+| `STRIPE_STANDARD_ANNUAL_PRICE_ID` | Standard annual | Yes |
+| `STRIPE_PREMIUM_MONTHLY_PRICE_ID` | Premium monthly | Yes |
+| `STRIPE_PREMIUM_ANNUAL_PRICE_ID` | Premium annual | Yes |
+| `STRIPE_PROFESSIONAL_MONTHLY_PRICE_ID` | Professional monthly | Yes |
+| `STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID` | Professional annual | Yes |
+| `STRIPE_ENTERPRISE_MONTHLY_PRICE_ID` | Enterprise monthly/custom | Optional |
+| `STRIPE_ENTERPRISE_ANNUAL_PRICE_ID` | Enterprise annual/custom | Optional |
 | `STRIPE_PRO_PRICE_ID` | Pro (legacy) | No |
 
 Create Price IDs in the [Stripe Dashboard](https://dashboard.stripe.com/test/products) under **Test Mode**.
