@@ -670,7 +670,7 @@ async def generate_narrator_audio(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = result.get("audio_time", 0)
+                duration = result.get("audio_time") or 0  # KAN-373: handle explicit null from API
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
@@ -1274,7 +1274,7 @@ async def generate_character_audio(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = result.get("audio_time", 0)
+                duration = result.get("audio_time") or 0  # KAN-373: handle explicit null from API
 
                 if not audio_url:
                     raise Exception("No audio URL in response")
@@ -1541,7 +1541,7 @@ async def generate_sound_effects_audio(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = result.get("audio_time", 10)
+                duration = result.get("audio_time") or 10  # KAN-373: handle explicit null from API
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
@@ -1727,7 +1727,7 @@ async def generate_background_music(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = result.get("audio_time", 30.0)
+                duration = result.get("audio_time") or 30.0  # KAN-373: handle explicit null from API
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
@@ -2031,7 +2031,7 @@ def generate_chapter_audio_task(
                     except Exception as persist_error:
                         logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                         raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
-                    audio_duration = result.get("audio_time", duration)
+                    audio_duration = result.get("audio_time") or duration  # KAN-373: handle explicit null from API
                 else:
                     raise Exception(
                         f"Failed to generate {audio_type}: {result.get('error', 'Unknown error')}"
