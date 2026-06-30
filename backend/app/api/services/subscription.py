@@ -393,26 +393,88 @@ class SubscriptionManager:
             f"{resource_type}s_remaining": "unlimited",  # no monthly cap
         }
 
+    def _get_price_id_for_tier(
+        self, tier: SubscriptionTier, billing_period: str = "monthly"
+    ) -> Optional[str]:
+        """
+        Resolve the Stripe price ID for a tier and billing period.
+        Supports new per-period env vars (STRIPE_{TIER}_{MONTHLY|ANNUAL}_PRICE_ID)
+        with fallback to the legacy STRIPE_{TIER}_PRICE_ID for backward compat.
+        """
+        period = (billing_period or "monthly").lower()
+        tier_key = tier.value.upper()
+
+        # New per-period env vars
+        period_price_id = getattr(
+            settings, f"STRIPE_{tier_key}_{period.upper()}_PRICE_ID", None
+        )
+        if period_price_id:
+            return period_price_id
+
+        # Legacy fallback
+        legacy_price_id = getattr(settings, f"STRIPE_{tier_key}_PRICE_ID", None)
+        if legacy_price_id:
+            return legacy_price_id
+
+        # Back-compat: SubscriptionTier.PRO maps to STRIPE_STANDARD_PRICE_ID
+        # (PRO tier IS "Standard" in this app per credits/constants.py mapping).
+        # STRIPE_PRO_PRICE_ID is a legacy alias that may not be set in all envs.
+        if tier == SubscriptionTier.PRO:
+            pro_price = getattr(settings, "STRIPE_PRO_PRICE_ID", None)
+            if pro_price:
+                return pro_price
+            return getattr(settings, "STRIPE_STANDARD_PRICE_ID", None)
+
+        return None
+
     async def create_checkout_session(
-        self, user_id: str, tier: SubscriptionTier, success_url: str, cancel_url: str
+        self,
+        user_id: str,
+        tier: SubscriptionTier,
+        success_url: str,
+        cancel_url: str,
+        billing_period: str = "monthly",
     ) -> Dict[str, Any]:
         """
         Create Stripe checkout session for subscription
         """
         try:
+            # KAN-406: Free tier does not require Stripe checkout
+            if tier == SubscriptionTier.FREE:
+                raise ValueError("Free tier does not require a paid checkout session")
+
             # Get price ID for tier (you need to create these in Stripe Dashboard)
             price_ids = {
-                SubscriptionTier.FREE: settings.STRIPE_FREE_PRICE_ID,
-                SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID,
-                SubscriptionTier.PRO: settings.STRIPE_STANDARD_PRICE_ID,
-                SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID,
-                SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID,
-                SubscriptionTier.ENTERPRISE: settings.STRIPE_ENTERPRISE_PRICE_ID,
+                SubscriptionTier.FREE: self._get_price_id_for_tier(
+                    SubscriptionTier.FREE, billing_period
+                ),
+                SubscriptionTier.BASIC: self._get_price_id_for_tier(
+                    SubscriptionTier.BASIC, billing_period
+                ),
+                SubscriptionTier.PRO: self._get_price_id_for_tier(
+                    SubscriptionTier.PRO, billing_period
+                ),
+                SubscriptionTier.PREMIUM: self._get_price_id_for_tier(
+                    SubscriptionTier.PREMIUM, billing_period
+                ),
+                SubscriptionTier.PROFESSIONAL: self._get_price_id_for_tier(
+                    SubscriptionTier.PROFESSIONAL, billing_period
+                ),
+                SubscriptionTier.ENTERPRISE: self._get_price_id_for_tier(
+                    SubscriptionTier.ENTERPRISE, billing_period
+                ),
             }
 
             price_id = price_ids.get(tier)
             if not price_id:
                 raise ValueError(f"No price ID configured for tier: {tier.value}")
+
+            # Enterprise custom price must be a real Stripe price ID
+            price_id_str = str(price_id)
+            if tier == SubscriptionTier.ENTERPRISE and not price_id_str.startswith("price_"):
+                raise ValueError(
+                    "Enterprise tier requires a valid Stripe price ID. Contact admin for custom quote."
+                )
 
             # Create Stripe checkout session
             session = stripe.checkout.Session.create(
