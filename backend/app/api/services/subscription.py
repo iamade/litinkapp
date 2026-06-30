@@ -416,9 +416,14 @@ class SubscriptionManager:
         if legacy_price_id:
             return legacy_price_id
 
-        # Back-compat special cases from older config names
+        # Back-compat: SubscriptionTier.PRO maps to STRIPE_STANDARD_PRICE_ID
+        # (PRO tier IS "Standard" in this app per credits/constants.py mapping).
+        # STRIPE_PRO_PRICE_ID is a legacy alias that may not be set in all envs.
         if tier == SubscriptionTier.PRO:
-            return getattr(settings, "STRIPE_PRO_PRICE_ID", None)
+            pro_price = getattr(settings, "STRIPE_PRO_PRICE_ID", None)
+            if pro_price:
+                return pro_price
+            return getattr(settings, "STRIPE_STANDARD_PRICE_ID", None)
 
         return None
 
