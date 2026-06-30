@@ -1272,8 +1272,10 @@ async def generate_character_audio(
             audio_url = None
             duration = 0
 
+            original_cdn_url = None  # KAN-373: track for provider metadata
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
+                original_cdn_url = audio_url
                 duration = result.get("audio_time") or 0  # KAN-373: handle explicit null from API
 
                 if not audio_url:
