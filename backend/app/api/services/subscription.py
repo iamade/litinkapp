@@ -439,6 +439,10 @@ class SubscriptionManager:
         Create Stripe checkout session for subscription
         """
         try:
+            # KAN-406: Free tier does not require Stripe checkout
+            if tier == SubscriptionTier.FREE:
+                raise ValueError("Free tier does not require a paid checkout session")
+
             # Get price ID for tier (you need to create these in Stripe Dashboard)
             price_ids = {
                 SubscriptionTier.FREE: self._get_price_id_for_tier(
