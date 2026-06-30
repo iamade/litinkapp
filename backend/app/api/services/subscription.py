@@ -411,6 +411,15 @@ class SubscriptionManager:
         if period_price_id:
             return period_price_id
 
+        # The internal "pro" tier is displayed as Standard, and the canonical
+        # per-period env vars use the display name.
+        if tier == SubscriptionTier.PRO:
+            standard_period_price_id = getattr(
+                settings, f"STRIPE_STANDARD_{period.upper()}_PRICE_ID", None
+            )
+            if standard_period_price_id:
+                return standard_period_price_id
+
         # Legacy fallback
         legacy_price_id = getattr(settings, f"STRIPE_{tier_key}_PRICE_ID", None)
         if legacy_price_id:
