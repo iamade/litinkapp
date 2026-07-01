@@ -70,6 +70,8 @@ interface ScriptGenerationOptions {
   sceneCount?: number;
   focusAreas: string[];
   scriptStoryType?: string;
+  customLogline?: string;
+  generationMode?: 'draft' | 'cinematic';
 }
 
 export const useScriptGeneration = (chapterId: string) => {
@@ -141,7 +143,8 @@ export const useScriptGeneration = (chapterId: string) => {
           sceneCount: options.sceneCount,
           focusAreas: options.focusAreas,
           scriptStoryType: options.scriptStoryType,
-          customLogline: options.customLogline
+          customLogline: options.customLogline,
+          generationMode: options.generationMode
         }
       );
       
