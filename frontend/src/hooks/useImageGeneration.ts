@@ -36,7 +36,6 @@ interface ImageGenerationOptions {
   useCharacterReferences: boolean;
   includeBackground: boolean;
   lightingMood: string;
-  generationMode?: 'draft' | 'cinematic';
   customPrompt?: string;
 }
 
@@ -297,7 +296,6 @@ export const useImageGeneration = (
         character_image_urls: characterImageUrls,
         is_suggested_shot: isSuggestedShot,  // Pass suggested shot flag to backend
         shot_index: shotIndex,  // Pass shot_index to backend (0 = Key Scene, 1+ = Suggested)
-        generation_mode: options.generationMode
       };
 
       const result = await userService.generateSceneImage(chapterId!, sceneNumber, request);
@@ -386,8 +384,7 @@ export const useImageGeneration = (
         style: options.style,
         aspect_ratio: options.aspectRatio,
         custom_prompt: options.lightingMood ? `Lighting mood: ${options.lightingMood}` : undefined,
-        script_id: selectedScriptId ?? undefined,
-        generation_mode: options.generationMode
+        script_id: selectedScriptId ?? undefined
       };
 
       const result = await userService.generateCharacterImage(chapterId!, request);
