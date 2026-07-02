@@ -21,7 +21,13 @@ from app.auth.models import User
 from app.plots.models import PlotOverview, Character
 from app.projects.models import Project
 from app.credits.dependencies import require_credits
-from app.credits.constants import OperationType, PLOT_GEN, CHARACTER_GEN
+from app.credits.constants import (
+    OperationType,
+    PLOT_GEN,
+    CHARACTER_GEN,
+    get_book_pipeline_credit_rate,
+    normalize_book_pipeline_mode,
+)
 from app.credits.service import CreditService
 
 router = APIRouter()
@@ -33,7 +39,6 @@ async def generate_plot_overview(
     request: PlotGenerationRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.PLOT_GEN, PLOT_GEN)),
 ):
     """
     Generate comprehensive plot overview with characters for a book.
@@ -54,6 +59,40 @@ async def generate_plot_overview(
         if book.user_id != current_user.id:
             raise HTTPException(
                 status_code=403, detail="Not authorized to access this book"
+            )
+
+        subscription_manager = SubscriptionManager(session)
+        user_tier = await subscription_manager.get_user_tier(current_user.id)
+        generation_mode = normalize_book_pipeline_mode(
+            request.generation_mode, user_tier.value
+        )
+        credit_cost = get_book_pipeline_credit_rate("plot", generation_mode, user_tier.value)
+        credit_service = CreditService(session)
+        try:
+            reservation_id = await credit_service.reserve_credits(
+                user_id=current_user.id,
+                amount=credit_cost,
+                operation_type=OperationType.PLOT_GEN,
+                ref_id=str(uuid.uuid4()),
+                meta={
+                    "ticket": "KAN-399",
+                    "pipeline": "book",
+                    "generation_mode": generation_mode,
+                    "user_tier": user_tier.value,
+                },
+            )
+            await session.commit()
+        except ValueError:
+            balance = await credit_service.get_effective_balance(current_user.id)
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "message": "Insufficient credits",
+                    "balance": balance,
+                    "required": credit_cost,
+                    "operation_type": OperationType.PLOT_GEN,
+                    "generation_mode": generation_mode,
+                },
             )
 
         # Validate refinement prompt for safety (only allow plot-related operations)
@@ -131,8 +170,7 @@ async def generate_plot_overview(
                     ]
 
         # Generate plot overview with refinement support
-        credit_service = CreditService(session)
-        async with credit_service.credit_transaction(reservation_id, PLOT_GEN):
+        async with credit_service.credit_transaction(reservation_id, credit_cost):
             result = await plot_service.generate_plot_overview(
                 user_id=current_user.id,
                 book_id=book_id,
@@ -476,7 +514,6 @@ async def generate_project_plot_overview(
     request: ProjectPlotGenerationRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.PLOT_GEN, PLOT_GEN)),
 ):
     """
     Generate plot overview from a project's prompt (no book required).
@@ -504,6 +541,40 @@ async def generate_project_plot_overview(
                 status_code=403, detail="Not authorized to access this project"
             )
 
+        subscription_manager = SubscriptionManager(session)
+        user_tier = await subscription_manager.get_user_tier(current_user.id)
+        generation_mode = normalize_book_pipeline_mode(
+            request.generation_mode, user_tier.value
+        )
+        credit_cost = get_book_pipeline_credit_rate("plot", generation_mode, user_tier.value)
+        credit_service = CreditService(session)
+        try:
+            reservation_id = await credit_service.reserve_credits(
+                user_id=current_user.id,
+                amount=credit_cost,
+                operation_type=OperationType.PLOT_GEN,
+                ref_id=str(uuid.uuid4()),
+                meta={
+                    "ticket": "KAN-399",
+                    "pipeline": "book",
+                    "generation_mode": generation_mode,
+                    "user_tier": user_tier.value,
+                },
+            )
+            await session.commit()
+        except ValueError:
+            balance = await credit_service.get_effective_balance(current_user.id)
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "message": "Insufficient credits",
+                    "balance": balance,
+                    "required": credit_cost,
+                    "operation_type": OperationType.PLOT_GEN,
+                    "generation_mode": generation_mode,
+                },
+            )
+
         # If refinement is requested, fetch existing plot
         existing_plot = None
         if request.refinement_prompt:
@@ -525,8 +596,7 @@ async def generate_project_plot_overview(
         # Generate plot from project prompt (or refine existing)
         # Pass book_id to enable character extraction from book content
         plot_service = PlotService(session)
-        credit_service = CreditService(session)
-        async with credit_service.credit_transaction(reservation_id, PLOT_GEN):
+        async with credit_service.credit_transaction(reservation_id, credit_cost):
             result = await plot_service.generate_plot_from_prompt(
                 user_id=current_user.id,
                 project_id=project_id,

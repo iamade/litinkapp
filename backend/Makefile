@@ -15,6 +15,11 @@ dev:
 	DEBUG=false ENVIRONMENT=development ENV_FILE=./.envs/.env.docker docker compose -p mac-dev -f local.yml up --build -d --remove-orphans
 # 	@cd scripts && ./start-local-dev.sh
 
+# Forward Stripe test-mode webhooks to the local backend.
+# Use when completing a local Checkout payment and expecting subscription state/credits to update.
+stripe-listen:
+	stripe listen --forward-to localhost:8000/api/subscriptions/webhook
+
 # Run in production mode
 up:
 	DEBUG=false ENVIRONMENT=production docker compose -p mac-dev -f local.yml up --build -d
@@ -94,6 +99,7 @@ help:
 	@echo "  make dev               - Start app in development mode (mac-dev project)"
 	@echo "  make up                - Start app in production mode"
 	@echo "  make debug             - Start app with debugger enabled"
+	@echo "  make stripe-listen     - Forward Stripe test webhooks to local backend"
 	@echo "  make down              - Stop mac-dev project services"
 	@echo "  make rebuild-dev       - Rebuild and start app in dev mode"
 	@echo "  make logs              - Show API logs"

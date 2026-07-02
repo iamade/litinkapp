@@ -734,6 +734,7 @@ const ProjectView: React.FC = () => {
             onUpdateScript={updateScript}
             onDeleteScript={deleteScript}
             plotOverview={plotOverview}
+            userTier={user?.subscription_tier || 'free'}
             onCreatePlotCharacter={async (name: string, entityType: 'character' | 'object' | 'location' = 'character') => {
               if (!id) throw new Error('No project ID');
               const result = await userService.createProjectCharacter(id, name, entityType);
@@ -807,6 +808,7 @@ const ProjectView: React.FC = () => {
             videoGenerations={filteredVideoGenerations}
             onDeleteGeneration={handleDeleteVideoGeneration}
             onNavigateToTab={(tab) => setActiveTab(tab as WorkflowTab)}
+            userTier={user?.subscription_tier || 'free'}
           />
         );
 

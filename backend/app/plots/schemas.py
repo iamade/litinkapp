@@ -49,6 +49,9 @@ class PlotOverviewBase(BaseModel):
     generation_method: Optional[str] = Field(
         None, max_length=100, description="Method used for generation"
     )
+    generation_mode: Optional[str] = Field(
+        None, max_length=20, description="KAN-399 credit mode: draft or cinematic"
+    )
     model_used: Optional[str] = Field(None, max_length=100, description="AI model used")
     generation_cost: Optional[Decimal] = Field(None, description="Cost of generation")
     status: str = Field("pending", max_length=50, description="Current status")

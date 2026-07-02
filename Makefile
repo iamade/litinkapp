@@ -1,4 +1,4 @@
-.PHONY: help tunnel-dev tunnel-staging start-vps-dev start-vps-staging start-dev start-staging vps-dev vps-staging vps-down vps-logs vps-ps dev staging frontend logs logs-api logs-worker ps ps-backend stop-backend down docker-down down-backend restart-dev restart-staging recreate-backend migrate current-migration history
+.PHONY: help tunnel-dev tunnel-staging start-vps-dev start-vps-staging start-dev start-staging vps-dev vps-staging vps-down vps-logs vps-ps dev staging frontend frontend-down stripe-listen logs logs-api logs-worker ps ps-backend stop-backend down docker-down down-backend restart-dev restart-staging recreate-backend migrate current-migration history
 
 help:
 	@echo "LitInkAI local/VPS tunnel commands"
@@ -21,6 +21,8 @@ help:
 	@echo "  make dev              - Run the existing backend Makefile dev target"
 	@echo "  make staging          - Not mapped to VPS tunnel; use make vps-staging explicitly"
 	@echo "  make frontend         - Start local Vite frontend on localhost:5173"
+	@echo "  make frontend-down    - Stop local Vite frontend listeners on 5173/5174"
+	@echo "  make stripe-listen    - Forward Stripe test webhooks to local backend"
 	@echo ""
 	@echo "Backend Docker helpers:"
 	@echo "  make logs             - Follow all backend service logs"
@@ -87,6 +89,26 @@ staging:
 
 frontend:
 	cd frontend && npm run dev
+
+frontend-down:
+	@pids="$$(lsof -tiTCP:5173 -sTCP:LISTEN 2>/dev/null; lsof -tiTCP:5174 -sTCP:LISTEN 2>/dev/null)"; \
+	if [ -n "$$pids" ]; then \
+		echo "$$pids" | xargs kill 2>/dev/null || true; \
+		sleep 1; \
+		remaining="$$(lsof -tiTCP:5173 -sTCP:LISTEN 2>/dev/null; lsof -tiTCP:5174 -sTCP:LISTEN 2>/dev/null)"; \
+		if [ -n "$$remaining" ]; then \
+			echo "Failed to stop frontend listener(s): $$remaining"; \
+			echo "Try: kill $$remaining"; \
+			exit 1; \
+		else \
+			echo "Stopped frontend listener(s) on 5173/5174"; \
+		fi; \
+	else \
+		echo "No frontend listener found on 5173/5174"; \
+	fi
+
+stripe-listen:
+	stripe listen --forward-to localhost:8000/api/subscriptions/webhook
 
 restart-dev: start-dev
 

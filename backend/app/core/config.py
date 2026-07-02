@@ -168,7 +168,7 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
     STRIPE_PRICE_ID: Optional[str] = None
 
-    # Stripe Price IDs for subscription tiers
+    # Stripe Price IDs for subscription tiers (legacy single-period)
     STRIPE_FREE_PRICE_ID: Optional[str] = None
     STRIPE_BASIC_PRICE_ID: Optional[str] = None
     STRIPE_STANDARD_PRICE_ID: Optional[str] = None
@@ -176,6 +176,16 @@ class Settings(BaseSettings):
     STRIPE_PROFESSIONAL_PRICE_ID: Optional[str] = None
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = None
     STRIPE_PRO_PRICE_ID: Optional[str] = None  # Keep for backward compatibility
+
+    # KAN-406: Per-period Stripe Price IDs (canonical source for billing_period routing)
+    STRIPE_BASIC_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_BASIC_ANNUAL_PRICE_ID: Optional[str] = None
+    STRIPE_STANDARD_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_STANDARD_ANNUAL_PRICE_ID: Optional[str] = None
+    STRIPE_PREMIUM_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_PREMIUM_ANNUAL_PRICE_ID: Optional[str] = None
+    STRIPE_PROFESSIONAL_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID: Optional[str] = None
 
     # Rate Limiting per Tier (requests per minute)
     RATE_LIMITS: ClassVar[Dict[str, int]] = {
@@ -204,6 +214,10 @@ class Settings(BaseSettings):
     # ModelsLab must fetch media from an externally reachable host.
     MODELSLAB_MEDIA_PUBLIC_URL: Optional[str] = None
     MINIO_PROVIDER_PUBLIC_URL: Optional[str] = None
+    # Optional port to enforce on MinIO public URLs when the configured URL
+    # omits an explicit port. Used to keep :8443 on VPS-staging where the
+    # load balancer / Caddy only terminates TLS on that port.
+    MINIO_PUBLIC_PORT: Optional[int] = None
 
     # S3 Configuration (for production)
     S3_ENDPOINT: Optional[str] = None  # AWS S3 or S3-compatible endpoint

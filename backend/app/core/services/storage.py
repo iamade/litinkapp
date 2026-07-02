@@ -4,6 +4,7 @@ import re
 import hashlib
 from typing import Optional, BinaryIO
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 from app.core.config import settings
 import boto3
 from botocore.client import Config
@@ -11,6 +12,43 @@ from botocore.exceptions import ClientError
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _enforce_minio_port(url: str) -> str:
+    """Ensure MinIO public URLs carry an explicit port when configured.
+
+    Some MinIO public URLs (e.g. ``https://minio-staging.litinkai.com``) omit a
+    port and rely on the URL scheme default (443/80). On VPS-staging the
+    TLS-terminating reverse proxy only listens on a non-default port
+    (8443), so URLs without an explicit port never resolve.
+
+    When ``MINIO_PUBLIC_PORT`` is configured, this helper appends it whenever
+    the input URL is parseable and currently has no explicit port. Existing
+    ports are preserved so dev/localhost setups (e.g. http://localhost:9000)
+    keep working unchanged.
+    """
+    if not url:
+        return url
+    port = getattr(settings, "MINIO_PUBLIC_PORT", None)
+    if not port:
+        return url
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return url
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    # ``port`` is None when the URL omits it; rebuild with the enforced port.
+    if parsed.port is None:
+        netloc = f"{parsed.hostname}:{port}"
+        if parsed.username:
+            userinfo = parsed.username
+            if parsed.password:
+                userinfo = f"{parsed.username}:{parsed.password}"
+            netloc = f"{userinfo}@{netloc}"
+        parsed = parsed._replace(netloc=netloc)
+        return urlunparse(parsed)
+    return url
 
 
 class S3StorageService:
@@ -108,7 +146,7 @@ class S3StorageService:
 
             # Generate public URL
             if self.use_minio:
-                return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
+                return _enforce_minio_port(f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}")
             else:
                 # For S3/Supabase, generate presigned URL or use CDN
                 return self.get_public_url(path)
@@ -137,7 +175,7 @@ class S3StorageService:
             )
 
             if self.use_minio:
-                return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
+                return _enforce_minio_port(f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}")
             else:
                 return self.get_public_url(path)
 
@@ -221,7 +259,7 @@ class S3StorageService:
 
         # Build expected prefix based on storage backend
         if self.use_minio:
-            prefix = f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/"
+            prefix = _enforce_minio_port(f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/")
         elif settings.S3_ENDPOINT:
             prefix = f"{settings.S3_ENDPOINT}/{self.bucket_name}/"
         else:
@@ -252,7 +290,7 @@ class S3StorageService:
     def get_public_url(self, path: str) -> str:
         """Get public URL for a file"""
         if self.use_minio:
-            return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
+            return _enforce_minio_port(f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}")
         elif settings.S3_ENDPOINT:
             # Supabase public buckets require object/public URLs, not the S3 API path.
             base = (

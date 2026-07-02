@@ -15,6 +15,7 @@ from fastapi import (
     File,
     UploadFile,
     Form,
+    status,
 )
 from app.videos.schemas import VideoGenerationRequest, VideoGenerationResponse
 from app.api.services.character import CharacterService
@@ -79,6 +80,8 @@ from app.credits.constants import (
     VOICE_GEN, EMOTIONAL_MAP, EXPAND_SCRIPT, VIDEO_PER_SECOND,
     SOUND_EFFECT_GEN, AUDIO_NARRATION, SCREENPLAY_GEN,
     VIDEO_AVATAR_GEN, ENHANCED_SPEECH,
+    estimate_book_pipeline_script_credits,
+    normalize_book_pipeline_mode,
 )
 from app.credits.service import CreditService
 from app.core.services.file import FileService
@@ -3413,7 +3416,6 @@ async def generate_script_and_scenes(
     request: dict = Body(...),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
-    reservation_id: uuid.UUID = Depends(require_credits(OperationType.SCRIPT_GEN, SCRIPT_GEN)),
 ):
     """Generate only the AI script and scene descriptions for a chapter using OpenRouter (no video generation)"""
     try:
@@ -3544,6 +3546,41 @@ async def generate_script_and_scenes(
         # ✅ Check subscription tier (credit-only, no monthly cap)
         subscription_manager = SubscriptionManager(session)
         user_tier = await subscription_manager.get_user_tier(current_user.id)
+        generation_mode = normalize_book_pipeline_mode(
+            request.get("generation_mode"), user_tier.value
+        )
+        estimated_credit_cost = estimate_book_pipeline_script_credits(
+            mode=generation_mode,
+            user_tier=user_tier.value,
+        )
+        credit_service = CreditService(session)
+        try:
+            reservation_id = await credit_service.reserve_credits(
+                user_id=current_user.id,
+                amount=estimated_credit_cost,
+                operation_type=OperationType.SCRIPT_GEN,
+                ref_id=str(uuid.uuid4()),
+                meta={
+                    "ticket": "KAN-399",
+                    "pipeline": "book",
+                    "generation_mode": generation_mode,
+                    "user_tier": user_tier.value,
+                    "estimated_tokens": 1000,
+                },
+            )
+            await session.commit()
+        except ValueError:
+            balance = await credit_service.get_effective_balance(current_user.id)
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail={
+                    "message": "Insufficient credits",
+                    "balance": balance,
+                    "required": estimated_credit_cost,
+                    "operation_type": OperationType.SCRIPT_GEN,
+                    "generation_mode": generation_mode,
+                },
+            )
 
         # Map subscription tier to model tier
         model_tier_mapping = {
@@ -3623,8 +3660,7 @@ async def generate_script_and_scenes(
             target_duration = None
 
         # ✅ Generate script using OpenRouter with tier-appropriate model
-        credit_service = CreditService(session)
-        async with credit_service.credit_transaction(reservation_id, SCRIPT_GEN):
+        try:
             script_result = await openrouter_service.generate_script(
                 content=chapter_content,  # Use chapter content (works for both Chapter and Artifact)
                 user_tier=user_model_tier,
@@ -3634,8 +3670,15 @@ async def generate_script_and_scenes(
                     plot_info if plot_info and plot_info.get("enhanced_content") else None
                 ),
             )
+        except Exception:
+            await session.rollback()
+            await credit_service.release_reservation(reservation_id)
+            await session.commit()
+            raise
 
         if script_result.get("status") != "success":
+            await credit_service.release_reservation(reservation_id)
+            await session.commit()
             raise HTTPException(
                 status_code=500,
                 detail=f"OpenRouter script generation failed: {script_result.get('error', 'Unknown error')}",
@@ -3643,6 +3686,21 @@ async def generate_script_and_scenes(
 
         script = script_result.get("content", "")
         usage = script_result.get("usage", {})
+        actual_credit_cost = estimate_book_pipeline_script_credits(
+            token_count=usage.get("total_tokens", 0),
+            mode=generation_mode,
+            user_tier=user_tier.value,
+        )
+        confirmed = await credit_service.confirm_deduction(
+            reservation_id,
+            actual_credit_cost,
+        )
+        if not confirmed:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to confirm script generation credit deduction",
+            )
+        await session.commit()
 
         # ✅ First, try to parse scenes directly from the script
         scene_descriptions = []

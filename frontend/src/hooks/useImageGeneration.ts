@@ -295,7 +295,7 @@ export const useImageGeneration = (
         character_ids: characterIds,
         character_image_urls: characterImageUrls,
         is_suggested_shot: isSuggestedShot,  // Pass suggested shot flag to backend
-        shot_index: shotIndex  // Pass shot_index to backend (0 = Key Scene, 1+ = Suggested)
+        shot_index: shotIndex,  // Pass shot_index to backend (0 = Key Scene, 1+ = Suggested)
       };
 
       const result = await userService.generateSceneImage(chapterId!, sceneNumber, request);

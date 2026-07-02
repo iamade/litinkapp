@@ -12,6 +12,7 @@ class AudioGenerationRequest(BaseModel):
     duration: Optional[float] = None
     custom_prompt: Optional[str] = None
     script_id: Optional[str] = None
+    generation_mode: Optional[str] = None  # KAN-399: "draft" or "cinematic"
     # Shot information for audio-to-scene mapping
     shot_type: Optional[str] = "key_scene"  # 'key_scene' or 'suggested_shot'
     shot_index: Optional[int] = 0  # 0 = key scene, 1+ = suggested shots
