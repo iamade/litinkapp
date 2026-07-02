@@ -1260,9 +1260,12 @@ Focus ONLY on locations and significant physical objects. Do NOT include charact
             result = response.get("result", "")
             if result:
                 items = self._parse_character_generation_response(result)
-                # Tag all items with their entity_type and fill defaults
+                # KAN-372: Fix entity_type — _parse_character_generation_response defaults
+                # to "character" via .get(), so setdefault() is a no-op.
+                # Force-set entity_type for objects/locations that were defaulted to "character".
                 for item in items:
-                    item.setdefault("entity_type", "object")
+                    if item.get("entity_type") not in ("location", "object"):
+                        item["entity_type"] = "object"
                     item.setdefault("character_arc", "")
                     item.setdefault("want", "")
                     item.setdefault("need", "")
