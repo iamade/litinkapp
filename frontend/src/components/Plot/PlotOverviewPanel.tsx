@@ -1346,10 +1346,16 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                     Promise.allSettled(objectsWithoutImages.map((c: Character) => handleGenerateImage(c.id)));
                     toast.success(`Generating images for ${objectsWithoutImages.length} objects/locations...`);
                   }}
-                  className="flex items-center space-x-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-800/40 text-sm border border-blue-200 dark:border-blue-800"
+                  disabled={generatingImages.size > 0}
+                  className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 text-sm"
                 >
-                  <Sparkles className="w-4 h-4" />
+                  <Wand2 className="w-4 h-4" />
                   <span>Generate All Images</span>
+                  {generatingImages.size > 0 && (
+                    <span className="ml-2 text-green-200 text-xs">
+                      ({generatingImages.size} in progress...)
+                    </span>
+                  )}
                 </button>
               )}
 
