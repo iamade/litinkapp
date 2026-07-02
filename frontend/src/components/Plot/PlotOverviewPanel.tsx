@@ -451,13 +451,11 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       return;
     }
 
-    // KAN-372: Only generate for actual characters, skip objects and locations
-    // Objects/locations should be generated individually from their own section
-    const actualCharacters = plotOverview.characters.filter(
-      (char: Character) => !char.entity_type || char.entity_type === 'character'
-    );
+    // KAN-372: Include ALL entities (characters, objects, locations) in batch generation
+    // Previously skipped objects/locations, leaving their image_url null and breaking card rendering
+    const allEntities = plotOverview.characters;
 
-    const charactersWithoutImages = actualCharacters.filter(
+    const charactersWithoutImages = allEntities.filter(
       (char: Character) => !char.image_url
     );
 
@@ -466,7 +464,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       return;
     }
 
-    toast.success(`Generating images for ${charactersWithoutImages.length} characters...`);
+    toast.success(`Generating images for ${charactersWithoutImages.length} entities...`);
 
     // Generate images in parallel
     const promises = charactersWithoutImages.map((character: Character) =>
@@ -1338,6 +1336,24 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                 </>
               )}
               
+              {/* KAN-372: Generate All Images button for objects/locations without images */}
+              {filteredCharacters.filter((c: Character) => (c.entity_type === 'object' || c.entity_type === 'location') && !c.image_url).length > 0 && (
+                <button
+                  onClick={() => {
+                    const objectsWithoutImages = filteredCharacters.filter((c: Character) => (c.entity_type === 'object' || c.entity_type === 'location') && !c.image_url);
+                    objectsWithoutImages.forEach((c: Character) => {
+                      setGeneratingImages(prev => new Set(prev).add(c.id));
+                    });
+                    Promise.allSettled(objectsWithoutImages.map((c: Character) => handleGenerateImage(c.id)));
+                    toast.success(`Generating images for ${objectsWithoutImages.length} objects/locations...`);
+                  }}
+                  className="flex items-center space-x-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-800/40 text-sm border border-blue-200 dark:border-blue-800"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Generate All Images</span>
+                </button>
+              )}
+
               {filteredCharacters.filter((c: Character) => c.entity_type === 'object' || c.entity_type === 'location').length > 0 && (
                 <button
                   onClick={handleSelectAllObjects}

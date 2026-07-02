@@ -126,15 +126,48 @@ class S3StorageService:
         """
         Upload file from stream (most memory-efficient).
         Use this for large files to avoid loading into memory.
+
+        KAN-373: Uses put_object instead of upload_fileobj to avoid
+        SignatureDoesNotMatch errors on S3-compatible backends (MinIO/Supabase).
+        Multipart upload (upload_fileobj) signs each part separately and can
+        produce signature mismatches when ExtraArgs include ContentType.
+        put_object signs the request atomically, avoiding the issue.
+        For files > 5MB where multipart is truly needed, falls back to
+        upload_fileobj without ContentType in ExtraArgs.
         """
         try:
+            # Read stream into bytes to use put_object (atomic, avoids multipart signing issues)
+            file_stream.seek(0, 2)  # Seek to end to get size
+            size = file_stream.tell()
+            file_stream.seek(0)
+
             extra_args = {}
             if content_type:
                 extra_args["ContentType"] = content_type
 
-            self.client.upload_fileobj(
-                file_stream, self.bucket_name, path, ExtraArgs=extra_args
-            )
+            if size <= 5 * 1024 * 1024:  # ≤ 5MB: use put_object (atomic signing)
+                body = file_stream.read()
+                self.client.put_object(
+                    Bucket=self.bucket_name, Key=path, Body=body, **extra_args
+                )
+            else:
+                # > 5MB: use multipart upload, but avoid ContentType in ExtraArgs
+                # to prevent SignatureDoesNotMatch on some S3-compatible backends
+                self.client.upload_fileobj(
+                    file_stream, self.bucket_name, path, ExtraArgs={}
+                )
+                # Apply content type via a separate put_object metadata update if needed
+                if content_type:
+                    try:
+                        self.client.copy_object(
+                            Bucket=self.bucket_name,
+                            Key=path,
+                            CopySource={"Bucket": self.bucket_name, "Key": path},
+                            MetadataDirective="REPLACE",
+                            ContentType=content_type,
+                        )
+                    except Exception as meta_err:
+                        logger.warning(f"Failed to set ContentType for {path}: {meta_err}")
 
             if self.use_minio:
                 return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
