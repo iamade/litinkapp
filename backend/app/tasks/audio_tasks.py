@@ -1557,6 +1557,8 @@ async def generate_sound_effects_audio(
                             f"[SOUND EFFECTS] KAN-373: Capped SFX from {requested_dur}s to {actual_dur}s "
                             f"(dialogue {dialogue_dur}s * 1.5)"
                         )
+                # KAN-373: If dialogue_dur is 0, keep the default cap (min(30, max(3, requested)))
+            # KAN-373: If no dialogue durations available, keep the default cap
 
             print(
                 f"[SOUND EFFECTS] Processing effect {i+1}/{len(sound_effects)}: {effect['description']} (scene {scene_id}, {shot_type}, dur={actual_dur}s)"
@@ -1571,28 +1573,42 @@ async def generate_sound_effects_audio(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = cap_generated_audio_duration(result.get("audio_time"), actual_dur)
+                provider_audio_time = result.get("audio_time")
+                duration = cap_generated_audio_duration(provider_audio_time, actual_dur)
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
 
-                # Persist audio from CDN to our own S3 storage
+                # KAN-373: Trim audio to capped duration BEFORE storage
+                from app.core.services.storage import get_storage_service, S3StorageService
+                import uuid as _uuid_mod
+                storage = get_storage_service()
+                s3_path = S3StorageService.build_media_path(
+                    user_id=str(user_id) if user_id else 'system',
+                    media_type='audio',
+                    record_id=str(_uuid_mod.uuid4()),
+                    extension='mp3',
+                )
                 original_cdn_url = audio_url
-                try:
-                    from app.core.services.storage import get_storage_service, S3StorageService
-                    import uuid as _uuid_mod
-                    storage = get_storage_service()
-                    s3_path = S3StorageService.build_media_path(
-                        user_id=str(user_id) if user_id else 'system',
-                        media_type='audio',
-                        record_id=str(_uuid_mod.uuid4()),
-                        extension='mp3',
-                    )
+
+                if provider_audio_time and float(provider_audio_time) > actual_dur:
+                    try:
+                        from app.core.services.ffmpeg_utils import download_trim_and_upload
+                        trimmed_url, trimmed_dur = await download_trim_and_upload(
+                            audio_url, storage, s3_path, actual_dur, content_type='audio/mpeg'
+                        )
+                        if trimmed_url:
+                            logger.info(f"[SOUND EFFECTS] KAN-373: Trimmed audio from {provider_audio_time}s to {actual_dur}s")
+                            audio_url = trimmed_url
+                            duration = actual_dur
+                        else:
+                            audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                    except Exception as trim_err:
+                        logger.warning(f"[SOUND EFFECTS] KAN-373: Audio trim failed: {trim_err}")
+                        audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                else:
                     audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
-                    logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
-                except Exception as persist_error:
-                    logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
-                    raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+                logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
 
                 # KAN-166: If API didn't report duration, probe actual file
                 if duration <= 0 and audio_url:
@@ -1743,6 +1759,25 @@ async def generate_background_music(
                             f"[BACKGROUND MUSIC] KAN-373: Capped music from {requested_dur}s to {actual_dur}s "
                             f"(dialogue {dialogue_dur}s * 1.2)"
                         )
+                else:
+                    # KAN-373: Dialogue duration unavailable for this scene — apply default cap
+                    # to prevent provider generating excessively long audio (180s+)
+                    default_cap = min(requested_dur, 15.0)
+                    if default_cap < requested_dur:
+                        actual_dur = default_cap
+                        print(
+                            f"[BACKGROUND MUSIC] KAN-373: Default cap applied — music from {requested_dur}s to {actual_dur}s "
+                            f"(no dialogue duration available)"
+                        )
+            else:
+                # KAN-373: No dialogue durations at all — apply default cap
+                default_cap = min(requested_dur, 15.0)
+                if default_cap < requested_dur:
+                    actual_dur = default_cap
+                    print(
+                        f"[BACKGROUND MUSIC] KAN-373: Default cap applied — music from {requested_dur}s to {actual_dur}s "
+                        f"(no dialogue durations available)"
+                    )
 
             logger.info(
                 f"[BACKGROUND MUSIC] Processing scene {scene_id} ({shot_type}): {music_cue['description']} dur={actual_dur}s"
@@ -1757,28 +1792,45 @@ async def generate_background_music(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = cap_generated_audio_duration(result.get("audio_time"), actual_dur)
+                provider_audio_time = result.get("audio_time")
+                duration = cap_generated_audio_duration(provider_audio_time, actual_dur)
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
 
-                # Persist audio from CDN to our own S3 storage
+                # KAN-373: Trim audio to capped duration BEFORE storage
+                # Provider may generate longer audio than requested (e.g., 180s vs 15s requested).
+                # Download → ffmpeg trim → upload_stream to ensure stored file matches capped duration.
+                from app.core.services.storage import get_storage_service, S3StorageService
+                import uuid as _uuid_mod
+                storage = get_storage_service()
+                s3_path = S3StorageService.build_media_path(
+                    user_id=str(user_id) if user_id else 'system',
+                    media_type='audio',
+                    record_id=str(_uuid_mod.uuid4()),
+                    extension='mp3',
+                )
                 original_cdn_url = audio_url
-                try:
-                    from app.core.services.storage import get_storage_service, S3StorageService
-                    import uuid as _uuid_mod
-                    storage = get_storage_service()
-                    s3_path = S3StorageService.build_media_path(
-                        user_id=str(user_id) if user_id else 'system',
-                        media_type='audio',
-                        record_id=str(_uuid_mod.uuid4()),
-                        extension='mp3',
-                    )
+
+                if provider_audio_time and float(provider_audio_time) > actual_dur:
+                    try:
+                        from app.core.services.ffmpeg_utils import download_trim_and_upload
+                        trimmed_url, trimmed_dur = await download_trim_and_upload(
+                            audio_url, storage, s3_path, actual_dur, content_type='audio/mpeg'
+                        )
+                        if trimmed_url:
+                            logger.info(f"[BACKGROUND MUSIC] KAN-373: Trimmed audio from {provider_audio_time}s to {actual_dur}s")
+                            audio_url = trimmed_url
+                            duration = actual_dur
+                        else:
+                            # Fallback: persist original
+                            audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                    except Exception as trim_err:
+                        logger.warning(f"[BACKGROUND MUSIC] KAN-373: Audio trim failed: {trim_err}")
+                        audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
+                else:
                     audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
-                    logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
-                except Exception as persist_error:
-                    logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
-                    raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
+                logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
 
                 # KAN-166: If API didn't report duration, probe actual file
                 if duration <= 0 and audio_url:
@@ -1833,12 +1885,12 @@ async def generate_background_music(
                         }
                     )
 
-                    # KAN-373: Track credits for actual BG music duration
-                    if user_id and duration and float(duration) > 0:
+                    # KAN-373: Charge credits based on actual_dur (capped requested), not provider duration
+                    if user_id and actual_dur and float(actual_dur) > 0:
                         try:
                             from app.credits.service import CreditService, credits_for_audio_duration
                             from app.credits.constants import OperationType
-                            credit_cost = credits_for_audio_duration(float(duration))
+                            credit_cost = credits_for_audio_duration(float(actual_dur))
                             _total_bg_credits += credit_cost
                             credit_svc = CreditService(session)
                             await credit_svc.deduct_for_operation(
