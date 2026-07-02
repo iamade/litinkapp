@@ -27,6 +27,24 @@ CHAPTER_AUDIO_TTS_MODEL_CHAIN = [
 ]
 
 
+def cap_generated_audio_duration(
+    provider_duration: Optional[float], requested_duration: float
+) -> float:
+    """Keep stored duration aligned with the duration requested from provider."""
+    if provider_duration is None:
+        return requested_duration
+
+    try:
+        duration = float(provider_duration)
+    except (TypeError, ValueError):
+        return requested_duration
+
+    if duration <= 0:
+        return duration
+
+    return min(duration, requested_duration)
+
+
 def build_provider_audio_metadata(original_cdn_url: Optional[str]) -> Dict[str, str]:
     """Build durable ModelsLab provider URL metadata for later provider reuse.
 
@@ -1541,7 +1559,7 @@ async def generate_sound_effects_audio(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = result.get("audio_time", 10)
+                duration = cap_generated_audio_duration(result.get("audio_time"), actual_dur)
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
@@ -1570,7 +1588,7 @@ async def generate_sound_effects_audio(
                         from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
                         probed = await probe_audio_duration_from_url(audio_url)
                         if probed and probed > 0:
-                            duration = probed
+                            duration = cap_generated_audio_duration(probed, actual_dur)
                             print(f"[SOUND EFFECTS] KAN-166: Probed actual duration: {duration}s")
                     except Exception as probe_err:
                         print(f"[SOUND EFFECTS] KAN-166: Duration probe failed: {probe_err}")
@@ -1727,7 +1745,7 @@ async def generate_background_music(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = result.get("audio_time", 30.0)
+                duration = cap_generated_audio_duration(result.get("audio_time"), actual_dur)
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
@@ -1756,7 +1774,7 @@ async def generate_background_music(
                         from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
                         probed = await probe_audio_duration_from_url(audio_url)
                         if probed and probed > 0:
-                            duration = probed
+                            duration = cap_generated_audio_duration(probed, actual_dur)
                             print(f"[BACKGROUND MUSIC] KAN-166: Probed actual duration: {duration}s")
                     except Exception as probe_err:
                         print(f"[BACKGROUND MUSIC] KAN-166: Duration probe failed: {probe_err}")
