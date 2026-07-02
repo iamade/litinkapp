@@ -27,6 +27,24 @@ CHAPTER_AUDIO_TTS_MODEL_CHAIN = [
 ]
 
 
+def cap_generated_audio_duration(
+    provider_duration: Optional[float], requested_duration: float
+) -> float:
+    """Keep stored duration aligned with the duration requested from provider."""
+    if provider_duration is None:
+        return requested_duration
+
+    try:
+        duration = float(provider_duration)
+    except (TypeError, ValueError):
+        return requested_duration
+
+    if duration <= 0:
+        return duration
+
+    return min(duration, requested_duration)
+
+
 def build_provider_audio_metadata(original_cdn_url: Optional[str]) -> Dict[str, str]:
     """Build durable ModelsLab provider URL metadata for later provider reuse.
 
@@ -125,7 +143,6 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 video_gen.generation_status = "generating_audio"
                 session.add(video_gen)
                 await session.commit()
-                generation_mode = task_meta.get("generation_mode", "draft")
 
             # Get user subscription tier for model config
             user_tier = "free"
@@ -435,7 +452,6 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                     user_id,
                     script_id=script_id_str,
                     model_config=audio_config,
-                    generation_mode=generation_mode,
                 )
             else:
                 # For narration: generate narrator voice + background music + sound effects
@@ -447,7 +463,6 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                     user_id,
                     script_id=script_id_str,
                     model_config=audio_config,
-                    generation_mode=generation_mode,
                 )
                 character_results = []
 
@@ -470,7 +485,6 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 user_id,
                 script_id=script_id_str,
                 scene_dialogue_durations=scene_dialogue_durations,
-                generation_mode=generation_mode,
             )
 
             # Generate background music (KAN-373: pass dialogue durations for proportional music)
@@ -482,7 +496,6 @@ def generate_all_audio_for_video(self, video_generation_id: str):
                 user_id,
                 script_id=script_id_str,
                 scene_dialogue_durations=scene_dialogue_durations,
-                generation_mode=generation_mode,
             )
 
             # Compile results
@@ -618,7 +631,6 @@ async def generate_narrator_audio(
     script_id: Optional[str] = None,
     model_config: Optional[ModelConfig] = None,
     credit_reservation_id: Optional[str] = None,
-    generation_mode: str = "draft",
 ) -> List[Dict[str, Any]]:
     """Generate narrator voice audio"""
 
@@ -676,7 +688,7 @@ async def generate_narrator_audio(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = result.get("audio_time") or 0  # KAN-373: handle explicit null from API
+                duration = result.get("audio_time", 0)
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
@@ -758,13 +770,9 @@ async def generate_narrator_audio(
                 # Deduct credits for actual audio duration
                 if user_id and duration and float(duration) > 0:
                     try:
-                        from app.credits.service import CreditService, book_pipeline_audio_credits
+                        from app.credits.service import CreditService, credits_for_audio_duration
                         from app.credits.constants import OperationType
-                        credit_cost = book_pipeline_audio_credits(
-                            float(duration),
-                            generation_mode,
-                            user_tier,
-                        )
+                        credit_cost = credits_for_audio_duration(float(duration))
                         if credit_reservation_id:
                             # Accumulate; reservation will be confirmed after the loop
                             _total_audio_credits += credit_cost
@@ -880,7 +888,6 @@ async def generate_character_audio(
     script_id: Optional[str] = None,
     model_config: Optional[ModelConfig] = None,
     credit_reservation_id: Optional[str] = None,
-    generation_mode: str = "draft",
 ) -> List[Dict[str, Any]]:
     """Generate character voice audio for cinematic scripts"""
 
@@ -1283,11 +1290,9 @@ async def generate_character_audio(
             audio_url = None
             duration = 0
 
-            original_cdn_url = None  # KAN-373: track for provider metadata
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                original_cdn_url = audio_url
-                duration = result.get("audio_time") or 0  # KAN-373: handle explicit null from API
+                duration = result.get("audio_time", 0)
 
                 if not audio_url:
                     raise Exception("No audio URL in response")
@@ -1366,13 +1371,9 @@ async def generate_character_audio(
                 # Deduct credits for actual audio duration
                 if user_id and duration and float(duration) > 0:
                     try:
-                        from app.credits.service import CreditService, book_pipeline_audio_credits
+                        from app.credits.service import CreditService, credits_for_audio_duration
                         from app.credits.constants import OperationType
-                        credit_cost = book_pipeline_audio_credits(
-                            float(duration),
-                            generation_mode,
-                            user_tier,
-                        )
+                        credit_cost = credits_for_audio_duration(float(duration))
                         if credit_reservation_id:
                             # Accumulate; reservation will be confirmed after the loop
                             _total_audio_credits += credit_cost
@@ -1514,7 +1515,6 @@ async def generate_sound_effects_audio(
     user_id: Optional[str],
     script_id: Optional[str] = None,
     scene_dialogue_durations: Optional[Dict[int, float]] = None,
-    generation_mode: str = "draft",
 ) -> List[Dict[str, Any]]:
     """Generate sound effects audio.
 
@@ -1559,7 +1559,7 @@ async def generate_sound_effects_audio(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = result.get("audio_time") or 10  # KAN-373: handle explicit null from API
+                duration = cap_generated_audio_duration(result.get("audio_time"), actual_dur)
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
@@ -1588,7 +1588,7 @@ async def generate_sound_effects_audio(
                         from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
                         probed = await probe_audio_duration_from_url(audio_url)
                         if probed and probed > 0:
-                            duration = probed
+                            duration = cap_generated_audio_duration(probed, actual_dur)
                             print(f"[SOUND EFFECTS] KAN-166: Probed actual duration: {duration}s")
                     except Exception as probe_err:
                         print(f"[SOUND EFFECTS] KAN-166: Duration probe failed: {probe_err}")
@@ -1643,13 +1643,9 @@ async def generate_sound_effects_audio(
                     # KAN-373: Track credits for actual SFX duration
                     if user_id and duration and float(duration) > 0:
                         try:
-                            from app.credits.service import CreditService, book_pipeline_audio_credits
+                            from app.credits.service import CreditService, credits_for_audio_duration
                             from app.credits.constants import OperationType
-                            credit_cost = book_pipeline_audio_credits(
-                                float(duration),
-                                generation_mode,
-                                user_tier,
-                            )
+                            credit_cost = credits_for_audio_duration(float(duration))
                             _total_sfx_credits += credit_cost
                             credit_svc = CreditService(session)
                             await credit_svc.deduct_for_operation(
@@ -1705,7 +1701,6 @@ async def generate_background_music(
     user_id: Optional[str],
     script_id: Optional[str] = None,
     scene_dialogue_durations: Optional[Dict[int, float]] = None,
-    generation_mode: str = "draft",
 ) -> List[Dict[str, Any]]:
     """Generate background music.
 
@@ -1750,7 +1745,7 @@ async def generate_background_music(
 
             if result.get("status") == "success":
                 audio_url = result.get("audio_url")
-                duration = result.get("audio_time") or 30.0  # KAN-373: handle explicit null from API
+                duration = cap_generated_audio_duration(result.get("audio_time"), actual_dur)
 
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
@@ -1779,7 +1774,7 @@ async def generate_background_music(
                         from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
                         probed = await probe_audio_duration_from_url(audio_url)
                         if probed and probed > 0:
-                            duration = probed
+                            duration = cap_generated_audio_duration(probed, actual_dur)
                             print(f"[BACKGROUND MUSIC] KAN-166: Probed actual duration: {duration}s")
                     except Exception as probe_err:
                         print(f"[BACKGROUND MUSIC] KAN-166: Duration probe failed: {probe_err}")
@@ -1829,13 +1824,9 @@ async def generate_background_music(
                     # KAN-373: Track credits for actual BG music duration
                     if user_id and duration and float(duration) > 0:
                         try:
-                            from app.credits.service import CreditService, book_pipeline_audio_credits
+                            from app.credits.service import CreditService, credits_for_audio_duration
                             from app.credits.constants import OperationType
-                            credit_cost = book_pipeline_audio_credits(
-                                float(duration),
-                                generation_mode,
-                                user_tier,
-                            )
+                            credit_cost = credits_for_audio_duration(float(duration))
                             _total_bg_credits += credit_cost
                             credit_svc = CreditService(session)
                             await credit_svc.deduct_for_operation(
@@ -1897,7 +1888,6 @@ def generate_chapter_audio_task(
     speed: float = 1.0,
     duration: float = None,
     record_id: str = None,
-    generation_mode: str = "draft",
 ):
     """Generate audio for a chapter scene"""
 
@@ -2059,7 +2049,7 @@ def generate_chapter_audio_task(
                     except Exception as persist_error:
                         logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                         raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
-                    audio_duration = result.get("audio_time") or duration  # KAN-373: handle explicit null from API
+                    audio_duration = result.get("audio_time", duration)
                 else:
                     raise Exception(
                         f"Failed to generate {audio_type}: {result.get('error', 'Unknown error')}"

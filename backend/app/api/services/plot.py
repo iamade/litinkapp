@@ -1260,9 +1260,12 @@ Focus ONLY on locations and significant physical objects. Do NOT include charact
             result = response.get("result", "")
             if result:
                 items = self._parse_character_generation_response(result)
-                # Tag all items with their entity_type and fill defaults
+                # KAN-372: Fix entity_type — _parse_character_generation_response defaults
+                # to "character" via .get(), so setdefault() is a no-op.
+                # Force-set entity_type for objects/locations that were defaulted to "character".
                 for item in items:
-                    item.setdefault("entity_type", "object")
+                    if item.get("entity_type") not in ("location", "object"):
+                        item["entity_type"] = "object"
                     item.setdefault("character_arc", "")
                     item.setdefault("want", "")
                     item.setdefault("need", "")
@@ -1325,7 +1328,6 @@ Focus ONLY on locations and significant physical objects. Do NOT include charact
                     {
                         "name": char.get("name", ""),
                         "role": char.get("role", "supporting"),
-                        "entity_type": char.get("entity_type", "character"),
                         "character_arc": char.get("character_arc", ""),
                         "physical_description": char.get("physical_description", ""),
                         "personality": char.get("personality", ""),
@@ -1338,7 +1340,7 @@ Focus ONLY on locations and significant physical objects. Do NOT include charact
                     }
                 )
 
-        return validated_characters[:8]  # Allow up to 8 characters/objects/locations for combined results
+        return validated_characters[:5]  # Limit to 5 characters
 
     def _parse_character_generation_text_response(
         self, ai_response: str

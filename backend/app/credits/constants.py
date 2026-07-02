@@ -2,7 +2,6 @@
 Credit cost constants for AI operations.
 """
 from enum import Enum
-import math
 
 # Credit costs per operation unit
 IMAGE_GEN = 1           # per image generated
@@ -27,82 +26,6 @@ ENHANCED_SPEECH = 1     # per enhanced speech
 CHAPTER_GEN = 2         # per chapter generation
 TRAILER_ANALYZE = 5     # per trailer scene analysis (LLM-heavy)
 TRAILER_VIDEO_PER_SECOND = 8  # per second of trailer video (KAN-150)
-
-# KAN-399: Book-pipeline Draft/Cinematic credit rates.
-# Trailer rates remain separate; do not use these for trailer operations.
-BOOK_PIPELINE_DEFAULT_SCRIPT_TOKENS = 1000
-BOOK_PIPELINE_CREDIT_RATES = {
-    "draft": {
-        "plot": 2,
-        "script_per_1k_tokens": 3,
-        "image": 12,
-        "audio_per_second": 2,
-        "video_per_second": 35,
-    },
-    "cinematic": {
-        "plot": 2,
-        "script_per_1k_tokens": {
-            "free": 3,
-            "basic": 8,
-            "pro": 10,
-            "standard": 10,
-            "premium": 12,
-            "professional": 15,
-            "enterprise": 15,
-        },
-        "image": {
-            "free": 12,
-            "basic": 12,
-            "pro": 16,
-            "standard": 16,
-            "premium": 17,
-            "professional": 22,
-            "enterprise": 65,
-        },
-        "audio_per_second": 2,
-        "video_per_second": 49,
-    },
-}
-
-
-def normalize_book_pipeline_mode(requested_mode: str | None, user_tier: str | None) -> str:
-    """Free users are always billed/served Draft; paid users may choose Cinematic."""
-    tier = (user_tier or "free").lower()
-    if tier == "free":
-        return "draft"
-    return "cinematic" if (requested_mode or "").lower() == "cinematic" else "draft"
-
-
-def _tier_rate(rate, user_tier: str | None) -> int:
-    if isinstance(rate, dict):
-        tier = (user_tier or "free").lower()
-        return int(rate.get(tier, rate.get("pro", rate.get("free", 1))))
-    return int(rate)
-
-
-def get_book_pipeline_credit_rate(operation: str, mode: str = "draft", user_tier: str | None = None) -> int:
-    profile = BOOK_PIPELINE_CREDIT_RATES.get(mode, BOOK_PIPELINE_CREDIT_RATES["draft"])
-    return _tier_rate(profile[operation], user_tier)
-
-
-def estimate_book_pipeline_script_credits(
-    token_count: int | None = None,
-    mode: str = "draft",
-    user_tier: str | None = None,
-) -> int:
-    tokens = max(1, int(token_count or BOOK_PIPELINE_DEFAULT_SCRIPT_TOKENS))
-    per_1k = get_book_pipeline_credit_rate("script_per_1k_tokens", mode, user_tier)
-    return max(1, math.ceil(tokens / 1000) * per_1k)
-
-
-def estimate_book_pipeline_duration_credits(
-    seconds: float,
-    operation: str,
-    mode: str = "draft",
-    user_tier: str | None = None,
-) -> int:
-    rate = get_book_pipeline_credit_rate(operation, mode, user_tier)
-    return max(1, math.ceil(float(seconds or 0)) * rate)
 
 # Monthly credit grants per subscription tier (KAN-314 — synced with Stripe pricing metadata)
 # NOTE: Tier names follow Stripe product IDs; SubscriptionTier enum mapping:

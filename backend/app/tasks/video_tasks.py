@@ -1343,16 +1343,11 @@ async def async_generate_all_videos_for_generation(video_generation_id: str):
             credit_reservation_id = task_meta.get("credit_reservation_id")
             if user_id and credit_reservation_id:
                 try:
-                    from app.credits.service import CreditService, book_pipeline_video_credits
+                    from app.credits.service import CreditService, credits_for_video_duration
                     from app.credits.constants import OperationType
                     credit_svc = CreditService(session)
-                    generation_mode = task_meta.get("generation_mode", "draft")
                     actual_cost = (
-                        book_pipeline_video_credits(
-                            float(total_duration),
-                            generation_mode,
-                            video_gen.get("quality_tier", "free"),
-                        )
+                        credits_for_video_duration(float(total_duration))
                         if successful_videos > 0 and total_duration > 0
                         else 0
                     )

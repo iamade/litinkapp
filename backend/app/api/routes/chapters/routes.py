@@ -49,13 +49,7 @@ from app.subscriptions.models import SubscriptionTier
 from app.auth.models import User
 from app.projects.models import Project, Artifact
 from app.credits.dependencies import require_credits
-from app.credits.constants import (
-    OperationType,
-    SCENE_IMAGE_GEN,
-    CHARACTER_IMAGE_GEN,
-    get_book_pipeline_credit_rate,
-    normalize_book_pipeline_mode,
-)
+from app.credits.constants import OperationType, SCENE_IMAGE_GEN, CHARACTER_IMAGE_GEN
 from app.credits.service import CreditService
 
 router = APIRouter()
@@ -587,6 +581,7 @@ async def generate_scene_image(
     request: SceneImageRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.SCENE_IMAGE_GEN, SCENE_IMAGE_GEN)),
 ):
     """Generate an image for a specific scene in the chapter (asynchronous)"""
     try:
@@ -609,40 +604,6 @@ async def generate_scene_image(
         # Get user tier for model selection
         subscription_manager = SubscriptionManager(session)
         user_tier = await subscription_manager.get_user_tier(current_user.id)
-        generation_mode = normalize_book_pipeline_mode(
-            request.generation_mode, user_tier.value
-        )
-        credit_cost = get_book_pipeline_credit_rate(
-            "image", generation_mode, user_tier.value
-        )
-        credit_service = CreditService(session)
-        try:
-            reservation_id = await credit_service.reserve_credits(
-                user_id=current_user.id,
-                amount=credit_cost,
-                operation_type=OperationType.SCENE_IMAGE_GEN,
-                ref_id=str(uuid.uuid4()),
-                meta={
-                    "ticket": "KAN-399",
-                    "pipeline": "book",
-                    "generation_mode": generation_mode,
-                    "user_tier": user_tier.value,
-                    "rate": credit_cost,
-                },
-            )
-            await session.commit()
-        except ValueError:
-            balance = await credit_service.get_effective_balance(current_user.id)
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail={
-                    "message": "Insufficient credits",
-                    "balance": balance,
-                    "required": credit_cost,
-                    "operation_type": OperationType.SCENE_IMAGE_GEN,
-                    "generation_mode": generation_mode,
-                },
-            )
 
         # Create pending record in database
         # We use ImageGeneration model directly via session
@@ -654,8 +615,6 @@ async def generate_scene_image(
             "style": request.style,
             "aspect_ratio": request.aspect_ratio,
             "character_ids": request.character_ids,
-            "generation_mode": generation_mode,
-            "credit_cost": credit_cost,
         }
 
         record = ImageGeneration(
@@ -699,8 +658,9 @@ async def generate_scene_image(
             )
 
         # Queue the scene image generation task
+        credit_service = CreditService(session)
         try:
-            async with credit_service.credit_transaction(reservation_id, credit_cost):
+            async with credit_service.credit_transaction(reservation_id, SCENE_IMAGE_GEN):
                 print(
                     f"[DEBUG] [generate_scene_image] About to queue task for record_id={record_id}, scene={scene_number}"
                 )
@@ -719,7 +679,6 @@ async def generate_scene_image(
                     character_ids=request.character_ids,
                     character_image_urls=request.character_image_urls,
                     is_suggested_shot=request.is_suggested_shot,
-                    generation_mode=generation_mode,
                 )
 
                 print(
@@ -773,6 +732,7 @@ async def generate_character_image(
     request: CharacterImageRequest,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
+    reservation_id: uuid.UUID = Depends(require_credits(OperationType.CHARACTER_IMAGE_GEN, CHARACTER_IMAGE_GEN)),
 ):
     """Generate an image for a character in the chapter (asynchronous)"""
     try:
@@ -796,49 +756,10 @@ async def generate_character_image(
             character_info["description"] = request.character_description
 
         # Create initial record in database
-        subscription_manager = SubscriptionManager(session)
-        user_tier = await subscription_manager.get_user_tier(current_user.id)
-        generation_mode = normalize_book_pipeline_mode(
-            request.generation_mode, user_tier.value
-        )
-        credit_cost = get_book_pipeline_credit_rate(
-            "image", generation_mode, user_tier.value
-        )
-        credit_service = CreditService(session)
-        try:
-            reservation_id = await credit_service.reserve_credits(
-                user_id=current_user.id,
-                amount=credit_cost,
-                operation_type=OperationType.CHARACTER_IMAGE_GEN,
-                ref_id=str(uuid.uuid4()),
-                meta={
-                    "ticket": "KAN-399",
-                    "pipeline": "book",
-                    "generation_mode": generation_mode,
-                    "user_tier": user_tier.value,
-                    "rate": credit_cost,
-                },
-            )
-            await session.commit()
-        except ValueError:
-            balance = await credit_service.get_effective_balance(current_user.id)
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail={
-                    "message": "Insufficient credits",
-                    "balance": balance,
-                    "required": credit_cost,
-                    "operation_type": OperationType.CHARACTER_IMAGE_GEN,
-                    "generation_mode": generation_mode,
-                },
-            )
-
         metadata = {
             "chapter_id": chapter_id,
             "character_name": character_info["name"],
             "image_type": "character",
-            "generation_mode": generation_mode,
-            "credit_cost": credit_cost,
         }
 
         record = ImageGeneration(
@@ -858,7 +779,8 @@ async def generate_character_image(
         record_id = str(record.id)
 
         # Queue the character image generation task
-        async with credit_service.credit_transaction(reservation_id, credit_cost):
+        credit_service = CreditService(session)
+        async with credit_service.credit_transaction(reservation_id, CHARACTER_IMAGE_GEN):
             task = generate_character_image_task.delay(
                 character_name=character_info["name"],
                 character_description=character_info["description"],
@@ -868,7 +790,6 @@ async def generate_character_image(
                 aspect_ratio=request.aspect_ratio,
                 custom_prompt=request.custom_prompt,
                 record_id=record_id,  # Pass the record_id to the task
-                generation_mode=generation_mode,
             )
 
             return ImageGenerationQueuedResponse(
@@ -1581,12 +1502,6 @@ async def generate_chapter_audio(
                     )
 
         # Get content based on audio type
-        subscription_manager = SubscriptionManager(session)
-        user_tier = await subscription_manager.get_user_tier(current_user.id)
-        generation_mode = normalize_book_pipeline_mode(
-            request.generation_mode, user_tier.value
-        )
-
         text_content = None
         if audio_type == "narrator":
             # Get scene description for narration
@@ -1638,8 +1553,6 @@ async def generate_chapter_audio(
                 "shot_index": (
                     request.shot_index if request.shot_index is not None else 0
                 ),
-                "generation_mode": generation_mode,
-                "user_tier": user_tier.value,
             },
         )
 
@@ -1664,7 +1577,6 @@ async def generate_chapter_audio(
             speed=request.speed,
             duration=request.duration,
             record_id=record_id,
-            generation_mode=generation_mode,
         )
 
         return AudioGenerationQueuedResponse(

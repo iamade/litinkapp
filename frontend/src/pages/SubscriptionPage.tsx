@@ -297,32 +297,6 @@ export default function SubscriptionPage() {
           />
         </div>
 
-        <div className="mt-12 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-8">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">
-            Book Pipeline Credit Rates
-          </h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-5">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Draft</h3>
-              <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                <li>Script: 3 credits per ~1k tokens</li>
-                <li>Image: 12 credits per image</li>
-                <li>Narration/audio: 2 credits per second</li>
-                <li>Video: 35 credits per second</li>
-              </ul>
-            </div>
-            <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-5">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Cinematic</h3>
-              <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                <li>Script: 8-15 credits per ~1k tokens by model tier</li>
-                <li>Image: model-tier rate shown before generation</li>
-                <li>Narration/audio: 2 credits per second</li>
-                <li>Video: 49 credits per second</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
         {/* FAQ Section */}
         <div className="mt-12 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-8">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6 text-center">

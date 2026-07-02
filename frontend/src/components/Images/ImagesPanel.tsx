@@ -47,8 +47,9 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { upscaleImage } from '../../lib/api/upscale';
 import { useCreditBalance } from '../../hooks/useCreditBalance';
-import { BookPipelineCreditMode, estimateImageCredits, estimateUpscaleCredits, getInsufficientCreditsTooltip, normalizeBookPipelineMode } from '../../lib/creditCosts';
+import { estimateImageCredits, estimateUpscaleCredits, getInsufficientCreditsTooltip } from '../../lib/creditCosts';
 import { dispatchCreditsRefresh } from '../../lib/credits';
+import { resolveDisplayImageUrl } from '../../lib/imageUrls';
 
 import { projectService } from '../../services/projectService';
 import SceneGenerationModal from './SceneGenerationModal';
@@ -164,14 +165,6 @@ const parseScriptScenes = (scriptText: string): string[] => {
     return extractedScenes;
 };
 
-const resolveWatermarkedAssetUrl = (
-  asset?: { watermarked_image_url?: string; watermarked_url?: string; image_url?: string; imageUrl?: string } | null
-): string => {
-  // Backend is authoritative: image_url is tier-appropriate (clean for paid, watermarked for free).
-  if (!asset) return '';
-  return asset.image_url || asset.imageUrl || '';
-};
-
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
   chapterId,
   chapterTitle,
@@ -263,11 +256,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     quality: 'standard',
     aspectRatio: '16:9',
     useCharacterReferences: true,
-    lightingMood: 'cinematic',
-    generationMode: 'draft'
+    lightingMood: 'cinematic'
   } as ImageGenerationOptions);
-  const effectiveGenerationMode = normalizeBookPipelineMode(generationOptions.generationMode, userTier);
-  const perImageCost = estimateImageCredits(1, effectiveGenerationMode, userTier);
+  const perImageCost = estimateImageCredits(1);
   const singleImageInsufficientReason = creditBalance < perImageCost
     ? getInsufficientCreditsTooltip(creditBalance, perImageCost)
     : "";
@@ -408,7 +399,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
     return [];
   }, [selectedScript]);
-  const allScenesEstimatedCost = estimateImageCredits(scenes.length, effectiveGenerationMode, userTier);
+  const allScenesEstimatedCost = estimateImageCredits(scenes.length);
 
 
   const {
@@ -1181,22 +1172,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Credit Mode</label>
-            <select
-              value={effectiveGenerationMode}
-              disabled={userTier.toLowerCase() === 'free'}
-              onChange={(e) => setGenerationOptions(prev => ({
-                ...prev,
-                generationMode: e.target.value as BookPipelineCreditMode
-              }))}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="draft">Draft</option>
-              <option value="cinematic">Cinematic</option>
-            </select>
-          </div>
-
-          <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Aspect Ratio</label>
             <select
               value={generationOptions.aspectRatio}
@@ -1895,7 +1870,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 let characterImage = filteredCharacterImages?.[characterKey];
 
                 // If no script-specific image, check if plot overview has an image
-                const plotImageUrl = typeof character === "object" ? resolveWatermarkedAssetUrl(character as any) : '';
+                const plotImageUrl = typeof character === "object" ? resolveDisplayImageUrl(character as any) : '';
 
                   // Check if this is a derived/fallback image
                   const isFallbackImage = !characterImage && !!plotImageUrl;
@@ -1924,7 +1899,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     plotCharacters={
                       (plotOverview?.characters || []).map((plotCharacter) => ({
                         ...plotCharacter,
-                        image_url: resolveWatermarkedAssetUrl(plotCharacter as any),
+                        image_url: resolveDisplayImageUrl(plotCharacter as any),
                       }))
                     }
                     onGenerate={async (selectedPlotCharName) => {
@@ -1939,7 +1914,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                         return;
                       }
 
-                      const plotCharImageUrl = resolveWatermarkedAssetUrl(plotChar as any);
+                      const plotCharImageUrl = resolveDisplayImageUrl(plotChar as any);
                       if (!plotCharImageUrl) {
                         toast.error(`"${selectedPlotCharName}" has no plot image to link yet.`);
                         return;
@@ -2044,7 +2019,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                   const itemKey = item.originalName || item.name;
                   const displayName = item.displayName || item.name;
                   const itemImage = characterImages?.[itemKey];
-                  const plotImageUrl = resolveWatermarkedAssetUrl(item as any);
+                  const plotImageUrl = resolveDisplayImageUrl(item as any);
                   const isFallbackImage = !itemImage && !!plotImageUrl;
 
                   let finalImage = itemImage;
@@ -2071,7 +2046,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       plotCharacters={
                         (plotOverview?.characters || []).map((character) => ({
                           ...character,
-                          image_url: resolveWatermarkedAssetUrl(character as any),
+                          image_url: resolveDisplayImageUrl(character as any),
                         }))
                       }
                       onGenerate={() => {
@@ -2423,7 +2398,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 // 1. Gather URLs from characters selected in the modal (from plot overview)
                 const selectedCharUrls: string[] = characters
                     .filter(c => charIds.includes(c.id || c.name))
-                    .map(c => resolveWatermarkedAssetUrl(c as any))
+                    .map(c => resolveDisplayImageUrl(c as any))
                     .filter(url => url && url.length > 0);
                 
                 // 2. Also include any generated character images from this script
@@ -2468,7 +2443,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             ...characters.map(c => {
                 const charKey = c.originalName || c.name;
                 const linkedImage = characterImages?.[charKey];
-                const plotImageUrl = resolveWatermarkedAssetUrl(c as any);
+                const plotImageUrl = resolveDisplayImageUrl(c as any);
                 const hasScriptSpecificLinkedImage = !!(selectedScriptId && linkedImage?.script_id === selectedScriptId);
                 const resolvedImageUrl = hasScriptSpecificLinkedImage
                   ? (linkedImage?.imageUrl || plotImageUrl || '')
@@ -2484,7 +2459,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             }),
             ...objectsAndLocations.map((item: any) => ({
                 name: item.name,
-                imageUrl: resolveWatermarkedAssetUrl(item as any),
+                imageUrl: resolveDisplayImageUrl(item as any),
                 id: item.id || item.name,
                 prompt: '',
                 generationStatus: 'completed' as const,

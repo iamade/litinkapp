@@ -391,7 +391,6 @@ async def generate_character_images_optimized(
     session: AsyncSession = None,
     user_id: Optional[str] = None,
     credit_reservation_id: Optional[str] = None,
-    generation_mode: str = "draft",
 ) -> List[Dict[str, Any]]:
     """Generate character images with optimizations"""
 
@@ -496,18 +495,15 @@ async def generate_character_images_optimized(
                 if user_id:
                     try:
                         from app.credits.service import CreditService
-                        from app.credits.constants import OperationType, get_book_pipeline_credit_rate
-                        image_credit_cost = get_book_pipeline_credit_rate(
-                            "image", generation_mode, user_tier
-                        )
+                        from app.credits.constants import OperationType, IMAGE_GEN
                         if credit_reservation_id:
                             # Accumulate; reservation will be confirmed after the loop
-                            _total_image_credits += image_credit_cost
+                            _total_image_credits += IMAGE_GEN
                         else:
                             credit_svc = CreditService(session)
                             await credit_svc.deduct_for_operation(
                                 user_id=_uuid.UUID(str(user_id)),
-                                amount=image_credit_cost,
+                                amount=IMAGE_GEN,
                                 operation_type=OperationType.IMAGE_GEN,
                                 ref_id=f"image_gen:{record_id}",
                             )
@@ -619,7 +615,6 @@ async def generate_scene_images_optimized(
     session: AsyncSession = None,
     user_id: Optional[str] = None,
     credit_reservation_id: Optional[str] = None,
-    generation_mode: str = "draft",
 ) -> List[Dict[str, Any]]:
     """Generate scene images sequentially with optimizations"""
 
@@ -743,18 +738,15 @@ async def generate_scene_images_optimized(
                 if user_id:
                     try:
                         from app.credits.service import CreditService
-                        from app.credits.constants import OperationType, get_book_pipeline_credit_rate
-                        image_credit_cost = get_book_pipeline_credit_rate(
-                            "image", generation_mode, user_tier
-                        )
+                        from app.credits.constants import OperationType, IMAGE_GEN
                         if credit_reservation_id:
                             # Accumulate; reservation will be confirmed after the loop
-                            _total_image_credits += image_credit_cost
+                            _total_image_credits += IMAGE_GEN
                         else:
                             credit_svc = CreditService(session)
                             await credit_svc.deduct_for_operation(
                                 user_id=_uuid.UUID(str(user_id)),
-                                amount=image_credit_cost,
+                                amount=IMAGE_GEN,
                                 operation_type=OperationType.IMAGE_GEN,
                                 ref_id=f"image_gen:{record_id}",
                             )
@@ -898,7 +890,6 @@ def generate_character_image_task(
     record_id: Optional[str] = None,
     user_tier: str = "free",
     entity_type: str = "character",
-    generation_mode: str = "draft",
 ):
     """
     Unified asynchronous Celery task for generating character images.
@@ -1176,7 +1167,6 @@ def generate_scene_image_task(
     character_ids: Optional[List[str]] = None,
     character_image_urls: Optional[List[str]] = None,
     is_suggested_shot: bool = False,  # For suggested shot special handling
-    generation_mode: str = "draft",
 ) -> None:
     """
     Asynchronous Celery task for generating scene images with retry mechanism.
