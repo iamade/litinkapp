@@ -47,7 +47,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { upscaleImage } from '../../lib/api/upscale';
 import { useCreditBalance } from '../../hooks/useCreditBalance';
-import { BookPipelineCreditMode, estimateImageCredits, estimateUpscaleCredits, getInsufficientCreditsTooltip, normalizeBookPipelineMode } from '../../lib/creditCosts';
+import { estimateImageCredits, estimateUpscaleCredits, getInsufficientCreditsTooltip } from '../../lib/creditCosts';
 import { dispatchCreditsRefresh } from '../../lib/credits';
 
 import { projectService } from '../../services/projectService';
@@ -263,11 +263,9 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
     quality: 'standard',
     aspectRatio: '16:9',
     useCharacterReferences: true,
-    lightingMood: 'cinematic',
-    generationMode: 'draft'
+    lightingMood: 'cinematic'
   } as ImageGenerationOptions);
-  const effectiveGenerationMode = normalizeBookPipelineMode(generationOptions.generationMode, userTier);
-  const perImageCost = estimateImageCredits(1, effectiveGenerationMode, userTier);
+  const perImageCost = estimateImageCredits(1);
   const singleImageInsufficientReason = creditBalance < perImageCost
     ? getInsufficientCreditsTooltip(creditBalance, perImageCost)
     : "";
@@ -408,7 +406,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
 
     return [];
   }, [selectedScript]);
-  const allScenesEstimatedCost = estimateImageCredits(scenes.length, effectiveGenerationMode, userTier);
+  const allScenesEstimatedCost = estimateImageCredits(scenes.length);
 
 
   const {
@@ -1177,22 +1175,6 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             >
               <option value="standard">Standard</option>
               <option value="hd">High Definition</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Credit Mode</label>
-            <select
-              value={effectiveGenerationMode}
-              disabled={userTier.toLowerCase() === 'free'}
-              onChange={(e) => setGenerationOptions(prev => ({
-                ...prev,
-                generationMode: e.target.value as BookPipelineCreditMode
-              }))}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="draft">Draft</option>
-              <option value="cinematic">Cinematic</option>
             </select>
           </div>
 

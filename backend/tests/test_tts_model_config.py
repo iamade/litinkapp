@@ -29,12 +29,6 @@ EXPECTED_GLOBAL_TTS_CHAINS = {
         "fish-speech/default",
         "google/text-to-speech",
     ],
-    "pro": [
-        "elevenlabs/eleven_multilingual_v2",
-        "openai/tts-1-hd",
-        "fish-speech/default",
-        "google/text-to-speech",
-    ],
     "enterprise": [
         "elevenlabs/eleven_multilingual_v2",
         "openai/tts-1-hd",

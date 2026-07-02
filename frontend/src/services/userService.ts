@@ -143,12 +143,6 @@ interface SceneImageRequest {
   style?: string;
   aspect_ratio?: string;
   custom_prompt?: string;
-  script_id?: string;
-  character_ids?: string[];
-  character_image_urls?: string[];
-  is_suggested_shot?: boolean;
-  shot_index?: number;
-  generation_mode?: "draft" | "cinematic";
 }
 
 interface CharacterImageRequest {
@@ -157,8 +151,6 @@ interface CharacterImageRequest {
   style?: string;
   aspect_ratio?: string;
   custom_prompt?: string;
-  script_id?: string;
-  generation_mode?: "draft" | "cinematic";
 }
 
 interface DeleteImageResponse {
@@ -275,7 +267,6 @@ export const userService = {
       focusAreas?: string[];
       scriptStoryType?: string;
       customLogline?: string;
-      generationMode?: "draft" | "cinematic";
     }
   ): Promise<ScriptResult> => {
     const requestPayload = {
@@ -287,7 +278,6 @@ export const userService = {
       focus_areas: options?.focusAreas,
       scriptStoryType: options?.scriptStoryType,
       custom_logline: options?.customLogline,
-      generation_mode: options?.generationMode,
     };
     return apiClient.post<ScriptResult>(`/ai/generate-script-and-scenes`, requestPayload);
   },

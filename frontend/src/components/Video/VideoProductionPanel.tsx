@@ -80,7 +80,6 @@ interface VideoProductionPanelProps {
   generationProgress?: GenerationProgress; // Progress data from polling
   onDeleteGeneration?: (genId: string) => void; // Callback to delete a failed generation
   onNavigateToTab?: (tab: string) => void; // Navigate to another tab (e.g. 'images')
-  userTier?: string;
 }
 
 const TIER_ORDER = ['free', 'basic', 'pro', 'premium', 'professional', 'enterprise'] as const;
@@ -129,8 +128,7 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   generatingShotIds = new Set(),
   generationProgress,
   onDeleteGeneration,
-  onNavigateToTab,
-  userTier = 'free'
+  onNavigateToTab
 }) => {
   const {
     selectedScriptId,
@@ -366,15 +364,11 @@ const VideoProductionPanel: React.FC<VideoProductionPanelProps> = ({
   const controlsDisabled = isSwitching || isLoading;
   const selectedVideoCost = estimateVideoCreditsFromShots(
     selectedShotIds.length,
-    DEFAULT_VIDEO_SECONDS_PER_SHOT,
-    'draft',
-    userTier
+    DEFAULT_VIDEO_SECONDS_PER_SHOT
   );
   const allVideoCost = estimateVideoCreditsFromShots(
     Math.max(enrichedScenes.length, 1),
-    DEFAULT_VIDEO_SECONDS_PER_SHOT,
-    'draft',
-    userTier
+    DEFAULT_VIDEO_SECONDS_PER_SHOT
   );
   const [showInsufficientCreditsModal, setShowInsufficientCreditsModal] = useState(false);
   const [requiredCreditsForModal, setRequiredCreditsForModal] = useState(0);

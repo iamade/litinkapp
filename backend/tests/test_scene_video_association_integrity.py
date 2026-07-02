@@ -660,9 +660,6 @@ async def test_kan86_selected_scene_audio_rehydrates_provider_cdn_and_records_at
 async def test_kan86_selected_scene_audio_flow_passes_public_media_urls_to_provider(monkeypatch):
     monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PUBLIC_URL", "https://minio-public.example.com")
     monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_ENDPOINT", "http://minio:9000")
-    monkeypatch.setattr("app.tasks.video_tasks.settings.MODELSLAB_MEDIA_PUBLIC_URL", None)
-    monkeypatch.setattr("app.tasks.video_tasks.settings.MINIO_PROVIDER_PUBLIC_URL", None)
-    _clear_provider_media_env(monkeypatch)
 
     service = _RecordingModelsLabService()
     session = AsyncMock()

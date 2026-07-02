@@ -325,33 +325,3 @@ def credits_for_video_duration(duration_seconds: float) -> int:
     """Convert video duration to credit cost (ceiling, 5 credits/second)."""
     from app.credits.constants import VIDEO_PER_SECOND
     return max(1, math.ceil(duration_seconds) * VIDEO_PER_SECOND)
-
-
-def book_pipeline_audio_credits(
-    duration_seconds: float,
-    mode: str = "draft",
-    user_tier: str | None = None,
-) -> int:
-    from app.credits.constants import estimate_book_pipeline_duration_credits
-
-    return estimate_book_pipeline_duration_credits(
-        duration_seconds,
-        "audio_per_second",
-        mode,
-        user_tier,
-    )
-
-
-def book_pipeline_video_credits(
-    duration_seconds: float,
-    mode: str = "draft",
-    user_tier: str | None = None,
-) -> int:
-    from app.credits.constants import estimate_book_pipeline_duration_credits
-
-    return estimate_book_pipeline_duration_credits(
-        duration_seconds,
-        "video_per_second",
-        mode,
-        user_tier,
-    )

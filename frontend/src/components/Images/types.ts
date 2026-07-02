@@ -31,6 +31,5 @@ export interface ImageGenerationOptions {
   useCharacterReferences: boolean;
   includeBackground: boolean;
   lightingMood: string;
-  generationMode?: 'draft' | 'cinematic';
   customPrompt?: string; // Added to fix lint error
 }

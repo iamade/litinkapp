@@ -5,7 +5,7 @@ import CharacterDropdown, { PlotCharacter } from './CharacterDropdown';
 import { apiClient } from '../../lib/api';
 import ExpandScriptModal from './ExpandScriptModal';
 import { useCreditBalance } from '../../hooks/useCreditBalance';
-import { BookPipelineCreditMode, estimateScriptCredits, normalizeBookPipelineMode } from '../../lib/creditCosts';
+import { estimateScriptCredits } from '../../lib/creditCosts';
 import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 import { toast } from 'react-hot-toast';
 import ProtectedImage from '../Common/ProtectedImage';
@@ -93,7 +93,6 @@ interface ScriptGenerationPanelProps {
     original_prompt?: string;
   } | null;
   onCreatePlotCharacter?: (name: string, entityType?: 'character' | 'object' | 'location') => Promise<PlotCharacter>;  // Create placeholder in plot
-  userTier?: string;
 }
 
 interface ScriptGenerationOptions {
@@ -103,7 +102,6 @@ interface ScriptGenerationOptions {
   focusAreas: string[];
   scriptStoryType?: string; // Added property for script story type
   customLogline?: string;
-  generationMode?: BookPipelineCreditMode;
 }
 
 const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
@@ -116,8 +114,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   onUpdateScript,
   onDeleteScript,
   plotOverview,
-  onCreatePlotCharacter,
-  userTier = 'free'
+  onCreatePlotCharacter
 }) => {
   const {
     selectedScriptId,
@@ -233,9 +230,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
   const [newCharacterName, setNewCharacterName] = useState('');
   const [newEntityType, setNewEntityType] = useState<'character' | 'object' | 'location' | ''>('');
   const { balance: creditBalance } = useCreditBalance({ enabled: true });
-  const [generationMode, setGenerationMode] = useState<BookPipelineCreditMode>('draft');
-  const effectiveGenerationMode = normalizeBookPipelineMode(generationMode, userTier);
-  const scriptCreditCost = estimateScriptCredits(effectiveGenerationMode, userTier);
+  const scriptCreditCost = estimateScriptCredits();
   const hasScriptCredits = creditBalance >= scriptCreditCost;
 
   // KAN-331/KAN-265 Bug 1 fix: Remove Set guard — it prevented re-linking when
@@ -312,8 +307,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
     onGenerateScript(scriptStyle, {
       ...generationOptions,
       scriptStoryType: scriptStoryType,
-      customLogline: logline,
-      generationMode: effectiveGenerationMode
+      customLogline: logline
     });
   };
 
@@ -531,19 +525,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
         </div>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-          <span>Credit mode</span>
-          <select
-            value={effectiveGenerationMode}
-            onChange={(e) => setGenerationMode(e.target.value as BookPipelineCreditMode)}
-            disabled={userTier.toLowerCase() === 'free'}
-            className="border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-          >
-            <option value="draft">Draft</option>
-            <option value="cinematic">Cinematic</option>
-          </select>
-        </label>
+      <div className="flex justify-end">
         <button
           onClick={handleGenerateScript}
           disabled={isGeneratingScript}
@@ -563,7 +545,7 @@ const ScriptGenerationPanel: React.FC<ScriptGenerationPanelProps> = ({
           </button>
       </div>
       <p className="mt-3 text-right text-xs text-gray-500 dark:text-gray-400">
-        Estimated {effectiveGenerationMode} script cost: {scriptCreditCost} credit{scriptCreditCost === 1 ? '' : 's'} per ~1k tokens • Available: {creditBalance}
+        Estimated cost: {scriptCreditCost} credit{scriptCreditCost === 1 ? '' : 's'} • Available: {creditBalance}
       </p>
     </div>
   );

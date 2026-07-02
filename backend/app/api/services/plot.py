@@ -1325,7 +1325,6 @@ Focus ONLY on locations and significant physical objects. Do NOT include charact
                     {
                         "name": char.get("name", ""),
                         "role": char.get("role", "supporting"),
-                        "entity_type": char.get("entity_type", "character"),
                         "character_arc": char.get("character_arc", ""),
                         "physical_description": char.get("physical_description", ""),
                         "personality": char.get("personality", ""),
@@ -1338,7 +1337,7 @@ Focus ONLY on locations and significant physical objects. Do NOT include charact
                     }
                 )
 
-        return validated_characters[:8]  # Allow up to 8 characters/objects/locations for combined results
+        return validated_characters[:5]  # Limit to 5 characters
 
     def _parse_character_generation_text_response(
         self, ai_response: str

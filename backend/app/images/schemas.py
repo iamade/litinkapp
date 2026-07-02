@@ -15,7 +15,6 @@ class SceneImageRequest(BaseModel):
     character_image_urls: Optional[List[str]] = None
     is_suggested_shot: bool = False  # For suggested shot special handling
     shot_index: Optional[int] = None  # 0 = Key Scene, 1+ = Suggested Shots
-    generation_mode: Optional[str] = None  # KAN-399: "draft" or "cinematic"
 
 
 class CharacterImageRequest(BaseModel):
@@ -27,7 +26,6 @@ class CharacterImageRequest(BaseModel):
     aspect_ratio: str = "3:4"
     custom_prompt: Optional[str] = None
     script_id: Optional[str] = None
-    generation_mode: Optional[str] = None  # KAN-399: "draft" or "cinematic"
 
 
 class BatchImageRequest(BaseModel):

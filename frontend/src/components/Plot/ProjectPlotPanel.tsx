@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BookOpen, Loader2, MapPin, Package, Users, Wand2 } from 'lucide-react';
+import { BookOpen, Loader2, Wand2 } from 'lucide-react';
 import { useProjectPlotGeneration } from '../../hooks/useProjectPlotGeneration';
 
 interface ProjectPlotPanelProps {
@@ -9,16 +9,6 @@ interface ProjectPlotPanelProps {
   projectType: string;
   onCharacterChange?: () => void | Promise<void>;
 }
-
-type ProjectEntity = {
-  id?: string;
-  name: string;
-  role?: string;
-  entity_type?: 'character' | 'object' | 'location';
-  character_arc?: string;
-  physical_description?: string;
-  personality?: string;
-};
 
 /**
  * Plot panel for prompt-only projects.
@@ -46,9 +36,6 @@ const ProjectPlotPanel: React.FC<ProjectPlotPanelProps> = ({
   const [tone, setTone] = useState('');
   const [audience, setAudience] = useState('');
   const [refinementPrompt, setRefinementPrompt] = useState('');
-  const plotEntities = (plotOverview?.characters || []) as ProjectEntity[];
-  const storyCharacters = plotEntities.filter((entity) => entity.entity_type !== 'object' && entity.entity_type !== 'location');
-  const objectsAndLocations = plotEntities.filter((entity) => entity.entity_type === 'object' || entity.entity_type === 'location');
 
   useEffect(() => {
     loadPlot();
@@ -239,17 +226,11 @@ const ProjectPlotPanel: React.FC<ProjectPlotPanelProps> = ({
           )}
 
           {/* Characters */}
-          {storyCharacters.length > 0 && (
+          {plotOverview.characters && plotOverview.characters.length > 0 && (
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
-                  <Users className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
-                  Characters
-                </h4>
-                <span className="text-sm text-gray-500 dark:text-gray-400">{storyCharacters.length} shown</span>
-              </div>
+              <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Characters</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {storyCharacters.map((char, idx) => (
+                {plotOverview.characters.map((char: any, idx) => (
                   <div key={char.id || idx} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4 hover:shadow-md dark:hover:shadow-lg dark:hover:shadow-purple-900/20 transition-shadow bg-gray-50 dark:bg-gray-700/50">
                     <div className="flex items-start justify-between mb-2">
                       <h5 className="font-semibold text-gray-900 dark:text-white">{char.name}</h5>
@@ -273,57 +254,6 @@ const ProjectPlotPanel: React.FC<ProjectPlotPanelProps> = ({
                     )}
                   </div>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* Objects & Locations */}
-          {objectsAndLocations.length > 0 && (
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
-                  <Package className="h-5 w-5 mr-2 text-purple-600 dark:text-purple-400" />
-                  Objects & Locations
-                </h4>
-                <span className="text-sm text-gray-500 dark:text-gray-400">{objectsAndLocations.length} shown</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {objectsAndLocations.map((entity, idx) => {
-                  const isLocation = entity.entity_type === 'location';
-                  const typeLabel = isLocation ? 'entity_type=location' : 'entity_type=object';
-                  return (
-                    <div key={entity.id || idx} className="border border-gray-200 dark:border-gray-600 rounded-lg p-4 hover:shadow-md dark:hover:shadow-lg dark:hover:shadow-purple-900/20 transition-shadow bg-gray-50 dark:bg-gray-700/50">
-                      <div className="flex items-start justify-between mb-2">
-                        <h5 className="font-semibold text-gray-900 dark:text-white">{entity.name}</h5>
-                        <span className={`inline-flex items-center text-xs px-2 py-1 rounded-full ${
-                          isLocation
-                            ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
-                            : 'bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-300'
-                        }`}>
-                          {isLocation ? <MapPin className="h-3 w-3 mr-1" /> : <Package className="h-3 w-3 mr-1" />}
-                          {typeLabel}
-                        </span>
-                      </div>
-                      {entity.role && (
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{entity.role}</p>
-                      )}
-                      {entity.physical_description && (
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">{entity.physical_description}</p>
-                      )}
-                      {entity.character_arc && (
-                        <p className="text-xs text-gray-500 dark:text-gray-500 italic">{entity.character_arc}</p>
-                      )}
-                      {entity.id && (
-                        <button
-                          onClick={() => handleDeleteCharacter(entity.id as string)}
-                          className="mt-2 text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                        >
-                          Remove Item
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
               </div>
             </div>
           )}
