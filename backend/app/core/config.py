@@ -214,6 +214,10 @@ class Settings(BaseSettings):
     # ModelsLab must fetch media from an externally reachable host.
     MODELSLAB_MEDIA_PUBLIC_URL: Optional[str] = None
     MINIO_PROVIDER_PUBLIC_URL: Optional[str] = None
+    # Optional port to enforce on MinIO public URLs when the configured URL
+    # omits an explicit port. Used to keep :8443 on VPS-staging where the
+    # load balancer / Caddy only terminates TLS on that port.
+    MINIO_PUBLIC_PORT: Optional[int] = None
 
     # S3 Configuration (for production)
     S3_ENDPOINT: Optional[str] = None  # AWS S3 or S3-compatible endpoint
