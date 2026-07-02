@@ -788,11 +788,10 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   }
 
   const normalizedGenre = plotOverview.genre?.toLowerCase() || "";
-  // KAN-372: Count only actual characters (not objects/locations) for the "without images" display
-  const actualCharactersForDisplay = plotOverview.characters?.filter(
-    (char: Character) => !char.entity_type || char.entity_type === 'character'
-  ) || [];
-  const charactersWithoutImages = actualCharactersForDisplay.filter((char: Character) => !char.image_url).length;
+  // KAN-372: Count ALL entities (characters + objects + locations) without images
+  const charactersWithoutImages = plotOverview.characters?.filter(
+    (char: Character) => !char.image_url
+  ).length || 0;
   const hasCharacters = plotOverview.characters && plotOverview.characters.length > 0;
   const normalizedStoryType = plotOverview.story_type?.toLowerCase().replace(/'/g, "") || "";
 
@@ -1798,11 +1797,11 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
               <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
                 <Wand2 className="w-6 h-6 text-green-600" />
               </div>
-              <h3 className="text-xl font-bold text-gray-900">Generate All Character Images</h3>
+              <h3 className="text-xl font-bold text-gray-900">Generate All Images</h3>
             </div>
 
             <p className="text-gray-600 mb-6">
-              Generate images for all <strong>{charactersWithoutImages} character{charactersWithoutImages !== 1 ? 's' : ''}</strong> without images? This may take several minutes.
+              Generate images for all <strong>{charactersWithoutImages} entit{charactersWithoutImages !== 1 ? 'ies' : 'y'}</strong> without images? This may take several minutes.
             </p>
 
             <div className="flex gap-3">
