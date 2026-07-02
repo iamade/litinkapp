@@ -469,12 +469,24 @@ def generate_all_audio_for_video(self, video_generation_id: str):
             # KAN-373: Compute per-scene dialogue duration before generating SFX/BG.
             # Capped SFX/BG durations prevent overcharging when dialogue is very short.
             scene_dialogue_durations: Dict[int, float] = {}
+            total_dialogue_segments = 0  # KAN-373 round2: fallback count
             for r in narrator_results:
                 scene_num = r.get("scene_number", r.get("scene", 1))
                 scene_dialogue_durations[scene_num] = scene_dialogue_durations.get(scene_num, 0.0) + float(r.get("duration", 0))
+                total_dialogue_segments += 1
             for r in character_results:
                 scene_num = r.get("scene_number", r.get("scene", 1))
                 scene_dialogue_durations[scene_num] = scene_dialogue_durations.get(scene_num, 0.0) + float(r.get("duration", 0))
+                total_dialogue_segments += 1
+            # KAN-373 round2: when all durations are 0 (e.g. provider returned null audio_time),
+            # estimate from segment count so the cap still fires.
+            if total_dialogue_segments > 0:
+                total_dialogue_dur = sum(scene_dialogue_durations.values())
+                if total_dialogue_dur <= 0:
+                    estimated_dur = total_dialogue_segments * 1.5  # ~1.5s per short line
+                    print(f"[KAN-373] All dialogue durations 0; estimating {estimated_dur}s from {total_dialogue_segments} segments")
+                    for scene_num in scene_dialogue_durations:
+                        scene_dialogue_durations[scene_num] = estimated_dur / max(1, len(scene_dialogue_durations))
 
             # Generate sound effects (KAN-373: pass dialogue durations for proportional SFX)
             sound_effect_results = await generate_sound_effects_audio(
@@ -1535,7 +1547,7 @@ async def generate_sound_effects_audio(
             # KAN-373: Cap SFX duration to dialogue * 1.5 (min 3s, max 30s)
             requested_dur = effect.get("duration", 10.0)
             actual_dur = min(30.0, max(3.0, requested_dur))
-            if scene_dialogue_durations:
+            if scene_dialogue_durations is not None and len(scene_dialogue_durations) > 0:
                 dialogue_dur = scene_dialogue_durations.get(scene_id, 0.0)
                 if dialogue_dur > 0:
                     cap = max(3.0, dialogue_dur * 1.5)
@@ -1721,7 +1733,7 @@ async def generate_background_music(
             # KAN-373: Cap music duration to dialogue * 1.2 (min 5s to avoid zero-duration)
             requested_dur = music_cue.get("duration", 15.0)
             actual_dur = requested_dur
-            if scene_dialogue_durations:
+            if scene_dialogue_durations is not None and len(scene_dialogue_durations) > 0:
                 dialogue_dur = scene_dialogue_durations.get(scene_id, 0.0)
                 if dialogue_dur > 0:
                     cap = max(5.0, dialogue_dur * 1.2)

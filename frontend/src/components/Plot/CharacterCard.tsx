@@ -87,8 +87,11 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
   const [showDeleteImageModal, setShowDeleteImageModal] = useState(false);
 
   const isObject = character.entity_type === 'object' || character.entity_type === 'location';
-  const resolveImageUrl = (img?: { watermarked_image_url?: string; watermarked_url?: string; image_url?: string } | null) =>
-    img?.watermarked_image_url || img?.watermarked_url || img?.image_url || '';
+  // KAN-372: use shared resolver (image_url first = tier-appropriate)
+  const resolveImageUrl = (img?: { image_url?: string; imageUrl?: string; watermarked_image_url?: string; watermarked_url?: string; watermarkedImageUrl?: string } | null) => {
+    if (!img) return '';
+    return img.image_url || img.imageUrl || img.watermarked_image_url || img.watermarked_url || img.watermarkedImageUrl || '';
+  };
   
   // Carousel Logic
   const validImages = React.useMemo(() => {
