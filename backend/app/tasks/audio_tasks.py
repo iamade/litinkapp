@@ -2028,16 +2028,21 @@ def generate_chapter_audio_task(
                     logger.error(f'[AudioTask] Failed to persist audio to S3: {persist_error}')
                     raise Exception(f'Audio generated but failed to persist to storage: {persist_error}')
             else:
-                # Use ModelsLab for non-TTS audio types
+                # KAN-373 round4: Use capped duration, not raw provider fallback
                 audio_service = ModelsLabV7AudioService()
+                # duration or 30.0 incorrectly uses 30.0 when duration=0 (falsy).
+                raw_dur = float(duration) if duration else 10.0
+                if audio_type == "music":
+                    raw_dur = float(duration) if duration else 30.0
+                actual_dur = cap_generated_audio_duration(None, raw_dur)
 
                 if audio_type == "music":
                     result = await audio_service.generate_sound_effect(
-                        description=text_content, duration=duration or 30.0
+                        description=text_content, duration=actual_dur
                     )
                 else:
                     result = await audio_service.generate_sound_effect(
-                        description=text_content, duration=duration or 10.0
+                        description=text_content, duration=actual_dur
                     )
 
                 if result.get("status") == "success":
