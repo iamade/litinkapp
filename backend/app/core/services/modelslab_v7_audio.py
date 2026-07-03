@@ -392,8 +392,9 @@ class ModelsLabV7AudioService:
         dialogue_audio_urls: List[str] = None,
         include_ambient: bool = True,
         include_music: bool = True,
+        max_music_duration: float = 30.0,
     ) -> Dict[str, Any]:
-        """Generate comprehensive audio enhancement for a scene"""
+        """Generate comprehensive audio enhancement for a scene."""
 
         try:
             logger.info(
@@ -419,11 +420,14 @@ class ModelsLabV7AudioService:
                     enhanced_audio["ambient_sounds"].append(ambient_result)
 
             # ✅ Generate background music
+            # KAN-373 round 7: cap music duration to caller-supplied maximum
+            # instead of always requesting the hard-coded 30s default.
+            capped_music_duration = min(30.0, max(1.0, float(max_music_duration)))
             if include_music:
                 music_prompt = f"Background music for: {scene_description}. Create atmospheric music that matches the mood and setting."
 
                 music_result = await self.generate_background_music(
-                    description=music_prompt, duration=30.0
+                    description=music_prompt, duration=capped_music_duration
                 )
 
                 if music_result.get("status") == "success":
