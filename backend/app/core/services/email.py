@@ -70,11 +70,11 @@ class EmailService:
             part2 = MIMEText(html_content, 'html')
             msg.attach(part2)
 
-            with smtplib.SMTP(settings.MAILPIT_SMTP_HOST, settings.MAILPIT_SMTP_PORT) as server:
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
                 server.send_message(msg)
 
             logger.info(f"Email sent via Mailpit to {to_email}")
-            logger.info(f"View email at: http://{settings.MAILPIT_SMTP_HOST}:{settings.MAILPIT_WEB_UI_PORT}")
+            logger.info(f"View email at: http://{settings.SMTP_HOST}:{settings.MAILPIT_UI_PORT}")
             return True
 
         except Exception as e:
