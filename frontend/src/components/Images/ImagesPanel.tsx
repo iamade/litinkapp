@@ -1071,25 +1071,37 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
       }
       await generateAllSceneImages(scenes, generationOptions);
     } else if (confirmAction === 'characters') {
+      // KAN-372 round 7: the "Characters" tab already excludes objects/locations,
+      // so this batch generation path must also exclude them. Passing object/location
+      // names into generateCharacterImage() will either 404 or generate the wrong visual.
+      const actualCharacters = characters.filter((char) => {
+        const typedChar = char as Character;
+        return !typedChar.entity_type || typedChar.entity_type === 'character';
+      });
+
       // Build character details from plot overview
       const characterDetails: Record<string, string> = {};
       if (plotOverview?.characters) {
         (plotOverview?.characters ?? []).forEach((char) => {
           if (typeof char === "object" && char !== null && "name" in char) {
+            // KAN-372 round 7: skip details for objects/locations even if they
+            // appear in plotOverview for cross-referencing.
+            if (char.entity_type && char.entity_type !== 'character') return;
             characterDetails[(char as { name: string }).name] =
               `${(char as any).physical_description ?? ""}. ${(char as any).personality ?? ""}. ${(char as any).role ?? ""}`;
           }
         });
       } else {
         // Fallback to basic descriptions
-        characters.forEach((char) => {
+        actualCharacters.forEach((char) => {
           const name = typeof char === "string" ? char : (char as { name: string }).name;
           characterDetails[name] = `Portrait of ${name}, detailed character design`;
         });
       }
 
+      // KAN-372 round 7: generate only for actual characters.
       await generateAllCharacterImages(
-        characters.map((char) => (typeof char === "string" ? char : (char as { name: string }).name)),
+        actualCharacters.map((char) => (typeof char === "string" ? char : (char as { name: string }).name)),
         characterDetails,
         generationOptions
       );
