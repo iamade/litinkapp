@@ -168,7 +168,7 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
     STRIPE_PRICE_ID: Optional[str] = None
 
-    # Stripe Price IDs for subscription tiers
+    # Stripe Price IDs for subscription tiers (legacy single-period)
     STRIPE_FREE_PRICE_ID: Optional[str] = None
     STRIPE_BASIC_PRICE_ID: Optional[str] = None
     STRIPE_STANDARD_PRICE_ID: Optional[str] = None
@@ -176,6 +176,16 @@ class Settings(BaseSettings):
     STRIPE_PROFESSIONAL_PRICE_ID: Optional[str] = None
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = None
     STRIPE_PRO_PRICE_ID: Optional[str] = None  # Keep for backward compatibility
+
+    # KAN-406: Per-period Stripe Price IDs (canonical source for billing_period routing)
+    STRIPE_BASIC_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_BASIC_ANNUAL_PRICE_ID: Optional[str] = None
+    STRIPE_STANDARD_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_STANDARD_ANNUAL_PRICE_ID: Optional[str] = None
+    STRIPE_PREMIUM_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_PREMIUM_ANNUAL_PRICE_ID: Optional[str] = None
+    STRIPE_PROFESSIONAL_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID: Optional[str] = None
 
     # Rate Limiting per Tier (requests per minute)
     RATE_LIMITS: ClassVar[Dict[str, int]] = {

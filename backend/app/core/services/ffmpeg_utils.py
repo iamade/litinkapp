@@ -880,3 +880,80 @@ async def async_apply_fade_in_out(
         fade_in_duration,
         fade_out_duration,
     )
+
+
+def trim_audio_file_sync(input_path: str, output_path: str, max_duration: float) -> bool:
+    """Trim audio file to max_duration seconds using ffmpeg (KAN-373).
+
+    Uses -c copy for fast lossless trimming. Returns True on success.
+    """
+    cmd = [
+        "ffmpeg", "-y", "-i", input_path,
+        "-t", str(max_duration),
+        "-c", "copy",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        logger.error(f"[TRIM AUDIO] ffmpeg failed: {result.stderr[:200]}")
+        return False
+    return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+
+
+async def download_trim_and_upload(
+    source_url: str,
+    storage,
+    s3_path: str,
+    max_duration: float,
+    content_type: str = 'audio/mpeg',
+) -> tuple[Optional[str], float]:
+    """Download audio, trim to max_duration, upload to storage. Returns (url, actual_duration).
+
+    KAN-373: Trims provider audio to capped duration BEFORE storage so credits
+    and DB duration match the actual stored file. Falls back to persist_from_url
+    if trimming fails.
+    """
+    import tempfile
+    import requests as _requests
+    import shutil
+
+    if not source_url or max_duration <= 0:
+        return None, 0.0
+
+    tmp_dir = tempfile.mkdtemp(prefix="trim_audio_")
+    tmp_input = os.path.join(tmp_dir, "input.mp3")
+    tmp_output = os.path.join(tmp_dir, "trimmed.mp3")
+
+    try:
+        # Download original
+        resp = _requests.get(source_url, timeout=60, stream=True)
+        resp.raise_for_status()
+        with open(tmp_input, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        # Trim with ffmpeg
+        cmd = [
+            "ffmpeg", "-y", "-i", tmp_input,
+            "-t", str(max_duration),
+            "-c", "copy",
+            tmp_output,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0 or not os.path.exists(tmp_output) or os.path.getsize(tmp_output) == 0:
+            logger.error(f"[TRIM] ffmpeg failed: {result.stderr[:200]}")
+            # Fallback: upload original
+            with open(tmp_input, "rb") as f:
+                url = await storage.upload_stream(f, s3_path, content_type=content_type)
+            return url, max_duration  # Duration unknown, use cap
+
+        # Upload trimmed
+        with open(tmp_output, "rb") as f:
+            url = await storage.upload_stream(f, s3_path, content_type=content_type)
+        return url, max_duration
+
+    except Exception as e:
+        logger.error(f"[TRIM] Error: {e}")
+        return None, 0.0
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
