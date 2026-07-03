@@ -59,15 +59,19 @@ class ModelFallbackManager:
             )
             return await generation_function(**request_params)
 
-        models_to_try = [config.primary]
-        if config.fallback:
-            models_to_try.append(config.fallback)
-        if config.fallback2:
-            models_to_try.append(config.fallback2)
-        if config.fallback3:
-            models_to_try.append(config.fallback3)
-        if getattr(config, "fallback4", None):
-            models_to_try.append(config.fallback4)
+        models_to_try = [
+            model
+            for model in (
+                config.primary,
+                config.fallback,
+                config.fallback2,
+                config.fallback3,
+                config.fallback4,
+                getattr(config, "fallback5", None),
+                getattr(config, "fallback6", None),
+            )
+            if model
+        ]
 
         attempted_models = []
         last_error = None
@@ -157,9 +161,7 @@ class ModelFallbackManager:
                     "exceeded",  # e.g., "max wait time exceeded"
                 ]
                 error_lower = error_msg.lower()
-                is_timeout = any(
-                    t in error_lower for t in stop_fallback_indicators
-                )
+                is_timeout = any(t in error_lower for t in stop_fallback_indicators)
                 is_rate_limit = any(
                     indicator in error_lower for indicator in rate_limit_indicators
                 )
@@ -287,9 +289,7 @@ class ModelFallbackManager:
                     "exceeded",
                 ]
                 error_lower = error_msg.lower()
-                is_timeout = any(
-                    t in error_lower for t in stop_fallback_indicators
-                )
+                is_timeout = any(t in error_lower for t in stop_fallback_indicators)
                 is_rate_limit = any(
                     indicator in error_lower for indicator in rate_limit_indicators
                 )

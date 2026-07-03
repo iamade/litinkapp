@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
+from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger()
@@ -11,7 +12,9 @@ class ModelTier(Enum):
     BASIC = "basic"
     STANDARD = "standard"
     PREMIUM = "premium"
-    PRO = "pro"  # KAN-tier-mapping: alias for PROFESSIONAL (SubscriptionTier uses "pro")
+    PRO = (
+        "pro"  # KAN-tier-mapping: alias for PROFESSIONAL (SubscriptionTier uses "pro")
+    )
     PROFESSIONAL = "professional"
     ENTERPRISE = "enterprise"
 
@@ -21,10 +24,12 @@ class ModelConfig:
     primary: str
     fallback: str
     fallback2: Optional[str] = None
-    fallback3: Optional[str] = (
-        None  # Added for additional fallback (Veo 3 direct, Grok AI)
-    )
+    fallback3: Optional[
+        str
+    ] = None  # Added for additional fallback (Veo 3 direct, Grok AI)
     fallback4: Optional[str] = None  # 5th option — cross-provider safety net
+    fallback5: Optional[str] = None
+    fallback6: Optional[str] = None
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     cost_per_1k_input: Optional[float] = None
@@ -32,14 +37,16 @@ class ModelConfig:
 
 
 # Text & Script Generation Strategy (LMSYS Creative Writing Leaderboard-based)
-# Primary: Ollama Cloud (KAN-181) | Fallbacks: Ollama Cloud models
+# Primary: Ollama Cloud (KAN-181) | FREE fallbacks mix providers for KAN-401
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
         primary="ollama/gemma4:31b",  # Ollama Cloud API — valid model ID (KAN-239 fix)
-        fallback="ollama/ministral-3:8b",  # Ollama Cloud, 8B params, Mistral (KAN-239)
-        fallback2="ollama/gemma3:12b",  # Ollama Cloud, 12B params, Gemma 3 (KAN-239)
-        fallback3="ollama/gemma3:4b",  # Ollama Cloud, 4B params, lightweight backup (KAN-239)
-        fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
+        fallback=f"zai/{settings.Z_AI_FREE_MODEL}",  # Z.AI first non-Ollama fallback (KAN-401)
+        fallback2=f"piapi/{settings.PIAPI_FREE_MODEL}",  # PiAPI second non-Ollama fallback (KAN-401)
+        fallback3=f"featherless/{settings.FEATHERLESS_FREE_MODEL}",  # Featherless third non-Ollama fallback (KAN-401)
+        fallback4="ollama/ministral-3:8b",  # Ollama Cloud, 8B params, Mistral (KAN-239)
+        fallback5="ollama/gemma3:12b",  # Ollama Cloud, 12B params, Gemma 3 (KAN-239)
+        fallback6="ollama/gemma3:4b",  # Ollama Cloud, 4B params, lightweight backup (KAN-239)
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.0,
