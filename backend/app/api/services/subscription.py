@@ -1,6 +1,7 @@
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from enum import Enum
+import html as html_module
 import stripe
 from sqlmodel import select, col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -535,6 +536,8 @@ class SubscriptionManager:
         tier_name = tier_limits.get("display_name", tier.value.title())
         dashboard_url = f"{settings.FRONTEND_URL}/dashboard"
         display_name = user.full_name or user.display_name or "there"
+        # Escape user-controlled content to prevent HTML injection in email
+        display_name_escaped = html_module.escape(display_name)
         subject = "Payment Confirmed - Your LitInkAI Subscription is Active"
 
         html_content = f"""
@@ -556,7 +559,7 @@ class SubscriptionManager:
                     <h1>Payment Confirmed</h1>
                 </div>
                 <div class="content">
-                    <p>Hi {display_name},</p>
+                    <p>Hi {display_name_escaped},</p>
                     <p>Your payment was successful and your LitInkAI {tier_name} subscription is now active.</p>
                     <p>You can start using your updated subscription features from your dashboard.</p>
                     <p style="text-align: center;">
