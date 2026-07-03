@@ -950,7 +950,19 @@ async def download_trim_and_upload(
         # Upload trimmed
         with open(tmp_output, "rb") as f:
             url = await storage.upload_stream(f, s3_path, content_type=content_type)
-        return url, max_duration
+
+        # KAN-373: Probe actual duration of stored file so DB matches reality.
+        # ffmpeg -c copy with -t may yield a file slightly shorter than max_duration
+        # if input was already shorter; always return the probed value capped at max_duration.
+        actual_dur = max_duration
+        try:
+            probed = _get_audio_duration(tmp_output)
+            if probed and probed > 0:
+                actual_dur = min(probed, max_duration)
+        except Exception as probe_err:
+            logger.warning(f"[TRIM] Failed to probe trimmed duration: {probe_err}")
+
+        return url, actual_dur
 
     except Exception as e:
         logger.error(f"[TRIM] Error: {e}")
