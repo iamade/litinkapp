@@ -13,8 +13,8 @@ from pydantic import field_validator
 # This makes the native Python config path honour the same ENV_FILE variable
 # that local.yml and the VPS tunnel scripts already use, so Docker and native
 # always agree on which env file drives DATABASE_URL.
-_CONFIG_DIR = Path(__file__).parent           # backend/app/core/
-_BACKEND_ROOT = _CONFIG_DIR.parent.parent     # backend/
+_CONFIG_DIR = Path(__file__).parent  # backend/app/core/
+_BACKEND_ROOT = _CONFIG_DIR.parent.parent  # backend/
 _ENVS_DIR = _BACKEND_ROOT / ".envs"
 
 _env_file_override = os.getenv("ENV_FILE")
@@ -22,7 +22,11 @@ _app_env = os.getenv("APP_ENV")
 
 if _env_file_override:
     _candidate = Path(_env_file_override)
-    _ENV_FILE = _candidate if _candidate.is_absolute() else (_BACKEND_ROOT / _env_file_override.lstrip("./"))
+    _ENV_FILE = (
+        _candidate
+        if _candidate.is_absolute()
+        else (_BACKEND_ROOT / _env_file_override.lstrip("./"))
+    )
 elif _app_env:
     _ENV_FILE = _ENVS_DIR / f".env.{_app_env}"
 else:
@@ -208,7 +212,9 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET_NAME: str = "litink-books"
     MINIO_SECURE: bool = False  # Use HTTP in development
-    MINIO_PUBLIC_URL: str = "http://localhost:9000"  # Browser/public URL (without bucket name)
+    MINIO_PUBLIC_URL: str = (
+        "http://localhost:9000"  # Browser/public URL (without bucket name)
+    )
     # External provider-readable media URL base (without bucket name). Use when
     # MINIO_PUBLIC_URL is localhost/docker-local for browser/dev access but
     # ModelsLab must fetch media from an externally reachable host.
@@ -262,6 +268,34 @@ class Settings(BaseSettings):
     # Ollama API
     OLLAMA_API_KEY: Optional[str] = None
     OLLAMA_BASE_URL: str = "https://ollama.com/v1"
+
+    # KAN-401: Script/free non-Ollama fallback providers
+    Z_AI_API_KEY: Optional[str] = None
+    ZAI_API_KEY: Optional[
+        str
+    ] = None  # Legacy env spelling kept for existing local envs
+    Z_AI_BASE_URL: str = "https://api.z.ai/api/coding/paas/v4"
+    Z_AI_FREE_MODEL: str = "glm-5.2"
+
+    PIAPI_API_KEY_LITINKAI: Optional[str] = None
+    PIAPI_BASE_URL: str = "https://api.piapi.ai/v1"
+    PIAPI_FREE_MODEL: str = "gpt-4o-mini"
+
+    FEATHERLESS_API_KEY_LITINKAI: Optional[str] = None
+    FEATHERLESS_BASE_URL: str = "https://api.featherless.ai/v1"
+    FEATHERLESS_FREE_MODEL: str = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+    @property
+    def z_ai_api_key(self) -> Optional[str]:
+        return self.Z_AI_API_KEY or self.ZAI_API_KEY
+
+    @property
+    def piapi_api_key(self) -> Optional[str]:
+        return self.PIAPI_API_KEY_LITINKAI
+
+    @property
+    def featherless_api_key(self) -> Optional[str]:
+        return self.FEATHERLESS_API_KEY_LITINKAI
 
     # xAI Grok Video (prepared for future use)
     # Get your API key from: https://console.x.ai/

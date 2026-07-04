@@ -447,28 +447,28 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
     setShowGenerateAllModal(false);
 
     if (!plotOverview?.characters || plotOverview.characters.length === 0) {
-      toast.error("No characters available to generate images");
+      toast.error("No entities available to generate images");
       return;
     }
 
-    // KAN-372: Include ALL entities (characters, objects, locations) in batch generation
-    // Previously skipped objects/locations, leaving their image_url null and breaking card rendering
+    // KAN-372: Include ALL entities (characters + objects + locations) in batch generation.
+    // plotOverview.characters contains every entity; no entity_type filter here.
     const allEntities = plotOverview.characters;
 
-    const charactersWithoutImages = allEntities.filter(
-      (char: Character) => !char.image_url
+    const entitiesWithoutImages = allEntities.filter(
+      (entity: Character) => !entity.image_url
     );
 
-    if (charactersWithoutImages.length === 0) {
-      toast.error("All characters already have images");
+    if (entitiesWithoutImages.length === 0) {
+      toast.error("All entities already have images");
       return;
     }
 
-    toast.success(`Generating images for ${charactersWithoutImages.length} entities...`);
+    toast.success(`Generating images for ${entitiesWithoutImages.length} entities...`);
 
     // Generate images in parallel
-    const promises = charactersWithoutImages.map((character: Character) =>
-      handleGenerateImage(character.id)
+    const promises = entitiesWithoutImages.map((entity: Character) =>
+      handleGenerateImage(entity.id)
     );
 
     try {

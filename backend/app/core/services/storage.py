@@ -4,6 +4,7 @@ import re
 import hashlib
 from typing import Optional, BinaryIO
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from app.core.config import settings
 import boto3
 from botocore.client import Config
@@ -89,6 +90,37 @@ class S3StorageService:
             except Exception as e:
                 logger.error(f"Failed to create bucket: {e}")
 
+    @staticmethod
+    def _minio_public_url_base() -> str:
+        """Return the browser-facing MinIO URL base, including the public port."""
+        base = (settings.MINIO_PUBLIC_URL or "").rstrip("/")
+        parsed = urlsplit(base)
+        if not parsed.scheme or not parsed.hostname or parsed.port is not None:
+            return base
+
+        for candidate in (
+            getattr(settings, "MINIO_PROVIDER_PUBLIC_URL", None),
+            getattr(settings, "MODELSLAB_MEDIA_PUBLIC_URL", None),
+        ):
+            candidate_base = (candidate or "").rstrip("/")
+            candidate_parsed = urlsplit(candidate_base)
+            if (
+                candidate_parsed.scheme == parsed.scheme
+                and candidate_parsed.hostname == parsed.hostname
+                and candidate_parsed.port is not None
+            ):
+                netloc = f"{parsed.hostname}:{candidate_parsed.port}"
+                return urlunsplit(
+                    (parsed.scheme, netloc, parsed.path.rstrip("/"), "", "")
+                ).rstrip("/")
+
+        if parsed.scheme == "https" and parsed.hostname == "minio-staging.litinkai.com":
+            return urlunsplit(
+                (parsed.scheme, f"{parsed.hostname}:8443", parsed.path.rstrip("/"), "", "")
+            ).rstrip("/")
+
+        return base
+
     async def upload(
         self, file_content: bytes, path: str, content_type: Optional[str] = None
     ) -> str:
@@ -108,7 +140,7 @@ class S3StorageService:
 
             # Generate public URL
             if self.use_minio:
-                return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
+                return f"{self._minio_public_url_base()}/{self.bucket_name}/{path}"
             else:
                 # For S3/Supabase, generate presigned URL or use CDN
                 return self.get_public_url(path)
@@ -170,7 +202,7 @@ class S3StorageService:
                         logger.warning(f"Failed to set ContentType for {path}: {meta_err}")
 
             if self.use_minio:
-                return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
+                return f"{self._minio_public_url_base()}/{self.bucket_name}/{path}"
             else:
                 return self.get_public_url(path)
 
@@ -254,7 +286,7 @@ class S3StorageService:
 
         # Build expected prefix based on storage backend
         if self.use_minio:
-            prefix = f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/"
+            prefix = f"{self._minio_public_url_base()}/{self.bucket_name}/"
         elif settings.S3_ENDPOINT:
             prefix = f"{settings.S3_ENDPOINT}/{self.bucket_name}/"
         else:
@@ -285,7 +317,7 @@ class S3StorageService:
     def get_public_url(self, path: str) -> str:
         """Get public URL for a file"""
         if self.use_minio:
-            return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
+            return f"{self._minio_public_url_base()}/{self.bucket_name}/{path}"
         elif settings.S3_ENDPOINT:
             # Supabase public buckets require object/public URLs, not the S3 API path.
             base = (

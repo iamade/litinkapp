@@ -1579,7 +1579,9 @@ async def generate_sound_effects_audio(
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
 
-                # KAN-373: Trim audio to capped duration BEFORE storage
+                # KAN-373: Trim audio to capped duration BEFORE storage.
+                # Always trim so stored file duration matches DB duration even when provider
+                # reports 0/null audio_time or returns shorter/longer audio.
                 from app.core.services.storage import get_storage_service, S3StorageService
                 import uuid as _uuid_mod
                 storage = get_storage_service()
@@ -1591,35 +1593,21 @@ async def generate_sound_effects_audio(
                 )
                 original_cdn_url = audio_url
 
-                if provider_audio_time and float(provider_audio_time) > actual_dur:
-                    try:
-                        from app.core.services.ffmpeg_utils import download_trim_and_upload
-                        trimmed_url, trimmed_dur = await download_trim_and_upload(
-                            audio_url, storage, s3_path, actual_dur, content_type='audio/mpeg'
-                        )
-                        if trimmed_url:
-                            logger.info(f"[SOUND EFFECTS] KAN-373: Trimmed audio from {provider_audio_time}s to {actual_dur}s")
-                            audio_url = trimmed_url
-                            duration = actual_dur
-                        else:
-                            audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
-                    except Exception as trim_err:
-                        logger.warning(f"[SOUND EFFECTS] KAN-373: Audio trim failed: {trim_err}")
+                try:
+                    from app.core.services.ffmpeg_utils import download_trim_and_upload
+                    trimmed_url, trimmed_dur = await download_trim_and_upload(
+                        audio_url, storage, s3_path, actual_dur, content_type='audio/mpeg'
+                    )
+                    if trimmed_url:
+                        logger.info(f"[SOUND EFFECTS] KAN-373: Trimmed audio to {trimmed_dur}s (cap {actual_dur}s)")
+                        audio_url = trimmed_url
+                        duration = trimmed_dur
+                    else:
+                        # Fallback: persist original
                         audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
-                else:
+                except Exception as trim_err:
+                    logger.warning(f"[SOUND EFFECTS] KAN-373: Audio trim failed: {trim_err}")
                     audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
-                logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
-
-                # KAN-166: If API didn't report duration, probe actual file
-                if duration <= 0 and audio_url:
-                    try:
-                        from app.core.services.ffmpeg_utils import probe_audio_duration_from_url
-                        probed = await probe_audio_duration_from_url(audio_url)
-                        if probed and probed > 0:
-                            duration = cap_generated_audio_duration(probed, actual_dur)
-                            print(f"[SOUND EFFECTS] KAN-166: Probed actual duration: {duration}s")
-                    except Exception as probe_err:
-                        print(f"[SOUND EFFECTS] KAN-166: Duration probe failed: {probe_err}")
 
                 # Using passed script_id
 
@@ -1798,9 +1786,10 @@ async def generate_background_music(
                 if not audio_url:
                     raise Exception("No audio URL in V7 response")
 
-                # KAN-373: Trim audio to capped duration BEFORE storage
+                # KAN-373: Trim audio to capped duration BEFORE storage.
                 # Provider may generate longer audio than requested (e.g., 180s vs 15s requested).
-                # Download → ffmpeg trim → upload_stream to ensure stored file matches capped duration.
+                # Always trim to actual_dur; also fixes providers that report 0/null audio_time
+                # so we don't accidentally persist untrimmed files.
                 from app.core.services.storage import get_storage_service, S3StorageService
                 import uuid as _uuid_mod
                 storage = get_storage_service()
@@ -1812,23 +1801,20 @@ async def generate_background_music(
                 )
                 original_cdn_url = audio_url
 
-                if provider_audio_time and float(provider_audio_time) > actual_dur:
-                    try:
-                        from app.core.services.ffmpeg_utils import download_trim_and_upload
-                        trimmed_url, trimmed_dur = await download_trim_and_upload(
-                            audio_url, storage, s3_path, actual_dur, content_type='audio/mpeg'
-                        )
-                        if trimmed_url:
-                            logger.info(f"[BACKGROUND MUSIC] KAN-373: Trimmed audio from {provider_audio_time}s to {actual_dur}s")
-                            audio_url = trimmed_url
-                            duration = actual_dur
-                        else:
-                            # Fallback: persist original
-                            audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
-                    except Exception as trim_err:
-                        logger.warning(f"[BACKGROUND MUSIC] KAN-373: Audio trim failed: {trim_err}")
+                try:
+                    from app.core.services.ffmpeg_utils import download_trim_and_upload
+                    trimmed_url, trimmed_dur = await download_trim_and_upload(
+                        audio_url, storage, s3_path, actual_dur, content_type='audio/mpeg'
+                    )
+                    if trimmed_url:
+                        logger.info(f"[BACKGROUND MUSIC] KAN-373: Trimmed audio to {trimmed_dur}s (cap {actual_dur}s)")
+                        audio_url = trimmed_url
+                        duration = trimmed_dur
+                    else:
+                        # Fallback: persist original
                         audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
-                else:
+                except Exception as trim_err:
+                    logger.warning(f"[BACKGROUND MUSIC] KAN-373: Audio trim failed: {trim_err}")
                     audio_url = await storage.persist_from_url(audio_url, s3_path, content_type='audio/mpeg')
                 logger.info(f'[AudioTask] Persisted audio to S3: {s3_path}')
 
