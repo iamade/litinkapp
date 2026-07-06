@@ -644,8 +644,18 @@ Return only the summary text, not JSON.
             return f"Mock response for: {prompt[:100]}..."
 
         try:
-            # Sanitize prompt
-            sanitized_prompt = TextSanitizer.sanitize_for_openai(prompt)
+            # KAN-378: SEC-01 untrusted-input contract validation
+            from app.core.security.input_contract import InputContract, TrustBoundary
+            validation = InputContract.validate(prompt, boundary=TrustBoundary.USER)
+            if validation.blocked_patterns:
+                logger.warning(
+                    f"[SEC-01] generate_text_from_prompt: injection patterns detected: "
+                    f"{validation.blocked_patterns[:3]}"
+                )
+            sanitized_prompt = validation.sanitized_text
+
+            # Legacy sanitization as defense-in-depth
+            sanitized_prompt = TextSanitizer.sanitize_for_openai(sanitized_prompt)
 
             # Create safe messages
             messages, total_tokens = create_safe_openai_messages(
@@ -673,8 +683,18 @@ Return only the summary text, not JSON.
             return f"Mock tutorial script for: {prompt[:100]}..."
 
         try:
-            # Sanitize prompt
-            sanitized_prompt = TextSanitizer.sanitize_for_openai(prompt)
+            # KAN-378: SEC-01 untrusted-input contract validation
+            from app.core.security.input_contract import InputContract, TrustBoundary
+            validation = InputContract.validate(prompt, boundary=TrustBoundary.USER)
+            if validation.blocked_patterns:
+                logger.warning(
+                    f"[SEC-01] generate_tutorial_script: injection patterns detected: "
+                    f"{validation.blocked_patterns[:3]}"
+                )
+            sanitized_prompt = validation.sanitized_text
+
+            # Legacy sanitization as defense-in-depth
+            sanitized_prompt = TextSanitizer.sanitize_for_openai(sanitized_prompt)
 
             # Create safe messages
             messages, total_tokens = create_safe_openai_messages(
@@ -801,8 +821,18 @@ Return only the list of scene descriptions.
             return []
 
         try:
-            # Sanitize script content (it can be long)
-            sanitized_script = TextSanitizer.sanitize_for_openai(script_content)
+            # KAN-378: SEC-01 untrusted-input contract validation
+            from app.core.security.input_contract import InputContract, TrustBoundary
+            validation = InputContract.validate(script_content, boundary=TrustBoundary.USER, max_length=64000)
+            if validation.blocked_patterns:
+                logger.warning(
+                    f"[SEC-01] generate_emotional_map: injection patterns detected: "
+                    f"{validation.blocked_patterns[:3]}"
+                )
+            sanitized_script = validation.sanitized_text
+
+            # Legacy sanitization as defense-in-depth
+            sanitized_script = TextSanitizer.sanitize_for_openai(sanitized_script)
 
             prompt = f"""
             Analyze the following script excerpt and generate a detailed "Emotional Map" for each line of dialogue.
