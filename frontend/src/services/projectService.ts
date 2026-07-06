@@ -12,6 +12,14 @@ export interface Project {
   updated_at: string;
   input_prompt?: string;
   source_material_url?: string;
+  // KAN-395: Copyright capture + classification
+  original_work_title?: string;
+  original_work_author?: string;
+  original_work_url?: string;
+  rights_ownership?: "own" | "licensed" | "public_domain" | "unknown";
+  rights_notes?: string;
+  content_classification?: "original" | "fanfiction" | "adaptation" | "documentary";
+  requires_attribution?: boolean;
   artifacts?: any[];
   content_terminology?: string;  // Film, Episode, Part, Chapter, or custom
   pipeline_steps?: string[];
