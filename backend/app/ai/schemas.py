@@ -79,6 +79,9 @@ class EnhanceScenePromptRequest(BaseModel):
     characters_in_scene: Optional[List[str]] = None  # Character names present
     shot_type: Optional[str] = None  # e.g., "close-up", "wide shot"
     style: str = "cinematic"
+    # KAN-374: Add accent and agenda fields for richer scene enhancement
+    accent: Optional[str] = None  # Character accent for dialogue-informed scene prompts
+    agenda: Optional[str] = None  # Character agenda/motivation for scene context
 
 
 class EnhanceScenePromptResponse(BaseModel):
