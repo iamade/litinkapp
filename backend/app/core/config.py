@@ -210,7 +210,7 @@ class Settings(BaseSettings):
     MINIO_ENDPOINT: str = "http://minio:9000"  # MinIO server endpoint
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
-    MINIO_BUCKET_NAME: str = "litink-books"
+    MINIO_BUCKET_NAME: str = "litinkai-staging"  # Default matches staging / VPS env files
     MINIO_SECURE: bool = False  # Use HTTP in development
     MINIO_PUBLIC_URL: str = (
         "http://localhost:9000"  # Browser/public URL (without bucket name)
@@ -339,6 +339,31 @@ class Settings(BaseSettings):
     #     env_file = ".env"
     #     case_sensitive = True
     #     extra = "ignore"
+
+    def minio_env_check(self) -> None:
+        """
+        KAN-402: warn loudly when a staging/production environment uses MinIO
+        without an externally reachable provider-facing URL. Provider callbacks /
+        fetch-backs will fail if the bucket is only reachable from inside Docker.
+        """
+        import warnings
+
+        if not self.USE_MINIO:
+            return
+        if self.ENVIRONMENT not in ("staging", "production"):
+            return
+        for key in ("MINIO_PROVIDER_PUBLIC_URL", "MODELSLAB_MEDIA_PUBLIC_URL"):
+            value = getattr(self, key, None)
+            if not value:
+                warnings.warn(
+                    f"{key} is unset in ENVIRONMENT={self.ENVIRONMENT!r}. "
+                    "External providers will not be able to fetch media from MinIO.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
+    def model_post_init(self, __context: object) -> None:
+        self.minio_env_check()
 
 
 settings = Settings()
