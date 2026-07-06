@@ -5,6 +5,8 @@ import { CharacterImage } from './types';
 import { userService } from '../../services/userService';
 import { toast } from 'react-hot-toast';
 import ProtectedImage from '../Common/ProtectedImage';
+// KAN-371: Character reference injection for consistent visual generation
+import { injectCharacterReferences, extractCharacterReference } from '../../lib/CharacterReferenceInjector';
 
 // Tier-based character reference limits
 const TIER_CHARACTER_LIMITS: Record<string, number> = {
@@ -510,7 +512,11 @@ const SceneGenerationModal: React.FC<SceneGenerationModalProps> = ({
                 onInsufficientCredits?.();
                 return;
               }
-              onGenerate(description, Array.from(selectedCharacterIds));
+              // KAN-371: Inject character visual references into the generation prompt
+              const selectedChars = characters.filter(c => selectedCharacterIds.has(c.id));
+              const charRefs = selectedChars.map(extractCharacterReference).filter(Boolean);
+              const { enhanced_prompt } = injectCharacterReferences(description, charRefs as any);
+              onGenerate(enhanced_prompt, Array.from(selectedCharacterIds));
             }}
             disabled={isGenerating}
             title={insufficientCreditsMessage}
