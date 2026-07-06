@@ -55,6 +55,9 @@ import { projectService } from '../../services/projectService';
 import SceneGenerationModal from './SceneGenerationModal';
 import { StoryboardSceneRow } from './StoryboardSceneRow';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+// KAN-371: Character reference injection and drift verification
+import { injectCharacterReferences, extractCharacterReference } from '../../lib/CharacterReferenceInjector';
+import { verifyCharacterDrift } from '../../lib/characterDriftVerify';
 import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 import ProtectedImage from '../Common/ProtectedImage';
 import {
