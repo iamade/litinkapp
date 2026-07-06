@@ -79,6 +79,48 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   const [isCreatingCharacter, setIsCreatingCharacter] = useState(false);
   const [isGeneratingWithAI, setIsGeneratingWithAI] = useState(false);
   const [isAutoAddingCharacters, setIsAutoAddingCharacters] = useState(false);
+  
+  // KAN-370: Persist AI-generated character details to survive refresh
+  const [draftRestored, setDraftRestored] = useState(false);
+  const DRAFT_KEY = `litinkai_char_draft_${bookId}`;
+  const DRAFT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+  // Restore draft when modal opens
+  useEffect(() => {
+    if (showCreateModal) {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        try {
+          const draft = JSON.parse(raw);
+          if (draft.timestamp && Date.now() - draft.timestamp < DRAFT_TTL_MS) {
+            setNewCharacter(prev => ({
+              ...prev,
+              name: draft.characterName || prev.name,
+              physical_description: draft.characterDetails?.physical_description || prev.physical_description,
+              personality: draft.characterDetails?.personality || prev.personality,
+              character_arc: draft.characterDetails?.character_arc || prev.character_arc,
+              want: draft.characterDetails?.want || prev.want,
+              need: draft.characterDetails?.need || prev.need,
+              lie: draft.characterDetails?.lie || prev.lie,
+              ghost: draft.characterDetails?.ghost || prev.ghost,
+            }));
+            setDraftRestored(true);
+          } else {
+            localStorage.removeItem(DRAFT_KEY);
+          }
+        } catch {
+          localStorage.removeItem(DRAFT_KEY);
+        }
+      }
+    }
+  }, [showCreateModal, bookId]);
+
+  // Clear draft helper
+  const clearDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    setDraftRestored(false);
+  };
+
   const [newCharacter, setNewCharacter] = useState({
     name: '',
     role: '',
