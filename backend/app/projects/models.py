@@ -69,6 +69,15 @@ class Project(SQLModel, table=True):
     input_prompt: Optional[str] = Field(default=None, sa_column=Column(pg.TEXT))
     source_material_url: Optional[str] = Field(default=None)  # Link to uploaded file
 
+    # KAN-395: Copyright capture + classification fields
+    original_work_title: Optional[str] = Field(default=None)  # Title of original work if adapted
+    original_work_author: Optional[str] = Field(default=None)  # Author/creator of original work
+    original_work_url: Optional[str] = Field(default=None)  # URL to original work/source
+    rights_ownership: Optional[str] = Field(default=None)  # "own", "licensed", "public_domain", "unknown"
+    rights_notes: Optional[str] = Field(default=None, sa_column=Column(pg.TEXT))  # Free-form rights info
+    content_classification: Optional[str] = Field(default=None)  # "original", "fanfiction", "adaptation", "documentary"
+    requires_attribution: bool = Field(default=False)  # Whether output requires attribution
+
     # Optional link to Book (when content is uploaded and processed)
     book_id: Optional[uuid.UUID] = Field(
         default=None,
