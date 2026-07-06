@@ -270,7 +270,7 @@ export default function AuthPage() {
                         {loading ? "Processing..." : (isLogin ? "Login" : "Register")}
                     </button>
 
-                    {/* KAN-386: Social login buttons — Google + Microsoft OAuth */
+                    {/* KAN-386: Social login buttons — Google + Microsoft OAuth */}
                     <div className="relative my-6">
                         <div className="absolute inset-0 flex items-center">
                             <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
