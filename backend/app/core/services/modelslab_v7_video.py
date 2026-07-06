@@ -80,6 +80,16 @@ class ModelsLabV7VideoService:
     ) -> Dict[str, Any]:
         """Generate video from image using ModelsLab V7 API (Strict I2V)"""
 
+        # KAN-378: SEC-01 untrusted-input contract — injection defense
+        from app.core.security.input_contract import InputContract, TrustBoundary
+        validation = InputContract.validate(prompt, boundary=TrustBoundary.USER, max_length=4000)
+        if validation.blocked_patterns:
+            logger.warning(
+                f"[SEC-01] generate_image_to_video: injection patterns detected: "
+                f"{validation.blocked_patterns[:3]}"
+            )
+        prompt = validation.sanitized_text
+
         attempts = [
             {"model_id": model_id, "description": f"primary model {model_id}"},
         ]

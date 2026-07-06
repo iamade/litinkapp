@@ -654,8 +654,22 @@ class ModelsLabV7ImageService:
             raise e
 
     def _sanitize_prompt(self, prompt: str) -> str:
-        """Sanitize prompt to avoid safety filter triggers"""
+        """Sanitize prompt to avoid safety filter triggers
+        
+        KAN-378: SEC-01 untrusted-input contract applied first for injection defense,
+        then content safety replacements as defense-in-depth.
+        """
         import re
+
+        # KAN-378: SEC-01 untrusted-input contract — injection defense first
+        from app.core.security.input_contract import InputContract, TrustBoundary
+        validation = InputContract.validate(prompt, boundary=TrustBoundary.USER, max_length=4000)
+        if validation.blocked_patterns:
+            logger.warning(
+                f"[SEC-01] _sanitize_prompt: injection patterns detected: "
+                f"{validation.blocked_patterns[:3]}"
+            )
+        prompt = validation.sanitized_text
 
         # Dictionary of sensitive words and their safe replacements
         replacements = {
