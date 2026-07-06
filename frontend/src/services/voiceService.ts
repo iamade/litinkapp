@@ -32,6 +32,9 @@ export const voiceService = {
         text,
         character: character.name,
         emotion,
+        // KAN-374: Pass character gender and accent to voice generation
+        gender: character.gender || character.voice_gender || undefined,
+        accent: character.accent || undefined,
       }
     );
     return response.audio_url;
