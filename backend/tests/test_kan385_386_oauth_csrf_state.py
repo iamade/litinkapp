@@ -64,7 +64,7 @@ async def test_callback_valid_state_passes_validation():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # We expect the callback to fail *after* state validation because
-        # there is no real Google/Microsoft token endpoint.  The important
+        # there is no real Google token endpoint.  The important
         # assertion is that it does NOT fail with a 400 CSRF error.
         resp = await client.get(
             _callback_url(OAuthProvider.GOOGLE, state=state),
@@ -127,20 +127,6 @@ async def test_callback_state_replay_rejected():
     assert "Invalid" in detail or "expired" in detail or "CSRF" in detail
 
 
-async def test_callback_valid_state_microsoft_passes_validation():
-    """Microsoft callback with a valid state also passes CSRF validation."""
-    state = _store_valid_state()
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(
-            _callback_url(OAuthProvider.MICROSOFT, state=state),
-            follow_redirects=False,
-        )
-
-    # State validation passed → downstream error, not CSRF 400.
-    assert resp.status_code != 400 or "CSRF" not in (resp.json().get("detail", ""))
-
 
 async def test_login_generates_random_state():
     """The login endpoint generates a unique state for each request."""
@@ -177,27 +163,3 @@ async def test_login_generates_random_state():
     assert state1 != "random_state_string", "State must not be the old hard-coded literal"
     assert state2 != "random_state_string", "State must not be the old hard-coded literal"
 
-
-async def test_login_microsoft_generates_random_state():
-    """Microsoft login also generates a unique random state."""
-    provider = OAuthProvider.MICROSOFT.value
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(
-            f"/api/v1/auth/login/{provider}",
-            follow_redirects=False,
-        )
-
-    # Microsoft login requires a configured client ID; this test only asserts
-    # that the route is reachable and, if configured, returns a redirect with
-    # a non-hard-coded state.  A 500 due to missing config is expected in CI.
-    assert resp.status_code in (302, 307, 500)
-    if resp.status_code in (302, 307):
-        import urllib.parse
-
-        loc = resp.headers.get("location", "")
-        qs = urllib.parse.parse_qs(urllib.parse.urlparse(loc).query)
-        state = qs.get("state", [None])[0]
-
-        assert state is not None
-        assert state != "random_state_string"
