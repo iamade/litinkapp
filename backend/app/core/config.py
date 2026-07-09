@@ -129,10 +129,6 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: Optional[str] = None
     GOOGLE_CLIENT_SECRET: Optional[str] = None
 
-    # Microsoft
-    MICROSOFT_CLIENT_ID: Optional[str] = None
-    MICROSOFT_CLIENT_SECRET: Optional[str] = None
-
     # Apple
     APPLE_CLIENT_ID: Optional[str] = None
     APPLE_TEAM_ID: Optional[str] = None

@@ -24,11 +24,6 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USER_INFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
-# Microsoft Configuration
-MICROSOFT_AUTH_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-MICROSOFT_TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-MICROSOFT_USER_INFO_URL = "https://graph.microsoft.com/v1.0/me"
-
 
 @router.get("/login/{provider}")
 async def login(provider: str, request: Request):
@@ -61,23 +56,6 @@ async def login(provider: str, request: Request):
             "prompt": "select_account",
         }
         url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
-        return RedirectResponse(url=url)
-
-    elif provider == OAuthProvider.MICROSOFT:
-        if not settings.MICROSOFT_CLIENT_ID:
-            raise HTTPException(
-                status_code=500, detail="Microsoft Client ID not configured"
-            )
-
-        params = {
-            "client_id": settings.MICROSOFT_CLIENT_ID,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": "openid email profile User.Read",
-            "response_mode": "query",
-            "state": state,
-        }
-        url = f"{MICROSOFT_AUTH_URL}?{urlencode(params)}"
         return RedirectResponse(url=url)
 
     elif provider == OAuthProvider.APPLE:
@@ -171,46 +149,6 @@ async def callback(
             last_name = user_info.get("family_name")
             avatar_url = user_info.get("picture")
 
-    elif provider == OAuthProvider.MICROSOFT:
-        if not settings.MICROSOFT_CLIENT_ID or not settings.MICROSOFT_CLIENT_SECRET:
-            raise HTTPException(
-                status_code=500, detail="Microsoft credentials not configured"
-            )
-
-        async with httpx.AsyncClient() as client:
-            token_data = {
-                "client_id": settings.MICROSOFT_CLIENT_ID,
-                "scope": "openid email profile User.Read",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-                "client_secret": settings.MICROSOFT_CLIENT_SECRET,
-            }
-            token_res = await client.post(MICROSOFT_TOKEN_URL, data=token_data)
-            if token_res.status_code != 200:
-                logger.error(f"Microsoft Token Error: {token_res.text}")
-                raise HTTPException(
-                    status_code=400, detail="Failed to retrieve token from Microsoft"
-                )
-
-            tokens = token_res.json()
-            access_token = tokens.get("access_token")
-
-            user_res = await client.get(
-                MICROSOFT_USER_INFO_URL,
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            if user_res.status_code != 200:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Failed to retrieve user info from Microsoft",
-                )
-
-            user_info = user_res.json()
-            user_email = user_info.get("mail") or user_info.get("userPrincipalName")
-            provider_user_id = user_info.get("id")
-            first_name = user_info.get("givenName")
-            last_name = user_info.get("surname")
     else:
         raise HTTPException(status_code=404, detail="Provider not supported")
 
