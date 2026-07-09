@@ -6,12 +6,14 @@ from typing import Optional
 from urllib.parse import urlencode
 import httpx
 import jwt
+import secrets
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.logging import get_logger
 from app.auth.models import User
 from app.auth.schema import RoleChoicesSchema, AccountStatusSchema
 from app.auth.oauth_models import UserOAuth, OAuthProvider
+from app.auth.oauth_state import oauth_state_store
 from app.auth.utils import create_jwt_token, set_auth_cookies
 
 router = APIRouter(prefix="/auth")
@@ -39,6 +41,10 @@ async def login(provider: str, request: Request):
     else:
         redirect_uri = f"{settings.API_BASE_URL}/auth/{provider}"
 
+    # Generate a cryptographically random per-request CSRF state.
+    state = secrets.token_urlsafe(32)
+    oauth_state_store.store_state(state)
+
     if provider == OAuthProvider.GOOGLE:
         if not settings.GOOGLE_CLIENT_ID:
             raise HTTPException(
@@ -51,7 +57,7 @@ async def login(provider: str, request: Request):
             "response_type": "code",
             "scope": "openid email profile",
             "access_type": "offline",
-            "state": "random_state_string",
+            "state": state,
             "prompt": "select_account",
         }
         url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
@@ -69,7 +75,7 @@ async def login(provider: str, request: Request):
             "response_type": "code",
             "scope": "openid email profile User.Read",
             "response_mode": "query",
-            "state": "random_state_string",
+            "state": state,
         }
         url = f"{MICROSOFT_AUTH_URL}?{urlencode(params)}"
         return RedirectResponse(url=url)
@@ -93,6 +99,24 @@ async def callback(
     """
     Handles the callback from the OAuth provider.
     """
+    # Validate OAuth CSRF state before processing the callback.
+    if not state:
+        logger.error("OAuth callback missing state parameter (provider=%s)", provider)
+        raise HTTPException(
+            status_code=400,
+            detail="Missing state parameter — CSRF validation failed",
+        )
+    if not oauth_state_store.consume_state(state):
+        logger.error(
+            "OAuth state validation failed (provider=%s, state_prefix=%s…)",
+            provider,
+            state[:8] if len(state) > 8 else state,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired state parameter — CSRF validation failed",
+        )
+
     # Callback URI must match what's in Google Console: /api/v1/auth/{provider}
     if settings.OAUTH_REDIRECT_BASE_URL:
         redirect_uri = f"{settings.OAUTH_REDIRECT_BASE_URL}/{provider}"
