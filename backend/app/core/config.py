@@ -122,7 +122,7 @@ class Settings(BaseSettings):
 
     # Social Auth
     OAUTH_REDIRECT_BASE_URL: str = (
-        ""  # e.g. https://api.litinkai.com/api/v1/auth/callback
+        ""  # e.g. https://api.litinkai.com/api/v1
     )
 
     # Google
