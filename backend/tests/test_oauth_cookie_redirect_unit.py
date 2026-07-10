@@ -7,8 +7,6 @@ without real network calls, then asserts the returned response carries the
 redirect status, Location header, and the auth cookies set by set_auth_cookies.
 """
 
-import asyncio
-import os
 import secrets
 from unittest.mock import AsyncMock, patch
 
