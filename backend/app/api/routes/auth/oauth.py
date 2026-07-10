@@ -232,4 +232,9 @@ async def callback(
     else:
         target_url = f"{settings.FRONTEND_URL}/dashboard"
 
-    return RedirectResponse(url=target_url)
+    # Preserve cookies set by set_auth_cookies on the injected response.
+    # A fresh RedirectResponse would drop the Set-Cookie headers, so mutate
+    # the existing response object into a 307 redirect instead.
+    response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
+    response.headers["Location"] = target_url
+    return response
