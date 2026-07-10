@@ -809,6 +809,9 @@ export const userService = {
     characters_in_scene?: string[];
     shot_type?: string;
     style?: string;
+    // KAN-374: Add accent and agenda fields
+    accent?: string;
+    agenda?: string;
   }): Promise<{
     original_description: string;
     enhanced_description: string;
@@ -822,6 +825,9 @@ export const userService = {
       characters_in_scene: request.characters_in_scene,
       shot_type: request.shot_type,
       style: request.style || "cinematic",
+      // KAN-374: Pass accent and agenda to backend
+      accent: request.accent,
+      agenda: request.agenda,
     });
   },
 

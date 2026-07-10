@@ -24,6 +24,14 @@ class ProjectBase(BaseModel):
     source_material_url: Optional[str] = None
     project_type: ProjectType
     workflow_mode: WorkflowMode
+    # KAN-395: Copyright capture + classification
+    original_work_title: Optional[str] = None
+    original_work_author: Optional[str] = None
+    original_work_url: Optional[str] = None
+    rights_ownership: Optional[str] = None
+    rights_notes: Optional[str] = None
+    content_classification: Optional[str] = None
+    requires_attribution: bool = False
 
 
 class ProjectCreate(ProjectBase):
@@ -36,6 +44,14 @@ class ProjectUpdate(BaseModel):
     current_step: Optional[str] = None
     pipeline_steps: Optional[List[str]] = None
     content_terminology: Optional[str] = None  # Film, Episode, Part, Chapter, or custom
+    # KAN-395: Allow updating copyright info post-creation
+    original_work_title: Optional[str] = None
+    original_work_author: Optional[str] = None
+    original_work_url: Optional[str] = None
+    rights_ownership: Optional[str] = None
+    rights_notes: Optional[str] = None
+    content_classification: Optional[str] = None
+    requires_attribution: Optional[bool] = None
 
 
 class ProjectRead(ProjectBase):

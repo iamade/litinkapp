@@ -29,19 +29,24 @@ class S3StorageService:
 
         import os as _os
 
-        print(
-            f"[STORAGE INIT] USE_MINIO={self.use_minio} (type={type(self.use_minio).__name__})"
+        logger.info(
+            "[STORAGE INIT] USE_MINIO=%s (type=%s)",
+            self.use_minio,
+            type(self.use_minio).__name__,
         )
-        print(
-            f"[STORAGE INIT] Raw env S3_BUCKET_NAME={_os.environ.get('S3_BUCKET_NAME', 'NOT SET')}"
+        logger.info(
+            "[STORAGE INIT] Raw env S3_BUCKET_NAME=%s",
+            _os.environ.get("S3_BUCKET_NAME", "NOT SET"),
         )
-        print(f"[STORAGE INIT] Settings S3_BUCKET_NAME={settings.S3_BUCKET_NAME}")
-        print(f"[STORAGE INIT] Settings MINIO_BUCKET_NAME={settings.MINIO_BUCKET_NAME}")
+        logger.info("[STORAGE INIT] Settings S3_BUCKET_NAME=%s", settings.S3_BUCKET_NAME)
+        logger.info("[STORAGE INIT] Settings MINIO_BUCKET_NAME=%s", settings.MINIO_BUCKET_NAME)
 
         if self.use_minio:
             # MinIO configuration for local development
-            print(
-                f"[STORAGE INIT] Using MinIO - endpoint={settings.MINIO_ENDPOINT}, bucket={settings.MINIO_BUCKET_NAME}"
+            logger.info(
+                "[STORAGE INIT] Using MinIO - endpoint=%s, bucket=%s",
+                settings.MINIO_ENDPOINT,
+                settings.MINIO_BUCKET_NAME,
             )
             self.client = boto3.client(
                 "s3",
@@ -54,11 +59,15 @@ class S3StorageService:
             self.bucket_name = settings.MINIO_BUCKET_NAME
         else:
             # S3-compatible storage for production (AWS S3 or Supabase Storage S3)
-            print(
-                f"[STORAGE INIT] Using S3 - endpoint={settings.S3_ENDPOINT}, bucket={settings.S3_BUCKET_NAME}, region={settings.S3_REGION}"
+            logger.info(
+                "[STORAGE INIT] Using S3 - endpoint=%s, bucket=%s, region=%s",
+                settings.S3_ENDPOINT,
+                settings.S3_BUCKET_NAME,
+                settings.S3_REGION,
             )
-            print(
-                f"[STORAGE INIT] S3 access key starts with: {settings.S3_ACCESS_KEY[:8] if settings.S3_ACCESS_KEY else 'NOT SET'}..."
+            logger.info(
+                "[STORAGE INIT] S3 access key starts with: %s...",
+                settings.S3_ACCESS_KEY[:8] if settings.S3_ACCESS_KEY else "NOT SET",
             )
             self.client = boto3.client(
                 "s3",

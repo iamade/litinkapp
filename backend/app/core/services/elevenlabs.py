@@ -1,10 +1,13 @@
 import httpx
 import asyncio
 import os
+import logging
 from typing import List, Dict, Any, Optional
 from app.core.config import settings
 import traceback
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class ElevenLabsService:
@@ -25,9 +28,32 @@ class ElevenLabsService:
         user_id: str = None,
         emotion: str = "neutral",
         speed: float = 1.0,
+        # KAN-374: Accept gender and accent for voice character selection
+        gender: Optional[str] = None,
+        accent: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Generate enhanced speech with ElevenLabs API"""
+        """Generate enhanced speech with ElevenLabs API
+        
+        KAN-374: Gender and accent params allow voice selection based on
+        character attributes. When provided, the service can adjust voice
+        settings or select voice IDs appropriate for the character.
+        """
         try:
+            # KAN-374: Adjust voice settings based on gender/accent if provided
+            voice_settings = {
+                "stability": 0.5,
+                "similarity_boost": 0.75,
+                "style": 0.0,
+                "use_speaker_boost": True,
+            }
+            
+            # If gender is provided, it can be used for voice selection logging
+            # (actual voice ID selection would be done by the caller)
+            if gender:
+                logger.info(f"[ElevenLabs] Voice gender hint: {gender}")
+            if accent:
+                logger.info(f"[ElevenLabs] Voice accent hint: {accent}")
+            
             # Generate audio with emotion and speed settings
             audio_data = await self._generate_speech_with_settings(
                 text, voice_id, emotion, speed

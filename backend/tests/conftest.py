@@ -5,11 +5,29 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 # Ensure imports like `from app...` work when running pytest from backend/
 BACKEND_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
+
+# Patch loguru BEFORE app.core.logging is imported so that file-sink
+# creation does not fail on root-owned log files in CI / test runners.
+import loguru
+
+loguru.logger.remove()
+loguru.logger.add(sys.stderr, level="WARNING")
+
+# Pre-populate app.core.logging with a test-safe stub so that the real
+# module (which tries to open root-owned log files) is never executed.
+_fake_logging = types.ModuleType("app.core.logging")
+
+
+def _get_logger():
+    return loguru.logger
+
+
+_fake_logging.get_logger = _get_logger
+sys.modules["app.core.logging"] = _fake_logging
 
 # Lightweight stubs so tests can import storage service without optional deps installed.
 if "boto3" not in sys.modules:
