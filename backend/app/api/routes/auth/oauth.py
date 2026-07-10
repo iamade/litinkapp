@@ -3,7 +3,7 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, urlunsplit
 import httpx
 import jwt
 import secrets
@@ -25,16 +25,43 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USER_INFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
+def _absolute_oauth_redirect_uri(request: Request, provider: str) -> str:
+    """Build the exact absolute callback URI used for both OAuth phases."""
+    for base_url in (settings.OAUTH_REDIRECT_BASE_URL, settings.API_BASE_URL):
+        parsed = urlsplit(base_url.rstrip('/')) if base_url else None
+        if not parsed or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            continue
+
+        base_path = parsed.path.rstrip('/')
+        callback_path = (
+            f"{base_path}/{provider}"
+            if base_path.endswith("/auth")
+            else f"{base_path}/auth/{provider}"
+        )
+        candidate = urlunsplit(
+            (parsed.scheme, parsed.netloc, callback_path, "", "")
+        )
+        return candidate
+
+    # Render may not define either optional base URL. Starlette builds this
+    # from the incoming host/scheme and includes the mounted /api/v1 prefix.
+    derived = str(request.url_for("oauth_callback", provider=provider))
+    parsed = urlsplit(derived)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        logger.error("Unable to build an absolute OAuth callback URI")
+        raise HTTPException(
+            status_code=500,
+            detail="OAuth callback URL is not configured correctly",
+        )
+    return derived
+
+
 @router.get("/login/{provider}")
 async def login(provider: str, request: Request):
     """
     Redirects the user to the OAuth provider's login page.
     """
-    # Build callback URL to match what's in Google Console: /api/v1/auth/{provider}
-    if settings.OAUTH_REDIRECT_BASE_URL:
-        redirect_uri = f"{settings.OAUTH_REDIRECT_BASE_URL}/{provider}"
-    else:
-        redirect_uri = f"{settings.API_BASE_URL}/auth/{provider}"
+    redirect_uri = _absolute_oauth_redirect_uri(request, provider)
 
     # Generate a cryptographically random per-request CSRF state.
     state = secrets.token_urlsafe(32)
@@ -65,7 +92,7 @@ async def login(provider: str, request: Request):
 
 
 # Callback route matches Google Console: /api/v1/auth/{provider}
-@router.get("/{provider}")
+@router.get("/{provider}", name="oauth_callback")
 async def callback(
     provider: str,
     code: str,
@@ -95,11 +122,7 @@ async def callback(
             detail="Invalid or expired state parameter — CSRF validation failed",
         )
 
-    # Callback URI must match what's in Google Console: /api/v1/auth/{provider}
-    if settings.OAUTH_REDIRECT_BASE_URL:
-        redirect_uri = f"{settings.OAUTH_REDIRECT_BASE_URL}/{provider}"
-    else:
-        redirect_uri = f"{settings.API_BASE_URL}/auth/{provider}"
+    redirect_uri = _absolute_oauth_redirect_uri(request, provider)
 
     user_email = None
     provider_user_id = None

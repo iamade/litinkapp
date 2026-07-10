@@ -9,6 +9,7 @@ Covers:
 """
 
 import secrets
+import urllib.parse
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,6 +18,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.auth.oauth_models import OAuthProvider
 from app.auth.oauth_state import oauth_state_store
+from app.core.config import settings
 from app.main import app
 
 pytestmark = pytest.mark.asyncio
@@ -147,8 +149,6 @@ async def test_login_generates_random_state():
     assert resp2.status_code in (302, 307)
 
     # Extract state from redirect Location headers.
-    import urllib.parse
-
     loc1 = resp1.headers.get("location", "")
     loc2 = resp2.headers.get("location", "")
     qs1 = urllib.parse.parse_qs(urllib.parse.urlparse(loc1).query)
@@ -163,3 +163,106 @@ async def test_login_generates_random_state():
     assert state1 != "random_state_string", "State must not be the old hard-coded literal"
     assert state2 != "random_state_string", "State must not be the old hard-coded literal"
 
+
+async def test_login_derives_absolute_redirect_uri_when_base_env_is_missing(monkeypatch):
+    """Production must never send Google a relative /auth/google redirect URI."""
+    monkeypatch.setattr(settings, "OAUTH_REDIRECT_BASE_URL", "")
+    monkeypatch.setattr(settings, "API_BASE_URL", "")
+    monkeypatch.setattr(settings, "GOOGLE_CLIENT_ID", "test-google-client")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="https://api.litinkai.com",
+    ) as client:
+        response = await client.get(
+            f"/api/v1/auth/login/{OAuthProvider.GOOGLE.value}",
+            follow_redirects=False,
+        )
+
+    query = urllib.parse.parse_qs(
+        urllib.parse.urlparse(response.headers["location"]).query
+    )
+    assert query["redirect_uri"] == [
+        "https://api.litinkai.com/api/v1/auth/google"
+    ]
+
+
+async def test_login_ignores_relative_configured_redirect_bases(monkeypatch):
+    """Relative env values cannot override the absolute request-derived URI."""
+    monkeypatch.setattr(settings, "OAUTH_REDIRECT_BASE_URL", "/api/v1/auth")
+    monkeypatch.setattr(settings, "API_BASE_URL", "/api/v1")
+    monkeypatch.setattr(settings, "GOOGLE_CLIENT_ID", "test-google-client")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="https://api.litinkai.com",
+    ) as client:
+        response = await client.get(
+            f"/api/v1/auth/login/{OAuthProvider.GOOGLE.value}",
+            follow_redirects=False,
+        )
+
+    query = urllib.parse.parse_qs(
+        urllib.parse.urlparse(response.headers["location"]).query
+    )
+    assert query["redirect_uri"] == [
+        "https://api.litinkai.com/api/v1/auth/google"
+    ]
+
+
+async def test_login_prefers_absolute_oauth_redirect_base(monkeypatch):
+    """A valid explicit callback base remains the highest-priority source."""
+    monkeypatch.setattr(
+        settings,
+        "OAUTH_REDIRECT_BASE_URL",
+        "https://oauth.example.com/api/v1/",
+    )
+    monkeypatch.setattr(settings, "API_BASE_URL", "https://api.example.com/api/v1")
+    monkeypatch.setattr(settings, "GOOGLE_CLIENT_ID", "test-google-client")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="https://api.litinkai.com",
+    ) as client:
+        response = await client.get(
+            f"/api/v1/auth/login/{OAuthProvider.GOOGLE.value}",
+            follow_redirects=False,
+        )
+
+    query = urllib.parse.parse_qs(
+        urllib.parse.urlparse(response.headers["location"]).query
+    )
+    assert query["redirect_uri"] == [
+        "https://oauth.example.com/api/v1/auth/google"
+    ]
+
+
+async def test_login_accepts_explicit_auth_route_base(monkeypatch):
+    """An existing /auth base is not duplicated during normalization."""
+    monkeypatch.setattr(
+        settings,
+        "OAUTH_REDIRECT_BASE_URL",
+        "https://oauth.example.com/api/v1/auth/",
+    )
+    monkeypatch.setattr(settings, "API_BASE_URL", "")
+    monkeypatch.setattr(settings, "GOOGLE_CLIENT_ID", "test-google-client")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport,
+        base_url="https://api.litinkai.com",
+    ) as client:
+        response = await client.get(
+            f"/api/v1/auth/login/{OAuthProvider.GOOGLE.value}",
+            follow_redirects=False,
+        )
+
+    query = urllib.parse.parse_qs(
+        urllib.parse.urlparse(response.headers["location"]).query
+    )
+    assert query["redirect_uri"] == [
+        "https://oauth.example.com/api/v1/auth/google"
+    ]
