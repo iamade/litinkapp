@@ -72,10 +72,38 @@ class Settings(BaseSettings):
             return v
         raise ValueError(v)
 
+    # KAN-414: Canonical production web origins that MUST always be allowed by
+    # CORS regardless of how ALLOWED_HOSTS is set in the environment. Prod was
+    # blocking https://www.litinkai.com because the Render `ALLOWED_HOSTS` env
+    # var drifted and only listed the apex (https://litinkai.com), so the
+    # browser got "No 'Access-Control-Allow-Origin' header" on every request to
+    # /api/v1/projects/. Unioning these guarantees both the apex and www
+    # variants stay allowed even if the env override is stale. The env can
+    # still ADD more origins (e.g. staging) on top of these.
+    CORS_CANONICAL_PROD_ORIGINS: ClassVar[List[str]] = [
+        "https://litinkai.com",
+        "https://www.litinkai.com",
+        "https://litinkai.org",
+        "https://www.litinkai.org",
+    ]
+
     @property
     def get_allowed_hosts(self) -> List[str]:
-        """Get allowed hosts from environment or use defaults"""
-        return self.ALLOWED_HOSTS
+        """Get allowed CORS origins.
+
+        Unions the env-configured ALLOWED_HOSTS with CORS_CANONICAL_PROD_ORIGINS
+        so the production apex + www domains are always permitted even if the
+        Render `ALLOWED_HOSTS` env var drifts (KAN-414). Order-preserving and
+        de-duplicated.
+        """
+        merged = list(self.ALLOWED_HOSTS) + self.CORS_CANONICAL_PROD_ORIGINS
+        seen: set[str] = set()
+        result: List[str] = []
+        for origin in merged:
+            if origin and origin not in seen:
+                seen.add(origin)
+                result.append(origin)
+        return result
 
     # Frontend URL for redirects (set via FRONTEND_URL env var)
     FRONTEND_URL: str = "http://localhost:5173"
