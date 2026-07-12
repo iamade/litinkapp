@@ -64,7 +64,7 @@ class SubscriptionManager:
             "display_name": "Basic",
             "description": "Great for casual creators",
         },
-        SubscriptionTier.PRO: {
+        SubscriptionTier.STANDARD: {
             "books_upload_limit": 25,
             "video_books_limit": 10,
             "chapters_per_book": "unlimited",
@@ -81,6 +81,25 @@ class SubscriptionManager:
             "price_monthly": 29,
             "display_name": "Standard",
             "description": "For serious content creators",
+        },
+        # One-release compatibility for pre-migration Standard rows stored as "pro".
+        SubscriptionTier.PRO: {
+            "books_upload_limit": 25,
+            "video_books_limit": 10,
+            "chapters_per_book": "unlimited",
+            "max_video_duration": 1800,
+            "max_resolution": "1080p",
+            "watermark": True,
+            "can_remove_watermark": True,
+            "can_download": True,
+            "priority": 2,
+            "support": "priority_email",
+            "api_access": False,
+            "model_selection": True,
+            "voice_cloning": True,
+            "price_monthly": 29,
+            "display_name": "Standard (legacy)",
+            "description": "Legacy Standard value pending migration",
         },
         SubscriptionTier.PREMIUM: {
             "books_upload_limit": 100,
@@ -149,6 +168,11 @@ class SubscriptionManager:
             "max_resolution": "720p",
             "formats": ["mp4"],
         },
+        SubscriptionTier.STANDARD: {
+            "daily_downloads": 15,
+            "max_resolution": "1080p",
+            "formats": ["mp4", "webm"],
+        },
         SubscriptionTier.PRO: {
             "daily_downloads": 15,
             "max_resolution": "1080p",
@@ -178,6 +202,8 @@ class SubscriptionManager:
         tiers = []
         display_order = 0
         for tier, limits in self.TIER_LIMITS.items():
+            if tier == SubscriptionTier.PRO:
+                continue
             feature_highlights = []
 
             # Build feature highlights for display
@@ -404,6 +430,7 @@ class SubscriptionManager:
             price_ids = {
                 SubscriptionTier.FREE: settings.STRIPE_FREE_PRICE_ID,
                 SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID,
+                SubscriptionTier.STANDARD: settings.STRIPE_STANDARD_PRICE_ID,
                 SubscriptionTier.PRO: settings.STRIPE_STANDARD_PRICE_ID,
                 SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID,
                 SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID,

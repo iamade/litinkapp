@@ -126,6 +126,7 @@ class Settings(BaseSettings):
 
     # AI Services
     OPENAI_API_KEY: Optional[str] = None
+    ANTHROPIC_API_KEY: Optional[str] = None
     ELEVENLABS_API_KEY: Optional[str] = None
     GOOGLE_TTS_API_KEY: Optional[str] = None
     FISH_SPEECH_API_KEY: Optional[str] = None
@@ -143,6 +144,18 @@ class Settings(BaseSettings):
     # ✅ NEW: OpenRouter Configuration
     OPENROUTER_API_KEY: Optional[str] = None
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+
+    # Script model providers
+    Z_AI_API_KEY: Optional[str] = None
+    ZAI_API_KEY: Optional[str] = None  # One-release compatibility alias
+    Z_AI_BASE_URL: str = "https://api.z.ai/api/coding/paas/v4"
+    PIAPI_API_KEY_LITINKAI: Optional[str] = None
+    PIAPI_BASE_URL: str = "https://api.piapi.ai/v1"
+    PIAPI_FREE_MODEL: Optional[str] = None
+    FEATHERLESS_API_KEY_LITINKAI: Optional[str] = None
+    FEATHERLESS_BASE_URL: str = "https://api.featherless.ai/v1"
+    FEATHERLESS_FREE_MODEL: Optional[str] = None
+    FEATHERLESS_SUB_ACTIVE: bool = False
 
     # Social Auth
     OAUTH_REDIRECT_BASE_URL: str = (
