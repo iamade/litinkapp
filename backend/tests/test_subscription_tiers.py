@@ -5,7 +5,23 @@ class TestSubscriptionTierConfig:
         """Every tier must define all required limit keys"""
         from app.api.services.subscription import SubscriptionManager
         from app.subscriptions.models import SubscriptionTier
-        required_keys = ['videos_per_month', 'images_per_month', 'audio_per_month', 'scripts_per_month', 'plots_per_month', 'price_monthly', 'display_name', 'watermark', 'priority', 'support']
+        required_keys = [
+            "books_upload_limit",
+            "video_books_limit",
+            "chapters_per_book",
+            "max_video_duration",
+            "max_resolution",
+            "price_monthly",
+            "display_name",
+            "watermark",
+            "can_remove_watermark",
+            "can_download",
+            "priority",
+            "support",
+            "api_access",
+            "model_selection",
+            "voice_cloning",
+        ]
         for tier in SubscriptionTier:
             if tier == SubscriptionTier.ENTERPRISE:
                 continue
