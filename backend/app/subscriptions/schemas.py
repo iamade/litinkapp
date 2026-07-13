@@ -7,6 +7,7 @@ from enum import Enum
 class SubscriptionTier(str, Enum):
     FREE = "free"
     BASIC = "basic"
+    STANDARD = "standard"
     PRO = "pro"
     PREMIUM = "premium"
     PROFESSIONAL = "professional"

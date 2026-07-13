@@ -42,6 +42,15 @@ export default function AuthPage() {
     setIsLogin(searchParams.get('mode') !== 'register');
   }, [searchParams]);
 
+  useEffect(() => {
+    if (searchParams.get('oauth_error') === 'account_unavailable') {
+      toast.error(
+        "We couldn't sign in with that Google account. Please choose an active account or use email and password.",
+        { id: 'oauth-account-unavailable' }
+      );
+    }
+  }, [searchParams]);
+
 
 
   const handleSubmit = async (e: React.FormEvent) => {

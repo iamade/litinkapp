@@ -71,6 +71,7 @@ multidict==6.5.0
 mypy_extensions==1.1.0
 numpy==1.26.4
 openai==1.86.0
+anthropic==0.116.0
 packaging==25.0
 passlib==1.7.4
 pathspec==0.12.1

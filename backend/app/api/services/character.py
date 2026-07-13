@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from app.core.database import get_session
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select, update, delete
-from app.core.services.openrouter import OpenRouterService, ModelTier
+from app.core.services.script_model_router import ScriptModelRouter, ModelTier
 from app.api.services.subscription import SubscriptionManager
 from app.core.services.modelslab_v7_image import ModelsLabV7ImageService
 from app.core.services.embeddings import EmbeddingsService
@@ -66,7 +66,7 @@ class CharacterService:
 
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.openrouter = OpenRouterService()
+        self.openrouter = ScriptModelRouter()
         self.subscription_manager = SubscriptionManager(self.session)
         self.image_service = ModelsLabV7ImageService()
         self.embeddings_service = EmbeddingsService(self.session)
@@ -216,7 +216,7 @@ class CharacterService:
             Content:
             {content}
             """
-            # Use OpenRouterService for AI analysis
+            # Use ScriptModelRouter for AI analysis
             response = await self.openrouter.analyze_content(
                 content=prompt,
                 user_tier=getattr(ModelTier, user_tier.upper(), ModelTier.FREE),
@@ -1868,7 +1868,7 @@ Return a JSON array of matches sorted by confidence:
             "standard": ModelTier.STANDARD,
             "premium": ModelTier.PREMIUM,
             "professional": ModelTier.PROFESSIONAL,
-            "pro": ModelTier.PREMIUM,
+            "pro": ModelTier.STANDARD,
             "enterprise": ModelTier.PROFESSIONAL,
         }
 
