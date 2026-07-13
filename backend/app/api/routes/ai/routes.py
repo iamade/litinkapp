@@ -15,6 +15,7 @@ from fastapi import (
     File,
     UploadFile,
     Form,
+    Response,
 )
 from app.videos.schemas import VideoGenerationRequest, VideoGenerationResponse
 from app.api.services.character import CharacterService
@@ -71,7 +72,7 @@ from app.core.auth import get_current_active_user
 from app.core.services.pipeline import PipelineManager, PipelineStep
 
 # from app.core.services.deepseek_script import DeepSeekScriptService
-from app.core.services.openrouter import OpenRouterService, ModelTier
+from app.core.services.script_model_router import ScriptModelRouter, ModelTier
 from app.api.services.subscription import SubscriptionManager
 from app.credits.dependencies import require_credits
 from app.credits.constants import (
@@ -616,7 +617,7 @@ async def expand_script(
         )
 
         # Call OpenRouter with script expansion prompt
-        openrouter = OpenRouterService()
+        openrouter = ScriptModelRouter()
         response = await openrouter.analyze_content(
             content=user_message,
             user_tier=tier,
@@ -3420,12 +3421,13 @@ async def combine_tavus_videos(
 # Update the generate_script_and_scenes endpoint
 @router.post("/generate-script-and-scenes")
 async def generate_script_and_scenes(
+    response: Response,
     request: dict = Body(...),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
     reservation_id: uuid.UUID = Depends(require_credits(OperationType.SCRIPT_GEN, SCRIPT_GEN)),
 ):
-    """Generate only the AI script and scene descriptions for a chapter using OpenRouter (no video generation)"""
+    """Generate only the AI script and scene descriptions for a chapter using ScriptModelRouter (no video generation)"""
     try:
         # Extract from request body
         chapter_id = request.get("chapter_id")
@@ -3562,15 +3564,18 @@ async def generate_script_and_scenes(
             "standard": ModelTier.STANDARD,
             "premium": ModelTier.PREMIUM,
             "professional": ModelTier.PROFESSIONAL,
+            # The historical `pro` database value used the Standard Stripe price.
+            # Keep it on the Standard ladder until the backfill removes those rows.
+            "pro": ModelTier.STANDARD,
         }
         user_model_tier = model_tier_mapping.get(user_tier.value, ModelTier.FREE)
 
         print(
-            f"[OpenRouter] Generating {script_style} script for {user_tier.value} tier user"
+            f"[ScriptModelRouter] Generating {script_style} script for {user_tier.value} tier user"
         )
 
-        # Initialize OpenRouter service
-        openrouter_service = OpenRouterService()
+        # Initialize the script-model router
+        script_model_router = ScriptModelRouter()
 
         # Get chapter context for enhanced content
         rag_service = RAGService(session)
@@ -3587,7 +3592,7 @@ async def generate_script_and_scenes(
                 "chapter": {"title": chapter_title, "content": chapter_content},
             }
 
-        # Prepare content for OpenRouter based on script style
+        # Prepare content for script generation based on script style
         content_for_script = chapter_context.get("total_context", chapter_content)
 
         # Enhance with plot context (Always attempt if we have a book_id, or if custom_logline is provided)
@@ -3632,14 +3637,15 @@ async def generate_script_and_scenes(
         else:
             target_duration = None
 
-        # ✅ Generate script using OpenRouter with tier-appropriate model
+        # ✅ Generate script using ScriptModelRouter with tier-appropriate model
         credit_service = CreditService(session)
         async with credit_service.credit_transaction(reservation_id, SCRIPT_GEN):
-            script_result = await openrouter_service.generate_script(
+            script_result = await script_model_router.generate_script(
                 content=chapter_content,  # Use chapter content (works for both Chapter and Artifact)
                 user_tier=user_model_tier,
                 script_type=script_style,
                 target_duration=target_duration,
+                user_id=str(current_user.id),
                 plot_context=(
                     plot_info if plot_info and plot_info.get("enhanced_content") else None
                 ),
@@ -3648,8 +3654,12 @@ async def generate_script_and_scenes(
         if script_result.get("status") != "success":
             raise HTTPException(
                 status_code=500,
-                detail=f"OpenRouter script generation failed: {script_result.get('error', 'Unknown error')}",
+                detail=f"Script generation failed: {script_result.get('error', 'Unknown error')}",
             )
+
+        response.headers["X-Resolved-Model"] = script_result.get(
+            "model_used", "unknown"
+        )
 
         script = script_result.get("content", "")
         usage = script_result.get("usage", {})
@@ -3771,7 +3781,7 @@ async def generate_script_and_scenes(
             print(
                 f"[DEBUG] Direct parsing found {len(scene_descriptions)} scenes, using AI analysis fallback"
             )
-            scene_breakdown_result = await openrouter_service.analyze_content(
+            scene_breakdown_result = await script_model_router.analyze_content(
                 content=f"""Extract ALL scenes from this script. Identify acts and scenes properly.
 
 For each scene, provide:
@@ -3886,7 +3896,7 @@ Script to analyze:
 
         print(f"[DEBUG] Extracted {len(dialogue_moments)} dialogue moments from script")
 
-        # ✅ Generate character analysis using OpenRouter
+        # ✅ Generate character analysis using ScriptModelRouter
         # KAN-230 FIX: Extract character names from SCRIPT dialogue speakers, NOT character_details
         # Primary method: Parse script for dialogue patterns (was previously fallback)
         print(f"[DEBUG] Extracting character names directly from script dialogue")
@@ -3987,7 +3997,7 @@ Script to analyze:
             "character_details": character_details,
             "metadata": script_data["metadata"],
             "status": "ready",
-            "service_used": "openrouter",
+            "service_used": "script_model_router",
             "script_story_type": script_story_type,  # Store the script story type
         }
 
@@ -4015,7 +4025,7 @@ Script to analyze:
         )
 
         print(
-            f"[OpenRouter] Successfully generated {script_style} script with {len(characters)} characters and {len(scene_descriptions)} scenes"
+            f"[ScriptModelRouter] Successfully generated {script_style} script with {len(characters)} characters and {len(scene_descriptions)} scenes"
         )
 
         # Auto-generate emotional map
@@ -4053,7 +4063,7 @@ Script to analyze:
             "character_details": character_details,
             "script_style": script_style,
             "metadata": script_data["metadata"],
-            "service_used": "openrouter",
+            "service_used": "script_model_router",
             "tier": user_tier.value,
             "plot_enhanced": plot_enhanced,
             "plot_info": plot_info["plot_info"] if plot_info else None,
@@ -4068,7 +4078,7 @@ Script to analyze:
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error generating script and scenes with OpenRouter: {e}")
+        print(f"Error generating script and scenes with ScriptModelRouter: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -5593,7 +5603,7 @@ Style: {request.style}
 Provide ONLY the enhanced description, no explanations or formatting."""
 
         # Use OpenRouter for the enhancement - use analyze_content with custom analysis
-        openrouter = OpenRouterService()
+        openrouter = ScriptModelRouter()
 
         # Combine system prompt and user prompt for analyze_content
         combined_prompt = f"""{system_prompt}

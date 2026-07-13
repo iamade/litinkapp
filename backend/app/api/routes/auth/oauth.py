@@ -106,6 +106,10 @@ async def callback(
     """
     Handles the callback from the OAuth provider.
     """
+    # Providers return an OAuth error instead of ``code`` when the selected
+    # account cannot complete sign-in (for example, a removed Google account).
+    # Redirect to the app so users see a useful message instead of FastAPI's
+    # raw missing-query-parameter JSON response.
     if error or not code:
         logger.warning(
             "OAuth callback rejected for provider=%s error=%s",

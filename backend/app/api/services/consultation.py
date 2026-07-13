@@ -13,7 +13,7 @@ from sqlmodel import select
 from sqlalchemy.orm import selectinload
 
 from app.projects.models import Project, Artifact, ArtifactType
-from app.core.services.openrouter import OpenRouterService
+from app.core.services.script_model_router import ScriptModelRouter
 from app.core.model_config import ModelTier
 from app.core.logging import get_logger
 
@@ -33,7 +33,7 @@ class ConsultationService:
 
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.openrouter = OpenRouterService()
+        self.openrouter = ScriptModelRouter()
 
     async def analyze_scripts_for_cinematic_universe(
         self,
