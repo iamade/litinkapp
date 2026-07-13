@@ -25,6 +25,7 @@ import TermsOfService from "./pages/TermsOfService";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import WebsiteTerms from "./pages/WebsiteTerms";
 import Footer from "./components/Footer";
+import { ExplorerModeRouteGate } from "./components/ExplorerModeRouteGate";
 import { setLoadingContextSetter } from "./lib/api";
 import { VideoGenerationProvider } from "./contexts/VideoGenerationContext";
 import { ScriptSelectionProvider } from "./contexts/ScriptSelectionContext";
@@ -130,15 +131,10 @@ function App() {
                     <Routes>
                       <Route path="/" element={<HomePage />} />
                       <Route path="/auth" element={<AuthPage />} />
-                      <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                      <Route path="/dashboard" element={<ExplorerModeRouteGate><ProtectedRoute><Dashboard /></ProtectedRoute></ExplorerModeRouteGate>} />
                       <Route path="/author" element={<ProtectedRoute><AuthorPanel /></ProtectedRoute>} />
-                      <Route path="/learn" element={<LearningMode />} />
-                      {/* KAN-315/KAN-393: Explorer mode disabled by default — opt-in only via VITE_FEATURE_EXPLORER_MODE='true' */}
-                      {import.meta.env.VITE_FEATURE_EXPLORER_MODE === 'true' ? (
-                        <Route path="/explore" element={<EntertainmentMode />} />
-                      ) : (
-                        <Route path="/explore" element={<Navigate to="/dashboard" replace />} />
-                      )}
+                      <Route path="/learn" element={<ExplorerModeRouteGate><LearningMode /></ExplorerModeRouteGate>} />
+                      <Route path="/explore" element={<ExplorerModeRouteGate><EntertainmentMode /></ExplorerModeRouteGate>} />
                       <Route path="/creator" element={<ProtectedRoute><CreatorMode /></ProtectedRoute>} />
                       <Route path="/project/:id" element={<ProtectedRoute><ProjectView /></ProtectedRoute>} />
                       <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />

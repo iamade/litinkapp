@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { subscriptionService, SubscriptionTier } from "../services/subscriptionService";
 import SubscriptionTierCard from "../components/Subscription/SubscriptionTierCard";
+import { getExplorerHomePath } from "../lib/explorerMode";
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -254,7 +255,7 @@ export default function HomePage() {
                 Transform textbooks into interactive lessons with AI quizzes and progress tracking. 
                 Make learning immersive and engaging for every student.
               </p>
-              <Link to="/learn" className="text-purple-500 dark:text-purple-400 font-semibold flex items-center gap-2 group-hover:gap-3 transition-all">
+              <Link to={getExplorerHomePath()} className="text-purple-500 dark:text-purple-400 font-semibold flex items-center gap-2 group-hover:gap-3 transition-all">
                 Start Teaching <ArrowRight className="w-4 h-4" />
               </Link>
             </div>

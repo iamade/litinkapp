@@ -6,6 +6,7 @@ import CostTrackingDashboard from "../components/Admin/CostTrackingDashboard";
 import MetricsDashboard from "../components/Admin/MetricsDashboard";
 import AlertsPanel from "../components/Admin/AlertsPanel";
 import UserManagementDashboard from "../components/Admin/UserManagementDashboard";
+import { getExplorerHomePath } from "../lib/explorerMode";
 
 type TabType = "cost" | "metrics" | "alerts" | "users";
 
@@ -25,7 +26,7 @@ export default function AdminDashboard() {
       user.roles?.includes("superadmin") || user.email === "support@litinkai.com";
 
     if (!isSuperadmin) {
-      navigate("/dashboard");
+      navigate(getExplorerHomePath());
       return;
     }
 
