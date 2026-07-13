@@ -95,15 +95,29 @@ async def login(provider: str, request: Request):
 @router.get("/{provider}", name="oauth_callback")
 async def callback(
     provider: str,
-    code: str,
     response: Response,
     request: Request,
+    code: Optional[str] = None,
     state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
 ):
     """
     Handles the callback from the OAuth provider.
     """
+    if error or not code:
+        logger.warning(
+            "OAuth callback rejected for provider=%s error=%s",
+            provider,
+            error or "missing_code",
+        )
+        params = {"oauth_error": "account_unavailable"}
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/auth?{urlencode(params)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     # Validate OAuth CSRF state before processing the callback.
     if not state:
         logger.error("OAuth callback missing state parameter (provider=%s)", provider)
