@@ -44,7 +44,10 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (searchParams.get('oauth_error') === 'account_unavailable') {
-      toast.error("We couldn't sign in with that Google account. Please choose an active account or use email and password.");
+      toast.error(
+        "We couldn't sign in with that Google account. Please choose an active account or use email and password.",
+        { id: 'oauth-account-unavailable' }
+      );
     }
   }, [searchParams]);
 
