@@ -41,7 +41,7 @@ TRAILER_VIDEO_PER_SECOND = 8  # per second of trailer video (KAN-150)
 # NOTE: Tier names follow Stripe product IDs; SubscriptionTier enum mapping:
 #   FREE -> SubscriptionTier.FREE
 #   BASIC -> SubscriptionTier.BASIC
-#   STANDARD -> SubscriptionTier.PRO
+#   STANDARD -> SubscriptionTier.STANDARD
 #   PREMIUM -> SubscriptionTier.PREMIUM
 #   PRO -> SubscriptionTier.PROFESSIONAL
 TIER_CREDIT_GRANTS = {
@@ -57,7 +57,8 @@ TIER_CREDIT_GRANTS = {
 TIER_CREDIT_GRANTS_BY_ENUM = {
     "free": 300,        # FREE
     "basic": 1500,      # BASIC
-    "pro": 4800,        # STANDARD
+    "standard": 4800,   # STANDARD
+    "pro": 4800,        # Legacy Standard value until the backfill is complete
     "premium": 13100,   # PREMIUM
     "professional": 33100,  # PRO
 }

@@ -1,10 +1,20 @@
-from typing import Dict, Any, Callable, Optional, List
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta
-from app.core.model_config import get_model_config, ModelTier
+from typing import Any, Callable, Dict, List
+
+from app.core.model_config import get_model_config
+from app.core.services.provider_router import (
+    ProviderNotConfiguredError,
+    ProviderSkipError,
+    provider_name_for_model,
+)
+from app.core.services.redis import redis_client
 
 logger = logging.getLogger(__name__)
+
+PROVIDER_COOLDOWN_SECONDS = 60 * 60
 
 
 class CircuitBreaker:
@@ -13,34 +23,97 @@ class CircuitBreaker:
         self.timeout_seconds = timeout_seconds
         self.failures: Dict[str, List[datetime]] = {}
 
-    def record_failure(self, model_name: str):
-        if model_name not in self.failures:
-            self.failures[model_name] = []
-
+    def record_failure(self, model_name: str) -> None:
         now = datetime.now()
-        self.failures[model_name].append(now)
-
+        failures = self.failures.setdefault(model_name, [])
+        failures.append(now)
         cutoff = now - timedelta(seconds=self.timeout_seconds)
-        self.failures[model_name] = [f for f in self.failures[model_name] if f > cutoff]
+        self.failures[model_name] = [
+            failure for failure in failures if failure > cutoff
+        ]
 
     def is_open(self, model_name: str) -> bool:
-        if model_name not in self.failures:
-            return False
+        cutoff = datetime.now() - timedelta(seconds=self.timeout_seconds)
+        recent = [
+            failure for failure in self.failures.get(model_name, []) if failure > cutoff
+        ]
+        return len(recent) >= self.failure_threshold
 
-        now = datetime.now()
-        cutoff = now - timedelta(seconds=self.timeout_seconds)
-        recent_failures = [f for f in self.failures[model_name] if f > cutoff]
-
-        return len(recent_failures) >= self.failure_threshold
-
-    def reset(self, model_name: str):
-        if model_name in self.failures:
-            self.failures[model_name] = []
+    def reset(self, model_name: str) -> None:
+        self.failures.pop(model_name, None)
 
 
 class ModelFallbackManager:
-    def __init__(self):
+    def __init__(self, redis_service=redis_client, sleep=asyncio.sleep):
         self.circuit_breaker = CircuitBreaker(failure_threshold=5, timeout_seconds=60)
+        self.redis = redis_service
+        self.sleep = sleep
+        self.local_cooldowns: Dict[str, float] = {}
+
+    async def _ensure_redis(self) -> None:
+        if not getattr(self.redis, "is_connected", False):
+            await self.redis.connect()
+
+    @staticmethod
+    def cooldown_key(provider: str) -> str:
+        return f"provider:{provider}:cooldown_until"
+
+    async def _cooldown_until(self, provider: str) -> float | None:
+        local_until = self.local_cooldowns.get(provider)
+        if local_until:
+            if local_until > time.time():
+                return local_until
+            self.local_cooldowns.pop(provider, None)
+        try:
+            await self._ensure_redis()
+            value = await self.redis.get(self.cooldown_key(provider))
+            if value is None:
+                return None
+            cooldown_until = float(value)
+            if cooldown_until <= time.time():
+                await self.redis.delete(self.cooldown_key(provider))
+                return None
+            return cooldown_until
+        except Exception as exc:
+            logger.warning("[FALLBACK] Redis cooldown read failed open: %s", exc)
+            return None
+
+    async def _set_cooldown(self, provider: str) -> None:
+        cooldown_until = time.time() + PROVIDER_COOLDOWN_SECONDS
+        self.local_cooldowns[provider] = cooldown_until
+        try:
+            await self._ensure_redis()
+            await self.redis.set(
+                self.cooldown_key(provider),
+                str(cooldown_until),
+                expire=PROVIDER_COOLDOWN_SECONDS,
+            )
+            logger.warning(
+                "[FALLBACK] Provider %s cooling down for %s seconds",
+                provider,
+                PROVIDER_COOLDOWN_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning("[FALLBACK] Redis cooldown write failed open: %s", exc)
+
+    @staticmethod
+    def _status_code(error: Exception) -> int | None:
+        status_code = getattr(error, "status_code", None)
+        if status_code is None and getattr(error, "response", None) is not None:
+            status_code = getattr(error.response, "status_code", None)
+        if status_code in {429, 503}:
+            return status_code
+        text = str(error).lower()
+        if "429" in text or "rate limit" in text or "too many requests" in text:
+            return 429
+        if "503" in text or "service unavailable" in text:
+            return 503
+        return None
+
+    @staticmethod
+    def _is_timeout(error: Exception) -> bool:
+        text = str(error).lower()
+        return any(token in text for token in ("timed out", "timeout", "time out"))
 
     async def try_with_fallback(
         self,
@@ -51,153 +124,159 @@ class ModelFallbackManager:
         model_param_name: str = "model_id",
     ) -> Dict[str, Any]:
         tier_normalized = user_tier.lower() if user_tier else "free"
-
         config = get_model_config(service_type, tier_normalized)
         if not config:
             logger.error(
-                f"No model config found for {service_type}/{tier_normalized}, using defaults"
+                "No model config found for %s/%s, using request defaults",
+                service_type,
+                tier_normalized,
             )
             return await generation_function(**request_params)
 
-        models_to_try = [
-            model
-            for model in (
-                config.primary,
-                config.fallback,
-                config.fallback2,
-                config.fallback3,
-                config.fallback4,
-                getattr(config, "fallback5", None),
-                getattr(config, "fallback6", None),
+        return await self._try_models(
+            models=config.models,
+            generation_function=generation_function,
+            request_params=request_params,
+            model_param_name=model_param_name,
+            service_type=service_type,
+            tier=tier_normalized,
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
+        )
+
+    async def _try_models(
+        self,
+        models: List[str],
+        generation_function: Callable,
+        request_params: Dict[str, Any],
+        model_param_name: str,
+        service_type: str,
+        tier: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> Dict[str, Any]:
+        attempted_models: List[Dict[str, Any]] = []
+        last_error: Exception | None = None
+        actual_attempts = 0
+
+        for index, model in enumerate(models):
+            provider = provider_name_for_model(model)
+            model_type = "primary" if index == 0 else f"fallback{index}"
+
+            cooldown_until = (
+                await self._cooldown_until(provider) if provider != "unknown" else None
             )
-            if model
-        ]
+            if cooldown_until:
+                attempted_models.append(
+                    {
+                        "model": model,
+                        "status": "skipped",
+                        "reason": "provider_cooldown",
+                        "provider": provider,
+                    }
+                )
+                continue
 
-        attempted_models = []
-        last_error = None
-
-        for i, model in enumerate(models_to_try):
             if self.circuit_breaker.is_open(model):
-                logger.warning(f"[FALLBACK] Circuit breaker open for {model}, skipping")
                 attempted_models.append(
                     {"model": model, "status": "skipped", "reason": "circuit_breaker"}
                 )
                 continue
 
-            model_type = "primary" if i == 0 else f"fallback{i}"
+            updated_params = dict(request_params)
+            updated_params[model_param_name] = model
+            if service_type == "script" and max_tokens:
+                updated_params["max_tokens"] = max_tokens
+            if service_type == "script" and temperature is not None:
+                updated_params["temperature"] = temperature
 
             try:
-                logger.warning(
-                    f"[FALLBACK] Attempting {model_type} model: {model} for {service_type}/{tier_normalized}"
+                logger.info(
+                    "[FALLBACK] Attempting %s model %s for %s/%s",
+                    model_type,
+                    model,
+                    service_type,
+                    tier or "n/a",
                 )
-
-                updated_params = request_params.copy()
-                updated_params[model_param_name] = model
-
-                if service_type == "script" and config.max_tokens:
-                    updated_params["max_tokens"] = config.max_tokens
-                if service_type == "script" and config.temperature:
-                    updated_params["temperature"] = config.temperature
-
+                actual_attempts += 1
                 result = await generation_function(**updated_params)
-
-                if result and result.get("status") in ["success", "processing"]:
-                    logger.info(
-                        f"[FALLBACK] ✅ Success with {model_type} model: {model}"
-                    )
-
-                    self.circuit_breaker.reset(model)
-
-                    if "model_used" not in result:
-                        result["model_used"] = model
-                    result["model_tier_used"] = model_type
-                    result["tier"] = tier_normalized
-                    result["attempted_models"] = attempted_models + [
-                        {"model": model, "status": "success"}
-                    ]
-
-                    return result
-                else:
-                    error_msg = (
+                if not result or result.get("status") not in {"success", "processing"}:
+                    error = (
                         result.get("error", "Unknown error") if result else "No result"
                     )
-                    raise Exception(f"Generation failed: {error_msg}")
+                    raise RuntimeError(f"Generation failed: {error}")
 
-            except Exception as e:
-                error_msg = str(e) if str(e) else repr(e)
-                logger.error(
-                    f"[FALLBACK] ❌ {model_type} model {model} failed: {error_msg}"
+                self.circuit_breaker.reset(model)
+                result.setdefault("model_used", model)
+                result["model_tier_used"] = model_type
+                if tier:
+                    result["tier"] = tier
+                result["attempted_models"] = attempted_models + [
+                    {"model": model, "status": "success", "provider": provider}
+                ]
+                result["attempts"] = actual_attempts
+                return result
+
+            except ProviderSkipError as exc:
+                actual_attempts -= 1
+                logger.info("[ScriptModelRouter] featherless skipped (sub lapsed)")
+                attempted_models.append(
+                    {
+                        "model": model,
+                        "status": "skipped",
+                        "reason": "provider_soft_skip",
+                        "error": str(exc),
+                    }
                 )
-
+                continue
+            except ProviderNotConfiguredError as exc:
+                actual_attempts -= 1
+                logger.info("[FALLBACK] Provider not configured for %s: %s", model, exc)
+                attempted_models.append(
+                    {
+                        "model": model,
+                        "status": "skipped",
+                        "reason": "provider_not_configured",
+                        "error": str(exc),
+                    }
+                )
+                last_error = exc
+                continue
+            except Exception as exc:
+                last_error = exc
                 self.circuit_breaker.record_failure(model)
-
+                status_code = self._status_code(exc)
                 attempted_models.append(
                     {
                         "model": model,
                         "status": "failed",
-                        "error": error_msg,
+                        "provider": provider,
+                        "error": str(exc) or repr(exc),
+                        "status_code": status_code,
                         "model_type": model_type,
                     }
                 )
-                last_error = e
+                if status_code in {429, 503} and provider != "unknown":
+                    await self._set_cooldown(provider)
 
-                # Check for rate limit or timeout errors
-                # For FREE tier models: rate limits are per-provider, so continue to next model
-                # For paid tiers: rate limits are account-wide, so stop fallback
-                # Timeouts: the image is likely still processing on ModelsLab's side
-                stop_fallback_indicators = [
-                    # Timeout indicators - image is likely still processing
-                    "timed out",
-                    "timeout",
-                    "time out",
-                ]
-                rate_limit_indicators = [
-                    "rate limit",
-                    "rate_limit",
-                    "ratelimit",
-                    "quota exceeded",
-                    "too many requests",
-                    "429",
-                    "exceeded",  # e.g., "max wait time exceeded"
-                ]
-                error_lower = error_msg.lower()
-                is_timeout = any(t in error_lower for t in stop_fallback_indicators)
-                is_rate_limit = any(
-                    indicator in error_lower for indicator in rate_limit_indicators
-                )
-                is_free_tier = tier_normalized == "free" or ":free" in model
-
-                if is_timeout:
-                    logger.warning(
-                        f"[FALLBACK] ⏱️ Timeout detected - stopping fallback (image may still be processing on provider)"
-                    )
+                # Preserve the existing safety rule for requests that may still be
+                # processing at the provider. Retrying could double-bill or duplicate
+                # media generation.
+                if self._is_timeout(exc):
                     break
-                elif is_rate_limit and not is_free_tier:
-                    logger.warning(
-                        f"[FALLBACK] ⚠️ Rate limit detected on paid model - stopping fallback to preserve quota"
-                    )
-                    break
-                elif is_rate_limit and is_free_tier:
-                    logger.warning(
-                        f"[FALLBACK] ℹ️ Rate limit on free model {model} - continuing to next fallback"
-                    )
 
-                if i < len(models_to_try) - 1:
-                    backoff_time = min(2**i, 3)  # Cap backoff at 3s for free tier
-                    logger.warning(
-                        f"[FALLBACK] Waiting {backoff_time}s before trying next model ({models_to_try[i+1]})"
-                    )
-                    await asyncio.sleep(backoff_time)
+                if index < len(models) - 1 and status_code not in {429, 503}:
+                    await self.sleep(min(2**index, 3))
 
         logger.error(
-            f"[FALLBACK] All models failed for {service_type}/{tier_normalized}"
+            "[FALLBACK] All models failed for %s/%s", service_type, tier or "n/a"
         )
-
         return {
             "status": "error",
-            "error": f"All models failed. Last error: {str(last_error)}",
+            "error": f"All models failed. Last error: {last_error}",
             "attempted_models": attempted_models,
-            "tier": tier_normalized,
+            "attempts": actual_attempts,
+            "tier": tier,
             "service_type": service_type,
         }
 
@@ -209,122 +288,13 @@ class ModelFallbackManager:
         model_param_name: str = "model_id",
         service_type: str = "generic",
     ) -> Dict[str, Any]:
-        attempted_models = []
-        last_error = None
-
-        for i, model in enumerate(models):
-            if self.circuit_breaker.is_open(model):
-                logger.warning(f"[FALLBACK] Circuit breaker open for {model}, skipping")
-                attempted_models.append(
-                    {"model": model, "status": "skipped", "reason": "circuit_breaker"}
-                )
-                continue
-
-            model_type = "primary" if i == 0 else f"fallback{i}"
-
-            try:
-                logger.info(
-                    f"[FALLBACK] Attempting {model_type} model: {model} for {service_type}"
-                )
-
-                updated_params = request_params.copy()
-                updated_params[model_param_name] = model
-
-                result = await generation_function(**updated_params)
-
-                if result and result.get("status") in ["success", "processing"]:
-                    logger.info(
-                        f"[FALLBACK] ✅ Success with {model_type} model: {model}"
-                    )
-
-                    self.circuit_breaker.reset(model)
-
-                    if "model_used" not in result:
-                        result["model_used"] = model
-                    result["model_tier_used"] = model_type
-                    result["attempted_models"] = attempted_models + [
-                        {"model": model, "status": "success"}
-                    ]
-
-                    return result
-                else:
-                    error_msg = (
-                        result.get("error", "Unknown error") if result else "No result"
-                    )
-                    raise Exception(f"Generation failed: {error_msg}")
-
-            except Exception as e:
-                error_msg = str(e) if str(e) else repr(e)
-                logger.error(
-                    f"[FALLBACK] ❌ {model_type} model {model} failed: {error_msg}"
-                )
-
-                self.circuit_breaker.record_failure(model)
-
-                attempted_models.append(
-                    {
-                        "model": model,
-                        "status": "failed",
-                        "error": error_msg,
-                        "model_type": model_type,
-                    }
-                )
-                last_error = e
-
-                # Check for rate limit or timeout errors
-                # For FREE tier models: rate limits are per-provider, so continue to next model
-                # For paid tiers: rate limits are account-wide, so stop fallback
-                stop_fallback_indicators = [
-                    "timed out",
-                    "timeout",
-                    "time out",
-                ]
-                rate_limit_indicators = [
-                    "rate limit",
-                    "rate_limit",
-                    "ratelimit",
-                    "quota exceeded",
-                    "too many requests",
-                    "429",
-                    "exceeded",
-                ]
-                error_lower = error_msg.lower()
-                is_timeout = any(t in error_lower for t in stop_fallback_indicators)
-                is_rate_limit = any(
-                    indicator in error_lower for indicator in rate_limit_indicators
-                )
-                is_free_model = ":free" in model
-
-                if is_timeout:
-                    logger.warning(
-                        f"[FALLBACK] ⏱️ Timeout detected - stopping fallback (image may still be processing on provider)"
-                    )
-                    break
-                elif is_rate_limit and not is_free_model:
-                    logger.warning(
-                        f"[FALLBACK] ⚠️ Rate limit detected on paid model - stopping fallback to preserve quota"
-                    )
-                    break
-                elif is_rate_limit and is_free_model:
-                    logger.info(
-                        f"[FALLBACK] ℹ️ Rate limit on free model {model} - continuing to next fallback"
-                    )
-
-                if i < len(models) - 1:
-                    backoff_time = 2**i
-                    logger.info(
-                        f"[FALLBACK] Waiting {backoff_time}s before trying next model"
-                    )
-                    await asyncio.sleep(backoff_time)
-
-        logger.error(f"[FALLBACK] All models failed for {service_type}")
-
-        return {
-            "status": "error",
-            "error": f"All models failed. Last error: {str(last_error)}",
-            "attempted_models": attempted_models,
-            "service_type": service_type,
-        }
+        return await self._try_models(
+            models=models,
+            generation_function=generation_function,
+            request_params=request_params,
+            model_param_name=model_param_name,
+            service_type=service_type,
+        )
 
 
 fallback_manager = ModelFallbackManager()

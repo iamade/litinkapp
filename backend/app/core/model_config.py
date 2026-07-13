@@ -30,82 +30,102 @@ class ModelConfig:
     fallback4: Optional[str] = None  # 5th option — cross-provider safety net
     fallback5: Optional[str] = None
     fallback6: Optional[str] = None
+    fallback7: Optional[str] = None
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     cost_per_1k_input: Optional[float] = None
     cost_per_1k_output: Optional[float] = None
 
+    @property
+    def models(self) -> List[str]:
+        return [
+            model
+            for model in (
+                self.primary,
+                self.fallback,
+                self.fallback2,
+                self.fallback3,
+                self.fallback4,
+                self.fallback5,
+                self.fallback6,
+                self.fallback7,
+            )
+            if model
+        ]
 
-# Text & Script Generation Strategy (LMSYS Creative Writing Leaderboard-based)
-# Primary: Ollama Cloud (KAN-181) | FREE fallbacks mix providers for KAN-401
+# Script ladders are cheapest-to-most-expensive and capped at two Ollama slots.
+# Token prices below are standard USD per 1M input/output tokens as of 2026-07-12.
+# Subscription/proxy slots need their effective dashboard rate in the COGS audit.
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
-        primary="ollama/gemma4:31b",  # Ollama Cloud API — valid model ID (KAN-239 fix)
-        fallback=f"zai/{settings.Z_AI_FREE_MODEL}",  # Z.AI first non-Ollama fallback (KAN-401)
-        fallback2=f"piapi/{settings.PIAPI_FREE_MODEL}",  # PiAPI second non-Ollama fallback (KAN-401)
-        fallback3=f"featherless/{settings.FEATHERLESS_FREE_MODEL}",  # Featherless third non-Ollama fallback (KAN-401)
-        fallback4="ollama/ministral-3:8b",  # Ollama Cloud, 8B params, Mistral (KAN-239)
-        fallback5="ollama/gemma3:12b",  # Ollama Cloud, 12B params, Gemma 3 (KAN-239)
-        fallback6="ollama/gemma3:4b",  # Ollama Cloud, 4B params, lightweight backup (KAN-239)
+        primary="zai/glm-5.2",  # $1.40/$4.40
+        fallback="ollama/gemma4:31b",  # plan-bundled; Ollama slot 1/1
+        fallback2="featherless/zai-org/GLM-5.2",  # subscription-gated
+        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
+        fallback4="google/gemini-2.5-flash",  # $0.30/$2.50
+        fallback5="openai/gpt-5-mini",  # legacy ID: rate confirmation required
+        fallback6="anthropic/claude-haiku-4-5-20251001",  # $1/$5
+        fallback7="zai/glm-5.1",  # $1.40/$4.40
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.0,
         cost_per_1k_output=0.0,
     ),
     ModelTier.BASIC: ModelConfig(
-        primary="ollama/deepseek-v3.2",  # Ollama Cloud, DeepSeek V3.2 (KAN-239)
-        fallback="ollama/gemma3:27b",  # Ollama Cloud, 27B params, high quality (KAN-239)
-        fallback2="ollama/ministral-3:14b",  # Ollama Cloud, 14B params, Mistral (KAN-239)
-        fallback4="google/gemini-2.5-flash",  # Google AI Studio FREE, 1M ctx safety net
+        primary="zai/glm-5.2",  # $1.40/$4.40
+        fallback="ollama/deepseek-v4-pro:cloud",  # plan-bundled; Ollama slot 1/1
+        fallback2="featherless/zai-org/GLM-5.2",  # subscription-gated
+        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
+        fallback4="google/gemini-2.5-flash",  # $0.30/$2.50
+        fallback5="openai/gpt-5-mini",  # legacy ID: rate confirmation required
+        fallback6="anthropic/claude-haiku-4-5-20251001",  # $1/$5
+        fallback7="anthropic/claude-sonnet-4-6",  # $3/$15
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.00014,
         cost_per_1k_output=0.00028,
     ),
     ModelTier.STANDARD: ModelConfig(
-        primary="google/gemini-2.5-pro",  # $2.50/1M, 1M ctx
-        fallback="anthropic/claude-sonnet-4.5",  # $9/1M, 1M ctx
-        fallback2="openai/gpt-5.4",  # $17.50/1M, 1M ctx, frontier
+        primary="zai/glm-5.1",  # $1.40/$4.40
+        fallback="zai/glm-5.2",  # $1.40/$4.40
+        fallback2="featherless/zai-org/GLM-5.1-FP8",  # subscription-gated
+        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
+        fallback4="google/gemini-2.5-pro",  # $1.25/$10 (<=200k prompt)
+        fallback5="openai/gpt-5.4",  # $2.50/$15 (short context)
+        fallback6="anthropic/claude-sonnet-4-6",  # $3/$15
+        fallback7="anthropic/claude-opus-4-6",  # $5/$25
         max_tokens=8000,
         temperature=0.7,
         cost_per_1k_input=0.00025,
         cost_per_1k_output=0.00125,
     ),
     ModelTier.PREMIUM: ModelConfig(
-        primary="google/gemini-3-flash-preview",  # $3.50/1M, 1M ctx, fast+thinking
-        fallback="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
-        fallback2="anthropic/claude-sonnet-4.5",  # $18.00/1M, 1M ctx, high quality
+        primary="zai/glm-5.2",  # $1.40/$4.40
+        fallback="ollama/kimi-k2.6:cloud",  # plan-bundled; Ollama slot 1/1
+        fallback2="featherless/zai-org/GLM-5.2",  # subscription-gated
+        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
+        fallback4="google/gemini-3.1-pro-preview",  # $2/$12 (<=200k prompt)
+        fallback5="openai/gpt-5.4",  # $2.50/$15 (short context)
+        fallback6="anthropic/claude-sonnet-4-6",  # $3/$15
+        fallback7="anthropic/claude-opus-4-6",  # $5/$25
         max_tokens=8000,
         temperature=0.75,
         cost_per_1k_input=0.00150,
         cost_per_1k_output=0.00600,
     ),
-    ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
-        primary="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
-        fallback="openai/gpt-5.4",  # $17.50/1M, 1M ctx, latest OpenAI
-        fallback2="anthropic/claude-sonnet-4.6",  # $18.00/1M, 1M ctx
+    ModelTier.PRO: ModelConfig(
+        primary="openai/gpt-5.5",  # $5/$30 (short context)
+        fallback="zai/glm-5.2",  # $1.40/$4.40
+        fallback2="featherless/zai-org/GLM-5.2",  # subscription-gated
+        fallback3="piapi/gpt-4o-mini",  # proxy rate: verify dashboard
+        fallback4="google/gemini-3.1-pro-preview",  # $2/$12 (<=200k prompt)
+        fallback5="openai/gpt-5.4-pro",  # $30/$180 (short context)
+        fallback6="anthropic/claude-sonnet-4-6",  # $3/$15
+        fallback7="anthropic/claude-opus-4-6",  # $5/$25
         max_tokens=16000,
         temperature=0.8,
         cost_per_1k_input=0.00250,
         cost_per_1k_output=0.01000,
-    ),
-    ModelTier.PROFESSIONAL: ModelConfig(
-        primary="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, frontier
-        fallback="openai/gpt-5.4",  # $17.50/1M, 1M ctx, latest OpenAI
-        fallback2="anthropic/claude-sonnet-4.6",  # $18.00/1M, 1M ctx
-        max_tokens=16000,
-        temperature=0.8,
-        cost_per_1k_input=0.00250,
-        cost_per_1k_output=0.01000,
-    ),
-    ModelTier.ENTERPRISE: ModelConfig(
-        primary="anthropic/claude-opus-4.6",  # $30.00/1M, 1M ctx, best quality
-        fallback="openai/gpt-5.4-pro",  # $210.00/1M, 1M ctx, OpenAI flagship
-        fallback2="google/gemini-3.1-pro-preview",  # $14.00/1M, 1M ctx, reliable fallback
-        max_tokens=16000,
-        temperature=0.8,
-        cost_per_1k_input=0.00500,
-        cost_per_1k_output=0.02000,
     ),
 }
 
@@ -461,6 +481,13 @@ def get_model_config(service_type: str, tier: str) -> Optional[ModelConfig]:
     try:
         model_tier = ModelTier(tier.lower())
 
+        if service_type.lower() == "script":
+            if model_tier == ModelTier.PRO:
+                # Historical subscription rows used `pro` for the Standard price.
+                model_tier = ModelTier.STANDARD
+            elif model_tier in {ModelTier.PROFESSIONAL, ModelTier.ENTERPRISE}:
+                model_tier = ModelTier.PRO
+
         config_map = {
             "script": SCRIPT_MODEL_CONFIG,
             "image": IMAGE_MODEL_CONFIG,
@@ -486,7 +513,7 @@ def validate_model_configs():
     logger.info("Validating model configurations...")
 
     for tier in ModelTier:
-        script_config = SCRIPT_MODEL_CONFIG.get(tier)
+        script_config = get_model_config("script", tier.value)
         image_config = IMAGE_MODEL_CONFIG.get(tier)
         video_config = VIDEO_MODEL_CONFIG.get(tier)
         audio_config = AUDIO_MODEL_CONFIG.get(tier)

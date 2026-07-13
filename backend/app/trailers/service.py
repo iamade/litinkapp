@@ -33,7 +33,7 @@ from app.trailers.schemas import (
     SceneScore,
     SceneAnalysisResult,
 )
-from app.core.services.openrouter import OpenRouterService
+from app.core.services.script_model_router import ScriptModelRouter
 from app.core.model_config import get_model_config
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class TrailerSceneService:
     
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.ai_service = OpenRouterService()
+        self.ai_service = ScriptModelRouter()
     
     async def analyze_project_for_trailer(
         self,
@@ -272,7 +272,7 @@ Content:
 Identify key moments suitable for a trailer and score them."""
 
         try:
-            # Use OpenRouterService via provider_router for flexible model selection
+            # Use ScriptModelRouter via provider_router for flexible model selection
             from app.core.services.provider_router import provider_router
             
             response = await provider_router.chat_completion(

@@ -27,21 +27,39 @@ class AIService:
 
     def __init__(self):
         # Check if any provider is available via the router
-        self.client = (
-            provider_router.openrouter_client
-            or provider_router.google_client
-            or provider_router.groq_client
+        self.client = next(
+            (
+                client
+                for client in (
+                    provider_router.zai_client,
+                    provider_router.ollama_client,
+                    provider_router.google_client,
+                    provider_router.openai_client,
+                    provider_router.anthropic_client,
+                    provider_router.piapi_client,
+                    provider_router.featherless_client,
+                    provider_router.groq_client,
+                )
+                if client is not None
+            ),
+            None,
         )
 
     def get_available_providers(self) -> List[str]:
         """Get list of available AI providers"""
         providers = []
-        if provider_router.openrouter_client:
-            providers.append("openrouter")
-        if provider_router.google_client:
-            providers.append("google")
-        if provider_router.groq_client:
-            providers.append("groq")
+        for name in (
+            "zai",
+            "ollama",
+            "google",
+            "openai",
+            "anthropic",
+            "piapi",
+            "featherless",
+            "groq",
+        ):
+            if getattr(provider_router, f"{name}_client", None):
+                providers.append(name)
         return providers
 
     async def _make_completion(
@@ -55,11 +73,10 @@ class AIService:
         """Make completion request via unified ProviderRouter with fallback support.
 
         The `provider` parameter is kept for backward compatibility but ignored —
-        routing is determined by the model prefix (ollama/, google/, groq/, or OpenRouter).
+        routing is determined by the explicit provider prefix on the model ID.
 
         If `fallback_tier` is provided (e.g. "free", "basic"), attempts the primary model
-        first, then falls back through fallback/fallback2/fallback3/fallback4 in the
-        tier's ModelConfig until one succeeds.
+        first, then falls back through all configured ladder slots until one succeeds.
         """
         model = model or _DEFAULT_MODEL
 
@@ -79,11 +96,7 @@ class AIService:
             )
 
         # Try primary, then fallbacks
-        models_to_try = [config.primary]
-        for attr in ["fallback", "fallback2", "fallback3", "fallback4"]:
-            val = getattr(config, attr, None)
-            if val:
-                models_to_try.append(val)
+        models_to_try = config.models
 
         last_error = None
         for attempt, model_id in enumerate(models_to_try):

@@ -7,7 +7,7 @@ from sqlmodel import select, col, desc
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.services.openrouter import OpenRouterService, ModelTier
+from app.core.services.script_model_router import ScriptModelRouter, ModelTier
 from app.api.services.subscription import SubscriptionManager
 from app.core.services.rag import RAGService
 from app.plots.schemas import (
@@ -34,7 +34,7 @@ class PlotService:
 
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.openrouter = OpenRouterService()
+        self.openrouter = ScriptModelRouter()
         self.subscription_manager = SubscriptionManager(session)
         self.rag_service = RAGService(session)
 
@@ -1748,6 +1748,7 @@ Return a JSON object with:
             "free": ModelTier.FREE,
             "basic": ModelTier.BASIC,
             "standard": ModelTier.STANDARD,
+            "pro": ModelTier.STANDARD,
             "premium": ModelTier.PREMIUM,
             "professional": ModelTier.PROFESSIONAL,
         }
