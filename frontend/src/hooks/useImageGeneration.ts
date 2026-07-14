@@ -2,6 +2,10 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { userService } from '../services/userService';
 import { toast } from 'react-hot-toast';
 import { dispatchCreditsRefresh } from '../lib/credits';
+import {
+  endCreditsPolling,
+  startCreditsPolling,
+} from "../lib/activeGeneration";
 
 export interface SceneImage {
   sceneNumber: number;
@@ -547,6 +551,18 @@ export const useImageGeneration = (
   const startPollingSceneImage = (sceneNumber: number, recordId: string) => {
     if (!chapterId) return;
 
+    startCreditsPolling();
+
+    const stopPolling = () => {
+      clearInterval(pollInterval);
+      endCreditsPolling();
+      setPollingIntervals(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(recordId);
+        return newMap;
+      });
+    };
+
     const pollInterval = setInterval(async () => {
       try {
         const status = await userService.getImageGenerationStatus(chapterId, recordId);
@@ -609,13 +625,7 @@ export const useImageGeneration = (
             return newSet;
           });
 
-          // Clear this interval
-          clearInterval(pollInterval);
-          setPollingIntervals(prev => {
-            const newMap = new Map(prev);
-            newMap.delete(recordId);
-            return newMap;
-          });
+          stopPolling();
 
           // Reload all images from database to get the complete data
           loadImages();
@@ -643,13 +653,7 @@ export const useImageGeneration = (
             return newSet;
           });
 
-          // Clear this interval
-          clearInterval(pollInterval);
-          setPollingIntervals(prev => {
-            const newMap = new Map(prev);
-            newMap.delete(recordId);
-            return newMap;
-          });
+          stopPolling();
 
           toast.error(`Failed to generate image for Scene ${sceneNumber}`);
         }
@@ -663,12 +667,7 @@ export const useImageGeneration = (
 
     // Timeout
     setTimeout(() => {
-      clearInterval(pollInterval);
-      setPollingIntervals(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(recordId);
-        return newMap;
-      });
+      stopPolling();
 
       // Check if still generating and mark as failed
       setGeneratingScenes((prev) => {
@@ -768,6 +767,18 @@ export const useImageGeneration = (
   const startPollingCharacterImage = (characterName: string, recordId: string) => {
     if (!chapterId) return;
 
+    startCreditsPolling();
+
+    const stopPolling = () => {
+      clearInterval(pollInterval);
+      endCreditsPolling();
+      setPollingIntervals(prev => {
+        const newMap = new Map(prev);
+        newMap.delete(recordId);
+        return newMap;
+      });
+    };
+
     const pollInterval = setInterval(async () => {
       try {
         const status = await userService.getImageGenerationStatus(chapterId, recordId);
@@ -795,13 +806,7 @@ export const useImageGeneration = (
             return newSet;
           });
 
-          // Clear this interval
-          clearInterval(pollInterval);
-          setPollingIntervals(prev => {
-            const newMap = new Map(prev);
-            newMap.delete(recordId);
-            return newMap;
-          });
+          stopPolling();
 
           // Reload all images from database to get the complete data
           loadImages();
@@ -825,13 +830,7 @@ export const useImageGeneration = (
             return newSet;
           });
 
-          // Clear this interval
-          clearInterval(pollInterval);
-          setPollingIntervals(prev => {
-            const newMap = new Map(prev);
-            newMap.delete(recordId);
-            return newMap;
-          });
+          stopPolling();
 
           toast.error(`Failed to generate image for ${characterName}`);
         }
@@ -845,12 +844,7 @@ export const useImageGeneration = (
 
     // Set a timeout to stop polling after 5 minutes
     setTimeout(() => {
-      clearInterval(pollInterval);
-      setPollingIntervals(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(recordId);
-        return newMap;
-      });
+      stopPolling();
 
       // Check if still generating and mark as failed
       setGeneratingCharacters((prev) => {

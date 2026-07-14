@@ -4,6 +4,10 @@ import { PipelineStatus } from '../types/pipelinestatus';
 import { toast } from 'react-hot-toast';
 import { UsePipelineStatusOptions, UsePipelineStatusReturn } from '../types/usePipelineStatus';
 import { handlePipelineStatusError } from '../utils/videoGenerationErrors';
+import {
+  endCreditsPolling,
+  startCreditsPolling,
+} from "../lib/activeGeneration";
 
 
 export const usePipelineStatus = (
@@ -33,6 +37,7 @@ export const usePipelineStatus = (
       mountedRef.current = false;
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
+        endCreditsPolling();
       }
     };
   }, []);
@@ -77,7 +82,7 @@ export const usePipelineStatus = (
         onError(err instanceof Error ? err : new Error(errorMessage));
       }
     }
-  }, [videoGenerationId, onStatusChange, onError, autoRefresh, isPolling]);
+  }, [videoGenerationId, onStatusChange, onError, autoRefresh, isPolling, stopPolling]);
 
   // Initial load
   const refreshStatus = useCallback(async () => {
@@ -94,6 +99,7 @@ export const usePipelineStatus = (
     if (pollingIntervalRef.current || !autoRefresh) return;
     
     setIsPolling(true);
+    startCreditsPolling();
     pollingIntervalRef.current = setInterval(fetchPipelineStatus, refreshInterval);
   }, [fetchPipelineStatus, refreshInterval, autoRefresh]);
 
@@ -102,6 +108,7 @@ export const usePipelineStatus = (
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
       pollingIntervalRef.current = null;
+      endCreditsPolling();
     }
     setIsPolling(false);
   }, []);
