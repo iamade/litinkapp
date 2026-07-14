@@ -10,45 +10,134 @@
 {% endblock %}
 
 {% block content %}
+<!-- Scoped icon styles: keep the 56px lock badge crisp at 390px mobile. -->
+<style>
+  .lock-badge {
+    width: 56px !important;
+    height: 56px !important;
+    min-width: 56px !important;
+    max-width: 56px !important;
+    background-color: #FEF3C7;
+    border-radius: 50%;
+    margin: 0 auto;
+    border-collapse: collapse;
+    table-layout: fixed !important;
+  }
+  .lock-badge td {
+    padding: 0 !important;
+    border-collapse: collapse;
+    line-height: 1px;
+    font-size: 1px;
+    width: 7px !important;
+    height: 7px !important;
+    min-width: 7px !important;
+    max-width: 7px !important;
+    min-height: 7px !important;
+    max-height: 7px !important;
+  }
+  .lock-badge .lb-cell {
+    background-color: #FEF3C7;
+  }
+  .lock-badge .lb-fill {
+    background-color: #B45309;
+  }
+  @media screen and (max-width: 600px) {
+    .lock-badge,
+    .lock-badge td,
+    .lock-badge .lb-cell,
+    .lock-badge .lb-fill {
+      padding: 0 !important;
+      width: 7px !important;
+      height: 7px !important;
+      min-width: 7px !important;
+      max-width: 7px !important;
+    }
+  }
+</style>
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse: collapse;">
   <tr>
     <td align="center" style="padding: 10px 0 24px;">
-      <!-- Email-safe lock icon: table-based pixel lock, no Unicode emoji, no external image. -->
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse: collapse; margin: 0 auto;">
+      <!-- Email-safe lock icon: 8x8 fixed-layout pixel badge, no Unicode emoji, no external image. -->
+      <table class="lock-badge" role="presentation" cellspacing="0" cellpadding="0" border="0" width="56" height="56" style="table-layout: fixed; border-collapse: collapse;">
         <tr>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #FEF3C7;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #FEF3C7;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #FEF3C7;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #FEF3C7;"></td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
         </tr>
         <tr>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #FEF3C7;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #FEF3C7;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #FEF3C7;"></td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
         </tr>
         <tr>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
         </tr>
         <tr>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #FEF3C7;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
         </tr>
         <tr>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
-          <td width="12" height="12" style="width: 12px; height: 12px; background-color: #B45309;"></td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+        </tr>
+        <tr>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+        </tr>
+        <tr>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+        </tr>
+        <tr>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-fill" width="7" height="7">&nbsp;</td>
+          <td class="lb-cell" width="7" height="7">&nbsp;</td>
         </tr>
       </table>
     </td>

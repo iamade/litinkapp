@@ -42,10 +42,25 @@ class TestAccountLockoutTemplate:
         html = env.get_template("account_lockout.html").render(**lockout_context)
         assert "&#128274;" not in html
         assert "🔒" not in html
-        # Table-based pixel lock is email-safe and has no external image.
+        # Badge is a single 56px table, not an expanded 5x5 or 8x8 pixel grid.
         assert "Email-safe lock icon" in html
-        assert "background-color: #B45309" in html
+        assert 'class="lock-badge"' in html
+        assert 'class="lb-cell"' in html
+        assert 'class="lb-fill"' in html
+        assert "width=\"56\"" in html
+        assert "height=\"56\"" in html
+        assert html.count("background-color: #B45309") <= 15
         assert 'role="presentation"' in html
+
+    def test_html_lock_badge_mobile_zero_padding_override(self, lockout_context):
+        env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
+        html = env.get_template("account_lockout.html").render(**lockout_context)
+        assert ".lock-badge td" in html
+        assert "padding: 0 !important" in html
+        assert ".lock-badge .lb-cell" in html
+        # Mobile media query keeps icon cells at 7px despite .email-wrapper td padding.
+        assert "max-width: 600px" in html
+        assert re.search(r"\.lock-badge\s*,\s*\.lock-badge td", html) is not None
 
     def test_html_has_security_icon_and_cta(self, lockout_context):
         env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
