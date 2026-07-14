@@ -39,6 +39,7 @@ interface SubscriptionTierCardProps {
 const TIER_CREDITS: Record<string, { label: string; amount: string }> = {
   free: { label: "Credits included", amount: "300" },
   basic: { label: "Credits/month", amount: "1,500" },
+  standard: { label: "Credits/month", amount: "4,800" },
   pro: { label: "Credits/month", amount: "4,800" },
   premium: { label: "Credits/month", amount: "13,100" },
   professional: { label: "Credits/month", amount: "33,100" },
@@ -48,6 +49,7 @@ const TIER_CREDITS: Record<string, { label: string; amount: string }> = {
 const getAnnualPrice = (tierName: string): number => {
   switch (tierName) {
     case "basic": return 108;
+    case "standard": return 228;
     case "pro": return 228;
     case "premium": return 828;
     case "professional": return 2268;
@@ -58,6 +60,7 @@ const getAnnualPrice = (tierName: string): number => {
 const getDiscountLabel = (tierName: string): string => {
   switch (tierName) {
     case "basic": return "Save 50%";
+    case "standard": return "Save 34%";
     case "pro": return "Save 34%";
     case "premium": return "Save 13%";
     case "professional": return "Save 5%";
