@@ -34,12 +34,16 @@ def send_email_task(
             )
             headers["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
 
+        # Multipart/alternative: clients should prefer the LAST part. We pass
+        # the plain body as the primary part and the HTML as the alternative so
+        # the generated MIME structure lists plain first and HTML last, making
+        # HTML the preferred rendered part in Gmail and other modern clients.
         message = MessageSchema(
             subject=subject,
             recipients=recipients,
-            body=html_content,
-            subtype=MessageType.html,
-            alternative_body=plain_content,
+            body=plain_content,
+            subtype=MessageType.plain,
+            alternative_body=html_content,
             multipart_subtype=MultipartSubtypeEnum.alternative,
             headers=headers,
         )
