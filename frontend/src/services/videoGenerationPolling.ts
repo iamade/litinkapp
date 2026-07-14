@@ -1,5 +1,9 @@
 import { videoGenerationAPI, VideoGeneration, GenerationStatus, normalizeGenerationStatus } from '../lib/videoGenerationApi';
 import { handleVideoGenerationStatusError, showVideoGenerationSuccess } from '../utils/videoGenerationErrors';
+import {
+  endCreditsPolling,
+  startCreditsPolling,
+} from "../lib/activeGeneration";
 
 export interface PollingConfig {
   interval: number;
@@ -41,21 +45,24 @@ export type VideoGenPollingParams = {
 // New reactive polling function
 export function startVideoGenerationPolling(params: VideoGenPollingParams): () => void {
   const { scriptId, signal, onUpdate, onError } = params;
-  
+
   // Create a cleanup function that will stop polling
   let isCleanedUp = false;
   let currentTimer: NodeJS.Timeout | null = null;
   let currentRetryAttempts = 0;
   const maxRetries = 5;
   const retryDelay = 2000;
-  
+
   const stopPolling = () => {
     isCleanedUp = true;
     if (currentTimer) {
       clearTimeout(currentTimer);
       currentTimer = null;
     }
+    endCreditsPolling();
   };
+
+  startCreditsPolling();
 
   // Handle abort signal
   if (signal) {
@@ -74,20 +81,20 @@ export function startVideoGenerationPolling(params: VideoGenPollingParams): () =
       // Use the existing polling service but keyed by scriptId
       // This assumes the backend can handle scriptId-based polling
       const statusResponse = await videoGenerationAPI.getEnhancedGenerationStatus(scriptId);
-      
+
       // Reset retry attempts on successful poll
       currentRetryAttempts = 0;
-      
+
       // Convert to existing VideoGeneration format for compatibility
       const generation = convertStatusResponse(scriptId, statusResponse);
-      
+
       // Call onUpdate with scriptId for stale update protection
       onUpdate?.({
         scriptId,
         status: generation.generation_status,
         payload: generation
       });
-      
+
       // Check if generation is complete
       if (isCompleteStatus(statusResponse.status)) {
         stopPolling();
@@ -104,7 +111,7 @@ export function startVideoGenerationPolling(params: VideoGenPollingParams): () =
       if (isCleanedUp || signal?.aborted) {
         return;
       }
-      
+
       if (currentRetryAttempts < maxRetries) {
         currentRetryAttempts++;
         currentTimer = setTimeout(poll, retryDelay);
@@ -150,7 +157,7 @@ function convertStatusResponse(
   statusResponse: VideoGenerationStatusResponse
 ): VideoGeneration {
   const generationStatus = mapStatusToGenerationStatus(statusResponse.status);
-  
+
   return {
     id: scriptId, // Use scriptId as the generation ID for new system
     script_id: scriptId,
@@ -211,7 +218,7 @@ class VideoGenerationPolling {
   private retryAttempts: Map<string, number> = new Map();
   private pollingAttempts: Map<string, number> = new Map();
   private pollingStartTimes: Map<string, number> = new Map();
-  
+
   private getPollingInterval(status: string): number {
     const normalized = normalizeGenerationStatus(status);
     // Smart polling - adjust interval based on generation phase
@@ -242,7 +249,7 @@ class VideoGenerationPolling {
   ): VideoGeneration {
     // Map the new status format to the existing VideoGeneration structure
     const generationStatus: GenerationStatus = this.mapStatusToGenerationStatus(statusResponse.status);
-    
+
     return {
       id: videoGenId,
       script_id: '', // Will be populated from existing data
@@ -312,27 +319,28 @@ class VideoGenerationPolling {
 
     // Stop existing polling for this ID
     this.stopPolling(videoGenId);
-    
+
     // Reset retry attempts and start tracking polling
     this.retryAttempts.set(videoGenId, 0);
     this.pollingAttempts.set(videoGenId, 0);
     this.pollingStartTimes.set(videoGenId, Date.now());
+    startCreditsPolling();
 
     const poll = async () => {
       try {
         // Increment polling attempt counter
         const currentPollingAttempt = (this.pollingAttempts.get(videoGenId) || 0) + 1;
         this.pollingAttempts.set(videoGenId, currentPollingAttempt);
-        
+
         // Use the new backend endpoint for status polling
         const statusResponse = await videoGenerationAPI.getEnhancedGenerationStatus(videoGenId);
-        
+
         // Reset retry attempts on successful poll
         this.retryAttempts.set(videoGenId, 0);
-        
+
         // Convert to existing VideoGeneration format for compatibility
         const generation = this.convertStatusResponse(videoGenId, statusResponse);
-        
+
         // Check for errors and show notifications
         handleVideoGenerationStatusError(generation, videoGenId);
 
@@ -346,7 +354,7 @@ class VideoGenerationPolling {
             is_fallback_retrieval: currentPollingAttempt > 12 // After 1 minute, start fallback
           }
         };
-        
+
         callbacks.onUpdate(enhancedGeneration);
 
         // Check if generation is complete
@@ -355,9 +363,9 @@ class VideoGenerationPolling {
           if (statusResponse.status === 'completed') {
             showVideoGenerationSuccess(videoGenId);
           }
-          
+
           callbacks.onComplete(enhancedGeneration);
-          
+
           if (finalConfig.stopOnComplete) {
             this.stopPolling(videoGenId);
             return;
@@ -373,16 +381,16 @@ class VideoGenerationPolling {
 
       } catch (error) {
         const currentAttempts = this.retryAttempts.get(videoGenId) || 0;
-        
+
         if (currentAttempts < finalConfig.maxRetries) {
           // Increment retry attempts
           this.retryAttempts.set(videoGenId, currentAttempts + 1);
-          
+
           // Call retry callback if provided
           if (callbacks.onRetry) {
             callbacks.onRetry(currentAttempts + 1, error as Error);
           }
-          
+
           // Schedule retry with delay
           const timer = setTimeout(poll, finalConfig.retryDelay);
           this.timers.set(videoGenId, timer);
@@ -403,6 +411,9 @@ class VideoGenerationPolling {
     if (timer) {
       clearTimeout(timer);
       this.timers.delete(videoGenId);
+    }
+    if (this.pollingAttempts.has(videoGenId)) {
+      endCreditsPolling();
     }
     this.retryAttempts.delete(videoGenId);
     this.pollingAttempts.delete(videoGenId);
