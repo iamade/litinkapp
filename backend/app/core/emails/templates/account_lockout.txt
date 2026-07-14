@@ -1,24 +1,26 @@
 {% extends "base.txt" %}
 
-{% block header %} Account Security Alert {% endblock %}
+{% block header %}Account Security Alert{% endblock %}
 
 {% block content %}
- Hello,
+{% if first_name %}Hi {{ first_name }},{% elif display_name %}Hi {{ display_name }},{% else %}Hello,{% endif %}
 
-For your security, your user account has been Temporarily locked due to multiple failed login attempts
+For your security, your LitInkAI account was temporarily locked after several failed login attempts. No one can sign in again until the lockout period ends.
 
-Your account will be automatically unlocked after {{ lockout_duration }}
+LOCKED AT: {{ lockout_time }}
+UNLOCKS AT: {{ unlock_time }}
+LOCKOUT DURATION: {{ lockout_duration }}
 
-If you did not attempt to login to your account, we recommend:
+SECURE MY ACCOUNT
+{{ security_action_url }}
 
-    1. Change your password immediately when your account unlocks.
-    2. Contact our support team if you believe your account has been compromised.
-    3. Check your email for any suspicious activity.
+Didn't try to sign in?
+- Reset your password as soon as your account unlocks.
+- Contact our support team if you believe your account is compromised.
+- Check your email for any suspicious activity.
 
-Time of lockout: {{ lockout_time }}
-Account will unlock at:{{ unlock_time }}
+If you need immediate help, reply to this email or write to {{ support_email }}.
 
-If you need immediate assistance, please contact our support team.
-
-
+Stay secure,
+The LitInkAI Team
 {% endblock %}

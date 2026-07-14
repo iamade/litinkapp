@@ -181,7 +181,7 @@ class UserAuthService:
             user.account_status = AccountStatusSchema.LOCKED
 
             try:
-                await send_account_lockout_email(user.email, current_time)
+                await send_account_lockout_email(user.email, current_time, user=user)
                 logger.info(f"Account lockout notification email sent to {user.email}")
 
             except Exception as e:

@@ -16,13 +16,24 @@
     </xml>
     </noscript>
     <![endif]-->
-
+    <style>
+      @media (prefers-color-scheme: dark) {
+        body { background-color: #111827 !important; }
+        .email-wrapper { background-color: #1f2937 !important; }
+        h1, h2, p, li, td { color: #e5e7eb !important; }
+        .muted { color: #9ca3af !important; }
+      }
+      @media screen and (max-width: 600px) {
+        .email-wrapper { width: 100% !important; }
+        .email-wrapper td { padding: 16px !important; }
+      }
+    </style>
 </head>
 <body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, Helvetica, sans-serif; line-height: 1.6; -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
     <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse: collapse; background-color: #f4f4f4;">
       <tr>
         <td align="center" style="padding: 20px 0;">
-          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="border-collapse: collapse; max-width: 600px; background-color: #ffffff; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+          <table class="email-wrapper" role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="border-collapse: collapse; max-width: 600px; width: 100%; background-color: #ffffff; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
             <tr>
               <td style="text-align: center; padding: 20px; border-bottom: 1px solid #eee;">
                 <h1 style="margin: 0; font-family: Arial, Helvetica, sans-serif;">{% block header %}{% endblock %}</h1>
@@ -36,8 +47,8 @@
             <tr>
               <td style="text-align: center; padding: 20px; border-top: 1px solid #eee; color: #666; font-size: 12px; font-family: Arial, Helvetica, sans-serif;">
                 {% block footer %}
-                <p style="margin: 0 0 10px;">If you have any questions, please contact us at <a href="mailto:{{ support_email }}" style="color: #4CAF50;">{{ support_email }}</a></p>
-                <p style="margin: 0;">Thanks for using our service! &copy; {{ site_name }} Team. All rights reserved.</p>
+                <p style="margin: 0 0 10px;">If you have any questions, please contact us at <a href="mailto:{{ support_email }}" style="color: #4F46E5;">{{ support_email }}</a></p>
+                <p class="muted" style="margin: 0;">Thanks for using our service! &copy; {{ site_name }} Team. All rights reserved.</p>
                 {% endblock %}
               </td>
             </tr>
