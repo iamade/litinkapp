@@ -399,21 +399,8 @@ class LogSanitizer:
 
     @staticmethod
     def preview(value: Any, max_len: int = 0, label: str = "content") -> str:
-        """Optional short preview; max_len=0 means fully redact."""
-        if value is None:
-            return f"[REDACTED {label}: None]"
-        if not isinstance(value, str):
-            try:
-                value = str(value)
-            except Exception:
-                return f"[REDACTED {label}: non-string]"
-        if max_len <= 0:
-            return f"[REDACTED {label}: len={len(value)}]"
-        snippet = value[:max_len]
-        remaining = len(value) - max_len
-        if remaining > 0:
-            snippet += f" [+{remaining} redacted]"
-        return snippet
+        """Return metadata only; ``max_len`` is retained for call compatibility."""
+        return LogSanitizer.redact(value, label=label)
 
     @staticmethod
     def redact_mapping(
@@ -439,4 +426,3 @@ class LogSanitizer:
             else:
                 redacted[key] = LogSanitizer.redact(value, label=label)
         return redacted
- 
