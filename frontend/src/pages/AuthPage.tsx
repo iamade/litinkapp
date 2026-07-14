@@ -24,13 +24,6 @@ const AppleIcon = () => (
   </svg>
 );
 
-// Helper for Microsoft Icon
-const MicrosoftIcon = () => (
-  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <path d="M11 11H1V1h10v10zm0 12H1V13h10v10zm12-12H13V1h10v10zm0 12H13V13h10v10z" fill="currentColor" />
-  </svg>
-);
-
 export default function AuthPage() {
   const [searchParams] = useSearchParams();
   const [isLogin, setIsLogin] = useState(searchParams.get('mode') !== 'register');
@@ -52,7 +45,10 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (searchParams.get('oauth_error') === 'account_unavailable') {
-      toast.error("We couldn't sign in with that Google account. Please choose an active account or use email and password.");
+      toast.error(
+        "We couldn't sign in with that Google account. Please choose an active account or use email and password.",
+        { id: 'oauth-account-unavailable' }
+      );
     }
   }, [searchParams]);
 
@@ -264,7 +260,7 @@ export default function AuthPage() {
                         {loading ? "Processing..." : (isLogin ? "Login" : "Register")}
                     </button>
 
-                    {/* Social login buttons temporarily disabled
+                    {/* KAN-386: Social login — Google OAuth */}
                     <div className="relative my-6">
                         <div className="absolute inset-0 flex items-center">
                             <div className="w-full border-t border-gray-200 dark:border-gray-700"></div>
@@ -279,18 +275,11 @@ export default function AuthPage() {
                             type="button" 
                             onClick={() => window.location.href = `${API_BASE_URL}/auth/login/google`}
                             className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                            aria-label="Login with Google"
                         >
                             <GoogleIcon />
                         </button>
-                        <button 
-                            type="button" 
-                            onClick={() => window.location.href = `${API_BASE_URL}/auth/login/microsoft`}
-                            className="p-3 bg-gray-50 dark:bg-[#1A1A2E] border border-gray-200 dark:border-gray-700 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                        >
-                            <MicrosoftIcon />
-                        </button>
                     </div>
-                    */}
 
                     <div className="text-center mt-6">
                          <button

@@ -3,15 +3,17 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, urlunsplit
 import httpx
 import jwt
+import secrets
 from app.core.config import settings
 from app.core.database import get_session
 from app.core.logging import get_logger
 from app.auth.models import User
 from app.auth.schema import RoleChoicesSchema, AccountStatusSchema
 from app.auth.oauth_models import UserOAuth, OAuthProvider
+from app.auth.oauth_state import oauth_state_store
 from app.auth.utils import create_jwt_token, set_auth_cookies
 
 router = APIRouter(prefix="/auth")
@@ -22,10 +24,36 @@ GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USER_INFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
-# Microsoft Configuration
-MICROSOFT_AUTH_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
-MICROSOFT_TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
-MICROSOFT_USER_INFO_URL = "https://graph.microsoft.com/v1.0/me"
+
+def _absolute_oauth_redirect_uri(request: Request, provider: str) -> str:
+    """Build the exact absolute callback URI used for both OAuth phases."""
+    for base_url in (settings.OAUTH_REDIRECT_BASE_URL, settings.API_BASE_URL):
+        parsed = urlsplit(base_url.rstrip('/')) if base_url else None
+        if not parsed or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            continue
+
+        base_path = parsed.path.rstrip('/')
+        callback_path = (
+            f"{base_path}/{provider}"
+            if base_path.endswith("/auth")
+            else f"{base_path}/auth/{provider}"
+        )
+        candidate = urlunsplit(
+            (parsed.scheme, parsed.netloc, callback_path, "", "")
+        )
+        return candidate
+
+    # Render may not define either optional base URL. Starlette builds this
+    # from the incoming host/scheme and includes the mounted /api/v1 prefix.
+    derived = str(request.url_for("oauth_callback", provider=provider))
+    parsed = urlsplit(derived)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        logger.error("Unable to build an absolute OAuth callback URI")
+        raise HTTPException(
+            status_code=500,
+            detail="OAuth callback URL is not configured correctly",
+        )
+    return derived
 
 
 @router.get("/login/{provider}")
@@ -33,11 +61,11 @@ async def login(provider: str, request: Request):
     """
     Redirects the user to the OAuth provider's login page.
     """
-    # Build callback URL to match what's in Google Console: /api/v1/auth/{provider}
-    if settings.OAUTH_REDIRECT_BASE_URL:
-        redirect_uri = f"{settings.OAUTH_REDIRECT_BASE_URL}/{provider}"
-    else:
-        redirect_uri = f"{settings.API_BASE_URL}/auth/{provider}"
+    redirect_uri = _absolute_oauth_redirect_uri(request, provider)
+
+    # Generate a cryptographically random per-request CSRF state.
+    state = secrets.token_urlsafe(32)
+    oauth_state_store.store_state(state)
 
     if provider == OAuthProvider.GOOGLE:
         if not settings.GOOGLE_CLIENT_ID:
@@ -51,27 +79,10 @@ async def login(provider: str, request: Request):
             "response_type": "code",
             "scope": "openid email profile",
             "access_type": "offline",
-            "state": "random_state_string",
+            "state": state,
             "prompt": "select_account",
         }
         url = f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
-        return RedirectResponse(url=url)
-
-    elif provider == OAuthProvider.MICROSOFT:
-        if not settings.MICROSOFT_CLIENT_ID:
-            raise HTTPException(
-                status_code=500, detail="Microsoft Client ID not configured"
-            )
-
-        params = {
-            "client_id": settings.MICROSOFT_CLIENT_ID,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": "openid email profile User.Read",
-            "response_mode": "query",
-            "state": "random_state_string",
-        }
-        url = f"{MICROSOFT_AUTH_URL}?{urlencode(params)}"
         return RedirectResponse(url=url)
 
     elif provider == OAuthProvider.APPLE:
@@ -81,7 +92,7 @@ async def login(provider: str, request: Request):
 
 
 # Callback route matches Google Console: /api/v1/auth/{provider}
-@router.get("/{provider}")
+@router.get("/{provider}", name="oauth_callback")
 async def callback(
     provider: str,
     response: Response,
@@ -111,11 +122,25 @@ async def callback(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    # Callback URI must match what's in Google Console: /api/v1/auth/{provider}
-    if settings.OAUTH_REDIRECT_BASE_URL:
-        redirect_uri = f"{settings.OAUTH_REDIRECT_BASE_URL}/{provider}"
-    else:
-        redirect_uri = f"{settings.API_BASE_URL}/auth/{provider}"
+    # Validate OAuth CSRF state before processing the callback.
+    if not state:
+        logger.error("OAuth callback missing state parameter (provider=%s)", provider)
+        raise HTTPException(
+            status_code=400,
+            detail="Missing state parameter — CSRF validation failed",
+        )
+    if not oauth_state_store.consume_state(state):
+        logger.error(
+            "OAuth state validation failed (provider=%s, state_prefix=%s…)",
+            provider,
+            state[:8] if len(state) > 8 else state,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid or expired state parameter — CSRF validation failed",
+        )
+
+    redirect_uri = _absolute_oauth_redirect_uri(request, provider)
 
     user_email = None
     provider_user_id = None
@@ -165,46 +190,6 @@ async def callback(
             last_name = user_info.get("family_name")
             avatar_url = user_info.get("picture")
 
-    elif provider == OAuthProvider.MICROSOFT:
-        if not settings.MICROSOFT_CLIENT_ID or not settings.MICROSOFT_CLIENT_SECRET:
-            raise HTTPException(
-                status_code=500, detail="Microsoft credentials not configured"
-            )
-
-        async with httpx.AsyncClient() as client:
-            token_data = {
-                "client_id": settings.MICROSOFT_CLIENT_ID,
-                "scope": "openid email profile User.Read",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-                "client_secret": settings.MICROSOFT_CLIENT_SECRET,
-            }
-            token_res = await client.post(MICROSOFT_TOKEN_URL, data=token_data)
-            if token_res.status_code != 200:
-                logger.error(f"Microsoft Token Error: {token_res.text}")
-                raise HTTPException(
-                    status_code=400, detail="Failed to retrieve token from Microsoft"
-                )
-
-            tokens = token_res.json()
-            access_token = tokens.get("access_token")
-
-            user_res = await client.get(
-                MICROSOFT_USER_INFO_URL,
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            if user_res.status_code != 200:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Failed to retrieve user info from Microsoft",
-                )
-
-            user_info = user_res.json()
-            user_email = user_info.get("mail") or user_info.get("userPrincipalName")
-            provider_user_id = user_info.get("id")
-            first_name = user_info.get("givenName")
-            last_name = user_info.get("surname")
     else:
         raise HTTPException(status_code=404, detail="Provider not supported")
 
@@ -288,4 +273,9 @@ async def callback(
     else:
         target_url = f"{settings.FRONTEND_URL}/dashboard"
 
-    return RedirectResponse(url=target_url)
+    # Preserve cookies set by set_auth_cookies on the injected response.
+    # A fresh RedirectResponse would drop the Set-Cookie headers, so mutate
+    # the existing response object into a 307 redirect instead.
+    response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
+    response.headers["Location"] = target_url
+    return response

@@ -4,6 +4,7 @@ import re
 import hashlib
 from typing import Optional, BinaryIO
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 from app.core.config import settings
 import boto3
 from botocore.client import Config
@@ -28,19 +29,24 @@ class S3StorageService:
 
         import os as _os
 
-        print(
-            f"[STORAGE INIT] USE_MINIO={self.use_minio} (type={type(self.use_minio).__name__})"
+        logger.info(
+            "[STORAGE INIT] USE_MINIO=%s (type=%s)",
+            self.use_minio,
+            type(self.use_minio).__name__,
         )
-        print(
-            f"[STORAGE INIT] Raw env S3_BUCKET_NAME={_os.environ.get('S3_BUCKET_NAME', 'NOT SET')}"
+        logger.info(
+            "[STORAGE INIT] Raw env S3_BUCKET_NAME=%s",
+            _os.environ.get("S3_BUCKET_NAME", "NOT SET"),
         )
-        print(f"[STORAGE INIT] Settings S3_BUCKET_NAME={settings.S3_BUCKET_NAME}")
-        print(f"[STORAGE INIT] Settings MINIO_BUCKET_NAME={settings.MINIO_BUCKET_NAME}")
+        logger.info("[STORAGE INIT] Settings S3_BUCKET_NAME=%s", settings.S3_BUCKET_NAME)
+        logger.info("[STORAGE INIT] Settings MINIO_BUCKET_NAME=%s", settings.MINIO_BUCKET_NAME)
 
         if self.use_minio:
             # MinIO configuration for local development
-            print(
-                f"[STORAGE INIT] Using MinIO - endpoint={settings.MINIO_ENDPOINT}, bucket={settings.MINIO_BUCKET_NAME}"
+            logger.info(
+                "[STORAGE INIT] Using MinIO - endpoint=%s, bucket=%s",
+                settings.MINIO_ENDPOINT,
+                settings.MINIO_BUCKET_NAME,
             )
             self.client = boto3.client(
                 "s3",
@@ -53,11 +59,15 @@ class S3StorageService:
             self.bucket_name = settings.MINIO_BUCKET_NAME
         else:
             # S3-compatible storage for production (AWS S3 or Supabase Storage S3)
-            print(
-                f"[STORAGE INIT] Using S3 - endpoint={settings.S3_ENDPOINT}, bucket={settings.S3_BUCKET_NAME}, region={settings.S3_REGION}"
+            logger.info(
+                "[STORAGE INIT] Using S3 - endpoint=%s, bucket=%s, region=%s",
+                settings.S3_ENDPOINT,
+                settings.S3_BUCKET_NAME,
+                settings.S3_REGION,
             )
-            print(
-                f"[STORAGE INIT] S3 access key starts with: {settings.S3_ACCESS_KEY[:8] if settings.S3_ACCESS_KEY else 'NOT SET'}..."
+            logger.info(
+                "[STORAGE INIT] S3 access key starts with: %s...",
+                settings.S3_ACCESS_KEY[:8] if settings.S3_ACCESS_KEY else "NOT SET",
             )
             self.client = boto3.client(
                 "s3",
@@ -89,6 +99,37 @@ class S3StorageService:
             except Exception as e:
                 logger.error(f"Failed to create bucket: {e}")
 
+    @staticmethod
+    def _minio_public_url_base() -> str:
+        """Return the browser-facing MinIO URL base, including the public port."""
+        base = (settings.MINIO_PUBLIC_URL or "").rstrip("/")
+        parsed = urlsplit(base)
+        if not parsed.scheme or not parsed.hostname or parsed.port is not None:
+            return base
+
+        for candidate in (
+            getattr(settings, "MINIO_PROVIDER_PUBLIC_URL", None),
+            getattr(settings, "MODELSLAB_MEDIA_PUBLIC_URL", None),
+        ):
+            candidate_base = (candidate or "").rstrip("/")
+            candidate_parsed = urlsplit(candidate_base)
+            if (
+                candidate_parsed.scheme == parsed.scheme
+                and candidate_parsed.hostname == parsed.hostname
+                and candidate_parsed.port is not None
+            ):
+                netloc = f"{parsed.hostname}:{candidate_parsed.port}"
+                return urlunsplit(
+                    (parsed.scheme, netloc, parsed.path.rstrip("/"), "", "")
+                ).rstrip("/")
+
+        if parsed.scheme == "https" and parsed.hostname == "minio-staging.litinkai.com":
+            return urlunsplit(
+                (parsed.scheme, f"{parsed.hostname}:8443", parsed.path.rstrip("/"), "", "")
+            ).rstrip("/")
+
+        return base
+
     async def upload(
         self, file_content: bytes, path: str, content_type: Optional[str] = None
     ) -> str:
@@ -108,7 +149,7 @@ class S3StorageService:
 
             # Generate public URL
             if self.use_minio:
-                return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
+                return f"{self._minio_public_url_base()}/{self.bucket_name}/{path}"
             else:
                 # For S3/Supabase, generate presigned URL or use CDN
                 return self.get_public_url(path)
@@ -126,18 +167,51 @@ class S3StorageService:
         """
         Upload file from stream (most memory-efficient).
         Use this for large files to avoid loading into memory.
+
+        KAN-373: Uses put_object instead of upload_fileobj to avoid
+        SignatureDoesNotMatch errors on S3-compatible backends (MinIO/Supabase).
+        Multipart upload (upload_fileobj) signs each part separately and can
+        produce signature mismatches when ExtraArgs include ContentType.
+        put_object signs the request atomically, avoiding the issue.
+        For files > 5MB where multipart is truly needed, falls back to
+        upload_fileobj without ContentType in ExtraArgs.
         """
         try:
+            # Read stream into bytes to use put_object (atomic, avoids multipart signing issues)
+            file_stream.seek(0, 2)  # Seek to end to get size
+            size = file_stream.tell()
+            file_stream.seek(0)
+
             extra_args = {}
             if content_type:
                 extra_args["ContentType"] = content_type
 
-            self.client.upload_fileobj(
-                file_stream, self.bucket_name, path, ExtraArgs=extra_args
-            )
+            if size <= 5 * 1024 * 1024:  # ≤ 5MB: use put_object (atomic signing)
+                body = file_stream.read()
+                self.client.put_object(
+                    Bucket=self.bucket_name, Key=path, Body=body, **extra_args
+                )
+            else:
+                # > 5MB: use multipart upload, but avoid ContentType in ExtraArgs
+                # to prevent SignatureDoesNotMatch on some S3-compatible backends
+                self.client.upload_fileobj(
+                    file_stream, self.bucket_name, path, ExtraArgs={}
+                )
+                # Apply content type via a separate put_object metadata update if needed
+                if content_type:
+                    try:
+                        self.client.copy_object(
+                            Bucket=self.bucket_name,
+                            Key=path,
+                            CopySource={"Bucket": self.bucket_name, "Key": path},
+                            MetadataDirective="REPLACE",
+                            ContentType=content_type,
+                        )
+                    except Exception as meta_err:
+                        logger.warning(f"Failed to set ContentType for {path}: {meta_err}")
 
             if self.use_minio:
-                return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
+                return f"{self._minio_public_url_base()}/{self.bucket_name}/{path}"
             else:
                 return self.get_public_url(path)
 
@@ -221,7 +295,7 @@ class S3StorageService:
 
         # Build expected prefix based on storage backend
         if self.use_minio:
-            prefix = f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/"
+            prefix = f"{self._minio_public_url_base()}/{self.bucket_name}/"
         elif settings.S3_ENDPOINT:
             prefix = f"{settings.S3_ENDPOINT}/{self.bucket_name}/"
         else:
@@ -252,7 +326,7 @@ class S3StorageService:
     def get_public_url(self, path: str) -> str:
         """Get public URL for a file"""
         if self.use_minio:
-            return f"{settings.MINIO_PUBLIC_URL}/{self.bucket_name}/{path}"
+            return f"{self._minio_public_url_base()}/{self.bucket_name}/{path}"
         elif settings.S3_ENDPOINT:
             # Supabase public buckets require object/public URLs, not the S3 API path.
             base = (

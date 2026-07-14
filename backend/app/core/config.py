@@ -13,8 +13,8 @@ from pydantic import field_validator
 # This makes the native Python config path honour the same ENV_FILE variable
 # that local.yml and the VPS tunnel scripts already use, so Docker and native
 # always agree on which env file drives DATABASE_URL.
-_CONFIG_DIR = Path(__file__).parent           # backend/app/core/
-_BACKEND_ROOT = _CONFIG_DIR.parent.parent     # backend/
+_CONFIG_DIR = Path(__file__).parent  # backend/app/core/
+_BACKEND_ROOT = _CONFIG_DIR.parent.parent  # backend/
 _ENVS_DIR = _BACKEND_ROOT / ".envs"
 
 _env_file_override = os.getenv("ENV_FILE")
@@ -22,7 +22,11 @@ _app_env = os.getenv("APP_ENV")
 
 if _env_file_override:
     _candidate = Path(_env_file_override)
-    _ENV_FILE = _candidate if _candidate.is_absolute() else (_BACKEND_ROOT / _env_file_override.lstrip("./"))
+    _ENV_FILE = (
+        _candidate
+        if _candidate.is_absolute()
+        else (_BACKEND_ROOT / _env_file_override.lstrip("./"))
+    )
 elif _app_env:
     _ENV_FILE = _ENVS_DIR / f".env.{_app_env}"
 else:
@@ -159,16 +163,12 @@ class Settings(BaseSettings):
 
     # Social Auth
     OAUTH_REDIRECT_BASE_URL: str = (
-        ""  # e.g. https://api.litinkai.com/api/v1/auth/callback
+        ""  # e.g. https://api.litinkai.com/api/v1
     )
 
     # Google
     GOOGLE_CLIENT_ID: Optional[str] = None
     GOOGLE_CLIENT_SECRET: Optional[str] = None
-
-    # Microsoft
-    MICROSOFT_CLIENT_ID: Optional[str] = None
-    MICROSOFT_CLIENT_SECRET: Optional[str] = None
 
     # Apple
     APPLE_CLIENT_ID: Optional[str] = None
@@ -209,7 +209,7 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: Optional[str] = None
     STRIPE_PRICE_ID: Optional[str] = None
 
-    # Stripe Price IDs for subscription tiers
+    # Stripe Price IDs for subscription tiers (legacy single-period)
     STRIPE_FREE_PRICE_ID: Optional[str] = None
     STRIPE_BASIC_PRICE_ID: Optional[str] = None
     STRIPE_STANDARD_PRICE_ID: Optional[str] = None
@@ -217,6 +217,16 @@ class Settings(BaseSettings):
     STRIPE_PROFESSIONAL_PRICE_ID: Optional[str] = None
     STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = None
     STRIPE_PRO_PRICE_ID: Optional[str] = None  # Keep for backward compatibility
+
+    # KAN-406: Per-period Stripe Price IDs (canonical source for billing_period routing)
+    STRIPE_BASIC_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_BASIC_ANNUAL_PRICE_ID: Optional[str] = None
+    STRIPE_STANDARD_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_STANDARD_ANNUAL_PRICE_ID: Optional[str] = None
+    STRIPE_PREMIUM_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_PREMIUM_ANNUAL_PRICE_ID: Optional[str] = None
+    STRIPE_PROFESSIONAL_MONTHLY_PRICE_ID: Optional[str] = None
+    STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID: Optional[str] = None
 
     # Rate Limiting per Tier (requests per minute)
     RATE_LIMITS: ClassVar[Dict[str, int]] = {
@@ -237,9 +247,11 @@ class Settings(BaseSettings):
     MINIO_ENDPOINT: str = "http://minio:9000"  # MinIO server endpoint
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
-    MINIO_BUCKET_NAME: str = "litink-books"
+    MINIO_BUCKET_NAME: str = "litinkai-staging"  # Default matches staging / VPS env files
     MINIO_SECURE: bool = False  # Use HTTP in development
-    MINIO_PUBLIC_URL: str = "http://localhost:9000"  # Browser/public URL (without bucket name)
+    MINIO_PUBLIC_URL: str = (
+        "http://localhost:9000"  # Browser/public URL (without bucket name)
+    )
     # External provider-readable media URL base (without bucket name). Use when
     # MINIO_PUBLIC_URL is localhost/docker-local for browser/dev access but
     # ModelsLab must fetch media from an externally reachable host.
@@ -294,6 +306,34 @@ class Settings(BaseSettings):
     OLLAMA_API_KEY: Optional[str] = None
     OLLAMA_BASE_URL: str = "https://ollama.com/v1"
 
+    # KAN-401: Script/free non-Ollama fallback providers
+    Z_AI_API_KEY: Optional[str] = None
+    ZAI_API_KEY: Optional[
+        str
+    ] = None  # Legacy env spelling kept for existing local envs
+    Z_AI_BASE_URL: str = "https://api.z.ai/api/coding/paas/v4"
+    Z_AI_FREE_MODEL: str = "glm-5.2"
+
+    PIAPI_API_KEY_LITINKAI: Optional[str] = None
+    PIAPI_BASE_URL: str = "https://api.piapi.ai/v1"
+    PIAPI_FREE_MODEL: str = "gpt-4o-mini"
+
+    FEATHERLESS_API_KEY_LITINKAI: Optional[str] = None
+    FEATHERLESS_BASE_URL: str = "https://api.featherless.ai/v1"
+    FEATHERLESS_FREE_MODEL: str = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+    @property
+    def z_ai_api_key(self) -> Optional[str]:
+        return self.Z_AI_API_KEY or self.ZAI_API_KEY
+
+    @property
+    def piapi_api_key(self) -> Optional[str]:
+        return self.PIAPI_API_KEY_LITINKAI
+
+    @property
+    def featherless_api_key(self) -> Optional[str]:
+        return self.FEATHERLESS_API_KEY_LITINKAI
+
     # xAI Grok Video (prepared for future use)
     # Get your API key from: https://console.x.ai/
     GROK_API_KEY: str = os.getenv("GROK_API_KEY", "")
@@ -336,6 +376,31 @@ class Settings(BaseSettings):
     #     env_file = ".env"
     #     case_sensitive = True
     #     extra = "ignore"
+
+    def minio_env_check(self) -> None:
+        """
+        KAN-402: warn loudly when a staging/production environment uses MinIO
+        without an externally reachable provider-facing URL. Provider callbacks /
+        fetch-backs will fail if the bucket is only reachable from inside Docker.
+        """
+        import warnings
+
+        if not self.USE_MINIO:
+            return
+        if self.ENVIRONMENT not in ("staging", "production"):
+            return
+        for key in ("MINIO_PROVIDER_PUBLIC_URL", "MODELSLAB_MEDIA_PUBLIC_URL"):
+            value = getattr(self, key, None)
+            if not value:
+                warnings.warn(
+                    f"{key} is unset in ENVIRONMENT={self.ENVIRONMENT!r}. "
+                    "External providers will not be able to fetch media from MinIO.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
+    def model_post_init(self, __context: object) -> None:
+        self.minio_env_check()
 
 
 settings = Settings()

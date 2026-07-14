@@ -470,15 +470,25 @@ async def generate_quiz(
 async def generate_voice(
     text: str,
     voice_id: str = "21m00Tcm4TlvDq8ikWAM",
+    # KAN-374: Accept character gender and accent for voice generation
+    gender: Optional[str] = None,
+    accent: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
     reservation_id: uuid.UUID = Depends(require_credits(OperationType.VOICE_GEN, VOICE_GEN)),
 ):
-    """Generate voice using ElevenLabs service"""
+    """Generate voice using ElevenLabs service
+    
+    KAN-374: Now accepts optional gender and accent params to pass
+    character voice characteristics through to the TTS engine.
+    """
     elevenlabs_service = ElevenLabsService()
     credit_service = CreditService(session)
     async with credit_service.credit_transaction(reservation_id, VOICE_GEN):
-        result = await elevenlabs_service.generate_enhanced_speech(text, voice_id)
+        # KAN-374: Pass gender/accent to the TTS service if provided
+        result = await elevenlabs_service.generate_enhanced_speech(
+            text, voice_id, gender=gender, accent=accent
+        )
         if result.get("error"):
             raise HTTPException(status_code=500, detail=result["error"])
         return {"voice_url": result.get("audio_url")}

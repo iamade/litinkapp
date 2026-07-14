@@ -87,8 +87,11 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
   const [showDeleteImageModal, setShowDeleteImageModal] = useState(false);
 
   const isObject = character.entity_type === 'object' || character.entity_type === 'location';
-  const resolveImageUrl = (img?: { watermarked_image_url?: string; watermarked_url?: string; image_url?: string } | null) =>
-    img?.watermarked_image_url || img?.watermarked_url || img?.image_url || '';
+  // KAN-372: use shared resolver (image_url first = tier-appropriate)
+  const resolveImageUrl = (img?: { image_url?: string; imageUrl?: string; watermarked_image_url?: string; watermarked_url?: string; watermarkedImageUrl?: string } | null) => {
+    if (!img) return '';
+    return img.image_url || img.imageUrl || img.watermarked_image_url || img.watermarked_url || img.watermarkedImageUrl || '';
+  };
   
   // Carousel Logic
   const validImages = React.useMemo(() => {
@@ -247,6 +250,15 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
           ghost: response.character_details.ghost || prev.ghost,
         }));
 
+        // KAN-370: Persist AI-generated character details to localStorage for refresh survival
+        try {
+          localStorage.setItem(`litinkai_char_draft_${bookId}`, JSON.stringify({
+            characterName: name,
+            characterDetails: response.character_details,
+            timestamp: Date.now(),
+          }));
+        } catch { /* localStorage may be unavailable */ }
+
         toast.success("Character details generated! Review and edit as needed.", {
           id: loadingToast,
           duration: 4000
@@ -259,6 +271,8 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
       toast.error(error?.message || "Failed to generate character details with AI", {
         id: loadingToast
       });
+      // KAN-370: Credit refund notification — backend credit_transaction releases reservations on exception
+      toast.success("Credits refunded — you haven't been charged.", { duration: 5000 });
     } finally {
       setIsGeneratingWithAI(false);
     }

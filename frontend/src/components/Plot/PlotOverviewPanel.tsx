@@ -79,6 +79,48 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   const [isCreatingCharacter, setIsCreatingCharacter] = useState(false);
   const [isGeneratingWithAI, setIsGeneratingWithAI] = useState(false);
   const [isAutoAddingCharacters, setIsAutoAddingCharacters] = useState(false);
+  
+  // KAN-370: Persist AI-generated character details to survive refresh
+  const [draftRestored, setDraftRestored] = useState(false);
+  const DRAFT_KEY = `litinkai_char_draft_${bookId}`;
+  const DRAFT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+  // Restore draft when modal opens
+  useEffect(() => {
+    if (showCreateModal) {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (raw) {
+        try {
+          const draft = JSON.parse(raw);
+          if (draft.timestamp && Date.now() - draft.timestamp < DRAFT_TTL_MS) {
+            setNewCharacter(prev => ({
+              ...prev,
+              name: draft.characterName || prev.name,
+              physical_description: draft.characterDetails?.physical_description || prev.physical_description,
+              personality: draft.characterDetails?.personality || prev.personality,
+              character_arc: draft.characterDetails?.character_arc || prev.character_arc,
+              want: draft.characterDetails?.want || prev.want,
+              need: draft.characterDetails?.need || prev.need,
+              lie: draft.characterDetails?.lie || prev.lie,
+              ghost: draft.characterDetails?.ghost || prev.ghost,
+            }));
+            setDraftRestored(true);
+          } else {
+            localStorage.removeItem(DRAFT_KEY);
+          }
+        } catch {
+          localStorage.removeItem(DRAFT_KEY);
+        }
+      }
+    }
+  }, [showCreateModal, bookId]);
+
+  // Clear draft helper
+  const clearDraft = () => {
+    localStorage.removeItem(DRAFT_KEY);
+    setDraftRestored(false);
+  };
+
   const [newCharacter, setNewCharacter] = useState({
     name: '',
     role: '',
@@ -447,30 +489,28 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
     setShowGenerateAllModal(false);
 
     if (!plotOverview?.characters || plotOverview.characters.length === 0) {
-      toast.error("No characters available to generate images");
+      toast.error("No entities available to generate images");
       return;
     }
 
-    // KAN-372: Only generate for actual characters, skip objects and locations
-    // Objects/locations should be generated individually from their own section
-    const actualCharacters = plotOverview.characters.filter(
-      (char: Character) => !char.entity_type || char.entity_type === 'character'
+    // KAN-372: Include ALL entities (characters + objects + locations) in batch generation.
+    // plotOverview.characters contains every entity; no entity_type filter here.
+    const allEntities = plotOverview.characters;
+
+    const entitiesWithoutImages = allEntities.filter(
+      (entity: Character) => !entity.image_url
     );
 
-    const charactersWithoutImages = actualCharacters.filter(
-      (char: Character) => !char.image_url
-    );
-
-    if (charactersWithoutImages.length === 0) {
-      toast.error("All characters already have images");
+    if (entitiesWithoutImages.length === 0) {
+      toast.error("All entities already have images");
       return;
     }
 
-    toast.success(`Generating images for ${charactersWithoutImages.length} characters...`);
+    toast.success(`Generating images for ${entitiesWithoutImages.length} entities...`);
 
     // Generate images in parallel
-    const promises = charactersWithoutImages.map((character: Character) =>
-      handleGenerateImage(character.id)
+    const promises = entitiesWithoutImages.map((entity: Character) =>
+      handleGenerateImage(entity.id)
     );
 
     try {
@@ -790,11 +830,10 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
   }
 
   const normalizedGenre = plotOverview.genre?.toLowerCase() || "";
-  // KAN-372: Count only actual characters (not objects/locations) for the "without images" display
-  const actualCharactersForDisplay = plotOverview.characters?.filter(
-    (char: Character) => !char.entity_type || char.entity_type === 'character'
-  ) || [];
-  const charactersWithoutImages = actualCharactersForDisplay.filter((char: Character) => !char.image_url).length;
+  // KAN-372: Count ALL entities (characters + objects + locations) without images
+  const charactersWithoutImages = plotOverview.characters?.filter(
+    (char: Character) => !char.image_url
+  ).length || 0;
   const hasCharacters = plotOverview.characters && plotOverview.characters.length > 0;
   const normalizedStoryType = plotOverview.story_type?.toLowerCase().replace(/'/g, "") || "";
 
@@ -1338,6 +1377,30 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
                 </>
               )}
               
+              {/* KAN-372: Generate All Images button for objects/locations without images */}
+              {filteredCharacters.filter((c: Character) => (c.entity_type === 'object' || c.entity_type === 'location') && !c.image_url).length > 0 && (
+                <button
+                  onClick={() => {
+                    const objectsWithoutImages = filteredCharacters.filter((c: Character) => (c.entity_type === 'object' || c.entity_type === 'location') && !c.image_url);
+                    objectsWithoutImages.forEach((c: Character) => {
+                      setGeneratingImages(prev => new Set(prev).add(c.id));
+                    });
+                    Promise.allSettled(objectsWithoutImages.map((c: Character) => handleGenerateImage(c.id)));
+                    toast.success(`Generating images for ${objectsWithoutImages.length} objects/locations...`);
+                  }}
+                  disabled={generatingImages.size > 0}
+                  className="flex items-center space-x-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 text-sm"
+                >
+                  <Wand2 className="w-4 h-4" />
+                  <span>Generate All Images</span>
+                  {generatingImages.size > 0 && (
+                    <span className="ml-2 text-green-200 text-xs">
+                      ({generatingImages.size} in progress...)
+                    </span>
+                  )}
+                </button>
+              )}
+
               {filteredCharacters.filter((c: Character) => c.entity_type === 'object' || c.entity_type === 'location').length > 0 && (
                 <button
                   onClick={handleSelectAllObjects}
@@ -1782,11 +1845,11 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
               <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
                 <Wand2 className="w-6 h-6 text-green-600" />
               </div>
-              <h3 className="text-xl font-bold text-gray-900">Generate All Character Images</h3>
+              <h3 className="text-xl font-bold text-gray-900">Generate All Images</h3>
             </div>
 
             <p className="text-gray-600 mb-6">
-              Generate images for all <strong>{charactersWithoutImages} character{charactersWithoutImages !== 1 ? 's' : ''}</strong> without images? This may take several minutes.
+              Generate images for all <strong>{charactersWithoutImages} entit{charactersWithoutImages !== 1 ? 'ies' : 'y'}</strong> without images? This may take several minutes.
             </p>
 
             <div className="flex gap-3">

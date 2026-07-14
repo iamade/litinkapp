@@ -1,5 +1,7 @@
 import pytest
 
+from app.tasks.audio_tasks import cap_generated_audio_duration
+
 
 class TestAudioGenerationPerScene:
     """KAN-165: Audio should be per-scene, not entire script.
@@ -240,6 +242,15 @@ class TestAudioDurationValidation:
     checks `audio_duration > 0` which means 0-duration audio BYPASSES min/max checks entirely
     and gets passed to the video generation API with invalid duration.
     """
+
+    def test_generated_duration_defaults_to_requested_cap_when_provider_omits_time(self):
+        assert cap_generated_audio_duration(None, 5.0) == 5.0
+
+    def test_generated_duration_caps_oversized_provider_time(self):
+        assert cap_generated_audio_duration(180.0, 6.0) == 6.0
+
+    def test_generated_duration_preserves_zero_for_probe_path(self):
+        assert cap_generated_audio_duration(0.0, 5.0) == 0.0
 
     def test_fallback_audio_time_is_zero(self):
         """Verify that ElevenLabs fallback returns audio_time=0 (the root cause)."""

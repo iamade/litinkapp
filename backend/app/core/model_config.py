@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
+from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger()
@@ -51,7 +52,6 @@ class ModelConfig:
             )
             if model
         ]
-
 
 # Script ladders are cheapest-to-most-expensive and capped at two Ollama slots.
 # Token prices below are standard USD per 1M input/output tokens as of 2026-07-12.

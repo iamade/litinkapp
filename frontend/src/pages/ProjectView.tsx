@@ -15,7 +15,7 @@ import {
   Image,
   Music,
   Video,
-  Layers,
+  // KAN-394: Layers removed — Merge Studio consolidated into Video tab
   ChevronLeft,
   ChevronRight,
   Edit2,
@@ -30,7 +30,7 @@ import ScriptGenerationPanel from '../components/Script/ScriptGenerationPanel';
 import ImagesPanel from '../components/Images/ImagesPanel';
 import AudioPanel from '../components/Audio/AudioPanel';
 import VideoProductionPanel from '../components/Video/VideoProductionPanel';
-import MergeStudioPanel from '../components/Video/MergeStudioPanel';
+// KAN-394: MergeStudioPanel import removed — consolidated into Video tab
 import ConsultationPanel from '../components/Consultation/ConsultationPanel';
 
 // Import hooks
@@ -95,10 +95,11 @@ interface WorkflowProgress {
   images: "idle" | "generating" | "completed" | "error";
   audio: "idle" | "generating" | "completed" | "error";
   video: "idle" | "generating" | "completed" | "error";
-  merge: "idle" | "generating" | "completed" | "error";
+  // KAN-394: merge consolidated into video
 }
 
-type WorkflowTab = "consultation" | "plot" | "script" | "images" | "audio" | "video" | "merge";
+type WorkflowTab = "consultation" | "plot" | "script" | "images" | "audio" | "video";
+// KAN-394: Merge Studio consolidated into Video tab — "merge" removed from tabs
 
 interface ChapterContentModalProps {
   chapter: ChapterArtifact | null;
@@ -298,7 +299,7 @@ const ProjectView: React.FC = () => {
         if (chapters.length > 0) {
           setSelectedChapter(chapters[0]);
           // Sync chapter selection with ScriptSelectionContext so
-          // sub-tabs (Script, Images, Audio, Video, Merge) can
+          // sub-tabs (Script, Images, Audio, Video) can
           // resolve selectedScriptId correctly on initial load.
           // Without this, the context keeps selectedChapterId=null
           // which causes downstream panels to render blank.
@@ -466,9 +467,9 @@ const ProjectView: React.FC = () => {
     { id: "script" as WorkflowTab, label: "Script", icon: FileText, description: "Chapter scripts & scenes" },
     { id: "images" as WorkflowTab, label: "Images", icon: Image, description: "Scene & character images" },
     { id: "audio" as WorkflowTab, label: "Audio", icon: Music, description: "Music, effects & dialogue" },
-    { id: "video" as WorkflowTab, label: "Video", icon: Video, description: "Per-scene video generation" },
-    { id: "merge" as WorkflowTab, label: "Merge Studio", icon: Layers, description: "Assemble and render final video" },
+    { id: "video" as WorkflowTab, label: "Video", icon: Video, description: "Video production & merge studio" },
   ];
+  // KAN-394: Merge Studio consolidated into Video tab
 
   // Get progress for current chapter
   const getCurrentProgress = (): WorkflowProgress => {
@@ -479,7 +480,6 @@ const ProjectView: React.FC = () => {
           images: "idle",
           audio: "idle",
           video: "idle",
-          merge: "idle",
         }
       : {
           plot: "idle",
@@ -487,7 +487,6 @@ const ProjectView: React.FC = () => {
           images: "idle",
           audio: "idle",
           video: "idle",
-          merge: "idle",
         };
   };
 
@@ -551,7 +550,7 @@ const ProjectView: React.FC = () => {
     }
 
     updateProgress("video", "generating");
-    updateProgress("merge", "generating");
+    // KAN-394: merge progress consolidated into video
     setVideoStatus("starting");
 
     // Track which shots are being generated
@@ -611,7 +610,7 @@ const ProjectView: React.FC = () => {
       setVideoStatus("ready");
       setGeneratingShotIds(new Set());
       updateProgress("video", "idle");
-      updateProgress("merge", "idle");
+      // KAN-394: merge progress consolidated into video
     }
   };
 
@@ -628,7 +627,7 @@ const ProjectView: React.FC = () => {
       setVideoStatus("completed");
       setGeneratingShotIds(new Set());
       updateProgress("video", "completed");
-      updateProgress("merge", "completed");
+      // KAN-394: merge progress consolidated into video
       // Update latestVideoUrl from polling data so Preview tab shows the video immediately
       if (generation?.video_url) {
         setLatestVideoUrl(generation.video_url);
@@ -646,7 +645,7 @@ const ProjectView: React.FC = () => {
       setVideoStatus("failed");
       setGeneratingShotIds(new Set());
       updateProgress("video", "error");
-      updateProgress("merge", "error");
+      // KAN-394: merge progress consolidated into video
       stopPolling();
       toast.error(generation?.error_message || 'Video generation failed. Please try again.');
     } else if (isVideoGenerating) {
@@ -807,29 +806,6 @@ const ProjectView: React.FC = () => {
             videoGenerations={filteredVideoGenerations}
             onDeleteGeneration={handleDeleteVideoGeneration}
             onNavigateToTab={(tab) => setActiveTab(tab as WorkflowTab)}
-          />
-        );
-
-      case "merge":
-        if (!selectedChapter) {
-          return (
-            <div className="text-center py-12 text-gray-500">
-              <Layers className="mx-auto h-12 w-12 mb-4 opacity-50" />
-              <p>Please select a chapter to open Merge Studio</p>
-            </div>
-          );
-        }
-        return (
-          <MergeStudioPanel
-            chapterId={getActualChapterId(selectedChapter)}
-            chapterTitle={selectedChapter.content.title}
-            imageUrls={generatedImageUrls}
-            audioFiles={generatedAudioFiles}
-            videoGenerations={filteredVideoGenerations}
-            canRender={!!selectedChapter && videoStatus !== "processing" && videoStatus !== "starting"}
-            isRenderInProgress={videoStatus === "processing" || videoStatus === "starting"}
-            onRenderVideo={() => handleGenerateVideo()}
-            userTier={(user?.subscription_tier as 'free' | 'basic' | 'pro' | 'enterprise') || 'free'}
           />
         );
 

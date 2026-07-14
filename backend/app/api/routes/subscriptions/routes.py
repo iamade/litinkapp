@@ -101,6 +101,10 @@ async def create_checkout_session(
             tier=checkout_data.tier,
             success_url=str(checkout_data.success_url),
             cancel_url=str(checkout_data.cancel_url),
+            billing_period=checkout_data.billing_period or "monthly",
+            customer_id=customer_id,
+            customer_email=current_user.email,
+            customer_name=current_user.full_name,
         )
 
         return session_data
@@ -230,7 +234,9 @@ async def get_watermark_status(
     """
     manager = SubscriptionManager(session)
     tier = await manager.get_user_tier(current_user.id)
-    tier_limits = manager.TIER_LIMITS.get(tier, manager.TIER_LIMITS[SubscriptionTier.FREE])
+    tier_limits = manager.TIER_LIMITS.get(
+        tier, manager.TIER_LIMITS[SubscriptionTier.FREE]
+    )
 
     return {
         "has_watermark": True,  # Always true — watermark is on by default for all tiers

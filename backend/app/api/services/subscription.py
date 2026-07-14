@@ -1,11 +1,14 @@
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from enum import Enum
+import html as html_module
 import stripe
 from sqlmodel import select, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.config import settings
+from app.core.services.email import email_service
 from app.core.services.stripe import stripe_service
+from app.auth.models import User
 from app.subscriptions.models import (
     UserSubscription,
     UserDownload,
@@ -419,48 +422,211 @@ class SubscriptionManager:
             f"{resource_type}s_remaining": "unlimited",  # no monthly cap
         }
 
+    def _get_price_id_for_tier(
+        self, tier: SubscriptionTier, billing_period: str = "monthly"
+    ) -> Optional[str]:
+        """
+        Resolve the Stripe price ID for a tier and billing period.
+        Supports per-period env vars with legacy single-price fallback.
+        """
+        period = (billing_period or "monthly").lower()
+        tier_key = tier.value.upper()
+
+        period_price_id = getattr(
+            settings, f"STRIPE_{tier_key}_{period.upper()}_PRICE_ID", None
+        )
+        if period_price_id:
+            return period_price_id
+
+        # The internal "pro" tier is displayed as Standard, and the canonical
+        # per-period env vars use the display name.
+        if tier == SubscriptionTier.PRO:
+            standard_period_price_id = getattr(
+                settings, f"STRIPE_STANDARD_{period.upper()}_PRICE_ID", None
+            )
+            if standard_period_price_id:
+                return standard_period_price_id
+
+        legacy_price_id = getattr(settings, f"STRIPE_{tier_key}_PRICE_ID", None)
+        if legacy_price_id:
+            return legacy_price_id
+
+        if tier == SubscriptionTier.PRO:
+            pro_price = getattr(settings, "STRIPE_PRO_PRICE_ID", None)
+            if pro_price:
+                return pro_price
+            return getattr(settings, "STRIPE_STANDARD_PRICE_ID", None)
+
+        return None
+
     async def create_checkout_session(
-        self, user_id: str, tier: SubscriptionTier, success_url: str, cancel_url: str
+        self,
+        user_id: str,
+        tier: SubscriptionTier,
+        success_url: str,
+        cancel_url: str,
+        billing_period: str = "monthly",
+        customer_id: Optional[str] = None,
+        customer_email: Optional[str] = None,
+        customer_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create Stripe checkout session for subscription
         """
         try:
+            if tier == SubscriptionTier.FREE:
+                raise ValueError("Free tier does not require a paid checkout session")
+
             # Get price ID for tier (you need to create these in Stripe Dashboard)
             price_ids = {
-                SubscriptionTier.FREE: settings.STRIPE_FREE_PRICE_ID,
-                SubscriptionTier.BASIC: settings.STRIPE_BASIC_PRICE_ID,
-                SubscriptionTier.STANDARD: settings.STRIPE_STANDARD_PRICE_ID,
-                SubscriptionTier.PRO: settings.STRIPE_STANDARD_PRICE_ID,
-                SubscriptionTier.PREMIUM: settings.STRIPE_PREMIUM_PRICE_ID,
-                SubscriptionTier.PROFESSIONAL: settings.STRIPE_PROFESSIONAL_PRICE_ID,
-                SubscriptionTier.ENTERPRISE: settings.STRIPE_ENTERPRISE_PRICE_ID,
+                SubscriptionTier.FREE: self._get_price_id_for_tier(
+                    SubscriptionTier.FREE, billing_period
+                ),
+                SubscriptionTier.BASIC: self._get_price_id_for_tier(
+                    SubscriptionTier.BASIC, billing_period
+                ),
+                SubscriptionTier.STANDARD: self._get_price_id_for_tier(
+                    SubscriptionTier.STANDARD, billing_period
+                ),
+                SubscriptionTier.PRO: self._get_price_id_for_tier(
+                    SubscriptionTier.PRO, billing_period
+                ),
+                SubscriptionTier.PREMIUM: self._get_price_id_for_tier(
+                    SubscriptionTier.PREMIUM, billing_period
+                ),
+                SubscriptionTier.PROFESSIONAL: self._get_price_id_for_tier(
+                    SubscriptionTier.PROFESSIONAL, billing_period
+                ),
+                SubscriptionTier.ENTERPRISE: self._get_price_id_for_tier(
+                    SubscriptionTier.ENTERPRISE, billing_period
+                ),
             }
 
             price_id = price_ids.get(tier)
             if not price_id:
                 raise ValueError(f"No price ID configured for tier: {tier.value}")
 
-            # Create Stripe checkout session
-            session = stripe.checkout.Session.create(
-                payment_method_types=["card"],
-                line_items=[
+            # Enterprise custom price must be a real Stripe price ID.
+            price_id_str = str(price_id)
+            if tier == SubscriptionTier.ENTERPRISE and not price_id_str.startswith(
+                "price_"
+            ):
+                raise ValueError(
+                    "Enterprise tier requires a valid Stripe price ID. Contact admin for custom quote."
+                )
+
+            metadata = {"user_id": str(user_id), "tier": tier.value}
+            if customer_name:
+                metadata["customer_name"] = customer_name
+
+            checkout_kwargs = {
+                "payment_method_types": ["card"],
+                "line_items": [
                     {
                         "price": price_id,
                         "quantity": 1,
                     }
                 ],
-                mode="subscription",
-                success_url=success_url,
-                cancel_url=cancel_url,
-                metadata={"user_id": str(user_id), "tier": tier.value},
-            )
+                "mode": "subscription",
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+                "metadata": metadata,
+            }
+            if customer_id:
+                checkout_kwargs["customer"] = customer_id
+            elif customer_email:
+                checkout_kwargs["customer_email"] = customer_email
+
+            # Create Stripe checkout session
+            session = stripe.checkout.Session.create(**checkout_kwargs)
 
             return {"checkout_url": session.url, "session_id": session.id}
 
         except Exception as e:
             logger.error(f"Error creating checkout session: {str(e)}")
             raise
+
+    async def _send_payment_confirmation_email(
+        self, user_id: uuid.UUID, tier: SubscriptionTier
+    ) -> None:
+        statement = select(User).where(User.id == user_id)
+        result = await self.session.exec(statement)
+        user = result.first()
+
+        if not user:
+            logger.warning(
+                f"KAN-410: user {user_id} not found; skipping payment confirmation email"
+            )
+            return
+
+        tier_limits = self.TIER_LIMITS.get(
+            tier, self.TIER_LIMITS[SubscriptionTier.FREE]
+        )
+        tier_name = tier_limits.get("display_name", tier.value.title())
+        dashboard_url = f"{settings.FRONTEND_URL}/dashboard"
+        display_name = user.full_name or user.display_name or "there"
+        # Escape user-controlled content to prevent HTML injection in email
+        display_name_escaped = html_module.escape(display_name)
+        subject = "Payment Confirmed - Your LitInkAI Subscription is Active"
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .header {{ background-color: #10B981; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+                .content {{ background-color: #f9fafb; padding: 30px; border-radius: 0 0 5px 5px; }}
+                .button {{ display: inline-block; padding: 12px 30px; background-color: #4F46E5; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
+                .footer {{ text-align: center; margin-top: 20px; font-size: 12px; color: #666; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>Payment Confirmed</h1>
+                </div>
+                <div class="content">
+                    <p>Hi {display_name_escaped},</p>
+                    <p>Your payment was successful and your LitInkAI {tier_name} subscription is now active.</p>
+                    <p>You can start using your updated subscription features from your dashboard.</p>
+                    <p style="text-align: center;">
+                        <a href="{dashboard_url}" class="button">Go to Dashboard</a>
+                    </p>
+                    <p>Thank you for choosing LitInkAI. If you have any questions, our support team is here to help.</p>
+                </div>
+                <div class="footer">
+                    <p>&copy; 2025 LitInkAI. All rights reserved.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        text_content = f"""
+        Payment Confirmed
+
+        Hi {display_name},
+
+        Your payment was successful and your LitInkAI {tier_name} subscription is now active.
+
+        Visit your dashboard: {dashboard_url}
+
+        Thank you for choosing LitInkAI. If you have any questions, our support team is here to help.
+
+        (c) 2025 LitInkAI. All rights reserved.
+        """
+
+        sent = await email_service.send_email(
+            user.email, subject, html_content, text_content
+        )
+        if sent:
+            logger.info(f"KAN-410: sent payment confirmation email to user {user_id}")
+        else:
+            logger.warning(
+                f"KAN-410: payment confirmation email failed for user {user_id}"
+            )
 
     async def handle_subscription_webhook(
         self, event_type: str, event_data: Dict[str, Any]
@@ -516,7 +682,11 @@ class SubscriptionManager:
             # KAN-314: grant tier credits on subscription activation
             credit_amount = TIER_CREDIT_GRANTS_BY_ENUM.get(tier.value)
             if credit_amount and credit_amount > 0:
-                grant_type = GrantType.FREE_TIER.value if tier == SubscriptionTier.FREE else GrantType.PURCHASE.value
+                grant_type = (
+                    GrantType.FREE_TIER.value
+                    if tier == SubscriptionTier.FREE
+                    else GrantType.PURCHASE.value
+                )
                 tier_credit_grant = CreditGrant(
                     user_id=user_id,
                     credits_remaining=credit_amount,
@@ -536,6 +706,8 @@ class SubscriptionManager:
                     f"KAN-314: no credit grant amount found for tier {tier.value}, "
                     f"user {user_id} — skipping credit grant"
                 )
+
+            await self._send_payment_confirmation_email(user_id, tier)
 
         elif event_type == "customer.subscription.deleted":
             subscription_data = event_data["object"]
@@ -592,14 +764,14 @@ class SubscriptionManager:
         except Exception as e:
             logger.error(f"Error recording usage: {str(e)}")
 
-
-
     async def get_download_status(self, user_id: uuid.UUID) -> Dict[str, Any]:
         """
         Get current download status for a user including today's count and limits.
         """
         tier = await self.get_user_tier(user_id)
-        tier_limits = self.TIER_LIMITS.get(tier, self.TIER_LIMITS[SubscriptionTier.FREE])
+        tier_limits = self.TIER_LIMITS.get(
+            tier, self.TIER_LIMITS[SubscriptionTier.FREE]
+        )
         download_limits = self.TIER_DOWNLOAD_LIMITS.get(
             tier, self.TIER_DOWNLOAD_LIMITS[SubscriptionTier.FREE]
         )

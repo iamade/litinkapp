@@ -365,3 +365,113 @@ class TestHierarchicalSectionAssignment:
 
         # ETYMOLOGY content must not contain chapter body text
         assert "Carpet-Bag" not in chapters[0]["content"]
+
+
+class TestKan434Kan440SharedParserScope:
+    """Regression shapes from Great Expectations EPUB and Orwell PDF failures."""
+
+    def setup_method(self):
+        self.processor = BookStructureDetector()
+
+    def _book(self, lines: list) -> str:
+        return "\n\n".join(lines)
+
+    def test_orwell_pdf_page_number_run_is_not_direct_chapters(self):
+        lines = []
+        for page in range(5, 35):
+            lines.extend([
+                str(page),
+                "There was one on the house-front immediately opposite",
+                _long_filler(80),
+            ])
+
+        assert self.processor._find_chapter_number_and_title(lines) == []
+
+    def test_part_to_chapter_hierarchy_survives_bare_part_headings(self):
+        content = self._book([
+            "Title Page",
+            "By George Orwell",
+            "PART ONE",
+            "Chapter 1",
+            _long_filler(90),
+            "Chapter 2",
+            _long_filler(90),
+            "PART TWO",
+            "Chapter 3",
+            _long_filler(90),
+            "APPENDIX. The Principles of Newspeak",
+            _long_filler(90),
+        ])
+
+        result = self.processor.detect_structure(content)
+
+        assert result["has_sections"] is True
+        sections = result["sections"]
+        assert [s["title"] for s in sections] == [
+            "PART ONE",
+            "PART TWO",
+            "APPENDIX. The Principles of Newspeak",
+        ]
+        assert [c["title"] for c in sections[0]["chapters"]] == ["Chapter 1", "Chapter 2"]
+        assert [c["title"] for c in sections[1]["chapters"]] == ["Chapter 3"]
+        assert sections[2]["content_type"] == "back_matter"
+
+    def test_great_expectations_prose_snippet_is_not_promoted_to_title(self):
+        prose = "And I saw pistols in it and jam and pills and there was no time"
+        assert self.processor._is_narrative_prose_title(prose)
+        assert not self.processor._is_semantic_heading_candidate(prose)
+
+    @pytest.mark.asyncio
+    async def test_read_only_matter_carries_generation_flag_false(self):
+        from app.core.services.file import FileService
+
+        file_service = FileService()
+        content = self._book([
+            "PREFACE",
+            _long_filler(90),
+            "Chapter 1",
+            _long_filler(90),
+            "Chapter 2",
+            _long_filler(90),
+            "APPENDIX. The Principles of Newspeak",
+            _long_filler(90),
+        ])
+
+        structure = self.processor.detect_structure(content)
+        chapters = await file_service._extract_hierarchical_chapters(
+            structure, book_type="entertainment", book_content=content
+        )
+
+        assert chapters[0]["content_type"] == "front_matter"
+        assert chapters[0]["use_in_generation"] is False
+        assert chapters[1]["content_type"] == "chapter"
+        assert chapters[1]["use_in_generation"] is True
+        assert chapters[-1]["content_type"] == "back_matter"
+        assert chapters[-1]["use_in_generation"] is False
+
+    def test_empty_nav_ncx_epub_uses_spine_documents_safely(self, tmp_path):
+        from ebooklib import epub
+        from app.core.services.file import FileService
+
+        epub_path = tmp_path / "empty-nav-real-spine.epub"
+        book = epub.EpubBook()
+        book.set_identifier("kan-434-440-empty-nav")
+        book.set_title("Empty NAV Real Spine")
+        book.set_language("en")
+
+        chapter_one = epub.EpubHtml(title="Chapter 1", file_name="chap_1.xhtml", lang="en")
+        chapter_one.content = f"<html><body><h1>Chapter 1</h1><p>{_long_filler(90)}</p></body></html>"
+        chapter_two = epub.EpubHtml(title="Chapter 2", file_name="chap_2.xhtml", lang="en")
+        chapter_two.content = f"<html><body><h1>Chapter 2</h1><p>{_long_filler(90)}</p></body></html>"
+        book.add_item(chapter_one)
+        book.add_item(chapter_two)
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+        book.spine = [chapter_one, chapter_two]
+        epub.write_epub(str(epub_path), book)
+
+        chapters = FileService().extract_epub_chapters(str(epub_path))
+
+        assert [chapter["title"] for chapter in chapters] == ["Chapter 1", "Chapter 2"]
+        assert all(chapter["content_type"] == "chapter" for chapter in chapters)
+        assert all(chapter["use_in_generation"] is True for chapter in chapters)

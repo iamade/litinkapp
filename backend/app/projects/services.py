@@ -367,6 +367,7 @@ async def _process_project_upload_background(
                     extracted_number = chapter.get("number")
                     chapter_summary = chapter.get("summary", "")
                     content_type = chapter.get("content_type") or chapter.get("type") or "chapter"
+                    use_in_generation = chapter.get("use_in_generation", content_type == "chapter")
                     section_title = chapter.get("section_title")
 
                     # Only real 'chapter' content gets sequential numbering 1..N.
@@ -407,6 +408,7 @@ async def _process_project_upload_background(
                             "summary": chapter_summary,
                             "chapter_id": str(book_chapter.id),
                             "content_type": content_type,
+                            "use_in_generation": use_in_generation,
                         },
                         generation_metadata={
                             "source": "upload_extraction",

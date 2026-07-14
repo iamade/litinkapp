@@ -49,11 +49,15 @@ import { upscaleImage } from '../../lib/api/upscale';
 import { useCreditBalance } from '../../hooks/useCreditBalance';
 import { estimateImageCredits, estimateUpscaleCredits, getInsufficientCreditsTooltip } from '../../lib/creditCosts';
 import { dispatchCreditsRefresh } from '../../lib/credits';
+import { resolveDisplayImageUrl } from '../../lib/imageUrls';
 
 import { projectService } from '../../services/projectService';
 import SceneGenerationModal from './SceneGenerationModal';
 import { StoryboardSceneRow } from './StoryboardSceneRow';
 import { useStoryboardOptional } from '../../contexts/StoryboardContext';
+// KAN-371: Character reference injection and drift verification
+import { injectCharacterReferences, extractCharacterReference } from '../../lib/CharacterReferenceInjector';
+import { verifyCharacterDrift } from '../../lib/characterDriftVerify';
 import InsufficientCreditsModal from '../Credits/InsufficientCreditsModal';
 import ProtectedImage from '../Common/ProtectedImage';
 import {
@@ -162,14 +166,6 @@ const parseScriptScenes = (scriptText: string): string[] => {
     }
     
     return extractedScenes;
-};
-
-const resolveWatermarkedAssetUrl = (
-  asset?: { watermarked_image_url?: string; watermarked_url?: string; image_url?: string; imageUrl?: string } | null
-): string => {
-  // Backend is authoritative: image_url is tier-appropriate (clean for paid, watermarked for free).
-  if (!asset) return '';
-  return asset.image_url || asset.imageUrl || '';
 };
 
 const ImagesPanel: React.FC<ImagesPanelProps> = ({
@@ -1889,7 +1885,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 let characterImage = filteredCharacterImages?.[characterKey];
 
                 // If no script-specific image, check if plot overview has an image
-                const plotImageUrl = typeof character === "object" ? resolveWatermarkedAssetUrl(character as any) : '';
+                const plotImageUrl = typeof character === "object" ? resolveDisplayImageUrl(character as any) : '';
 
                   // Check if this is a derived/fallback image
                   const isFallbackImage = !characterImage && !!plotImageUrl;
@@ -1918,7 +1914,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                     plotCharacters={
                       (plotOverview?.characters || []).map((plotCharacter) => ({
                         ...plotCharacter,
-                        image_url: resolveWatermarkedAssetUrl(plotCharacter as any),
+                        image_url: resolveDisplayImageUrl(plotCharacter as any),
                       }))
                     }
                     onGenerate={async (selectedPlotCharName) => {
@@ -1933,7 +1929,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                         return;
                       }
 
-                      const plotCharImageUrl = resolveWatermarkedAssetUrl(plotChar as any);
+                      const plotCharImageUrl = resolveDisplayImageUrl(plotChar as any);
                       if (!plotCharImageUrl) {
                         toast.error(`"${selectedPlotCharName}" has no plot image to link yet.`);
                         return;
@@ -2038,7 +2034,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                   const itemKey = item.originalName || item.name;
                   const displayName = item.displayName || item.name;
                   const itemImage = characterImages?.[itemKey];
-                  const plotImageUrl = resolveWatermarkedAssetUrl(item as any);
+                  const plotImageUrl = resolveDisplayImageUrl(item as any);
                   const isFallbackImage = !itemImage && !!plotImageUrl;
 
                   let finalImage = itemImage;
@@ -2065,7 +2061,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                       plotCharacters={
                         (plotOverview?.characters || []).map((character) => ({
                           ...character,
-                          image_url: resolveWatermarkedAssetUrl(character as any),
+                          image_url: resolveDisplayImageUrl(character as any),
                         }))
                       }
                       onGenerate={() => {
@@ -2417,7 +2413,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
                 // 1. Gather URLs from characters selected in the modal (from plot overview)
                 const selectedCharUrls: string[] = characters
                     .filter(c => charIds.includes(c.id || c.name))
-                    .map(c => resolveWatermarkedAssetUrl(c as any))
+                    .map(c => resolveDisplayImageUrl(c as any))
                     .filter(url => url && url.length > 0);
                 
                 // 2. Also include any generated character images from this script
@@ -2462,7 +2458,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             ...characters.map(c => {
                 const charKey = c.originalName || c.name;
                 const linkedImage = characterImages?.[charKey];
-                const plotImageUrl = resolveWatermarkedAssetUrl(c as any);
+                const plotImageUrl = resolveDisplayImageUrl(c as any);
                 const hasScriptSpecificLinkedImage = !!(selectedScriptId && linkedImage?.script_id === selectedScriptId);
                 const resolvedImageUrl = hasScriptSpecificLinkedImage
                   ? (linkedImage?.imageUrl || plotImageUrl || '')
@@ -2478,7 +2474,7 @@ const ImagesPanel: React.FC<ImagesPanelProps> = ({
             }),
             ...objectsAndLocations.map((item: any) => ({
                 name: item.name,
-                imageUrl: resolveWatermarkedAssetUrl(item as any),
+                imageUrl: resolveDisplayImageUrl(item as any),
                 id: item.id || item.name,
                 prompt: '',
                 generationStatus: 'completed' as const,
