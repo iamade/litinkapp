@@ -42,14 +42,20 @@ class TestAccountLockoutTemplate:
         html = env.get_template("account_lockout.html").render(**lockout_context)
         assert "&#128274;" not in html
         assert "🔒" not in html
-        # Badge is a single 56px table, not an expanded 5x5 or 8x8 pixel grid.
+        # No old pixel grid classes/cells and no external image/SVG/data URI.
+        assert 'class="lb-cell"' not in html
+        assert 'class="lb-fill"' not in html
+        assert "data:image" not in html
+        assert "<svg" not in html.lower()
+        assert 'src="http' not in html.lower()
+        # Smooth lock silhouette with dedicated parts.
         assert "Email-safe lock icon" in html
         assert 'class="lock-badge"' in html
-        assert 'class="lb-cell"' in html
-        assert 'class="lb-fill"' in html
+        assert 'class="lock-shackle"' in html
+        assert 'class="lock-body"' in html
+        assert 'class="lock-keyhole"' in html
         assert "width=\"56\"" in html
         assert "height=\"56\"" in html
-        assert html.count("background-color: #B45309") <= 15
         assert 'role="presentation"' in html
 
     def test_html_lock_badge_mobile_zero_padding_override(self, lockout_context):
@@ -57,10 +63,15 @@ class TestAccountLockoutTemplate:
         html = env.get_template("account_lockout.html").render(**lockout_context)
         assert ".lock-badge td" in html
         assert "padding: 0 !important" in html
-        assert ".lock-badge .lb-cell" in html
-        # Mobile media query keeps icon cells at 7px despite .email-wrapper td padding.
+        assert ".lock-shackle" in html
+        assert ".lock-body" in html
+        assert ".lock-keyhole" in html
+        # Mobile media query keeps badge and icon parts bounded despite .email-wrapper td padding.
         assert "max-width: 600px" in html
-        assert re.search(r"\.lock-badge\s*,\s*\.lock-badge td", html) is not None
+        assert re.search(r"\.lock-badge\s*,\s*\.lock-icon", html) is not None
+        assert 'width: 56px !important' in html
+        assert 'width: 32px !important' in html
+        assert 'width: 24px !important' in html
 
     def test_html_has_security_icon_and_cta(self, lockout_context):
         env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)

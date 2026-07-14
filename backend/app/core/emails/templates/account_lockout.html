@@ -10,7 +10,7 @@
 {% endblock %}
 
 {% block content %}
-<!-- Scoped icon styles: keep the 56px lock badge crisp at 390px mobile. -->
+<!-- Scoped icon styles: fixed 56px lock badge, smooth shackle/body silhouette. -->
 <style>
   .lock-badge {
     width: 56px !important;
@@ -26,118 +26,115 @@
   .lock-badge td {
     padding: 0 !important;
     border-collapse: collapse;
-    line-height: 1px;
-    font-size: 1px;
-    width: 7px !important;
-    height: 7px !important;
-    min-width: 7px !important;
-    max-width: 7px !important;
-    min-height: 7px !important;
-    max-height: 7px !important;
+    text-align: center;
+    vertical-align: bottom;
   }
-  .lock-badge .lb-cell {
-    background-color: #FEF3C7;
+  .lock-icon {
+    width: 56px !important;
+    height: 56px !important;
+    border-collapse: collapse;
+    margin: 0 auto;
   }
-  .lock-badge .lb-fill {
+  .lock-shackle {
+    width: 24px !important;
+    height: 13px !important;
+    min-width: 24px !important;
+    max-width: 24px !important;
+    min-height: 13px !important;
+    max-height: 13px !important;
     background-color: #B45309;
+    border: 0;
+    border-radius: 12px 12px 0 0;
+    margin: 0 auto;
+    display: block;
+  }
+  .lock-body {
+    width: 32px !important;
+    height: 22px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    min-height: 22px !important;
+    max-height: 22px !important;
+    background-color: #B45309;
+    border: 0;
+    border-radius: 4px;
+    margin: 0 auto;
+    display: block;
+  }
+  .lock-keyhole {
+    width: 6px !important;
+    height: 10px !important;
+    min-width: 6px !important;
+    max-width: 6px !important;
+    min-height: 10px !important;
+    max-height: 10px !important;
+    background-color: #FEF3C7;
+    border-radius: 3px;
+    margin: 5px auto 0;
+    display: block;
   }
   @media screen and (max-width: 600px) {
     .lock-badge,
-    .lock-badge td,
-    .lock-badge .lb-cell,
-    .lock-badge .lb-fill {
+    .lock-icon,
+    .lock-shackle,
+    .lock-body,
+    .lock-keyhole {
       padding: 0 !important;
-      width: 7px !important;
-      height: 7px !important;
-      min-width: 7px !important;
-      max-width: 7px !important;
+    }
+    .lock-badge {
+      width: 56px !important;
+      height: 56px !important;
+      min-width: 56px !important;
+      max-width: 56px !important;
+    }
+    .lock-icon {
+      width: 56px !important;
+      height: 56px !important;
+    }
+    .lock-shackle {
+      width: 24px !important;
+      height: 13px !important;
+      min-width: 24px !important;
+      max-width: 24px !important;
+      min-height: 13px !important;
+      max-height: 13px !important;
+    }
+    .lock-body {
+      width: 32px !important;
+      height: 22px !important;
+      min-width: 32px !important;
+      max-width: 32px !important;
+      min-height: 22px !important;
+      max-height: 22px !important;
+    }
+    .lock-keyhole {
+      width: 6px !important;
+      height: 10px !important;
+      min-width: 6px !important;
+      max-width: 6px !important;
+      min-height: 10px !important;
+      max-height: 10px !important;
     }
   }
 </style>
 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse: collapse;">
   <tr>
     <td align="center" style="padding: 10px 0 24px;">
-      <!-- Email-safe lock icon: 8x8 fixed-layout pixel badge, no Unicode emoji, no external image. -->
+      <!-- Email-safe lock icon: smooth lock silhouette, no Unicode emoji, no external image, no SVG. -->
       <table class="lock-badge" role="presentation" cellspacing="0" cellpadding="0" border="0" width="56" height="56" style="table-layout: fixed; border-collapse: collapse;">
         <tr>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-        </tr>
-        <tr>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-fill" width="7" height="7">&nbsp;</td>
-          <td class="lb-cell" width="7" height="7">&nbsp;</td>
+          <td style="padding: 0;">
+            <table class="lock-icon" role="presentation" cellspacing="0" cellpadding="0" border="0" width="56" height="56" style="border-collapse: collapse;">
+              <tr>
+                <td align="center" valign="bottom" style="padding: 10px 0 0;">
+                  <div class="lock-shackle" width="24" height="13" style="width: 24px; height: 13px; background-color: #B45309; border-radius: 12px 12px 0 0;">&nbsp;</div>
+                  <div class="lock-body" width="32" height="22" style="width: 32px; height: 22px; background-color: #B45309; border-radius: 4px;">
+                    <div class="lock-keyhole" width="6" height="10" style="width: 6px; height: 10px; background-color: #FEF3C7; border-radius: 3px;">&nbsp;</div>
+                  </div>
+                </td>
+              </tr>
+            </table>
+          </td>
         </tr>
       </table>
     </td>
