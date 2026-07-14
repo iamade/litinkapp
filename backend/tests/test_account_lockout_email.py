@@ -37,10 +37,19 @@ class TestAccountLockoutTemplate:
         assert "Lit-Link Ai" not in html
         assert "Account Security Alert" in html
 
+    def test_html_has_email_safe_lock_icon_no_unicode_emoji(self, lockout_context):
+        env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
+        html = env.get_template("account_lockout.html").render(**lockout_context)
+        assert "&#128274;" not in html
+        assert "🔒" not in html
+        # Table-based pixel lock is email-safe and has no external image.
+        assert "Email-safe lock icon" in html
+        assert "background-color: #B45309" in html
+        assert 'role="presentation"' in html
+
     def test_html_has_security_icon_and_cta(self, lockout_context):
         env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
         html = env.get_template("account_lockout.html").render(**lockout_context)
-        assert "&#128274;" in html or "🔒" in html
         assert "Secure my account" in html
         assert "reset-password" in html
         assert 'role="presentation"' in html
