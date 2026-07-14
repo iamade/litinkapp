@@ -74,7 +74,7 @@ export default function SubscriptionTierCard({
 }: SubscriptionTierCardProps) {
   const [billingPeriod, setBillingPeriod] = useState<"monthly" | "annual">("monthly");
   const isCurrentTier = currentTier === tier.tier;
-  const isPopular = tier.tier === "pro";
+  const isPopular = tier.tier === "standard";
   const isEnterprise = tier.tier === "enterprise";
 
   const annualPrice = getAnnualPrice(tier.tier);
@@ -89,7 +89,7 @@ export default function SubscriptionTierCard({
         return "border-gray-200 dark:border-gray-700";
       case "basic":
         return "border-blue-200 dark:border-blue-800";
-      case "pro":
+      case "standard":
         return "border-purple-400 dark:border-purple-600 ring-1 ring-purple-200 dark:ring-purple-800";
       case "premium":
         return "border-amber-200 dark:border-amber-800";
@@ -103,7 +103,7 @@ export default function SubscriptionTierCard({
   };
 
   const getButtonStyle = (tierName: string) => {
-    if (tierName === "pro") {
+    if (tierName === "standard") {
       return "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-lg shadow-purple-500/25";
     }
     if (tierName === "enterprise") {
@@ -116,7 +116,7 @@ export default function SubscriptionTierCard({
     switch (tierName) {
       case "free": return "text-gray-600 dark:text-gray-400";
       case "basic": return "text-blue-600 dark:text-blue-400";
-      case "pro": return "text-purple-600 dark:text-purple-400";
+      case "standard": return "text-purple-600 dark:text-purple-400";
       case "premium": return "text-amber-600 dark:text-amber-400";
       case "professional": return "text-rose-600 dark:text-rose-400";
       case "enterprise": return "text-indigo-600 dark:text-indigo-400";
