@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../lib/api';
+import { isExplorerModeEnabled } from '../lib/explorerMode';
 
 export type UserMode = 'explorer' | 'creator';
 
@@ -12,6 +13,12 @@ export const useUserMode = () => {
   useEffect(() => {
     const loadUserMode = async () => {
       if (!user) {
+        setMode('creator');
+        setIsLoading(false);
+        return;
+      }
+
+      if (!isExplorerModeEnabled()) {
         setMode('creator');
         setIsLoading(false);
         return;
@@ -49,6 +56,7 @@ export const useUserMode = () => {
 
   const switchMode = async (newMode: UserMode) => {
     if (!user) return;
+    if (newMode === 'explorer' && !isExplorerModeEnabled()) return false;
 
     try {
       await apiClient.put('/users/me', { preferred_mode: newMode });
@@ -61,7 +69,7 @@ export const useUserMode = () => {
   };
 
   const canAccessCreatorMode = user?.roles?.includes('creator') ?? false;
-  const canAccessExplorerMode = user?.roles?.includes('explorer') ?? false;
+  const canAccessExplorerMode = isExplorerModeEnabled() && (user?.roles?.includes('explorer') ?? false);
 
   return {
     mode,

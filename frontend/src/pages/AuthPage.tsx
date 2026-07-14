@@ -5,6 +5,7 @@ import { Mail, Lock, Eye, EyeOff } from "lucide-react";
 import { toast } from "react-hot-toast";
 import PasswordReset from "../components/PasswordReset";
 import { apiClient, API_BASE_URL } from "../lib/api";
+import { getPostAuthRedirect } from "../lib/explorerMode";
 
 // Helper for Google Icon
 const GoogleIcon = () => (
@@ -94,23 +95,10 @@ export default function AuthPage() {
             return;
         }
 
-        const hasCreator = user.roles?.includes('creator');
-        const hasExplorer = user.roles?.includes('explorer');
-        
-        if (hasCreator && !hasExplorer) {
-            navigate('/creator');
-        } else if (!hasCreator && hasExplorer) {
-            navigate('/dashboard');
-        } else {
-            if (user.preferred_mode === 'creator') {
-                navigate('/creator');
-            } else {
-                navigate('/dashboard');
-            }
-        }
+        navigate(getPostAuthRedirect(user));
       } catch (err) {
          console.error("Failed to fetch user profile for redirect", err);
-         navigate("/dashboard");
+         navigate(getPostAuthRedirect({}));
       }
     } catch (error) {
       if (error instanceof Error) {

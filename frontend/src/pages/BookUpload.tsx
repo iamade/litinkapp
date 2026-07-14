@@ -20,6 +20,7 @@ import { stripeService } from "../services/stripeService";
 import SubscriptionModal from "../components/Subscription/SubscriptionModal";
 import UpgradePrompt from "../components/Subscription/UpgradePrompt";
 import { subscriptionService } from "../services/subscriptionService";
+import { getExplorerHomePath } from "../lib/explorerMode";
 // import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 // Add interface for chapter structure
@@ -1265,8 +1266,7 @@ export default function BookUpload() {
       toast.success("Book rejected and deleted successfully");
       setShowRejectModal(false);
 
-      // Navigate back to dashboard
-      navigate("/dashboard");
+      navigate(getExplorerHomePath());
     } catch (error: any) {
       const errorMessage =
         error?.response?.data?.detail ||
@@ -1411,7 +1411,7 @@ export default function BookUpload() {
       };
       await apiClient.put(`/books/${aiBook.id}`, payload);
       toast.success("Book details updated!");
-      navigate("/dashboard");
+      navigate(getExplorerHomePath());
     } catch (e: unknown) {
       const error = e as Error;
       toast.error(error.message || "Failed to update book details.");
@@ -2389,7 +2389,7 @@ export default function BookUpload() {
               </p>
               <div className="flex justify-center space-x-4">
                 <button
-                  onClick={() => navigate("/dashboard")}
+                  onClick={() => navigate(getExplorerHomePath())}
                   className="bg-indigo-500 text-white px-6 py-2 rounded-xl"
                 >
                   Go to Dashboard

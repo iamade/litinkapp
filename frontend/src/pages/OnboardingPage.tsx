@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { apiClient } from "../lib/api";
 import { toast } from "react-hot-toast";
 import PromoCodeInput from "../components/Subscription/PromoCodeInput";
+import { CREATOR_HOME_PATH, EXPLORER_HOME_PATH, isExplorerModeEnabled } from "../lib/explorerMode";
 
 // Step 1: Personal Info
 const Step1 = ({ data, updateData }: { data: any; updateData: (d: any) => void }) => {
@@ -280,7 +281,10 @@ export default function OnboardingPage() {
           toast.success("Profile setup complete!");
           
           // Route based on user's selected role
-          const destination = formData.primaryRole === "creator" ? "/creator" : "/dashboard";
+          const destination =
+            formData.primaryRole !== "creator" && isExplorerModeEnabled()
+              ? EXPLORER_HOME_PATH
+              : CREATOR_HOME_PATH;
           navigate(destination);
           window.location.reload(); // Refresh to update user context with new roles/status
       } catch (error) {
