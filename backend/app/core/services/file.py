@@ -416,7 +416,7 @@ class BookStructureDetector:
                     if current_section:
                         current_section["chapters"].append(chapter_data)
                         print(
-                            f"[HIERARCHICAL] Added chapter {chapter_number} to section '{current_section['title']}'"
+                            f"[HIERARCHICAL] Added chapter {chapter_number} to section '{LogSanitizer.redact(current_section['title'], label='title')}'"
                         )
                     else:
                         chapter_group.append(chapter_data)
@@ -564,7 +564,7 @@ class BookStructureDetector:
                         unique_chapters.append(chapter)
                     else:
                         print(
-                            f"[DUPLICATE REMOVAL] Skipping duplicate chapter {normalized_number}: {chapter['title']}"
+                            f"[DUPLICATE REMOVAL] Skipping duplicate chapter {normalized_number}: {LogSanitizer.redact(chapter['title'], label='title')}"
                         )
 
                 section["chapters"] = unique_chapters
@@ -601,7 +601,10 @@ class BookStructureDetector:
             chapter_title = chapter_info_or_title
             start_line = line_num + 1
 
-        print(f"[CONTENT EXTRACTION] Extracting content for: {chapter_title}")
+        print(
+            "[CONTENT EXTRACTION] Extracting content for: "
+            f"{LogSanitizer.redact(chapter_title, label='title')}"
+        )
         print(f"[CONTENT EXTRACTION] Starting from line {start_line}")
 
         for i in range(start_line, len(lines)):
@@ -746,7 +749,10 @@ class BookStructureDetector:
                             "raw_title": chapter_title,
                         }
                     )
-                    print(f"[CHAPTER DETECTION] Found: {full_title}")
+                    print(
+                        "[CHAPTER DETECTION] Found: "
+                        f"{LogSanitizer.redact(full_title, label='title')}"
+                    )
 
         # FIX: Additional validation - check for reasonable sequence
         # Relaxed: If we found at least 3 chapters, even if sequence has gaps, it's better than nothing
@@ -818,7 +824,7 @@ class BookStructureDetector:
 
         print(f"[CHAPTER DETECTION] Found {len(chapter_headers)} potential chapters")
         for header in chapter_headers:
-            print(f"[CHAPTER DETECTION] Line {header['line_num']}: {header['title']}")
+            print(f"[CHAPTER DETECTION] Line {header['line_num']}: {LogSanitizer.redact(header['title'], label='title')}")
 
         return chapter_headers
 
@@ -1039,7 +1045,9 @@ class BookStructureDetector:
                         "content_type": content_type,
                     })
                     print(
-                        f"[FLAT CHAPTERS] Preserved as {content_type}: {special_title} ({len(extracted_content)} chars)"
+                        f"[FLAT CHAPTERS] Preserved as {content_type}: "
+                        f"{LogSanitizer.redact(special_title, label='title')} "
+                        f"({len(extracted_content)} chars)"
                     )
                 continue
 
@@ -1096,11 +1104,13 @@ class BookStructureDetector:
                         "content_type": "chapter",
                     })
                     print(
-                        f"[FLAT CHAPTERS] Added chapter ({len(extracted_content)} chars): {chapter_title}"
+                        f"[FLAT CHAPTERS] Added chapter ({len(extracted_content)} chars): "
+                        f"{LogSanitizer.redact(chapter_title, label='title')}"
                     )
                 else:
                     print(
-                        f"[FLAT CHAPTERS] Skipped short content ({len(extracted_content)} chars) for: {chapter_title}"
+                        f"[FLAT CHAPTERS] Skipped short content ({len(extracted_content)} chars) for: "
+                        f"{LogSanitizer.redact(chapter_title, label='title')}"
                     )
 
         # KAN-367 v3: Renumber only chapters sequentially from 1
@@ -1170,7 +1180,8 @@ class BookStructureDetector:
     ) -> Optional[int]:
         """Fallback: Scan pages for the chapter title if page number finding fails - with OCR"""
         print(
-            f"[PAGE FINDER] Scanning pages {start_page+1}-{end_page+1} for title: {chapter_title}"
+            f"[PAGE FINDER] Scanning pages {start_page+1}-{end_page+1} for title: "
+            f"{LogSanitizer.redact(chapter_title, label='title')}"
         )
 
         try:
@@ -1202,7 +1213,9 @@ class BookStructureDetector:
                     # Loose matching - check if title exists in header area
                     if clean_title_upper in page_head:
                         print(
-                            f"[PAGE FINDER] Found title '{clean_title}' on page {i+1}"
+                            "[PAGE FINDER] Found title "
+                            f"{LogSanitizer.redact(clean_title, label='title')} "
+                            f"on page {i+1}"
                         )
                         return i
                 except Exception:
@@ -1248,7 +1261,8 @@ class BookStructureDetector:
 
                 if actual_start_page is None:
                     print(
-                        f"[PAGE EXTRACTION] Could not find actual page {toc_page_num} for {chapter_title}"
+                        f"[PAGE EXTRACTION] Could not find actual page {toc_page_num} for "
+                        f"{LogSanitizer.redact(chapter_title, label='title')}"
                     )
                     # Fallback: Scan for title
                     scan_start = (
@@ -1307,12 +1321,16 @@ class BookStructureDetector:
                 # Ensure valid page range
                 if actual_start_page >= end_page:
                     print(
-                        f"[PAGE EXTRACTION] Invalid page range for {chapter_title}: {actual_start_page} to {end_page}"
+                        "[PAGE EXTRACTION] Invalid page range for "
+                        f"{LogSanitizer.redact(chapter_title, label='title')}: "
+                        f"{actual_start_page} to {end_page}"
                     )
                     end_page = min(len(doc) - 1, actual_start_page + 10)
 
                 print(
-                    f"[PAGE EXTRACTION] {chapter_title}: pages {actual_start_page + 1} to {end_page + 1}"
+                    "[PAGE EXTRACTION] "
+                    f"{LogSanitizer.redact(chapter_title, label='title')}: "
+                    f"pages {actual_start_page + 1} to {end_page + 1}"
                 )
 
                 # Extract content from the actual page range
@@ -1340,7 +1358,10 @@ class BookStructureDetector:
                         f"[PAGE EXTRACTION] ✅ Extracted {len(cleaned_content)} chars from pages {actual_start_page + 1}-{end_page + 1}"
                     )
                 else:
-                    print(f"[PAGE EXTRACTION] ❌ Content too short for {chapter_title}")
+                    print(
+                        "[PAGE EXTRACTION] Content too short for "
+                        f"{LogSanitizer.redact(chapter_title, label='title')}"
+                    )
 
         return final_chapters
 
@@ -2452,7 +2473,10 @@ class FileService:
                             # Skip if too short
                             if len(sub_content.strip()) < 100:
                                 skipped_count += 1
-                                print(f"[EPUB] Skipping sub-chapter '{sub_title}': too short")
+                                print(
+                                    "[EPUB] Skipping short sub-chapter: "
+                                    f"{LogSanitizer.redact(sub_title, label='title')}"
+                                )
                                 continue
 
                             # KAN-367 v3: Classify BEFORE incrementing chapter_number
@@ -2469,7 +2493,10 @@ class FileService:
                                     "type": "chapter",
                                     "content_type": "chapter",
                                 })
-                                print(f"[EPUB] ✓ Added chapter {chapter_number}: {sub_title}")
+                                print(
+                                    f"[EPUB] Added chapter {chapter_number}: "
+                                    f"{LogSanitizer.redact(sub_title, label='title')}"
+                                )
                             else:
                                 # Preserve front_matter/back_matter/metadata — no chapter_number
                                 chapters.append({
@@ -2479,7 +2506,10 @@ class FileService:
                                     "type": content_type,
                                     "content_type": content_type,
                                 })
-                                print(f"[EPUB] ✓ Classified as {content_type}: {sub_title}")
+                                print(
+                                    f"[EPUB] Classified as {content_type}: "
+                                    f"{LogSanitizer.redact(sub_title, label='title')}"
+                                )
                         continue  # Move to next spine item
 
                     # Fall through to original single-chapter logic
@@ -2510,7 +2540,10 @@ class FileService:
                         title_text = heading.get_text().strip()
                         if title_text:
                             title = title_text
-                            print(f"[EPUB] Found heading title: {title}")
+                            print(
+                                "[EPUB] Found heading title: "
+                                f"{LogSanitizer.redact(title, label='title')}"
+                            )
                             break
 
                     # If no heading found, use first line as title or try to detect chapter pattern
@@ -2524,7 +2557,10 @@ class FileService:
                                     title = f"Chapter {chapter_match['number']}: {chapter_match['title']}"
                                 else:
                                     title = f"Chapter {chapter_match['number']}"
-                                print(f"[EPUB] Found chapter pattern: {title}")
+                                print(
+                                    "[EPUB] Found chapter pattern: "
+                                    f"{LogSanitizer.redact(title, label='title')}"
+                                )
                                 break
                             elif 5 < len(line_stripped) < 100 and not line_stripped.endswith("."):
                                 title = line_stripped
@@ -2552,7 +2588,10 @@ class FileService:
                             "type": "chapter",
                             "content_type": "chapter",
                         })
-                        print(f"[EPUB] ✓ Added chapter {chapter_number}: {title}")
+                        print(
+                            f"[EPUB] Added chapter {chapter_number}: "
+                            f"{LogSanitizer.redact(title, label='title')}"
+                        )
                     else:
                         # Preserve front_matter/back_matter/metadata — no chapter_number
                         if not title:
@@ -2564,7 +2603,10 @@ class FileService:
                             "type": content_type,
                             "content_type": content_type,
                         })
-                        print(f"[EPUB] ✓ Classified as {content_type}: {title}")
+                        print(
+                            f"[EPUB] Classified as {content_type}: "
+                            f"{LogSanitizer.redact(title, label='title')}"
+                        )
 
             # --- Dynamic front/back matter filter (structural) ---
             chapters = self._filter_front_back_matter_structural(chapters)
@@ -2801,7 +2843,7 @@ class FileService:
                             ):
                                 chapters.append(current_chapter)
                                 print(
-                                    f"DEBUG: Added learning chapter: {current_chapter['title']}"
+                                    f"DEBUG: Added learning chapter: {LogSanitizer.redact(current_chapter['title'], label='title')}"
                                 )
                                 print(
                                     f"DEBUG: Chapter content length: {len(current_chapter.get('content', ''))}"
@@ -2842,7 +2884,7 @@ class FileService:
                 if not self._is_duplicate_chapter(current_chapter, chapters):
                     chapters.append(current_chapter)
                     print(
-                        f"DEBUG: Added final learning chapter: {current_chapter['title']}"
+                        f"DEBUG: Added final learning chapter: {LogSanitizer.redact(current_chapter['title'], label='title')}"
                     )
 
         if not chapters:
@@ -2914,7 +2956,7 @@ class FileService:
                             ):
                                 chapters.append(current_chapter)
                                 print(
-                                    f"DEBUG: Added entertainment chapter: {current_chapter['title']}"
+                                    f"DEBUG: Added entertainment chapter: {LogSanitizer.redact(current_chapter['title'], label='title')}"
                                 )
                                 print(
                                     f"DEBUG: Chapter content length: {len(current_chapter.get('content', ''))}"
@@ -2949,7 +2991,7 @@ class FileService:
                 if not self._is_duplicate_chapter(current_chapter, chapters):
                     chapters.append(current_chapter)
                     print(
-                        f"DEBUG: Added final entertainment chapter: {current_chapter['title']}"
+                        f"DEBUG: Added final entertainment chapter: {LogSanitizer.redact(current_chapter['title'], label='title')}"
                     )
 
         if not chapters:
@@ -3273,7 +3315,9 @@ class FileService:
                         )
                     ):
                         print(
-                            f"[SIMPLE TOC] Skipping: '{clean_title}' (too short or appendix)"
+                            "[SIMPLE TOC] Skipping: "
+                            f"{LogSanitizer.redact(clean_title, label='title')} "
+                            "(too short or appendix)"
                         )
                         continue
 
@@ -3288,7 +3332,8 @@ class FileService:
                             }
                         )
                         print(
-                            f"[SIMPLE TOC] Found: Chapter {chapter_num}: {clean_title}"
+                            f"[SIMPLE TOC] Found: Chapter {chapter_num}: "
+                            f"{LogSanitizer.redact(clean_title, label='title')}"
                         )
                     except ValueError:
                         print(
@@ -3306,7 +3351,7 @@ class FileService:
 
         print(f"[SIMPLE TOC] Extracted {len(sorted_chapters)} simple chapters")
         for ch in sorted_chapters:
-            print(f"[SIMPLE TOC] Final: {ch['title']}")
+            print(f"[SIMPLE TOC] Final: {LogSanitizer.redact(ch['title'], label='title')}")
 
         if len(sorted_chapters) >= 3:
             return await self._parse_toc_with_ai_improved(sorted_chapters, doc)
@@ -3535,7 +3580,10 @@ class FileService:
 
         for i, chapter in enumerate(validated_chapters):
             chapter_title = chapter["title"]
-            print(f"[CONTENT EXTRACTION] Extracting content for: {chapter_title}")
+            print(
+                "[CONTENT EXTRACTION] Extracting content for: "
+                f"{LogSanitizer.redact(chapter_title, label='title')}"
+            )
 
             # Search for chapter title in text (flexible matching)
             chapter_patterns = [
@@ -3562,7 +3610,10 @@ class FileService:
                         break
 
             if content_start is None:
-                print(f"[CONTENT EXTRACTION] Could not find chapter: {chapter_title}")
+                print(
+                    "[CONTENT EXTRACTION] Could not find chapter: "
+                    f"{LogSanitizer.redact(chapter_title, label='title')}"
+                )
                 continue
 
             # Find content end (start of next chapter or end of book)
@@ -3593,14 +3644,19 @@ class FileService:
                         }
                     )
                     print(
-                        f"[CONTENT EXTRACTION] Successfully extracted {len(content)} chars for: {chapter_title}"
+                        f"[CONTENT EXTRACTION] Successfully extracted {len(content)} chars for: "
+                        f"{LogSanitizer.redact(chapter_title, label='title')}"
                     )
                 else:
                     print(
-                        f"[CONTENT EXTRACTION] Content validation failed for: {chapter_title}"
+                        "[CONTENT EXTRACTION] Content validation failed for: "
+                        f"{LogSanitizer.redact(chapter_title, label='title')}"
                     )
             else:
-                print(f"[CONTENT EXTRACTION] Insufficient content for: {chapter_title}")
+                print(
+                    "[CONTENT EXTRACTION] Insufficient content for: "
+                    f"{LogSanitizer.redact(chapter_title, label='title')}"
+                )
 
         return final_chapters
 
@@ -3820,7 +3876,10 @@ class FileService:
                         "type": section_type,
                         "number": section_number_word.lower(),
                     }
-                    print(f"[PATTERN TOC EXTRACTION] Found section: {section_title}")
+                    print(
+                        "[PATTERN TOC EXTRACTION] Found section: "
+                        f"{LogSanitizer.redact(section_title, label='title')}"
+                    )
                     found_any = True
 
             # Look for chapters in current section context
@@ -3851,7 +3910,9 @@ class FileService:
                             continue
 
                         print(
-                            f"[PATTERN TOC EXTRACTION] Raw match: num='{num_str}', title='{title_str}', page='{page_str}'"
+                            f"[PATTERN TOC EXTRACTION] Raw match: num='{num_str}', "
+                            f"title={LogSanitizer.redact(title_str, label='title')}, "
+                            f"page='{page_str}'"
                         )
 
                         # Convert Roman OR Spelled to Arabic
@@ -3914,11 +3975,14 @@ class FileService:
                                 }
                             )
                             print(
-                                f"[PATTERN TOC EXTRACTION] Found chapter: {clean_title} (sec={current_section['title']})"
+                                "[PATTERN TOC EXTRACTION] Found chapter: "
+                                f"{LogSanitizer.redact(clean_title, label='title')} "
+                                f"(sec={LogSanitizer.redact(current_section['title'], label='title')})"
                             )
                         else:
                             print(
-                                f"[PATTERN TOC EXTRACTION] Found chapter: {clean_title} (no section)"
+                                "[PATTERN TOC EXTRACTION] Found chapter: "
+                                f"{LogSanitizer.redact(clean_title, label='title')} (no section)"
                             )
 
                         all_entries.append(entry)
@@ -3970,7 +4034,7 @@ class FileService:
                 else ""
             )
             print(
-                f"[PATTERN TOC EXTRACTION] Final: {ch.get('title', 'Unknown')}{section_info}"
+                f"[PATTERN TOC EXTRACTION] Final: {LogSanitizer.redact(ch.get('title', 'Unknown'), label='title')}{section_info}"
             )
 
         # Add structure detection and return
@@ -4122,7 +4186,7 @@ class FileService:
                     print(
                         f"[LAYOUT ANALYSIS] Matched: Chapter {numeral['number']}: "
                         f"{LogSanitizer.redact(closest_title['text'], label='title')} -> "
-                        f"page {associated_page['text']}"
+                        f"page {LogSanitizer.redact(associated_page['text'], label='page_ref')}"
                     )
 
         return chapters
@@ -4140,11 +4204,11 @@ class FileService:
             if page_hint and isinstance(page_hint, int) and page_hint > 0:
                 chapters_with_pages.append(chapter)
                 print(
-                    f"[TOC PARSING] Chapter '{chapter['title']}' starts at page {page_hint}"
+                    f"[TOC PARSING] Chapter '{LogSanitizer.redact(chapter['title'], label='title')}' starts at page {page_hint}"
                 )
             else:
                 print(
-                    f"[TOC PARSING] Skipping chapter without valid page: '{chapter['title']}'"
+                    f"[TOC PARSING] Skipping chapter without valid page: '{LogSanitizer.redact(chapter['title'], label='title')}'"
                 )
 
         if len(chapters_with_pages) >= 3:
@@ -4164,11 +4228,11 @@ class FileService:
                 if chapter.get("content") and len(chapter["content"].strip()) > 100:
                     chapters_with_content.append(chapter)
                     print(
-                        f"[CONTENT CHECK] Chapter '{chapter['title']}' has {len(chapter['content'])} chars"
+                        f"[CONTENT CHECK] Chapter '{LogSanitizer.redact(chapter['title'], label='title')}' has {len(chapter['content'])} chars"
                     )
                 else:
                     print(
-                        f"[CONTENT CHECK] Chapter '{chapter['title']}' has insufficient content"
+                        f"[CONTENT CHECK] Chapter '{LogSanitizer.redact(chapter['title'], label='title')}' has insufficient content"
                     )
 
             return chapters_with_content
@@ -4239,7 +4303,10 @@ class FileService:
         extracted_chapters = []
 
         for chapter_title in chapter_titles:
-            print(f"[AI EXTRACTION] Processing: {chapter_title}")
+            print(
+                "[AI EXTRACTION] Processing: "
+                f"{LogSanitizer.redact(chapter_title, label='title')}"
+            )
 
             # Find relevant chunks that likely contain this chapter
             relevant_chunks = self._find_relevant_chunks(text_chunks, chapter_title)
@@ -4361,7 +4428,8 @@ class FileService:
             relevant_chunks = text_chunks[:2]
 
         print(
-            f"[CHUNK SELECTION] Selected {len(relevant_chunks)} chunks for chapter: {chapter_title}"
+            f"[CHUNK SELECTION] Selected {len(relevant_chunks)} chunks for chapter: "
+            f"{LogSanitizer.redact(chapter_title, label='title')}"
         )
         return relevant_chunks
 
@@ -4446,7 +4514,8 @@ class FileService:
         # Remove duplicates and sort
         occurrences = sorted(list(set(occurrences)))
         print(
-            f"[CONTENT EXTRACTION] Found {len(occurrences)} title occurrences for: {clean_title}"
+            f"[CONTENT EXTRACTION] Found {len(occurrences)} title occurrences for: "
+            f"{LogSanitizer.redact(clean_title, label='title')}"
         )
 
         return occurrences
@@ -4463,7 +4532,10 @@ class FileService:
         # Check if the title appears at the beginning of the content
         content_start = content[:200].strip()
         if clean_title.lower() in content_start.lower():
-            print(f"[CONTENT VALIDATION] Found title '{clean_title}' at content start")
+            print(
+                "[CONTENT VALIDATION] Found title at content start: "
+                f"{LogSanitizer.redact(clean_title, label='title')}"
+            )
 
             # Additional validation: check for substantial content following
             lines = content.split("\n")
@@ -4769,7 +4841,9 @@ class FileService:
                                     global_pos += title_pos_in_page
                                     title_occurrences.append(global_pos)
                                     print(
-                                        f"[TEXT ANALYSIS] Found formatted title '{clean_title}' at global position {global_pos} (page {page_num + 1})"
+                                        "[TEXT ANALYSIS] Found formatted title "
+                                        f"{LogSanitizer.redact(clean_title, label='title')} "
+                                        f"at global position {global_pos} (page {page_num + 1})"
                                     )
                                     print(
                                         f"[TEXT ANALYSIS] Properties: large_font={is_large_font}, centered={is_centered}, near_top={is_near_top}"
@@ -5480,7 +5554,10 @@ class FileService:
                 match = re.match(pattern, line, re.IGNORECASE)
                 if match:
                     groups = match.groups()
-                    print(f"[TOC PARSING] Pattern {pattern_idx} matched: {groups}")
+                    print(
+                        f"[TOC PARSING] Pattern {pattern_idx} matched: "
+                        f"{LogSanitizer.redact(groups, label='groups')}"
+                    )
 
                     if len(groups) == 3:  # Chapter number, title, page
                         chapter_num, title, page_str = groups
@@ -5492,7 +5569,10 @@ class FileService:
                             or "by gustav" in title.lower()
                             or "by singleton" in title.lower()
                         ):
-                            print(f"[TOC PARSING] Skipping illustration entry: {title}")
+                            print(
+                                "[TOC PARSING] Skipping illustration entry: "
+                                f"{LogSanitizer.redact(title, label='title')}"
+                            )
                             continue
 
                         try:
@@ -5507,7 +5587,7 @@ class FileService:
                                     }
                                 )
                                 print(
-                                    f"[TOC PARSING] Added chapter: {chapter_num} - {title.strip()} (page {page_num})"
+                                    f"[TOC PARSING] Added chapter: {chapter_num} - {LogSanitizer.redact(title.strip(), label='title')} (page {page_num})"
                                 )
                         except ValueError:
                             print(f"[TOC PARSING] Invalid page number: {page_str}")
@@ -5568,11 +5648,11 @@ class FileService:
                     }
                 )
                 print(
-                    f"[CONTENT EXTRACTION] Successfully extracted {len(content)} characters for: {chapter['title']}"
+                    f"[CONTENT EXTRACTION] Successfully extracted {len(content)} characters for: {LogSanitizer.redact(chapter['title'], label='title')}"
                 )
             else:
                 print(
-                    f"[CONTENT EXTRACTION] Skipped chapter with insufficient content: {chapter['title']} ({len(content)} chars)"
+                    f"[CONTENT EXTRACTION] Skipped chapter with insufficient content: {LogSanitizer.redact(chapter['title'], label='title')} ({len(content)} chars)"
                 )
 
         print(
@@ -5752,7 +5832,7 @@ Chapters:
             return result.strip()
 
         except Exception as e:
-            print(f"Error cleaning text content: {e}")
+            print(f"Error cleaning text content: {type(e).__name__} - {e}")
             # Return original content if cleaning fails
             return str(content) if content else ""
 
@@ -6055,7 +6135,8 @@ Chapters:
             )
             if should_drop:
                 print(
-                    f"[CHAPTER EXTRACTION] Dropping front/back matter: '{title}' — {drop_reason}"
+                    "[CHAPTER EXTRACTION] Dropping front/back matter: "
+                    f"{LogSanitizer.redact(title, label='title')} reason={drop_reason}"
                 )
             else:
                 filtered_chapters.append(ch)
@@ -6147,7 +6228,9 @@ Chapters:
             # Create a unique key for the section
             section_key = f"{section_title}|{section_type}|{section_number}"
             print(
-                f"[SECTION ORGANIZATION] Created {section_title}|{section_type}|{section_number} section details"
+                "[SECTION ORGANIZATION] Created section details: "
+                f"title={LogSanitizer.redact(section_title, label='title')} "
+                f"type={section_type} number={section_number}"
             )
 
             if section_key not in sections_map:
@@ -6181,7 +6264,9 @@ Chapters:
         print(f"[SECTION ORGANIZATION] Created {len(sections_list)} sections")
         for section in sections_list:
             print(
-                f"[SECTION ORGANIZATION] Section '{section['title']}': {len(section['chapters'])} chapters"
+                "[SECTION ORGANIZATION] Section "
+                f"{LogSanitizer.redact(section['title'], label='title')}: "
+                f"{len(section['chapters'])} chapters"
             )
 
         return sections_list
@@ -6199,7 +6284,10 @@ Chapters:
         for toc_chapter in toc_chapters:
             normalized_title = self._normalize_chapter_title(toc_chapter["title"])
             toc_titles.add(normalized_title)
-            print(f"[TOC VALIDATION] TOC chapter: {normalized_title}")
+            print(
+                "[TOC VALIDATION] TOC chapter: "
+                f"{LogSanitizer.redact(normalized_title, label='title')}"
+            )
 
         # Filter extracted chapters to only include those that match TOC
         validated_chapters = []
@@ -6210,7 +6298,10 @@ Chapters:
 
             # Skip if we've already seen this title (removes duplicates)
             if normalized_title in seen_titles:
-                print(f"[TOC VALIDATION] Skipping duplicate: {normalized_title}")
+                print(
+                    "[TOC VALIDATION] Skipping duplicate: "
+                    f"{LogSanitizer.redact(normalized_title, label='title')}"
+                )
                 continue
 
             # Check if this chapter exists in TOC
@@ -6228,13 +6319,22 @@ Chapters:
                 # Use TOC content if extracted content is too short
                 if toc_match and len(chapter["content"].strip()) < 500:
                     chapter["content"] = toc_match["content"]
-                    print(f"[TOC VALIDATION] Used TOC content for: {normalized_title}")
+                print(
+                    "[TOC VALIDATION] Used TOC content for: "
+                    f"{LogSanitizer.redact(normalized_title, label='title')}"
+                )
 
                 validated_chapters.append(chapter)
                 seen_titles.add(normalized_title)
-                print(f"[TOC VALIDATION] Validated chapter: {normalized_title}")
+                print(
+                    "[TOC VALIDATION] Validated chapter: "
+                    f"{LogSanitizer.redact(normalized_title, label='title')}"
+                )
             else:
-                print(f"[TOC VALIDATION] Rejected (not in TOC): {normalized_title}")
+                print(
+                    "[TOC VALIDATION] Rejected (not in TOC): "
+                    f"{LogSanitizer.redact(normalized_title, label='title')}"
+                )
 
         return validated_chapters
 
@@ -6298,7 +6398,8 @@ Chapters:
             section_content_type = section.get("content_type", section_type)
 
             print(
-                f"[HIERARCHICAL EXTRACTION] Processing {section_type}: {section_title}"
+                f"[HIERARCHICAL EXTRACTION] Processing {section_type}: "
+                f"{LogSanitizer.redact(section_title, label='title')}"
             )
 
             # If section has chapters within it, extract them
@@ -6792,7 +6893,10 @@ Chapters:
                     "section_number", str(len(all_chapters) + 1)
                 )
 
-                print(f"[COMPLEX TOC AI] Processing section: {section_title}")
+                print(
+                    "[COMPLEX TOC AI] Processing section: "
+                    f"{LogSanitizer.redact(section_title, label='title')}"
+                )
 
                 for ch in section.get("chapters", []):
                     try:
@@ -6836,7 +6940,9 @@ Chapters:
 
                         all_chapters.append(formatted_chapter)
                         print(
-                            f"[COMPLEX TOC AI] Added: {title} (Section: {section_title})"
+                            "[COMPLEX TOC AI] Added: "
+                            f"{LogSanitizer.redact(title, label='title')} "
+                            f"(Section: {LogSanitizer.redact(section_title, label='section_title')})"
                         )
                         chapter_counter += 1
 
@@ -7053,11 +7159,14 @@ Chapters:
                         )
 
                         print(
-                            f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: {title} (Section: {section_info})"
+                            f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: "
+                            f"{LogSanitizer.redact(title, label='title')} "
+                            f"(Section: {LogSanitizer.redact(section_info, label='section_title')})"
                         )
                     else:
                         print(
-                            f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: {title} (No section)"
+                            f"[AI TOC EXTRACTION] Formatted: Chapter {chapter_number}: "
+                            f"{LogSanitizer.redact(title, label='title')} (No section)"
                         )
 
                     formatted_chapters.append(formatted_chapter)
@@ -7190,7 +7299,10 @@ Chapters:
         self, chapter_title: str, content_preview: str
     ) -> bool:
         """Step 5: Validate that extracted content actually matches the chapter"""
-        print(f"[CONTENT VALIDATION] Validating content for: {chapter_title}")
+        print(
+            "[CONTENT VALIDATION] Validating content for: "
+            f"{LogSanitizer.redact(chapter_title, label='title')}"
+        )
 
         try:
             prompt = f"""
@@ -7236,7 +7348,10 @@ Chapters:
         # Use the property correctly
         book_title = self.extracted_title or context.get("book_title", "Unknown Book")
 
-        print(f"[AI EXTRACTION] Processing: {chapter_title}")
+        print(
+            "[AI EXTRACTION] Processing: "
+            f"{LogSanitizer.redact(chapter_title, label='title')}"
+        )
         print(f"[AI EXTRACTION] Search text length: {len(search_text)}")
         print(
             f"[AI EXTRACTION] First 200 chars: "
@@ -7404,7 +7519,10 @@ Chapters:
                 f"[AI FILTERING] AI kept {len(filtered_chapters)} chapters out of {len(chapters_to_analyze)}"
             )
             print(f"[AI FILTERING] Estimated total chapters: {estimated_total}")
-            print(f"[AI FILTERING] Reasoning: {reason}")
+            print(
+                "[AI FILTERING] Reasoning: "
+                f"{LogSanitizer.redact(reason, label='reason')}"
+            )
 
             return filtered_chapters
 
