@@ -57,6 +57,7 @@ class BookStructureDetector:
             },
             "part": {
                 "patterns": [
+                    r"(?i)^part\s+(\d+|[ivx]+|one|two|three|four|five|six|seven|eight|nine|ten)\.?\s*$",
                     r"(?i)^part\s+(\d+|[ivx]+|one|two|three|four|five|six|seven|eight|nine|ten)[\s\-:]*(.{10,})$",
                     r"(?i)^section\s+(\d+|[ivx]+)[\s\-:]*(.{10,})$",
                 ],
@@ -168,6 +169,8 @@ class BookStructureDetector:
 
         # Keep your existing section and special patterns as they are flexible
         self.SECTION_PATTERNS = [
+            r"^PART\s+([A-Z]+|[IVX]+|\d+)\.?\s*$",
+            r"^Part\s+([A-Z]+|[IVX]+|\d+)\.?\s*$",
             r"^PART\s+([A-Z]+|[IVX]+|\d+)[\s\-:]*(.{10,})$",
             r"^Part\s+([A-Z]+|[IVX]+|\d+)[\s\-:]*(.{10,})$",
             r"(?i)^tablet\s+([ivx]+|\d+)[\s\-:]*(.{10,})$",
@@ -184,10 +187,7 @@ class BookStructureDetector:
             r"^.{1,50}\s+\d+\s*$",  # Short text followed by numbers (typical TOC entry)
         ]
 
-        # Special sections that should be treated as standalone
-        # Special sections that should be treated as standalone or excluded
-        # KAN-367: Added etymology, extracts, epigraph, acknowledgments, afterword, dedication
-        # to prevent front-matter/back-matter from being counted as chapters (off-by-N regression)
+        # Special sections that should be treated as standalone/read-only matter.
         self.SPECIAL_SECTIONS = [
             r"(?i)^preface[\s\-:]*(.*)$",
             r"(?i)^introduction[\s\-:]*(.*)$",
@@ -195,7 +195,7 @@ class BookStructureDetector:
             r"(?i)^prologue[\s\-:]*(.*)$",
             r"(?i)^epilogue[\s\-:]*(.*)$",
             r"(?i)^conclusion[\s\-:]*(.*)$",
-            r"(?i)^appendix[\s\-:]*(.*)$",
+            r"(?i)^appendix[\s\-\.:]*(.*)$",
             r"(?i)^etymology[\s\-:]*(.*)$",
             r"(?i)^extracts?[\s\-:]*(.*)$",
             r"(?i)^epigraph[\s\-:]*(.*)$",
@@ -209,6 +209,100 @@ class BookStructureDetector:
             r"(?i)^references[\s\-:]*(.*)$",
             r"(?i)^glossary[\s\-:]*(.*)$",
         ]
+
+    @staticmethod
+    def _with_generation_flag(item: Dict[str, Any]) -> Dict[str, Any]:
+        """Mark read-only matter so downstream generation can exclude it."""
+        content_type = item.get("content_type") or item.get("type") or "chapter"
+        item["use_in_generation"] = content_type == "chapter"
+        return item
+
+    def _is_narrative_prose_title(self, title: str) -> bool:
+        """Reject body-text snippets masquerading as headings."""
+        t = re.sub(r"\s+", " ", (title or "").strip())
+        if not t:
+            return True
+        words = t.split()
+        lower = t.lower()
+        if len(words) > 12:
+            return True
+        if t.endswith((".", ",", ";", ":")):
+            return True
+        if re.search(r"[,;!?]", t):
+            return True
+        if re.search(
+            r"\b(and|but|because|there|then|when|while|which|with|from|into|upon|was|were|had|have|did|said)\b",
+            lower,
+        ) and len(words) > 5:
+            return True
+        if re.match(r"(?i)^(and|but|then|there|because|when|while|which|with|from)\b", t):
+            return True
+        return False
+
+    def _is_semantic_heading_candidate(self, title: str) -> bool:
+        """Allow concise headings, not random prose lines from OCR/PDF text."""
+        t = re.sub(r"\s+", " ", (title or "").strip())
+        if not (5 < len(t) < 100):
+            return False
+        if self._is_narrative_prose_title(t):
+            return False
+        if re.search(r"\d{4}", t):
+            return False
+        first_alpha = re.search(r"[A-Za-z]", t)
+        if first_alpha and not first_alpha.group(0).isupper():
+            return False
+        words = re.findall(r"[A-Za-z]+", t.lower())
+        if len(words) >= 4 and len(set(words)) / len(words) < 0.5:
+            return False
+        lower = t.lower()
+        blocked = ("copyright", "isbn", "published", "project gutenberg")
+        if any(word in lower for word in blocked):
+            return False
+        return bool(re.search(r"[A-Za-z]", t))
+
+    def _validate_direct_chapter_headers(
+        self, chapter_headers: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Keep direct number+title extraction only for real semantic chapters.
+
+        PDF page-number runs often look like "5" followed by narrative text. Those
+        must not outrank the normal PART/CHAPTER/special-section parser.
+        """
+        if len(chapter_headers) < 3:
+            return []
+
+        numbers = [int(h["number"]) for h in chapter_headers if str(h.get("number", "")).isdigit()]
+        if len(numbers) != len(chapter_headers):
+            return []
+
+        first, last = min(numbers), max(numbers)
+        consecutive_pairs = sum(
+            1 for prev, curr in zip(numbers, numbers[1:]) if curr == prev + 1
+        )
+        consecutive_ratio = consecutive_pairs / max(len(numbers) - 1, 1)
+        narrative_titles = sum(
+            1 for h in chapter_headers if self._is_narrative_prose_title(h.get("raw_title", ""))
+        )
+
+        if first != 1:
+            print(
+                f"[CHAPTER DETECTION] Rejected bare-number sequence {first} to {last}: "
+                "does not start at Chapter 1"
+            )
+            return []
+        if consecutive_ratio >= 0.95 and len(chapter_headers) >= 200:
+            print(
+                f"[CHAPTER DETECTION] Rejected running page-number sequence {first} to {last}"
+            )
+            return []
+        if narrative_titles:
+            print(
+                f"[CHAPTER DETECTION] Rejected {narrative_titles} prose-like direct titles"
+            )
+            return []
+
+        print(f"[CHAPTER DETECTION] Validated semantic sequence: {first} to {last}")
+        return chapter_headers
 
     def detect_structure(self, content: str) -> Dict[str, Any]:
         """Enhanced structure detection that skips TOC sections"""
@@ -226,11 +320,12 @@ class BookStructureDetector:
             for header in chapter_headers:
                 content_text = self._extract_chapter_content(content, header, lines)
                 flat_chapters.append(
-                    {
+                    self._with_generation_flag({
                         "title": header["title"],
                         "number": header["number"],
                         "content": content_text,
-                    }
+                        "content_type": "chapter",
+                    })
                 )
 
             return {
@@ -308,14 +403,21 @@ class BookStructureDetector:
                 continue
 
             # Skip obvious TOC entries
-            if self._is_toc_entry(line):
+            if (
+                self._is_toc_entry(line)
+                and not self._match_section_patterns(line)
+                and not self._match_special_sections(line)
+                and not self._match_chapter_patterns(line)
+            ):
                 continue
 
             # Check if line matches any section pattern
             section_match = self._match_section_patterns(line)
             if section_match:
                 # Verify this isn't a TOC entry by checking following content
-                if self._has_substantial_following_content(lines, line_num):
+                if self._has_substantial_following_content(
+                    lines, line_num
+                ) or self._has_following_chapter_before_next_section(lines, line_num):
                     _flush_chapter_group()
                     # Save previous section if exists
                     if current_section:
@@ -375,7 +477,7 @@ class BookStructureDetector:
                         next_line = lines[i].strip()
                         if not next_line:
                             continue
-                        if 10 < len(next_line) < 100:
+                        if self._is_semantic_heading_candidate(next_line):
                             if not self._match_chapter_patterns(next_line):
                                 title_found = next_line
                                 break
@@ -399,12 +501,12 @@ class BookStructureDetector:
 
                 # Only add if content is substantial
                 if len(chapter_content.strip()) > 500:  # Minimum content length
-                    chapter_data = {
+                    chapter_data = self._with_generation_flag({
                         "title": chapter_title,
                         "number": chapter_number,
                         "content": chapter_content,
                         "content_type": "chapter",
-                    }
+                    })
 
                     # KAN-367 v3: Special sections (ETYMOLOGY, EPILOGUE, etc.) must NOT
                     # swallow real chapters. Close the special section and place the
@@ -503,6 +605,20 @@ class BookStructureDetector:
 
         # Must have multiple lines and substantial text
         return content_lines >= min_lines and len(total_content.strip()) > 200
+
+    def _has_following_chapter_before_next_section(
+        self, lines: List[str], start_line: int
+    ) -> bool:
+        """Accept bare PART headings when real chapters follow immediately."""
+        for i in range(start_line + 1, min(len(lines), start_line + 40)):
+            line = lines[i].strip()
+            if not line:
+                continue
+            if self._match_section_patterns(line):
+                return False
+            if self._match_chapter_patterns(line):
+                return True
+        return False
 
     def _normalize_chapter_number(self, number: str) -> str:
         """Normalize chapter numbers (convert Roman to Arabic)"""
@@ -712,19 +828,7 @@ class BookStructureDetector:
                         continue
 
                     # FIX: More restrictive title validation
-                    if (
-                        next_line[0].isupper()
-                        and len(next_line) > 10
-                        and len(next_line) < 100  # Not too long
-                        and not re.match(r"^\d+\.", next_line)  # Not a footnote
-                        and not re.search(
-                            r"\d{4}", next_line
-                        )  # No years (likely copyright)
-                        and "copyright" not in next_line.lower()
-                        and "isbn" not in next_line.lower()
-                        and "published" not in next_line.lower()
-                    ):
-
+                    if self._is_semantic_heading_candidate(next_line):
                         chapter_title = next_line
                         title_line_num = next_line_num
                         break
@@ -754,23 +858,7 @@ class BookStructureDetector:
                         f"{LogSanitizer.redact(full_title, label='title')}"
                     )
 
-        # FIX: Additional validation - check for reasonable sequence
-        # Relaxed: If we found at least 3 chapters, even if sequence has gaps, it's better than nothing
-        if len(chapter_headers) >= 3:
-            numbers = [h["number"] for h in chapter_headers]
-            # More lenient sequence check
-            if min(numbers) <= 10:  # Allow starting a bit later
-                print(
-                    f"[CHAPTER DETECTION] Validated sequence: {min(numbers)} to {max(numbers)}"
-                )
-                return chapter_headers
-            else:
-                print(
-                    f"[CHAPTER DETECTION] Suspicious sequence start: {min(numbers)}, keeping for now"
-                )
-                return chapter_headers
-
-        return chapter_headers
+        return self._validate_direct_chapter_headers(chapter_headers)
 
     def _is_running_header_or_footer(self, text: str) -> bool:
         """Check if text is a running header or footer"""
@@ -1008,7 +1096,11 @@ class BookStructureDetector:
                 continue
 
             # Skip TOC entries (e.g. "1. Title  23")
-            if self._is_toc_entry(line):
+            if (
+                self._is_toc_entry(line)
+                and not self._match_special_sections(line)
+                and not self._match_chapter_patterns(line)
+            ):
                 continue
 
             # KAN-367 v3: Check for special sections — PRESERVE, don't skip
@@ -1038,12 +1130,12 @@ class BookStructureDetector:
                     content, chapter_info, lines
                 )
                 if len(extracted_content.strip()) >= 100:
-                    all_items.append({
+                    all_items.append(self._with_generation_flag({
                         "title": special_title,
                         "number": None,
                         "content": extracted_content,
                         "content_type": content_type,
-                    })
+                    }))
                     print(
                         f"[FLAT CHAPTERS] Preserved as {content_type}: "
                         f"{LogSanitizer.redact(special_title, label='title')} "
@@ -1075,7 +1167,7 @@ class BookStructureDetector:
                         next_line = lines[i].strip()
                         if not next_line:
                             continue
-                        if 10 < len(next_line) < 100:
+                        if self._is_semantic_heading_candidate(next_line):
                             if not self._match_chapter_patterns(next_line):
                                 title_found = next_line
                                 break
@@ -1097,12 +1189,12 @@ class BookStructureDetector:
                 )
 
                 if len(extracted_content.strip()) >= 500:
-                    all_items.append({
+                    all_items.append(self._with_generation_flag({
                         "title": chapter_title,
                         "number": chapter_number,
                         "content": extracted_content,
                         "content_type": "chapter",
-                    })
+                    }))
                     print(
                         f"[FLAT CHAPTERS] Added chapter ({len(extracted_content)} chars): "
                         f"{LogSanitizer.redact(chapter_title, label='title')}"
@@ -1119,6 +1211,7 @@ class BookStructureDetector:
             if item.get("content_type") == "chapter":
                 chapter_seq += 1
                 item["number"] = str(chapter_seq)
+            self._with_generation_flag(item)
 
         print(
             f"[FLAT CHAPTERS] Total: {len(all_items)} items — "
@@ -1899,6 +1992,18 @@ class FileService:
     ROMAN_RE = r"[IVXLCDM]+"
     ROMAN_RE_LOWER = r"[ivxlcdm]+"
 
+    @staticmethod
+    def _with_generation_flag(item: Dict[str, Any]) -> Dict[str, Any]:
+        content_type = item.get("content_type") or item.get("type") or "chapter"
+        item["use_in_generation"] = content_type == "chapter"
+        return item
+
+    def _is_narrative_prose_title(self, title: str) -> bool:
+        return self.structure_detector._is_narrative_prose_title(title)
+
+    def _is_semantic_heading_candidate(self, title: str) -> bool:
+        return self.structure_detector._is_semantic_heading_candidate(title)
+
     def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
         self.ai_service = AIService()
@@ -2203,7 +2308,7 @@ class FileService:
         # Metadata — pure structural artifacts (always metadata)
         METADATA_TITLES = {
             "uncopyright", "halftitlepage", "titlepage", "half title", "title page",
-            "also available", "copyright page",
+            "also available", "copyright page", "publication", "publication information",
         }
         for pattern in METADATA_TITLES:
             if title_lower == pattern or title_lower.startswith(pattern):
@@ -2227,6 +2332,7 @@ class FileService:
             "index", "bibliography", "glossary", "endnotes", "footnotes",
             "colophon", "imprint", "copyright",
             "about the author", "suggested reading", "references", "notes",
+            "the principles of newspeak",
         }
 
         for pattern in FRONT_MATTER_TITLES:
@@ -2269,14 +2375,17 @@ class FileService:
             if self._is_chapter_like(ch.get("title", "")):
                 chapter_indices.append(i)
 
-        # If no numbered chapters found, classify all as chapters (fallback)
         if len(chapter_indices) < 2:
             print(
                 f"[EPUB-STRUCTURAL] Fewer than 2 numbered chapters found ({len(chapter_indices)}), "
-                "classifying all items as chapters"
+                "preserving classifications and falling back to text parsing if needed"
             )
             for ch in chapters:
-                ch.setdefault("content_type", "chapter")
+                classified_type = self._classify_spine_item(
+                    ch.get("title", ""), "", len(ch.get("content", "").split())
+                )
+                ch["content_type"] = classified_type
+                self._with_generation_flag(ch)
             return chapters
 
         first_chapter_idx = chapter_indices[0]
@@ -2306,6 +2415,7 @@ class FileService:
             if classified_type != "chapter":
                 ch["content_type"] = classified_type
                 ch["number"] = None
+                self._with_generation_flag(ch)
                 if classified_type == "front_matter":
                     front_count += 1
                 elif classified_type == "back_matter":
@@ -2322,6 +2432,7 @@ class FileService:
             if i < first_chapter_idx:
                 ch["content_type"] = "front_matter"
                 ch["number"] = None
+                self._with_generation_flag(ch)
                 front_count += 1
                 print(
                     f"[EPUB-STRUCTURAL] Classified "
@@ -2330,6 +2441,7 @@ class FileService:
             elif i > last_chapter_idx:
                 ch["content_type"] = "back_matter"
                 ch["number"] = None
+                self._with_generation_flag(ch)
                 back_count += 1
                 print(
                     f"[EPUB-STRUCTURAL] Classified "
@@ -2338,6 +2450,7 @@ class FileService:
             else:
                 # Between first and last chapter — it's a chapter
                 ch["content_type"] = "chapter"
+                self._with_generation_flag(ch)
                 chapter_count += 1
                 ch["number"] = str(chapter_count)
 
@@ -2370,6 +2483,12 @@ class FileService:
         for i, heading in enumerate(headings):
             heading_text = heading.get_text().strip()
             if not heading_text:
+                continue
+            if self._is_narrative_prose_title(heading_text):
+                print(
+                    "[EPUB] Ignoring prose-like heading: "
+                    f"{LogSanitizer.redact(heading_text, label='title')}"
+                )
                 continue
 
             # Collect all siblings until the next heading of same or higher level
@@ -2486,26 +2605,26 @@ class FileService:
 
                             if content_type == "chapter":
                                 chapter_number += 1
-                                chapters.append({
+                                chapters.append(self._with_generation_flag({
                                     "number": str(chapter_number),
                                     "title": sub_title,
                                     "content": sub_content,
                                     "type": "chapter",
                                     "content_type": "chapter",
-                                })
+                                }))
                                 print(
                                     f"[EPUB] Added chapter {chapter_number}: "
                                     f"{LogSanitizer.redact(sub_title, label='title')}"
                                 )
                             else:
                                 # Preserve front_matter/back_matter/metadata — no chapter_number
-                                chapters.append({
+                                chapters.append(self._with_generation_flag({
                                     "number": None,
                                     "title": sub_title,
                                     "content": sub_content,
                                     "type": content_type,
                                     "content_type": content_type,
-                                })
+                                }))
                                 print(
                                     f"[EPUB] Classified as {content_type}: "
                                     f"{LogSanitizer.redact(sub_title, label='title')}"
@@ -2547,6 +2666,13 @@ class FileService:
                             break
 
                     # If no heading found, use first line as title or try to detect chapter pattern
+                    if title and self._is_narrative_prose_title(title):
+                        print(
+                            "[EPUB] Rejected prose-like title candidate: "
+                            f"{LogSanitizer.redact(title, label='title')}"
+                        )
+                        title = None
+
                     if not title:
                         first_lines = clean_text.split("\n")[:5]
                         for line in first_lines:
@@ -2562,7 +2688,7 @@ class FileService:
                                     f"{LogSanitizer.redact(title, label='title')}"
                                 )
                                 break
-                            elif 5 < len(line_stripped) < 100 and not line_stripped.endswith("."):
+                            elif self._is_semantic_heading_candidate(line_stripped):
                                 title = line_stripped
                                 print(
                                     f"[EPUB] Using first line as title: "
@@ -2581,13 +2707,13 @@ class FileService:
                         chapter_number += 1
                         if not title:
                             title = f"Chapter {chapter_number}"
-                        chapters.append({
+                        chapters.append(self._with_generation_flag({
                             "number": str(chapter_number),
                             "title": title,
                             "content": clean_text,
                             "type": "chapter",
                             "content_type": "chapter",
-                        })
+                        }))
                         print(
                             f"[EPUB] Added chapter {chapter_number}: "
                             f"{LogSanitizer.redact(title, label='title')}"
@@ -2596,13 +2722,13 @@ class FileService:
                         # Preserve front_matter/back_matter/metadata — no chapter_number
                         if not title:
                             title = f"Untitled {content_type}"
-                        chapters.append({
+                        chapters.append(self._with_generation_flag({
                             "number": None,
                             "title": title,
                             "content": clean_text,
                             "type": content_type,
                             "content_type": content_type,
-                        })
+                        }))
                         print(
                             f"[EPUB] Classified as {content_type}: "
                             f"{LogSanitizer.redact(title, label='title')}"
@@ -2610,6 +2736,18 @@ class FileService:
 
             # --- Dynamic front/back matter filter (structural) ---
             chapters = self._filter_front_back_matter_structural(chapters)
+
+            semantic_chapters = [
+                ch for ch in chapters
+                if ch.get("content_type") == "chapter"
+                and self._is_chapter_like(ch.get("title", ""))
+            ]
+            if len(semantic_chapters) < 2:
+                print(
+                    "[EPUB] Insufficient semantic chapter structure after spine scan "
+                    f"({len(semantic_chapters)} chapter-like items); falling back to text parsing"
+                )
+                return []
 
             print(
                 f"[EPUB] Extracted {len(chapters)} chapters from spine (skipped {skipped_count} short items)"
@@ -6103,8 +6241,11 @@ Chapters:
                     "content": chapter["content"],
                     "summary": chapter.get("summary", ""),
                     "chapter_number": chapter.get("number", i + 1),
+                    "number": chapter.get("number"),
+                    "content_type": chapter.get("content_type", "chapter"),
+                    "use_in_generation": chapter.get("use_in_generation", True),
                 }
-                extracted_chapters.append(chapter_data)
+                extracted_chapters.append(self._with_generation_flag(chapter_data))
 
         # Step 3: Drop chapters with less than 500 chars — likely page headers or misdetections
         pre_filter_count = len(extracted_chapters)
@@ -6119,33 +6260,8 @@ Chapters:
                 f"chapters with < 500 chars content"
             )
 
-        # Step 3b: Filter front/back matter (copyright, title page, imprint, etc.)
-        # This was only applied in the EPUB path — now covers structure detection fallback too
-        pre_fb_count = len(extracted_chapters)
-        filtered_chapters = []
         for ch in extracted_chapters:
-            title = ch.get("title", "")
-            word_count = len(ch.get("content", "").split())
-            should_drop, drop_reason = (
-                (False, "")
-                if ch.get("section_type") == "special"
-                else self._is_front_back_matter(
-                    title, "", word_count  # no href available in fallback path
-                )
-            )
-            if should_drop:
-                print(
-                    "[CHAPTER EXTRACTION] Dropping front/back matter: "
-                    f"{LogSanitizer.redact(title, label='title')} reason={drop_reason}"
-                )
-            else:
-                filtered_chapters.append(ch)
-        extracted_chapters = filtered_chapters
-        if len(extracted_chapters) < pre_fb_count:
-            print(
-                f"[CHAPTER EXTRACTION] Filtered {pre_fb_count - len(extracted_chapters)} "
-                f"front/back matter items"
-            )
+            self._with_generation_flag(ch)
 
         # Step 4: Filter if too many chapters found
         if len(extracted_chapters) > 20:
@@ -6224,6 +6340,7 @@ Chapters:
             section_title = chapter.get("section_title", "Main Content")
             section_type = chapter.get("section_type", "section")
             section_number = chapter.get("section_number", "")
+            section_content_type = chapter.get("content_type") if chapter.get("content_type") != "chapter" else None
 
             # Create a unique key for the section
             section_key = f"{section_title}|{section_type}|{section_number}"
@@ -6243,9 +6360,12 @@ Chapters:
                     "order_index": len(sections_map),
                     "chapters": [],
                 }
+                if section_content_type:
+                    sections_map[section_key]["content_type"] = section_content_type
+                    sections_map[section_key]["use_in_generation"] = False
 
             # Add chapter to section
-            chapter_data = {
+            chapter_data = self._with_generation_flag({
                 "id": f"chapter_{len(sections_map[section_key]['chapters']) + 1}",
                 "book_id": "",
                 "section_id": sections_map[section_key]["id"],
@@ -6255,7 +6375,7 @@ Chapters:
                 "summary": chapter.get("summary", ""),
                 "content_type": chapter.get("content_type", "chapter"),
                 "order_index": len(sections_map[section_key]["chapters"]),
-            }
+            })
 
             sections_map[section_key]["chapters"].append(chapter_data)
 
@@ -6418,11 +6538,11 @@ Chapters:
                     }
                     # KAN-367 v3: propagate content_type from the parent section
                     # so the project upload path can distinguish front/back matter.
-                    if section_content_type in ("front_matter", "back_matter"):
+                    if section_content_type in ("front_matter", "back_matter", "metadata"):
                         chapter_data["content_type"] = section_content_type
                     elif chapter.get("content_type"):
                         chapter_data["content_type"] = chapter["content_type"]
-                    all_chapters.append(chapter_data)
+                    all_chapters.append(self._with_generation_flag(chapter_data))
                     chapter_counter += 1
             else:
                 # Treat the entire section as a chapter (like tablets or special sections)
@@ -6436,9 +6556,9 @@ Chapters:
                     "chapter_number": chapter_counter,
                 }
                 # KAN-367 v3: propagate content_type from the section level
-                if section_content_type in ("front_matter", "back_matter"):
+                if section_content_type in ("front_matter", "back_matter", "metadata"):
                     chapter_data["content_type"] = section_content_type
-                all_chapters.append(chapter_data)
+                all_chapters.append(self._with_generation_flag(chapter_data))
                 chapter_counter += 1
 
         print(f"[HIERARCHICAL EXTRACTION] Extracted {len(all_chapters)} total chapters")
