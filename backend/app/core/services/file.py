@@ -20,7 +20,7 @@ import math
 import hashlib
 import json
 import time
-from app.core.services.text_utils import TextSanitizer
+from app.core.services.text_utils import TextSanitizer, LogSanitizer
 import itertools
 import traceback
 import ebooklib
@@ -633,7 +633,10 @@ class BookStructureDetector:
                     is_chapter_break = True
 
             if is_chapter_break:
-                print(f"[CONTENT EXTRACTION] Stopped at next chapter break: {line}")
+                print(
+                    f"[CONTENT EXTRACTION] Stopped at next chapter break: "
+                    f"{LogSanitizer.redact(line, label='line')}"
+                )
                 break
 
             # Skip page numbers, headers, footers
@@ -648,12 +651,18 @@ class BookStructureDetector:
                 "EPILOGUE", "AFTERWORD", "APPENDIX", "INDEX",
                 "ACKNOWLEDGMENTS", "ACKNOWLEDGEMENTS",
             ]:
-                print(f"[CONTENT EXTRACTION] Stopped at back-matter boundary: {line}")
+                print(
+                    f"[CONTENT EXTRACTION] Stopped at back-matter boundary: "
+                    f"{LogSanitizer.redact(line, label='line')}"
+                )
                 break
 
             # KAN-367 v3: Also stop when any special section heading is encountered
             if self._match_special_sections(line):
-                print(f"[CONTENT EXTRACTION] Stopped at special section: {line}")
+                print(
+                    f"[CONTENT EXTRACTION] Stopped at special section: "
+                    f"{LogSanitizer.redact(line, label='line')}"
+                )
                 break
 
             # Add content line
@@ -1039,7 +1048,9 @@ class BookStructureDetector:
                 # Guard: require substantial following content to avoid matching page numbers
                 if not self._has_substantial_following_content(lines, line_num):
                     print(
-                        f"[FLAT CHAPTERS] Skipped '{line}' — insufficient following content (likely page number)"
+                        f"[FLAT CHAPTERS] Skipped "
+                        f"'{LogSanitizer.redact(line, label='line')}' — "
+                        f"insufficient following content (likely page number)"
                     )
                     continue
 
@@ -1567,13 +1578,17 @@ class BookStructureDetector:
             ]
         ):
             print(
-                f"[PAGE FINDER] Rejecting match in list/index section: {matched_line}"
+                f"[PAGE FINDER] Rejecting match in list/index section: "
+                f"{LogSanitizer.redact(matched_line, label='matched_line')}"
             )
             return True
 
         # Check if the matched line contains other text that suggests it's not a page number
         if len(matched_line.split()) > 2:  # Page numbers are usually standalone
-            print(f"[PAGE FINDER] Rejecting match with extra text: {matched_line}")
+            print(
+                f"[PAGE FINDER] Rejecting match with extra text: "
+                f"{LogSanitizer.redact(matched_line, label='matched_line')}"
+            )
             return True
 
         # Check for figure/illustration patterns around the match
@@ -1599,7 +1614,8 @@ class BookStructureDetector:
                     ]
                 ):
                     print(
-                        f"[PAGE FINDER] Rejecting match near figure/illustration: {context[:100]}"
+                        f"[PAGE FINDER] Rejecting match near figure/illustration: "
+                        f"{LogSanitizer.redact(context, label='context')}"
                     )
                     return True
                 break
@@ -2275,7 +2291,10 @@ class FileService:
                     back_count += 1
                 elif classified_type == "metadata":
                     meta_count += 1
-                print(f"[EPUB-STRUCTURAL] Classified '{title[:60]}' as {classified_type}")
+                print(
+                    f"[EPUB-STRUCTURAL] Classified "
+                    f"'{LogSanitizer.redact(title, label='title')}' as {classified_type}"
+                )
                 continue
 
             # Position-based classification for items not caught by title classifier
@@ -2283,12 +2302,18 @@ class FileService:
                 ch["content_type"] = "front_matter"
                 ch["number"] = None
                 front_count += 1
-                print(f"[EPUB-STRUCTURAL] Classified '{title[:60]}' as front_matter (positional)")
+                print(
+                    f"[EPUB-STRUCTURAL] Classified "
+                    f"'{LogSanitizer.redact(title, label='title')}' as front_matter (positional)"
+                )
             elif i > last_chapter_idx:
                 ch["content_type"] = "back_matter"
                 ch["number"] = None
                 back_count += 1
-                print(f"[EPUB-STRUCTURAL] Classified '{title[:60]}' as back_matter (positional)")
+                print(
+                    f"[EPUB-STRUCTURAL] Classified "
+                    f"'{LogSanitizer.redact(title, label='title')}' as back_matter (positional)"
+                )
             else:
                 # Between first and last chapter — it's a chapter
                 ch["content_type"] = "chapter"
@@ -2503,7 +2528,10 @@ class FileService:
                                 break
                             elif 5 < len(line_stripped) < 100 and not line_stripped.endswith("."):
                                 title = line_stripped
-                                print(f"[EPUB] Using first line as title: {title}")
+                                print(
+                                    f"[EPUB] Using first line as title: "
+                                    f"{LogSanitizer.redact(title, label='title')}"
+                                )
                                 break
 
                     # KAN-367 v3: Classify BEFORE incrementing chapter_number
@@ -3193,7 +3221,10 @@ class FileService:
             text = page.get_text()
 
             print(f"[SIMPLE TOC] Processing page {page_num + 1}")
-            print(f"[SIMPLE TOC] First 500 chars: {text[:500]}")
+            print(
+                f"[SIMPLE TOC] First 500 chars: "
+                f"{LogSanitizer.redact(text, label='page_text')}"
+            )
 
             # Focus on clear chapter patterns only
             chapter_patterns = [
@@ -3311,8 +3342,8 @@ class FileService:
 
             # DEBUG: Print text from likely TOC pages to see actual format
             if 7 <= page_num <= 12:
-                print(f"[DEBUG TOC] Page {page_num + 1} text (first 500 chars):")
-                print(repr(text[:500]))
+                print(f"[DEBUG TOC] Page {page_num + 1} text preview:")
+                print(LogSanitizer.redact(text, label='page_text'))
                 print("---END DEBUG---")
 
             # ✅ FIX: First, look for explicit TOC headers
@@ -4089,7 +4120,9 @@ class FileService:
                     used_pages.add(associated_page["text"])
 
                     print(
-                        f"[LAYOUT ANALYSIS] Matched: Chapter {numeral['number']}: {closest_title['text']} -> page {associated_page['text']}"
+                        f"[LAYOUT ANALYSIS] Matched: Chapter {numeral['number']}: "
+                        f"{LogSanitizer.redact(closest_title['text'], label='title')} -> "
+                        f"page {associated_page['text']}"
                     )
 
         return chapters
@@ -4379,7 +4412,7 @@ class FileService:
         if significant_words:
             word_matches = sum(1 for word in significant_words if word in content_lower)
             if word_matches == 0:
-                print(f"[AI VALIDATION] No title words found in content")
+                print("[AI VALIDATION] No title words found in content")
                 return False
 
         return True
@@ -5438,7 +5471,10 @@ class FileService:
             ):
                 continue
 
-            print(f"[TOC PARSING] Processing line: '{line}'")
+            print(
+                f"[TOC PARSING] Processing line: "
+                f"'{LogSanitizer.redact(line, label='line')}'"
+            )
 
             for pattern_idx, pattern in enumerate(toc_patterns):
                 match = re.match(pattern, line, re.IGNORECASE)
@@ -6699,7 +6735,10 @@ Chapters:
 
             # Clean JSON response
             print(f"[COMPLEX TOC AI] Raw AI response length: {len(content)}")
-            print(f"[COMPLEX TOC AI] First 500 chars: {content[:500]}")
+            print(
+                f"[COMPLEX TOC AI] First 500 chars: "
+                f"{LogSanitizer.redact(content, label='ai_response')}"
+            )
 
             # Remove markdown formatting if present
             if content.startswith("```"):
@@ -6819,7 +6858,8 @@ Chapters:
         except json.JSONDecodeError as e:
             print(f"[COMPLEX TOC AI] JSON decode failed: {e}")
             print(
-                f"[COMPLEX TOC AI] Failed content: {content if 'content' in locals() else 'No content'}"
+                f"[COMPLEX TOC AI] Failed content: "
+                f"{LogSanitizer.redact(content, label='ai_response') if 'content' in locals() else 'No content'}"
             )
             return []
         except Exception as e:
@@ -6943,7 +6983,10 @@ Chapters:
                 content = content[5:]
 
             print(f"[AI TOC EXTRACTION] AI response length: {len(content)}")
-            print(f"[AI TOC EXTRACTION] First 200 chars: {content[:200]}")
+            print(
+                f"[AI TOC EXTRACTION] First 200 chars: "
+                f"{LogSanitizer.redact(content, label='ai_response')}"
+            )
 
             result = json.loads(content)
             chapters = result.get("chapters", [])
@@ -7042,7 +7085,8 @@ Chapters:
         except json.JSONDecodeError as e:
             print(f"[AI TOC EXTRACTION] JSON decode failed: {e}")
             print(
-                f"[AI TOC EXTRACTION] Raw response: {response.choices[0].message.content if 'response' in locals() else 'No response'}"
+                f"[AI TOC EXTRACTION] Raw response: "
+                f"{LogSanitizer.redact(response.choices[0].message.content, label='ai_response') if 'response' in locals() else 'No response'}"
             )
             return []
         except Exception as e:
@@ -7194,7 +7238,10 @@ Chapters:
 
         print(f"[AI EXTRACTION] Processing: {chapter_title}")
         print(f"[AI EXTRACTION] Search text length: {len(search_text)}")
-        print(f"[AI EXTRACTION] First 200 chars: {search_text[:200]}...")
+        print(
+            f"[AI EXTRACTION] First 200 chars: "
+            f"{LogSanitizer.redact(search_text, label='search_text')}..."
+        )
 
         prompt = f"""
         Extract the full content for the chapter titled "{chapter_title}" from the following text.
@@ -7230,7 +7277,10 @@ Chapters:
             )
             content = response.choices[0].message.content.strip()
             print(f"[AI EXTRACTION] AI returned {len(content)} characters")
-            print(f"[AI EXTRACTION] First 200 chars of AI response: {content[:200]}...")
+            print(
+                f"[AI EXTRACTION] First 200 chars of AI response: "
+                f"{LogSanitizer.redact(content, label='ai_response')}..."
+            )
 
             # Validate the extracted content
             is_valid = self._validate_ai_extracted_content(content, chapter_title)

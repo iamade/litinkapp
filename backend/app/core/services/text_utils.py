@@ -379,4 +379,64 @@ def create_safe_openai_messages(
         ]
         
         total_tokens = token_counter.count_message_tokens(messages)
-        return messages, total_tokens 
+        return messages, total_tokens
+
+
+class LogSanitizer:
+    """Redaction utility to keep uploaded book body text out of logs."""
+
+    @staticmethod
+    def redact(value: Any, label: str = "content") -> str:
+        """Return metadata-only placeholder; never echo the actual text."""
+        if value is None:
+            return f"[REDACTED {label}: None]"
+        if not isinstance(value, str):
+            try:
+                value = str(value)
+            except Exception:
+                return f"[REDACTED {label}: non-string]"
+        return f"[REDACTED {label}: len={len(value)}]"
+
+    @staticmethod
+    def preview(value: Any, max_len: int = 0, label: str = "content") -> str:
+        """Optional short preview; max_len=0 means fully redact."""
+        if value is None:
+            return f"[REDACTED {label}: None]"
+        if not isinstance(value, str):
+            try:
+                value = str(value)
+            except Exception:
+                return f"[REDACTED {label}: non-string]"
+        if max_len <= 0:
+            return f"[REDACTED {label}: len={len(value)}]"
+        snippet = value[:max_len]
+        remaining = len(value) - max_len
+        if remaining > 0:
+            snippet += f" [+{remaining} redacted]"
+        return snippet
+
+    @staticmethod
+    def redact_mapping(
+        data: Dict[str, Any],
+        allowed_keys: Optional[List[str]] = None,
+        label: str = "content",
+    ) -> Dict[str, Any]:
+        """Return a copy of a dict with non-allowed values redacted."""
+        allowed = set(allowed_keys or [])
+        redacted: Dict[str, Any] = {}
+        for key, value in data.items():
+            if key in allowed:
+                redacted[key] = value
+            elif isinstance(value, dict):
+                redacted[key] = LogSanitizer.redact_mapping(value, allowed_keys=None, label=label)
+            elif isinstance(value, list):
+                redacted[key] = [
+                    LogSanitizer.redact_mapping(v, allowed_keys=None, label=label)
+                    if isinstance(v, dict)
+                    else LogSanitizer.redact(v, label=label)
+                    for v in value
+                ]
+            else:
+                redacted[key] = LogSanitizer.redact(value, label=label)
+        return redacted
+ 
