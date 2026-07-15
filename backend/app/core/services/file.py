@@ -5517,33 +5517,40 @@ class FileService:
 
             # Build sections (if present)
             section_id_map: Dict[str, uuid.UUID] = {}
-            order = 0
+            chapter_order = 0
+            section_order = 0
 
             # We need to commit deletions before insertions?
             # SQLAlchemy handles transaction, so it should be fine within same transaction.
 
-            for ch in confirmed_chapters:
-                order += 1
-                section_id = None
-                if ch.get("section_title"):
-                    section_key = f"{ch.get('section_title','')}|{ch.get('section_type','')}|{ch.get('section_number','')}"
+            for entry in self._iter_confirmed_structure_entries(confirmed_chapters):
+                if entry["kind"] == "section":
+                    section_data = entry["data"]
+                    section_key = entry["section_key"]
 
                     if section_key not in section_id_map:
-                        # Create new section
                         section = Section(
                             book_id=book_uuid,
-                            title=ch["section_title"],
-                            section_type=ch.get("section_type") or "",
-                            section_number=ch.get("section_number") or "",
-                            order_index=ch.get("section_order", order),
+                            title=section_data["title"],
+                            section_type=section_data.get("section_type") or "",
+                            section_number=section_data.get("section_number") or "",
+                            order_index=section_data.get("order_index", section_order),
                         )
                         session.add(section)
                         await session.flush()  # Flush to get ID
                         await session.refresh(section)
-                        section_id = section.id
-                        section_id_map[section_key] = section_id
-                    else:
-                        section_id = section_id_map[section_key]
+                        section_id_map[section_key] = section.id
+                        section_order += 1
+                        yield f"Created section: {section.title}"
+
+                    continue
+
+                ch = entry["data"]
+                chapter_order += 1
+                section_id = None
+                section_key = entry.get("section_key")
+                if section_key:
+                    section_id = section_id_map.get(section_key)
 
                 # KAN-367 v3: Preserve content_type from detection
                 content_type = ch.get("content_type", "chapter")
@@ -5554,17 +5561,17 @@ class FileService:
                 else:
                     # Use sequential numbering if not provided
                     if chapter_number is None:
-                        chapter_number = order
+                        chapter_number = chapter_order
 
                 chapter = Chapter(
                     book_id=book_uuid,
                     section_id=section_id,
                     chapter_number=chapter_number,
-                    title=ch.get("title", f"Chapter {order}"),
+                    title=ch.get("title", f"Chapter {chapter_order}"),
                     content=self._clean_text_content(ch.get("content", "")),
                     summary=self._clean_text_content(ch.get("summary", "")),
                     content_type=content_type,
-                    order_index=order,
+                    order_index=chapter_order,
                 )
                 session.add(chapter)
                 await session.flush()
@@ -5593,7 +5600,7 @@ class FileService:
                 if book:
                     book.has_sections = bool(section_id_map)
                     book.structure_type = "hierarchical" if section_id_map else "flat"
-                    book.total_chapters = order
+                    book.total_chapters = chapter_order
                     book.status = "READY"
                     book.progress = 100
                     book.progress_message = "Book structure saved successfully"
@@ -5630,7 +5637,7 @@ class FileService:
                 )
                 yield "Structure saved successfully"
                 yield f"- {len(section_id_map)} sections created"
-                yield f"- {order} chapters created"
+                yield f"- {chapter_order} chapters created"
             except Exception as e:
                 print(f"[STRUCTURE SAVE] Failed to update book metadata: {e}")
 
@@ -5639,6 +5646,115 @@ class FileService:
             yield f"Error saving structure: {str(e)}"
             print(f"[STRUCTURE SAVE] Full error: {traceback.format_exc()}")
             raise e
+
+    def _iter_confirmed_structure_entries(
+        self, confirmed_chapters: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Normalize flat and hierarchical preview payloads for persistence."""
+        entries: List[Dict[str, Any]] = []
+
+        def _section_key(section: Dict[str, Any]) -> str:
+            return (
+                f"{section.get('title','')}|"
+                f"{section.get('section_type') or section.get('type') or ''}|"
+                f"{section.get('section_number') or section.get('number') or ''}"
+            )
+
+        for index, item in enumerate(confirmed_chapters):
+            if not isinstance(item, dict):
+                continue
+
+            nested_chapters = item.get("chapters") or []
+            item_content_type = item.get("content_type", "chapter")
+            item_type = item.get("section_type") or item.get("type")
+            item_type_normalized = str(item_type or "").lower()
+            is_section_payload = bool(nested_chapters) or (
+                item_type_normalized in {"part", "book", "section"}
+                and "section_title" not in item
+            )
+            persist_as_section = (
+                bool(nested_chapters) and item_content_type == "chapter"
+            )
+
+            if is_section_payload and persist_as_section:
+                section_data = {
+                    "title": item.get("title", f"Section {index + 1}"),
+                    "section_type": item_type_normalized,
+                    "section_number": item.get("section_number")
+                    or item.get("number")
+                    or "",
+                    "order_index": item.get("order_index", index),
+                }
+                section_key = _section_key(section_data)
+                entries.append(
+                    {
+                        "kind": "section",
+                        "data": section_data,
+                        "section_key": section_key,
+                    }
+                )
+
+                for chapter in nested_chapters:
+                    if not isinstance(chapter, dict):
+                        continue
+                    chapter_data = {
+                        **chapter,
+                        "section_title": section_data["title"],
+                        "section_type": section_data["section_type"],
+                        "section_number": section_data["section_number"],
+                    }
+                    entries.append(
+                        {
+                            "kind": "chapter",
+                            "data": chapter_data,
+                            "section_key": section_key,
+                        }
+                    )
+                continue
+
+            if is_section_payload:
+                entries.append(
+                    {
+                        "kind": "chapter",
+                        "data": {
+                            **item,
+                            "title": item.get("title", f"Chapter {index + 1}"),
+                            "content_type": item_content_type,
+                        },
+                        "section_key": None,
+                    }
+                )
+                continue
+
+            section_key = None
+            if item.get("section_title"):
+                section_key = (
+                    f"{item.get('section_title','')}|"
+                    f"{item.get('section_type','')}|"
+                    f"{item.get('section_number','')}"
+                )
+                entries.append(
+                    {
+                        "kind": "section",
+                        "data": {
+                            "title": item["section_title"],
+                            "section_type": item.get("section_type") or "",
+                            "section_number": item.get("section_number") or "",
+                            "order_index": item.get("section_order", index),
+                        },
+                        "section_key": section_key,
+                    }
+                )
+
+            entries.append(
+                {
+                    "kind": "chapter",
+                    "data": item,
+                    "section_key": section_key,
+                }
+            )
+
+        return entries
 
     async def _compare_with_toc_chapter(
         self, chapter_title: str, extracted_content: str, toc_reference: Dict
