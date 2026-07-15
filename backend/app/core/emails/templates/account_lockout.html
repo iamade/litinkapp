@@ -1,26 +1,197 @@
 {% extends "base.html" %}
 
-{% block title %} Account Temporarily Locked {% endblock %}
+{% block title %}Account Temporarily Locked{% endblock %}
 
-{% block header %} Account Security Alert {% endblock %}
+{% block header %}
+<div style="margin-bottom: 8px;">
+  <span style="font-family: Arial, Helvetica, sans-serif; font-size: 20px; font-weight: bold; color: #4F46E5; letter-spacing: -0.5px;">LitInkAI</span>
+</div>
+<div style="font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: bold; color: #111827;">Account Security Alert</div>
+{% endblock %}
 
 {% block content %}
-<p style="margin: 0 0 15px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">Hello,</p>
+<!-- Scoped icon styles: fixed 56px lock badge, smooth shackle/body silhouette. -->
+<style>
+  .lock-badge {
+    width: 56px !important;
+    height: 56px !important;
+    min-width: 56px !important;
+    max-width: 56px !important;
+    background-color: #FEF3C7;
+    border-radius: 50%;
+    margin: 0 auto;
+    border-collapse: collapse;
+    table-layout: fixed !important;
+  }
+  .lock-badge td {
+    padding: 0 !important;
+    border-collapse: collapse;
+    text-align: center;
+    vertical-align: bottom;
+  }
+  .lock-icon {
+    width: 56px !important;
+    height: 56px !important;
+    border-collapse: collapse;
+    margin: 0 auto;
+  }
+  .lock-shackle {
+    width: 24px !important;
+    height: 13px !important;
+    min-width: 24px !important;
+    max-width: 24px !important;
+    min-height: 13px !important;
+    max-height: 13px !important;
+    background-color: #B45309;
+    border: 0;
+    border-radius: 12px 12px 0 0;
+    margin: 0 auto;
+    display: block;
+  }
+  .lock-body {
+    width: 32px !important;
+    height: 22px !important;
+    min-width: 32px !important;
+    max-width: 32px !important;
+    min-height: 22px !important;
+    max-height: 22px !important;
+    background-color: #B45309;
+    border: 0;
+    border-radius: 4px;
+    margin: 0 auto;
+    display: block;
+  }
+  .lock-keyhole {
+    width: 6px !important;
+    height: 10px !important;
+    min-width: 6px !important;
+    max-width: 6px !important;
+    min-height: 10px !important;
+    max-height: 10px !important;
+    background-color: #FEF3C7;
+    border-radius: 3px;
+    margin: 5px auto 0;
+    display: block;
+  }
+  @media screen and (max-width: 600px) {
+    .lock-badge,
+    .lock-icon,
+    .lock-shackle,
+    .lock-body,
+    .lock-keyhole {
+      padding: 0 !important;
+    }
+    .lock-badge {
+      width: 56px !important;
+      height: 56px !important;
+      min-width: 56px !important;
+      max-width: 56px !important;
+    }
+    .lock-icon {
+      width: 56px !important;
+      height: 56px !important;
+    }
+    .lock-shackle {
+      width: 24px !important;
+      height: 13px !important;
+      min-width: 24px !important;
+      max-width: 24px !important;
+      min-height: 13px !important;
+      max-height: 13px !important;
+    }
+    .lock-body {
+      width: 32px !important;
+      height: 22px !important;
+      min-width: 32px !important;
+      max-width: 32px !important;
+      min-height: 22px !important;
+      max-height: 22px !important;
+    }
+    .lock-keyhole {
+      width: 6px !important;
+      height: 10px !important;
+      min-width: 6px !important;
+      max-width: 6px !important;
+      min-height: 10px !important;
+      max-height: 10px !important;
+    }
+  }
+</style>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse: collapse;">
+  <tr>
+    <td align="center" style="padding: 10px 0 24px;">
+      <!-- Email-safe lock icon: smooth lock silhouette, no Unicode emoji, no external image, no SVG. -->
+      <table class="lock-badge" role="presentation" cellspacing="0" cellpadding="0" border="0" width="56" height="56" style="table-layout: fixed; border-collapse: collapse;">
+        <tr>
+          <td style="padding: 0;">
+            <table class="lock-icon" role="presentation" cellspacing="0" cellpadding="0" border="0" width="56" height="56" style="border-collapse: collapse;">
+              <tr>
+                <td align="center" valign="bottom" style="padding: 10px 0 0;">
+                  <div class="lock-shackle" width="24" height="13" style="width: 24px; height: 13px; background-color: #B45309; border-radius: 12px 12px 0 0;">&nbsp;</div>
+                  <div class="lock-body" width="32" height="22" style="width: 32px; height: 22px; background-color: #B45309; border-radius: 4px;">
+                    <div class="lock-keyhole" width="6" height="10" style="width: 6px; height: 10px; background-color: #FEF3C7; border-radius: 3px;">&nbsp;</div>
+                  </div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="text-align: center; padding-bottom: 20px;">
+      <h2 style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 22px; line-height: 1.3; color: #111827;">Your account has been temporarily locked</h2>
+    </td>
+  </tr>
+</table>
 
-<p style="margin: 0 0 15px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">For your security, your user account has been temporarily locked due to multiple failed login attempts.</p>
+<p style="margin: 0 0 16px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.6; color: #333;">
+  {% if first_name %}Hi {{ first_name|e }},{% elif display_name %}Hi {{ display_name|e }},{% else %}Hello,{% endif %}
+</p>
 
-<p style="margin: 0 0 15px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">Your account will be automatically unlocked after {{ lockout_duration }}.</p>
+<p style="margin: 0 0 16px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.6; color: #333;">
+  For your security, your LitInkAI account was temporarily locked after several failed login attempts. No one can sign in again until the lockout period ends.
+</p>
 
-<p style="margin: 0 0 10px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">If you did not attempt to login to your account, we recommend:</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse: collapse; background-color: #F9FAFB; border-left: 4px solid #B45309; margin: 0 0 20px;">
+  <tr>
+    <td style="padding: 16px;">
+      <p style="margin: 0 0 8px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; color: #374151;"><strong>Locked at:</strong> {{ lockout_time }}</p>
+      <p style="margin: 0 0 8px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; color: #374151;"><strong>Unlocks at:</strong> {{ unlock_time }}</p>
+      <p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.5; color: #374151;"><strong>Lockout duration:</strong> {{ lockout_duration }}</p>
+    </td>
+  </tr>
+</table>
 
-<ul style="list-style-type: none; padding-left: 0; margin: 0 0 15px;">
-    <li style="margin: 10px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">1. Change your password immediately when your account unlocks.</li>
-    <li style="margin: 10px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">2. Contact our support team if you believe your account has been compromised.</li>
-    <li style="margin: 10px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">3. Check your email for any suspicious activity.</li>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border-collapse: collapse; margin: 0 0 20px;">
+  <tr>
+    <td align="center" style="padding: 10px 0;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse: collapse;">
+        <tr>
+          <td align="center" style="border-radius: 6px; background-color: #4F46E5;" bgcolor="#4F46E5">
+            <a href="{{ security_action_url }}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 14px 28px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; font-weight: bold; color: #ffffff; text-decoration: none; border-radius: 6px;">Secure my account</a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+
+<p style="margin: 0 0 12px; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.6; color: #333;"><strong>Didn't try to sign in?</strong></p>
+
+<ul style="list-style-type: none; padding-left: 0; margin: 0 0 16px;">
+    <li style="margin: 8px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333; padding-left: 20px; position: relative;"><span style="position: absolute; left: 0; color: #4F46E5;">&#8226;</span>Reset your password as soon as your account unlocks.</li>
+    <li style="margin: 8px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333; padding-left: 20px; position: relative;"><span style="position: absolute; left: 0; color: #4F46E5;">&#8226;</span>Contact our support team if you believe your account is compromised.</li>
+    <li style="margin: 8px 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333; padding-left: 20px; position: relative;"><span style="position: absolute; left: 0; color: #4F46E5;">&#8226;</span>Check your email for any suspicious activity.</li>
 </ul>
 
-<p style="margin: 0 0 10px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">Time of lockout: {{ lockout_time }}</p>
-<p style="margin: 0 0 10px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">Account will unlock at: {{ unlock_time }}</p>
-<p style="margin: 0 0 15px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #333;">If you need immediate assistance, please contact our support team.</p>
+<p style="margin: 0 0 16px; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #555;">
+  If you need immediate help, reply to this email or write to <a href="mailto:{{ support_email }}" style="color: #4F46E5; text-decoration: underline;">{{ support_email }}</a>.
+</p>
 
+<p style="margin: 0; font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.6; color: #555;">
+  Stay secure,<br>
+  <strong>The LitInkAI Team</strong>
+</p>
 {% endblock %}
