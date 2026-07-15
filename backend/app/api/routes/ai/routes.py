@@ -279,6 +279,172 @@ def extract_characters(
     return characters[:10]
 
 
+GENERIC_SCREENPLAY_ROLE_NAMES = {
+    "adult",
+    "announcer",
+    "boy",
+    "child",
+    "city man",
+    "city woman",
+    "crowd",
+    "elder",
+    "female voice",
+    "girl",
+    "guide",
+    "host",
+    "kid",
+    "male voice",
+    "man",
+    "narrator",
+    "old man",
+    "old woman",
+    "person",
+    "speaker",
+    "stranger",
+    "teacher",
+    "voice",
+    "woman",
+    "young man",
+    "young woman",
+}
+
+GENERIC_SCREENPLAY_ROLE_WORDS = {
+    "adult",
+    "boy",
+    "child",
+    "city",
+    "elder",
+    "female",
+    "girl",
+    "guide",
+    "host",
+    "kid",
+    "male",
+    "man",
+    "old",
+    "person",
+    "speaker",
+    "stranger",
+    "teacher",
+    "voice",
+    "woman",
+    "young",
+}
+
+
+def _normalize_script_character_name(raw_name: str) -> str:
+    """Normalize a dialogue speaker line into a possible character name."""
+    char_name = raw_name.strip().strip("*").strip()
+    char_name = re.sub(r"\([^)]+\)", "", char_name)
+    char_name = re.sub(r"\s+", " ", char_name)
+    return char_name.strip(" :-\t\n\r\"'")
+
+
+def _is_invalid_script_character_line(line: str) -> bool:
+    """Reject markdown headings, separators, scene directions, and generic roles."""
+    stripped = line.strip()
+    if not stripped:
+        return True
+    if stripped.startswith("#"):
+        return True
+    if re.fullmatch(r"[\W_]{2,}", stripped):
+        return True
+    if re.fullmatch(r"[#*\-=._~`|\\/\s]{2,}", stripped):
+        return True
+
+    normalized = _normalize_script_character_name(stripped)
+    if not normalized or len(normalized) > 30:
+        return True
+    if not any(c.isalpha() for c in normalized):
+        return True
+
+    normalized_key = normalized.casefold()
+    if normalized_key in GENERIC_SCREENPLAY_ROLE_NAMES:
+        return True
+    words = re.findall(r"[A-Za-z]+", normalized_key)
+    if words and all(word in GENERIC_SCREENPLAY_ROLE_WORDS for word in words):
+        return True
+
+    direction_prefixes = (
+        "act",
+        "cut",
+        "cut to",
+        "dissolve",
+        "ext.",
+        "fade",
+        "int.",
+        "scene",
+    )
+    return normalized_key.startswith(direction_prefixes)
+
+
+async def _load_plot_character_map(
+    session: AsyncSession, book_id: Optional[uuid.UUID], user_id: uuid.UUID
+) -> Dict[str, Character]:
+    """Load canonical Plot Overview characters for a book/project."""
+    if not book_id:
+        return {}
+
+    plot_stmt = (
+        select(PlotOverview)
+        .where(PlotOverview.book_id == book_id, PlotOverview.user_id == user_id)
+        .order_by(desc(PlotOverview.version))
+        .limit(1)
+    )
+    plot_result = await session.exec(plot_stmt)
+    plot_overview = plot_result.first()
+    if not plot_overview:
+        return {}
+
+    char_stmt = select(Character).where(Character.plot_overview_id == plot_overview.id)
+    char_result = await session.exec(char_stmt)
+    return {
+        character.name.casefold().strip(): character
+        for character in char_result.all()
+        if character.name
+    }
+
+
+def _extract_script_characters_with_ids(
+    script_lines: List[str], canonical_characters: Dict[str, Character]
+) -> Tuple[List[str], List[str]]:
+    """Extract valid script speaker pills and resolve them to canonical Plot IDs."""
+    characters: List[str] = []
+    character_ids: List[str] = []
+    seen_names = set()
+
+    for line in script_lines:
+        line_stripped = line.strip()
+        if not line_stripped or not line_stripped.isupper():
+            continue
+        if _is_invalid_script_character_line(line_stripped):
+            continue
+        if any(x in line_stripped for x in ["**", ":", "NARRATOR ("]):
+            continue
+
+        char_name = _normalize_script_character_name(line_stripped)
+        if not (2 <= len(char_name) <= 30 and any(c.isalpha() for c in char_name)):
+            continue
+
+        canonical = canonical_characters.get(char_name.casefold())
+        if canonical_characters and not canonical:
+            continue
+
+        display_name = canonical.name if canonical else char_name.title()
+        display_key = display_name.casefold()
+        if display_key in seen_names:
+            continue
+
+        seen_names.add(display_key)
+        characters.append(display_name)
+        character_ids.append(str(canonical.id) if canonical else "")
+
+        if len(characters) >= 15:
+            break
+
+    return characters, character_ids
+
+
 def validate_script_style(script_style: str) -> str:
     """Validate and normalize script style"""
     # Map frontend values to backend values
@@ -3900,33 +4066,13 @@ Script to analyze:
         # KAN-230 FIX: Extract character names from SCRIPT dialogue speakers, NOT character_details
         # Primary method: Parse script for dialogue patterns (was previously fallback)
         print(f"[DEBUG] Extracting character names directly from script dialogue")
-        characters = []
         script_lines = script.split("\n")
-        potential_characters = set()
-
-        for i, line in enumerate(script_lines):
-            line_stripped = line.strip()
-            # Look for character names: ALL CAPS lines that are not scene headers
-            # This parses dialogue speakers from the script itself
-            if (
-                line_stripped
-                and line_stripped.isupper()
-                and not line_stripped.startswith(
-                    ("INT.", "EXT.", "SCENE", "ACT", "FADE", "CUT TO", "DISSOLVE")
-                )
-                and not any(x in line_stripped for x in ["**", ":", "NARRATOR ("])
-            ):
-                # Clean up the character name
-                char_name = line_stripped.strip("*").strip()
-                # Remove parenthetical descriptions like "(V.O.)" or "(mocking)"
-                char_name = re.sub(r"\([^)]+\)", "", char_name).strip()
-                # Only add if it looks like a valid name (2-30 chars, contains letters)
-                if 2 <= len(char_name) <= 30 and any(
-                    c.isalpha() for c in char_name
-                ):
-                    potential_characters.add(char_name.title())
-
-        characters = list(potential_characters)[:15]  # Limit to 15 characters
+        canonical_characters = await _load_plot_character_map(
+            session, book_id, current_user.id
+        )
+        characters, character_ids = _extract_script_characters_with_ids(
+            script_lines, canonical_characters
+        )
         print(
             f"[DEBUG] Extracted {len(characters)} characters from script dialogue: {characters}"
         )
@@ -3962,6 +4108,7 @@ Script to analyze:
             "sub_scenes_metadata": sub_scenes_metadata,  # Sub-scene breakdown for images
             "dialogue_moments": dialogue_moments_by_scene,  # Suggested shots per scene
             "characters": characters,
+            "character_ids": character_ids,
             "character_details": character_details,
             "script_style": script_style,
             "script_name": script_name,
@@ -3994,6 +4141,7 @@ Script to analyze:
             "video_style": script_style,  # Required field - use script_style as default
             "scene_descriptions": scene_descriptions,
             "characters": characters,
+            "character_ids": character_ids,
             "character_details": character_details,
             "metadata": script_data["metadata"],
             "status": "ready",
@@ -4060,6 +4208,7 @@ Script to analyze:
             "script": script,
             "scene_descriptions": scene_descriptions,
             "characters": characters,
+            "character_ids": character_ids,
             "character_details": character_details,
             "script_style": script_style,
             "metadata": script_data["metadata"],
