@@ -2004,6 +2004,48 @@ class FileService:
     def _is_semantic_heading_candidate(self, title: str) -> bool:
         return self.structure_detector._is_semantic_heading_candidate(title)
 
+    @staticmethod
+    def _is_epub_document_item(item: Any) -> bool:
+        """Return True for EPUB spine items that contain HTML/XHTML content.
+
+        Some valid EPUBs expose chapter pages as generic EpubItem objects with
+        get_type() == ITEM_UNKNOWN/0 instead of ITEM_DOCUMENT. Media type and
+        href are more reliable for deciding whether the payload is parseable
+        document content.
+        """
+        try:
+            if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                return True
+        except Exception:
+            pass
+
+        media_type = (getattr(item, "media_type", "") or "").lower()
+        if media_type in {"application/xhtml+xml", "text/html"}:
+            return True
+
+        item_name = ""
+        try:
+            item_name = (item.get_name() or "").lower()
+        except Exception:
+            item_name = ""
+        if item_name.endswith((".xhtml", ".html", ".htm")):
+            return True
+
+        # Last-resort sniff for malformed manifests that omit the media type.
+        try:
+            raw_content = item.get_content()
+        except Exception:
+            return False
+        if not isinstance(raw_content, (bytes, bytearray)):
+            return False
+        sample = bytes(raw_content[:512]).decode(
+            "utf-8", errors="ignore"
+        ).lower()
+        return any(
+            marker in sample
+            for marker in ("<html", "<body", "<!doctype html")
+        )
+
     def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
         self.ai_service = AIService()
@@ -2570,7 +2612,7 @@ class FileService:
                 item_type = item.get_type()
                 print(f"[EPUB] Item {idx} (id: {item_id}): type = {item_type}")
 
-                if item_type == ebooklib.ITEM_DOCUMENT:
+                if self._is_epub_document_item(item):
                     # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
                     soup = BeautifulSoup(item.get_content(), "lxml")
 
@@ -2797,7 +2839,7 @@ class FileService:
             text_content = []
 
             for item in book.get_items():
-                if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                if self._is_epub_document_item(item):
                     # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
                     soup = BeautifulSoup(item.get_content(), "lxml")
 

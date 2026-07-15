@@ -475,3 +475,54 @@ class TestKan434Kan440SharedParserScope:
         assert [chapter["title"] for chapter in chapters] == ["Chapter 1", "Chapter 2"]
         assert all(chapter["content_type"] == "chapter" for chapter in chapters)
         assert all(chapter["use_in_generation"] is True for chapter in chapters)
+
+    @pytest.mark.asyncio
+    async def test_type_zero_xhtml_spine_items_are_parsed_as_documents(
+        self, tmp_path
+    ):
+        from ebooklib import epub
+        from app.core.services.file import FileService
+
+        epub_path = tmp_path / "type-zero-xhtml-spine.epub"
+        book = epub.EpubBook()
+        book.set_identifier("kan-445-type-zero-spine")
+        book.set_title("Type Zero XHTML Spine")
+        book.set_language("en")
+
+        page_one = epub.EpubItem(
+            uid="page_1",
+            file_name="page_1.xhtml",
+            media_type="application/xhtml+xml",
+            content=(
+                "<html><body><h1>Chapter 1</h1>"
+                f"<p>{_long_filler(90)}</p></body></html>"
+            ).encode("utf-8"),
+        )
+        page_two = epub.EpubItem(
+            uid="page_2",
+            file_name="page_2.xhtml",
+            media_type="application/xhtml+xml",
+            content=(
+                "<html><body><h1>Chapter 2</h1>"
+                f"<p>{_long_filler(90)}</p></body></html>"
+            ).encode("utf-8"),
+        )
+        book.add_item(page_one)
+        book.add_item(page_two)
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+        book.spine = [page_one, page_two]
+        epub.write_epub(str(epub_path), book)
+
+        file_service = FileService()
+
+        chapters = file_service.extract_epub_chapters(str(epub_path))
+        payload = await file_service.process_epub(str(epub_path))
+
+        assert [chapter["title"] for chapter in chapters] == [
+            "Chapter 1",
+            "Chapter 2",
+        ]
+        assert all(chapter["content_type"] == "chapter" for chapter in chapters)
+        assert "Chapter 1" in payload["text"]
+        assert "Chapter 2" in payload["text"]
