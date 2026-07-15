@@ -5,6 +5,7 @@ from typing import Dict, Iterable, List
 from app.core.model_config import (
     AUDIO_MODEL_CONFIG,
     IMAGE_MODEL_CONFIG,
+    TTS_TIER_CONFIG,
     VIDEO_MODEL_CONFIG,
     ModelConfig,
     ModelTier,
@@ -18,7 +19,7 @@ class MediaRouter:
         "image": IMAGE_MODEL_CONFIG,
         "video": VIDEO_MODEL_CONFIG,
         "audio": AUDIO_MODEL_CONFIG,
-        "tts": AUDIO_MODEL_CONFIG,
+        "tts": TTS_TIER_CONFIG,
     }
 
     SUPPORTED_PROVIDERS = {
