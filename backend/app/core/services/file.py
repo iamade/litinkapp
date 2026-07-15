@@ -2046,6 +2046,44 @@ class FileService:
             for marker in ("<html", "<body", "<!doctype html")
         )
 
+    @staticmethod
+    def _epub_spine_item_id(spine_entry: Any) -> Any:
+        """Return the idref/item id from an ebooklib spine entry."""
+        if isinstance(spine_entry, (tuple, list)) and spine_entry:
+            return spine_entry[0]
+        return spine_entry
+
+    def _get_epub_item_by_spine_id(self, book: Any, item_id: Any) -> Any:
+        """Resolve a spine idref to a manifest item, including href-based idrefs."""
+        if hasattr(item_id, "get_content"):
+            return item_id
+
+        item = book.get_item_with_id(item_id)
+        if item:
+            return item
+
+        item_id_str = str(item_id)
+        for manifest_item in book.get_items():
+            item_name = ""
+            try:
+                item_name = manifest_item.get_name()
+            except Exception:
+                item_name = ""
+
+            if (
+                manifest_item.get_id() == item_id
+                or item_name == item_id_str
+                or item_name.endswith("/" + item_id_str)
+            ):
+                return manifest_item
+        return None
+
+    def _iter_epub_spine_items(self, book: Any):
+        """Yield spine items in reading order with their index and idref."""
+        for idx, spine_entry in enumerate(book.spine):
+            item_id = self._epub_spine_item_id(spine_entry)
+            yield idx, item_id, self._get_epub_item_by_spine_id(book, item_id)
+
     def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
         self.ai_service = AIService()
@@ -2587,24 +2625,7 @@ class FileService:
             chapter_number = 0
             skipped_count = 0
 
-            for idx, (item_id, _) in enumerate(spine):
-                item = book.get_item_with_id(item_id)
-
-                if not item:
-                    # Fallback: some EPUBs use the manifest href as the spine idref
-                    for manifest_item in book.get_items():
-                        if (
-                            manifest_item.get_id() == item_id
-                            or manifest_item.get_name() == item_id
-                            or manifest_item.get_name().endswith("/" + item_id)
-                        ):
-                            item = manifest_item
-                            print(
-                                f"[EPUB] Item {idx}: Resolved idref '{item_id}' via manifest name "
-                                f"'{manifest_item.get_name()}'"
-                            )
-                            break
-
+            for idx, item_id, item in self._iter_epub_spine_items(book):
                 if not item:
                     print(f"[EPUB] Item {idx}: Could not get item with id '{item_id}'")
                     continue
@@ -2835,34 +2856,55 @@ class FileService:
                 print(f"[DEBUG] Error extracting author metadata: {e}")
                 author = None
 
-            # Extract text from all document items
+            # Extract text from spine document items in reading order. Some EPUBs
+            # expose HTML page items as ebooklib type 0, so media_type/href decide
+            # document parsing instead of get_type() alone.
             text_content = []
+            processed_items = set()
 
-            for item in book.get_items():
-                if self._is_epub_document_item(item):
-                    # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
-                    soup = BeautifulSoup(item.get_content(), "lxml")
+            def append_text_from_item(item: Any) -> None:
+                if not item or not self._is_epub_document_item(item):
+                    return
 
-                    # Remove script and style elements
-                    for script in soup(["script", "style"]):
-                        script.decompose()
+                item_key = id(item)
+                try:
+                    item_key = item.get_id() or item.get_name() or item_key
+                except Exception:
+                    pass
+                if item_key in processed_items:
+                    return
+                processed_items.add(item_key)
 
-                    # Get text and clean it
-                    text = soup.get_text()
+                # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
+                soup = BeautifulSoup(item.get_content(), "lxml")
 
-                    # Break into lines and remove leading/trailing space on each
-                    lines = (line.strip() for line in text.splitlines())
+                # Remove script and style elements
+                for script in soup(["script", "style"]):
+                    script.decompose()
 
-                    # Break multi-headlines into a line each
-                    chunks = (
-                        phrase.strip() for line in lines for phrase in line.split("  ")
-                    )
+                # Get text and clean it
+                text = soup.get_text()
 
-                    # Drop blank lines
-                    text = "\n".join(chunk for chunk in chunks if chunk)
+                # Break into lines and remove leading/trailing space on each
+                lines = (line.strip() for line in text.splitlines())
 
-                    if text:
-                        text_content.append(text)
+                # Break multi-headlines into a line each
+                chunks = (
+                    phrase.strip() for line in lines for phrase in line.split("  ")
+                )
+
+                # Drop blank lines
+                text = "\n".join(chunk for chunk in chunks if chunk)
+
+                if text:
+                    text_content.append(text)
+
+            for _, _, item in self._iter_epub_spine_items(book):
+                append_text_from_item(item)
+
+            if not text_content:
+                for item in book.get_items():
+                    append_text_from_item(item)
 
             # Combine all text
             full_text = "\n\n".join(text_content)
