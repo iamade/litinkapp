@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict, Optional
 
 import httpx
@@ -33,6 +34,8 @@ class PiAPIClient:
             raise RuntimeError("PIAPI_API_KEY_LITINKAI missing")
 
         payload = {"model": model, "task_type": task_type, "input": input}
+        start = time.monotonic()
+        logger.info("[PiAPI] Creating %s task with model %s", task_type, model)
         try:
             async with httpx.AsyncClient(
                 base_url=self._base_url_for_client(),
@@ -53,7 +56,13 @@ class PiAPIClient:
             raise RuntimeError(
                 self._redact(f"PiAPI create_task response missing task id: {data}")
             )
-        logger.info("[PiAPI] Created %s task %s with model %s", task_type, task_id, model)
+        logger.info(
+            "[PiAPI] Created %s task %s with model %s elapsed=%.2fs",
+            task_type,
+            task_id,
+            model,
+            time.monotonic() - start,
+        )
         return task_id
 
     async def poll_task(
@@ -69,6 +78,8 @@ class PiAPIClient:
         interval = poll_interval_seconds or self.poll_interval_seconds
         deadline = asyncio.get_event_loop().time() + max_wait_seconds
         last_result: Dict[str, Any] = {"status": "processing", "metadata": {}}
+        start = time.monotonic()
+        logger.info("[PiAPI] Polling task %s", task_id)
 
         while True:
             try:
@@ -87,6 +98,12 @@ class PiAPIClient:
 
             last_result = self._standardize_task_response(data)
             if last_result["status"] in {"success", "error"}:
+                logger.info(
+                    "[PiAPI] Task %s finished status=%s elapsed=%.2fs",
+                    task_id,
+                    last_result["status"],
+                    time.monotonic() - start,
+                )
                 return last_result
 
             if asyncio.get_event_loop().time() >= deadline:
