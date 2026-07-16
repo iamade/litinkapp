@@ -67,6 +67,11 @@ frontend/SKILL.md
 kan-*-summary.md
 kan-*-fix-summary.md
 
+# Local test artifacts and agent evidence — keep off GitHub
+/backend/tmp/
+/dispatch-reports/
+/tmp/
+
 # Docker compose files - should not be on GitHub (contain dev credentials)
 docker-compose*.yml
 
