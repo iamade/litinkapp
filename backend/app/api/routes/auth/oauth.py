@@ -25,6 +25,13 @@ GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USER_INFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
+def _invalid_oauth_state_redirect() -> RedirectResponse:
+    return RedirectResponse(
+        url=f"{settings.FRONTEND_URL}/auth?oauth_error=invalid_state",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 def _absolute_oauth_redirect_uri(request: Request, provider: str) -> str:
     """Build the exact absolute callback URI used for both OAuth phases."""
     for base_url in (settings.OAUTH_REDIRECT_BASE_URL, settings.API_BASE_URL):
@@ -65,7 +72,7 @@ async def login(provider: str, request: Request):
 
     # Generate a cryptographically random per-request CSRF state.
     state = secrets.token_urlsafe(32)
-    oauth_state_store.store_state(state)
+    await oauth_state_store.store_state(state)
 
     if provider == OAuthProvider.GOOGLE:
         if not settings.GOOGLE_CLIENT_ID:
@@ -125,20 +132,14 @@ async def callback(
     # Validate OAuth CSRF state before processing the callback.
     if not state:
         logger.error("OAuth callback missing state parameter (provider=%s)", provider)
-        raise HTTPException(
-            status_code=400,
-            detail="Missing state parameter — CSRF validation failed",
-        )
-    if not oauth_state_store.consume_state(state):
+        return _invalid_oauth_state_redirect()
+    if not await oauth_state_store.consume_state(state):
         logger.error(
             "OAuth state validation failed (provider=%s, state_prefix=%s…)",
             provider,
             state[:8] if len(state) > 8 else state,
         )
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid or expired state parameter — CSRF validation failed",
-        )
+        return _invalid_oauth_state_redirect()
 
     redirect_uri = _absolute_oauth_redirect_uri(request, provider)
 
