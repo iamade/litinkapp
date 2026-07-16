@@ -2004,6 +2004,86 @@ class FileService:
     def _is_semantic_heading_candidate(self, title: str) -> bool:
         return self.structure_detector._is_semantic_heading_candidate(title)
 
+    @staticmethod
+    def _is_epub_document_item(item: Any) -> bool:
+        """Return True for EPUB spine items that contain HTML/XHTML content.
+
+        Some valid EPUBs expose chapter pages as generic EpubItem objects with
+        get_type() == ITEM_UNKNOWN/0 instead of ITEM_DOCUMENT. Media type and
+        href are more reliable for deciding whether the payload is parseable
+        document content.
+        """
+        try:
+            if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                return True
+        except Exception:
+            pass
+
+        media_type = (getattr(item, "media_type", "") or "").lower()
+        if media_type in {"application/xhtml+xml", "text/html"}:
+            return True
+
+        item_name = ""
+        try:
+            item_name = (item.get_name() or "").lower()
+        except Exception:
+            item_name = ""
+        if item_name.endswith((".xhtml", ".html", ".htm")):
+            return True
+
+        # Last-resort sniff for malformed manifests that omit the media type.
+        try:
+            raw_content = item.get_content()
+        except Exception:
+            return False
+        if not isinstance(raw_content, (bytes, bytearray)):
+            return False
+        sample = bytes(raw_content[:512]).decode(
+            "utf-8", errors="ignore"
+        ).lower()
+        return any(
+            marker in sample
+            for marker in ("<html", "<body", "<!doctype html")
+        )
+
+    @staticmethod
+    def _epub_spine_item_id(spine_entry: Any) -> Any:
+        """Return the idref/item id from an ebooklib spine entry."""
+        if isinstance(spine_entry, (tuple, list)) and spine_entry:
+            return spine_entry[0]
+        return spine_entry
+
+    def _get_epub_item_by_spine_id(self, book: Any, item_id: Any) -> Any:
+        """Resolve a spine idref to a manifest item, including href-based idrefs."""
+        if hasattr(item_id, "get_content"):
+            return item_id
+
+        item = book.get_item_with_id(item_id)
+        if item:
+            return item
+
+        item_id_str = str(item_id)
+        for manifest_item in book.get_items():
+            item_name = ""
+            try:
+                item_name = manifest_item.get_name()
+            except Exception:
+                item_name = ""
+
+            if (
+                manifest_item.get_id() == item_id
+                or item_name == item_id_str
+                or item_name.endswith("/" + item_id_str)
+            ):
+                return manifest_item
+        return None
+
+    def _iter_epub_spine_items(self, book: Any):
+        """Yield spine items in reading order with their index and idref."""
+        for idx, spine_entry in enumerate(book.spine):
+            item_id = self._epub_spine_item_id(spine_entry)
+            yield idx, item_id, self._get_epub_item_by_spine_id(book, item_id)
+
     def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
         self.ai_service = AIService()
@@ -2545,24 +2625,7 @@ class FileService:
             chapter_number = 0
             skipped_count = 0
 
-            for idx, (item_id, _) in enumerate(spine):
-                item = book.get_item_with_id(item_id)
-
-                if not item:
-                    # Fallback: some EPUBs use the manifest href as the spine idref
-                    for manifest_item in book.get_items():
-                        if (
-                            manifest_item.get_id() == item_id
-                            or manifest_item.get_name() == item_id
-                            or manifest_item.get_name().endswith("/" + item_id)
-                        ):
-                            item = manifest_item
-                            print(
-                                f"[EPUB] Item {idx}: Resolved idref '{item_id}' via manifest name "
-                                f"'{manifest_item.get_name()}'"
-                            )
-                            break
-
+            for idx, item_id, item in self._iter_epub_spine_items(book):
                 if not item:
                     print(f"[EPUB] Item {idx}: Could not get item with id '{item_id}'")
                     continue
@@ -2570,7 +2633,7 @@ class FileService:
                 item_type = item.get_type()
                 print(f"[EPUB] Item {idx} (id: {item_id}): type = {item_type}")
 
-                if item_type == ebooklib.ITEM_DOCUMENT:
+                if self._is_epub_document_item(item):
                     # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
                     soup = BeautifulSoup(item.get_content(), "lxml")
 
@@ -2793,34 +2856,55 @@ class FileService:
                 print(f"[DEBUG] Error extracting author metadata: {e}")
                 author = None
 
-            # Extract text from all document items
+            # Extract text from spine document items in reading order. Some EPUBs
+            # expose HTML page items as ebooklib type 0, so media_type/href decide
+            # document parsing instead of get_type() alone.
             text_content = []
+            processed_items = set()
 
-            for item in book.get_items():
-                if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                    # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
-                    soup = BeautifulSoup(item.get_content(), "lxml")
+            def append_text_from_item(item: Any) -> None:
+                if not item or not self._is_epub_document_item(item):
+                    return
 
-                    # Remove script and style elements
-                    for script in soup(["script", "style"]):
-                        script.decompose()
+                item_key = id(item)
+                try:
+                    item_key = item.get_id() or item.get_name() or item_key
+                except Exception:
+                    pass
+                if item_key in processed_items:
+                    return
+                processed_items.add(item_key)
 
-                    # Get text and clean it
-                    text = soup.get_text()
+                # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
+                soup = BeautifulSoup(item.get_content(), "lxml")
 
-                    # Break into lines and remove leading/trailing space on each
-                    lines = (line.strip() for line in text.splitlines())
+                # Remove script and style elements
+                for script in soup(["script", "style"]):
+                    script.decompose()
 
-                    # Break multi-headlines into a line each
-                    chunks = (
-                        phrase.strip() for line in lines for phrase in line.split("  ")
-                    )
+                # Get text and clean it
+                text = soup.get_text()
 
-                    # Drop blank lines
-                    text = "\n".join(chunk for chunk in chunks if chunk)
+                # Break into lines and remove leading/trailing space on each
+                lines = (line.strip() for line in text.splitlines())
 
-                    if text:
-                        text_content.append(text)
+                # Break multi-headlines into a line each
+                chunks = (
+                    phrase.strip() for line in lines for phrase in line.split("  ")
+                )
+
+                # Drop blank lines
+                text = "\n".join(chunk for chunk in chunks if chunk)
+
+                if text:
+                    text_content.append(text)
+
+            for _, _, item in self._iter_epub_spine_items(book):
+                append_text_from_item(item)
+
+            if not text_content:
+                for item in book.get_items():
+                    append_text_from_item(item)
 
             # Combine all text
             full_text = "\n\n".join(text_content)
@@ -5475,33 +5559,40 @@ class FileService:
 
             # Build sections (if present)
             section_id_map: Dict[str, uuid.UUID] = {}
-            order = 0
+            chapter_order = 0
+            section_order = 0
 
             # We need to commit deletions before insertions?
             # SQLAlchemy handles transaction, so it should be fine within same transaction.
 
-            for ch in confirmed_chapters:
-                order += 1
-                section_id = None
-                if ch.get("section_title"):
-                    section_key = f"{ch.get('section_title','')}|{ch.get('section_type','')}|{ch.get('section_number','')}"
+            for entry in self._iter_confirmed_structure_entries(confirmed_chapters):
+                if entry["kind"] == "section":
+                    section_data = entry["data"]
+                    section_key = entry["section_key"]
 
                     if section_key not in section_id_map:
-                        # Create new section
                         section = Section(
                             book_id=book_uuid,
-                            title=ch["section_title"],
-                            section_type=ch.get("section_type") or "",
-                            section_number=ch.get("section_number") or "",
-                            order_index=ch.get("section_order", order),
+                            title=section_data["title"],
+                            section_type=section_data.get("section_type") or "",
+                            section_number=section_data.get("section_number") or "",
+                            order_index=section_data.get("order_index", section_order),
                         )
                         session.add(section)
                         await session.flush()  # Flush to get ID
                         await session.refresh(section)
-                        section_id = section.id
-                        section_id_map[section_key] = section_id
-                    else:
-                        section_id = section_id_map[section_key]
+                        section_id_map[section_key] = section.id
+                        section_order += 1
+                        yield f"Created section: {section.title}"
+
+                    continue
+
+                ch = entry["data"]
+                chapter_order += 1
+                section_id = None
+                section_key = entry.get("section_key")
+                if section_key:
+                    section_id = section_id_map.get(section_key)
 
                 # KAN-367 v3: Preserve content_type from detection
                 content_type = ch.get("content_type", "chapter")
@@ -5512,17 +5603,17 @@ class FileService:
                 else:
                     # Use sequential numbering if not provided
                     if chapter_number is None:
-                        chapter_number = order
+                        chapter_number = chapter_order
 
                 chapter = Chapter(
                     book_id=book_uuid,
                     section_id=section_id,
                     chapter_number=chapter_number,
-                    title=ch.get("title", f"Chapter {order}"),
+                    title=ch.get("title", f"Chapter {chapter_order}"),
                     content=self._clean_text_content(ch.get("content", "")),
                     summary=self._clean_text_content(ch.get("summary", "")),
                     content_type=content_type,
-                    order_index=order,
+                    order_index=chapter_order,
                 )
                 session.add(chapter)
                 await session.flush()
@@ -5551,7 +5642,7 @@ class FileService:
                 if book:
                     book.has_sections = bool(section_id_map)
                     book.structure_type = "hierarchical" if section_id_map else "flat"
-                    book.total_chapters = order
+                    book.total_chapters = chapter_order
                     book.status = "READY"
                     book.progress = 100
                     book.progress_message = "Book structure saved successfully"
@@ -5588,7 +5679,7 @@ class FileService:
                 )
                 yield "Structure saved successfully"
                 yield f"- {len(section_id_map)} sections created"
-                yield f"- {order} chapters created"
+                yield f"- {chapter_order} chapters created"
             except Exception as e:
                 print(f"[STRUCTURE SAVE] Failed to update book metadata: {e}")
 
@@ -5597,6 +5688,115 @@ class FileService:
             yield f"Error saving structure: {str(e)}"
             print(f"[STRUCTURE SAVE] Full error: {traceback.format_exc()}")
             raise e
+
+    def _iter_confirmed_structure_entries(
+        self, confirmed_chapters: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Normalize flat and hierarchical preview payloads for persistence."""
+        entries: List[Dict[str, Any]] = []
+
+        def _section_key(section: Dict[str, Any]) -> str:
+            return (
+                f"{section.get('title','')}|"
+                f"{section.get('section_type') or section.get('type') or ''}|"
+                f"{section.get('section_number') or section.get('number') or ''}"
+            )
+
+        for index, item in enumerate(confirmed_chapters):
+            if not isinstance(item, dict):
+                continue
+
+            nested_chapters = item.get("chapters") or []
+            item_content_type = item.get("content_type", "chapter")
+            item_type = item.get("section_type") or item.get("type")
+            item_type_normalized = str(item_type or "").lower()
+            is_section_payload = bool(nested_chapters) or (
+                item_type_normalized in {"part", "book", "section"}
+                and "section_title" not in item
+            )
+            persist_as_section = (
+                bool(nested_chapters) and item_content_type == "chapter"
+            )
+
+            if is_section_payload and persist_as_section:
+                section_data = {
+                    "title": item.get("title", f"Section {index + 1}"),
+                    "section_type": item_type_normalized,
+                    "section_number": item.get("section_number")
+                    or item.get("number")
+                    or "",
+                    "order_index": item.get("order_index", index),
+                }
+                section_key = _section_key(section_data)
+                entries.append(
+                    {
+                        "kind": "section",
+                        "data": section_data,
+                        "section_key": section_key,
+                    }
+                )
+
+                for chapter in nested_chapters:
+                    if not isinstance(chapter, dict):
+                        continue
+                    chapter_data = {
+                        **chapter,
+                        "section_title": section_data["title"],
+                        "section_type": section_data["section_type"],
+                        "section_number": section_data["section_number"],
+                    }
+                    entries.append(
+                        {
+                            "kind": "chapter",
+                            "data": chapter_data,
+                            "section_key": section_key,
+                        }
+                    )
+                continue
+
+            if is_section_payload:
+                entries.append(
+                    {
+                        "kind": "chapter",
+                        "data": {
+                            **item,
+                            "title": item.get("title", f"Chapter {index + 1}"),
+                            "content_type": item_content_type,
+                        },
+                        "section_key": None,
+                    }
+                )
+                continue
+
+            section_key = None
+            if item.get("section_title"):
+                section_key = (
+                    f"{item.get('section_title','')}|"
+                    f"{item.get('section_type','')}|"
+                    f"{item.get('section_number','')}"
+                )
+                entries.append(
+                    {
+                        "kind": "section",
+                        "data": {
+                            "title": item["section_title"],
+                            "section_type": item.get("section_type") or "",
+                            "section_number": item.get("section_number") or "",
+                            "order_index": item.get("section_order", index),
+                        },
+                        "section_key": section_key,
+                    }
+                )
+
+            entries.append(
+                {
+                    "kind": "chapter",
+                    "data": item,
+                    "section_key": section_key,
+                }
+            )
+
+        return entries
 
     async def _compare_with_toc_chapter(
         self, chapter_title: str, extracted_content: str, toc_reference: Dict

@@ -475,3 +475,129 @@ class TestKan434Kan440SharedParserScope:
         assert [chapter["title"] for chapter in chapters] == ["Chapter 1", "Chapter 2"]
         assert all(chapter["content_type"] == "chapter" for chapter in chapters)
         assert all(chapter["use_in_generation"] is True for chapter in chapters)
+
+    @pytest.mark.asyncio
+    async def test_type_zero_xhtml_spine_items_are_parsed_as_documents(
+        self, tmp_path
+    ):
+        from ebooklib import epub
+        from app.core.services.file import FileService
+
+        epub_path = tmp_path / "type-zero-xhtml-spine.epub"
+        book = epub.EpubBook()
+        book.set_identifier("kan-445-type-zero-spine")
+        book.set_title("Type Zero XHTML Spine")
+        book.set_language("en")
+
+        page_one = epub.EpubItem(
+            uid="page_1",
+            file_name="page_1.xhtml",
+            media_type="application/xhtml+xml",
+            content=(
+                "<html><body><h1>Chapter 1</h1>"
+                f"<p>{_long_filler(90)}</p></body></html>"
+            ).encode("utf-8"),
+        )
+        page_two = epub.EpubItem(
+            uid="page_2",
+            file_name="page_2.xhtml",
+            media_type="application/xhtml+xml",
+            content=(
+                "<html><body><h1>Chapter 2</h1>"
+                f"<p>{_long_filler(90)}</p></body></html>"
+            ).encode("utf-8"),
+        )
+        book.add_item(page_one)
+        book.add_item(page_two)
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+        book.spine = [page_one, page_two]
+        epub.write_epub(str(epub_path), book)
+
+        file_service = FileService()
+
+        chapters = file_service.extract_epub_chapters(str(epub_path))
+        payload = await file_service.process_epub(str(epub_path))
+
+        assert [chapter["title"] for chapter in chapters] == [
+            "Chapter 1",
+            "Chapter 2",
+        ]
+        assert all(chapter["content_type"] == "chapter" for chapter in chapters)
+        assert "Chapter 1" in payload["text"]
+        assert "Chapter 2" in payload["text"]
+
+    @pytest.mark.asyncio
+    async def test_type_zero_xhtml_pages_are_read_from_large_spine(
+        self, monkeypatch
+    ):
+        from app.core.services.file import FileService
+
+        class FakeSpineItem:
+            def __init__(self, uid, name, media_type, content):
+                self.uid = uid
+                self.media_type = media_type
+                self._name = name
+                self._content = content.encode("utf-8")
+
+            def get_id(self):
+                return self.uid
+
+            def get_name(self):
+                return self._name
+
+            def get_type(self):
+                return 0
+
+            def get_content(self):
+                return self._content
+
+        class FakeBook:
+            def __init__(self):
+                self.items = {}
+                for idx in range(1, 367):
+                    self.items[f"page_{idx}"] = FakeSpineItem(
+                        f"page_{idx}",
+                        f"text/page_{idx}.xhtml",
+                        "application/xhtml+xml",
+                        (
+                            f"<html><body><h1>Chapter {idx}</h1>"
+                            f"<p>{_long_filler(90)}</p></body></html>"
+                        ),
+                    )
+                self.items["cover"] = FakeSpineItem(
+                    "cover", "images/cover.jpg", "image/jpeg", "not html"
+                )
+                self.items["style"] = FakeSpineItem(
+                    "style", "styles/book.css", "text/css", "body {}"
+                )
+                self.spine = [
+                    *[(f"page_{idx}", "yes") for idx in range(1, 367)],
+                    ("cover", "no"),
+                    ("style", "no"),
+                ]
+
+            def get_metadata(self, *_args):
+                return []
+
+            def get_item_with_id(self, item_id):
+                return self.items.get(item_id)
+
+            def get_items(self):
+                return [self.items["cover"], self.items["style"]]
+
+        monkeypatch.setattr(
+            "app.core.services.file.epub.read_epub",
+            lambda _file_path: FakeBook(),
+        )
+
+        file_service = FileService()
+
+        chapters = file_service.extract_epub_chapters("great-expectations.epub")
+        payload = await file_service.process_epub("great-expectations.epub")
+
+        assert len(chapters) == 366
+        assert chapters[0]["title"] == "Chapter 1"
+        assert chapters[-1]["title"] == "Chapter 366"
+        assert "Chapter 1" in payload["text"]
+        assert "Chapter 366" in payload["text"]
