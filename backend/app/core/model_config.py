@@ -368,36 +368,54 @@ AUDIO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         primary="eleven_turbo_v2",
         fallback="eleven_multilingual_v2",
         fallback2="eleven_english_v1",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/ace-step",
     ),
     ModelTier.BASIC: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="eleven_turbo_v2",
         fallback2="eleven_english_v1",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/ace-step",
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
         fallback2="eleven_english_v1",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/ace-step",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
         fallback2="eleven_english_v1",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/ace-step",
     ),
     ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
-        fallback2=None,
+        fallback2="piapi/f5tts",
+        fallback3="piapi/fx-musicgen",
+        fallback4="piapi/ace-step",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
-        fallback2=None,
+        fallback2="piapi/f5tts",
+        fallback3="piapi/fx-musicgen",
+        fallback4="piapi/ace-step",
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
-        fallback2=None,
+        fallback2="piapi/f5tts",
+        fallback3="piapi/fx-musicgen",
+        fallback4="piapi/ace-step",
     ),
 }
 
@@ -407,35 +425,53 @@ TTS_TIER_CONFIG: Dict[ModelTier, ModelConfig] = {
         primary="elevenlabs/eleven_turbo_v2",
         fallback="openai/tts-1",
         fallback2="google/text-to-speech",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/ace-step",
     ),
     ModelTier.BASIC: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="google/text-to-speech",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/ace-step",
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="google/text-to-speech",
         fallback3="fish-speech/default",
+        fallback4="piapi/f5tts",
+        fallback5="piapi/fx-musicgen",
+        fallback6="piapi/ace-step",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="google/text-to-speech",
         fallback3="fish-speech/default",
+        fallback4="piapi/f5tts",
+        fallback5="piapi/fx-musicgen",
+        fallback6="piapi/ace-step",
     ),
     ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="fish-speech/default",
         fallback3="google/text-to-speech",
+        fallback4="piapi/f5tts",
+        fallback5="piapi/fx-musicgen",
+        fallback6="piapi/ace-step",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="fish-speech/default",
         fallback3="google/text-to-speech",
+        fallback4="piapi/f5tts",
+        fallback5="piapi/fx-musicgen",
+        fallback6="piapi/ace-step",
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
@@ -443,6 +479,9 @@ TTS_TIER_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="fish-speech/default",
         fallback3="google/text-to-speech",
         fallback4="kokoro/default",
+        fallback5="piapi/f5tts",
+        fallback6="piapi/fx-musicgen",
+        fallback7="piapi/ace-step",
     ),
 }
 
