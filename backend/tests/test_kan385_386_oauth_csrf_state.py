@@ -3,17 +3,19 @@ Regression tests for OAuth CSRF state validation (KAN-385, KAN-386).
 
 Covers:
 - State match success (valid state → callback proceeds past validation)
-- State mismatch (unknown state → 400)
-- State replay/reuse (same state consumed twice → second call fails)
-- Missing state (no state param → 400)
+- State mismatch (unknown state → friendly invalid-state redirect)
+- State replay/reuse (same state consumed twice → second call fails closed)
+- Missing state (no state param → friendly invalid-state redirect)
 """
 
 import secrets
+import time
 import urllib.parse
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.auth.oauth_models import OAuthProvider
@@ -28,10 +30,52 @@ pytestmark = pytest.mark.asyncio
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _store_valid_state() -> str:
+class FakeRedisClient:
+    def __init__(self):
+        self._store: dict[str, tuple[str, float | None]] = {}
+
+    async def set(self, key: str, value: str, ex: int | None = None):
+        expires_at = time.monotonic() + ex if ex is not None else None
+        self._store[key] = (value, expires_at)
+        return True
+
+    async def eval(self, script: str, numkeys: int, key: str):
+        item = self._store.get(key)
+        if item is None:
+            return 0
+
+        value, expires_at = item
+        if expires_at is not None and time.monotonic() > expires_at:
+            self._store.pop(key, None)
+            return 0
+
+        self._store.pop(key, None)
+        return 1 if value is not None else 0
+
+    async def delete(self, *keys: str):
+        for key in keys:
+            self._store.pop(key, None)
+
+    async def scan_iter(self, match: str):
+        prefix = match.removesuffix("*")
+        for key in list(self._store):
+            if key.startswith(prefix):
+                yield key
+
+
+class FakeRedisService:
+    def __init__(self):
+        self.redis_client = FakeRedisClient()
+        self.is_connected = True
+
+    async def connect(self):
+        self.is_connected = True
+
+
+async def _store_valid_state() -> str:
     """Generate and store a valid state, returning the token."""
     state = secrets.token_urlsafe(32)
-    oauth_state_store.store_state(state)
+    await oauth_state_store.store_state(state)
     return state
 
 
@@ -42,16 +86,27 @@ def _callback_url(provider: str, code: str = "test-auth-code", state: str | None
     return url
 
 
+def _assert_invalid_state_redirect(resp):
+    assert resp.status_code == 303
+    assert resp.headers["location"] == (
+        f"{settings.FRONTEND_URL}/auth?oauth_error=invalid_state"
+    )
+    assert "application/json" not in resp.headers.get("content-type", "")
+
+
 # ---------------------------------------------------------------------------
 # Fixture: clean the state store before each test
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(autouse=True)
-def _clean_state_store():
-    oauth_state_store.clear()
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_state_store():
+    original = oauth_state_store._redis_service
+    oauth_state_store._redis_service = FakeRedisService()
+    await oauth_state_store.clear()
     yield
-    oauth_state_store.clear()
+    await oauth_state_store.clear()
+    oauth_state_store._redis_service = original
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +116,7 @@ def _clean_state_store():
 
 async def test_callback_valid_state_passes_validation():
     """A callback with a valid, unexpired state passes CSRF validation."""
-    state = _store_valid_state()
+    state = await _store_valid_state()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -79,7 +134,7 @@ async def test_callback_valid_state_passes_validation():
 
 
 async def test_callback_missing_state_rejected():
-    """A callback without a state parameter is rejected with 400."""
+    """A callback without a state parameter fails closed with a friendly redirect."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(
@@ -87,13 +142,11 @@ async def test_callback_missing_state_rejected():
             follow_redirects=False,
         )
 
-    assert resp.status_code == 400
-    detail = resp.json().get("detail", "")
-    assert "Missing state" in detail or "CSRF" in detail
+    _assert_invalid_state_redirect(resp)
 
 
 async def test_callback_unknown_state_rejected():
-    """A callback with a state that was never stored is rejected with 400."""
+    """A callback with a state that was never stored fails closed."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get(
@@ -101,14 +154,12 @@ async def test_callback_unknown_state_rejected():
             follow_redirects=False,
         )
 
-    assert resp.status_code == 400
-    detail = resp.json().get("detail", "")
-    assert "Invalid" in detail or "expired" in detail or "CSRF" in detail
+    _assert_invalid_state_redirect(resp)
 
 
 async def test_callback_state_replay_rejected():
-    """A state consumed once cannot be replayed — second use returns 400."""
-    state = _store_valid_state()
+    """A state consumed once cannot be replayed."""
+    state = await _store_valid_state()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -124,9 +175,7 @@ async def test_callback_state_replay_rejected():
             follow_redirects=False,
         )
 
-    assert resp.status_code == 400
-    detail = resp.json().get("detail", "")
-    assert "Invalid" in detail or "expired" in detail or "CSRF" in detail
+    _assert_invalid_state_redirect(resp)
 
 
 

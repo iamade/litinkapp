@@ -8,30 +8,109 @@ redirect status, Location header, and the auth cookies set by set_auth_cookies.
 """
 
 import secrets
+import time
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.auth.oauth_models import OAuthProvider
 from app.auth.oauth_state import oauth_state_store
+from app.core.database import get_session
 from app.main import app
 
 
 pytestmark = pytest.mark.asyncio
 
 
-def _store_valid_state() -> str:
+class FakeRedisClient:
+    def __init__(self):
+        self._store: dict[str, tuple[str, float | None]] = {}
+
+    async def set(self, key: str, value: str, ex: int | None = None):
+        expires_at = time.monotonic() + ex if ex is not None else None
+        self._store[key] = (value, expires_at)
+        return True
+
+    async def eval(self, script: str, numkeys: int, key: str):
+        item = self._store.get(key)
+        if item is None:
+            return 0
+
+        value, expires_at = item
+        if expires_at is not None and time.monotonic() > expires_at:
+            self._store.pop(key, None)
+            return 0
+
+        self._store.pop(key, None)
+        return 1 if value is not None else 0
+
+    async def delete(self, *keys: str):
+        for key in keys:
+            self._store.pop(key, None)
+
+    async def scan_iter(self, match: str):
+        prefix = match.removesuffix("*")
+        for key in list(self._store):
+            if key.startswith(prefix):
+                yield key
+
+
+class FakeRedisService:
+    def __init__(self):
+        self.redis_client = FakeRedisClient()
+        self.is_connected = True
+
+    async def connect(self):
+        self.is_connected = True
+
+
+class _EmptyResult:
+    def first(self):
+        return None
+
+
+class FakeSession:
+    def __init__(self):
+        self.added = []
+
+    async def exec(self, statement):
+        return _EmptyResult()
+
+    def add(self, item):
+        self.added.append(item)
+
+    async def commit(self):
+        return None
+
+    async def refresh(self, item):
+        return None
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _fake_oauth_state_store():
+    original = oauth_state_store._redis_service
+    oauth_state_store._redis_service = FakeRedisService()
+    app.dependency_overrides[get_session] = lambda: FakeSession()
+    await oauth_state_store.clear()
+    yield
+    await oauth_state_store.clear()
+    app.dependency_overrides.pop(get_session, None)
+    oauth_state_store._redis_service = original
+
+
+async def _store_valid_state() -> str:
     state = secrets.token_urlsafe(32)
-    oauth_state_store.store_state(state)
+    await oauth_state_store.store_state(state)
     return state
 
 
 async def test_oauth_callback_redirect_preserves_auth_cookies():
     """KAN-385/386: the injected response must carry Set-Cookie on 307 redirect."""
-    oauth_state_store.clear()
-    state = _store_valid_state()
+    await oauth_state_store.clear()
+    state = await _store_valid_state()
 
     token_res = httpx.Response(
         200,
@@ -52,18 +131,6 @@ async def test_oauth_callback_redirect_preserves_auth_cookies():
             "picture": "https://example.com/pic.png",
         },
     )
-
-    # Clean up any prior test user with the same display_name so the
-    # unique constraint doesn't cause a flaky failure in local DB.
-    from sqlalchemy import text
-    from app.core.database import engine
-    async with engine.begin() as conn:
-        await conn.execute(
-            text("DELETE FROM user_oauth WHERE email LIKE 'unit.cookie.%@test.litinkai.com'")
-        )
-        await conn.execute(
-            text("DELETE FROM \"user\" WHERE email LIKE 'unit.cookie.%@test.litinkai.com'")
-        )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
