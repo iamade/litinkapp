@@ -37,6 +37,7 @@ export default function AuthPage() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const { login, register, resendVerificationEmail } = useAuth();
   const navigate = useNavigate();
+  const oauthError = searchParams.get('oauth_error');
 
   // Sync mode with URL params
   useEffect(() => {
@@ -44,13 +45,19 @@ export default function AuthPage() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (searchParams.get('oauth_error') === 'account_unavailable') {
+    if (oauthError === 'account_unavailable') {
       toast.error(
         "We couldn't sign in with that Google account. Please choose an active account or use email and password.",
         { id: 'oauth-account-unavailable' }
       );
     }
-  }, [searchParams]);
+    if (oauthError === 'invalid_state') {
+      toast.error(
+        "Your sign-in session expired or is invalid. Please try signing in again.",
+        { id: 'oauth-invalid-state' }
+      );
+    }
+  }, [oauthError]);
 
 
 
@@ -157,6 +164,15 @@ export default function AuthPage() {
                           : "Turn your script or prompt into stunning videos instantly. Sign up for free today."}
                     </p>
                 </div>
+
+                {oauthError === 'invalid_state' && (
+                    <div
+                        role="alert"
+                        className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
+                    >
+                        Your sign-in session expired. Please try signing in with Google again.
+                    </div>
+                )}
 
                 <form className="space-y-5" onSubmit={handleSubmit}>
                     
