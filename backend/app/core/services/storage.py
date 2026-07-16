@@ -325,6 +325,7 @@ class S3StorageService:
 
     def get_public_url(self, path: str) -> str:
         """Get public URL for a file"""
+        path = self._strip_url_prefix(path).lstrip("/")
         if self.use_minio:
             return f"{self._minio_public_url_base()}/{self.bucket_name}/{path}"
         elif settings.S3_ENDPOINT:
@@ -338,6 +339,14 @@ class S3StorageService:
         else:
             # AWS S3 public URL
             return f"https://{self.bucket_name}.s3.{settings.S3_REGION}.amazonaws.com/{path}"
+
+    def presigned_url(self, path: str, expiration: int = 3600) -> str:
+        """Return a signed/public URL suitable for provider input.
+
+        Local MinIO dev uses public bucket URLs; production backends can replace
+        this with real presigning without changing callers.
+        """
+        return self.get_public_url(path)
 
     async def delete(self, path: str) -> bool:
         """Delete file from storage"""

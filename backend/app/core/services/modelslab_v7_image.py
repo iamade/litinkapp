@@ -95,6 +95,14 @@ class ModelsLabV7ImageService:
             "instagram_story": "1080:1920",
         }
 
+    @staticmethod
+    def _redact_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a log-safe copy of a ModelsLab payload."""
+        return {
+            key: ("***" if key.lower() in {"key", "api_key"} else value)
+            for key, value in payload.items()
+        }
+
     async def generate_image(
         self,
         prompt: str,
@@ -244,11 +252,7 @@ class ModelsLabV7ImageService:
             logger.info(f"[MODELSLAB V7 IMAGE] Generating image with model: {model_id}")
             logger.info(f"[MODELSLAB V7 IMAGE] Prompt: {prompt[:100]}...")
             logger.info(f"[DEBUG] API endpoint: {self.image_endpoint}")
-            redacted_payload = {
-                key: ("***" if key == "key" else value)
-                for key, value in payload.items()
-            }
-            logger.info(f"[DEBUG] API payload: {redacted_payload}")
+            logger.info(f"[DEBUG] API payload: {self._redact_payload(payload)}")
 
             async with aiohttp.ClientSession() as session:
                 # Submit generation request with extended timeout
@@ -1093,7 +1097,7 @@ class ModelsLabV7ImageService:
                 "track_id": None,
             }
 
-            logger.info(f"[IMAGE EXPAND] Payload: {payload}")
+            logger.info(f"[IMAGE EXPAND] Payload: {self._redact_payload(payload)}")
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(

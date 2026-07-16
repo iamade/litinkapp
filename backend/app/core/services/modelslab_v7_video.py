@@ -58,6 +58,11 @@ class ModelsLabV7VideoService:
             "omni-human-1.5": 2,
         }
 
+    def _redact(self, value: str) -> str:
+        if self.api_key:
+            return value.replace(self.api_key, "***")
+        return value
+
     def get_max_audio_duration(self, model_id: str) -> Optional[float]:
         """Return max audio duration in seconds for a model, or None if no limit."""
         return self.model_audio_limits.get(model_id)
@@ -169,7 +174,9 @@ class ModelsLabV7VideoService:
 
                         if response.status != 200:
                             error_text = await response.text()
-                            raise Exception(f"HTTP {response.status}: {error_text}")
+                            raise Exception(
+                                self._redact(f"HTTP {response.status}: {error_text}")
+                            )
 
                         result = await response.json()
 
@@ -234,7 +241,7 @@ class ModelsLabV7VideoService:
 
             except Exception as e:
                 logger.error(
-                    f"[MODELSLAB V7 VIDEO ERROR] with {current_description}: {str(e)}"
+                    f"[MODELSLAB V7 VIDEO ERROR] with {current_description}: {self._redact(str(e))}"
                 )
                 last_error = e
 
@@ -246,10 +253,10 @@ class ModelsLabV7VideoService:
 
         # If we get here, both attempts failed
         error_msg = (
-            f"Both veo2 and seedance-i2v models failed. Last error: {str(last_error)}"
+            f"Both veo2 and seedance-i2v models failed. Last error: {self._redact(str(last_error))}"
         )
         logger.error(f"[MODELSLAB V7 VIDEO] {error_msg}")
-        raise Exception(error_msg)
+        raise Exception(self._redact(error_msg))
 
     async def generate_lip_sync(
         self, video_url: str, audio_url: str, model_id: str = "lipsync-2"
@@ -279,7 +286,9 @@ class ModelsLabV7VideoService:
 
                     if response.status != 200:
                         error_text = await response.text()
-                        raise Exception(f"HTTP {response.status}: {error_text}")
+                        raise Exception(
+                            self._redact(f"HTTP {response.status}: {error_text}")
+                        )
 
                     result = await response.json()
 
@@ -308,8 +317,10 @@ class ModelsLabV7VideoService:
                     return processed_response
 
         except Exception as e:
-            logger.error(f"[MODELSLAB V7 LIPSYNC ERROR]: {str(e)}")
-            raise e
+            logger.error(f"[MODELSLAB V7 LIPSYNC ERROR]: {self._redact(str(e))}")
+            raise RuntimeError(
+                self._redact(f"ModelsLab lip-sync failed: {e}")
+            ) from e
 
     async def enhance_video_for_scene(
         self,
@@ -1188,6 +1199,7 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                                     "message",
                                     result.get("error", "Unknown error during polling"),
                                 )
+                                error_msg = self._redact(str(error_msg))
                                 logger.error(
                                     f"[MODELSLAB V7 VIDEO] Polling error: {error_msg}"
                                 )
@@ -1209,7 +1221,7 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                         else:
                             error_text = await response.text()
                             logger.error(
-                                f"[MODELSLAB V7 VIDEO] HTTP {response.status} during polling: {error_text}"
+                                f"[MODELSLAB V7 VIDEO] HTTP {response.status} during polling: {self._redact(error_text)}"
                             )
 
                             # Try fallback retrieval if available
@@ -1224,7 +1236,9 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                             await asyncio.sleep(10)
 
             except Exception as e:
-                logger.error(f"[MODELSLAB V7 VIDEO] Polling exception: {str(e)}")
+                logger.error(
+                    f"[MODELSLAB V7 VIDEO] Polling exception: {self._redact(str(e))}"
+                )
                 # Try fallback retrieval if available
                 if future_links:
                     fallback_result = await self._try_fallback_retrieval(future_links)
@@ -1321,13 +1335,17 @@ engaging visual storytelling, seamless transitions, cinematic composition.
                 error_message = response.get(
                     "message", response.get("error", "Unknown error")
                 )
-                raise Exception(f"{operation_type} failed: {error_message}")
+                raise Exception(
+                    self._redact(f"{operation_type} failed: {error_message}")
+                )
 
         except Exception as e:
-            logger.error(f"[MODELSLAB V7 VIDEO] Response processing error: {e}")
+            logger.error(
+                f"[MODELSLAB V7 VIDEO] Response processing error: {self._redact(str(e))}"
+            )
             return {
                 "status": "error",
-                "error": str(e),
+                "error": self._redact(str(e)),
                 "operation_type": operation_type,
                 "raw_response": response,
             }

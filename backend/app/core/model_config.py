@@ -273,44 +273,49 @@ VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
         primary="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p - basic lip-sync capable
         fallback="wan2.6-i2v",  # Wan2.6-I2V (ModelsLab) - upgraded fallback
-        fallback2=None,
-        fallback3=None,
+        fallback2="piapi/kling-2.5-turbo",
+        fallback3="piapi/wan2.1-i2v",
     ),
     ModelTier.BASIC: ModelConfig(
         primary="wan2.6-i2v",  # Wan2.6-I2V (ModelsLab) 720p - better audio sync
         fallback="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p fallback
-        fallback2=None,
-        fallback3=None,
+        fallback2="piapi/kling-2.5-turbo",
+        fallback3="piapi/wan2.1-i2v",
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) - talking head specialist
         fallback="wan2.6-i2v",  # Wan2.6-I2V fallback
         fallback2="wan2.5-i2v",  # Wan2.5-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling-2.5-turbo",
+        fallback4="piapi/wan2.1-i2v",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="omni-human",  # Omni-Human (ModelsLab) - high quality talking head
         fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling-2.5-turbo",
+        fallback4="piapi/wan2.1-i2v",
     ),
     ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
         primary="omni-human",  # Omni-Human (ModelsLab) - professional quality
         fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling-2.5-turbo",
+        fallback4="piapi/wan2.1-i2v",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="omni-human",  # Omni-Human (ModelsLab) - professional quality
         fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling-2.5-turbo",
+        fallback4="piapi/wan2.1-i2v",
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="omni-human-1.5",  # Omni-Human-1.5 - best for enterprise (stable)
         fallback="omni-human",  # Omni-Human fallback
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling-2.5-turbo",
+        fallback4="piapi/wan2.1-i2v",
     ),
 }
 
