@@ -244,7 +244,11 @@ class ModelsLabV7ImageService:
             logger.info(f"[MODELSLAB V7 IMAGE] Generating image with model: {model_id}")
             logger.info(f"[MODELSLAB V7 IMAGE] Prompt: {prompt[:100]}...")
             logger.info(f"[DEBUG] API endpoint: {self.image_endpoint}")
-            logger.info(f"[DEBUG] API payload: {payload}")
+            redacted_payload = {
+                key: ("***" if key == "key" else value)
+                for key, value in payload.items()
+            }
+            logger.info(f"[DEBUG] API payload: {redacted_payload}")
 
             async with aiohttp.ClientSession() as session:
                 # Submit generation request with extended timeout
