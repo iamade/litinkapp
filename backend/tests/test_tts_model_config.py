@@ -15,7 +15,7 @@ EXPECTED_GLOBAL_TTS_CHAINS = {
         "google/text-to-speech",
         "piapi/f5tts",
         "piapi/fx-musicgen",
-        "piapi/ace-step",
+        "piapi/Qubico/ace-step",
     ],
     "basic": [
         "elevenlabs/eleven_multilingual_v2",
@@ -23,7 +23,7 @@ EXPECTED_GLOBAL_TTS_CHAINS = {
         "google/text-to-speech",
         "piapi/f5tts",
         "piapi/fx-musicgen",
-        "piapi/ace-step",
+        "piapi/Qubico/ace-step",
     ],
     "standard": [
         "elevenlabs/eleven_multilingual_v2",
@@ -32,7 +32,7 @@ EXPECTED_GLOBAL_TTS_CHAINS = {
         "fish-speech/default",
         "piapi/f5tts",
         "piapi/fx-musicgen",
-        "piapi/ace-step",
+        "piapi/Qubico/ace-step",
     ],
     "premium": [
         "elevenlabs/eleven_multilingual_v2",
@@ -41,7 +41,7 @@ EXPECTED_GLOBAL_TTS_CHAINS = {
         "fish-speech/default",
         "piapi/f5tts",
         "piapi/fx-musicgen",
-        "piapi/ace-step",
+        "piapi/Qubico/ace-step",
     ],
     "pro": [
         "elevenlabs/eleven_multilingual_v2",
@@ -50,7 +50,7 @@ EXPECTED_GLOBAL_TTS_CHAINS = {
         "google/text-to-speech",
         "piapi/f5tts",
         "piapi/fx-musicgen",
-        "piapi/ace-step",
+        "piapi/Qubico/ace-step",
     ],
     "professional": [
         "elevenlabs/eleven_multilingual_v2",
@@ -59,7 +59,7 @@ EXPECTED_GLOBAL_TTS_CHAINS = {
         "google/text-to-speech",
         "piapi/f5tts",
         "piapi/fx-musicgen",
-        "piapi/ace-step",
+        "piapi/Qubico/ace-step",
     ],
     "enterprise": [
         "elevenlabs/eleven_multilingual_v2",
@@ -69,7 +69,7 @@ EXPECTED_GLOBAL_TTS_CHAINS = {
         "kokoro/default",
         "piapi/f5tts",
         "piapi/fx-musicgen",
-        "piapi/ace-step",
+        "piapi/Qubico/ace-step",
     ],
 }
 

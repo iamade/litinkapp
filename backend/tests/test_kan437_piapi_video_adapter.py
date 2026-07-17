@@ -67,12 +67,17 @@ async def test_image_to_video_modelslab_failure_falls_back_to_piapi():
 
     assert result["status"] == "success"
     assert result["canonical_url"].startswith("http://localhost:9000/litinkai-staging/")
-    assert result["provider_url"] == "https://cdn.piapi.ai/image2video.mp4"
+    assert result["provider_url"] == "https://cdn.piapi.ai/video_generation.mp4"
     assert result["metadata"]["provider"] == "piapi"
-    assert piapi.calls[-1]["task_type"] == "image2video"
+    assert result["metadata"]["model"] == "kling"
+    assert piapi.calls[-1]["model"] == "kling"
+    assert piapi.calls[-1]["task_type"] == "video_generation"
     assert piapi.calls[-1]["input"]["image_url"].startswith(
         "http://localhost:9000/litinkai-staging/"
     )
+    assert piapi.calls[-1]["input"]["version"] == "2.5"
+    assert piapi.calls[-1]["input"]["mode"] == "std"
+    assert piapi.calls[-1]["input"]["duration"] == 5
     storage.persist_from_url.assert_awaited_once()
 
 

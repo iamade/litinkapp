@@ -139,14 +139,16 @@ async def test_music_modelslab_failure_falls_back_to_piapi():
     )
 
     assert result["status"] == "success"
-    assert result["provider_url"] == "https://cdn.piapi.ai/music.mp3"
+    assert result["provider_url"] == "https://cdn.piapi.ai/txt2audio.mp3"
     assert result["metadata"]["provider"] == "piapi"
-    assert result["metadata"]["model"] == "ace-step"
-    assert piapi.calls[-1]["task_type"] == "music"
+    assert result["metadata"]["model"] == "Qubico/ace-step"
+    assert piapi.calls[-1]["model"] == "Qubico/ace-step"
+    assert piapi.calls[-1]["task_type"] == "txt2audio"
     assert piapi.calls[-1]["input"] == {
-        "prompt": "tense orchestral trailer cue",
+        "style_prompt": "cinematic: tense orchestral trailer cue",
+        "negative_prompt": "low quality, distorted, clipping",
+        "lyrics": "[Instrumental]",
         "duration": 30,
-        "style": "cinematic",
     }
 
 
