@@ -9,25 +9,57 @@ from app.tasks import audio_tasks
 
 
 EXPECTED_GLOBAL_TTS_CHAINS = {
-    "free": ["elevenlabs/eleven_turbo_v2", "openai/tts-1", "google/text-to-speech"],
-    "basic": ["elevenlabs/eleven_multilingual_v2", "openai/tts-1-hd", "google/text-to-speech"],
+    "free": [
+        "elevenlabs/eleven_turbo_v2",
+        "openai/tts-1",
+        "google/text-to-speech",
+        "piapi/f5tts",
+        "piapi/fx-musicgen",
+        "piapi/Qubico/ace-step",
+    ],
+    "basic": [
+        "elevenlabs/eleven_multilingual_v2",
+        "openai/tts-1-hd",
+        "google/text-to-speech",
+        "piapi/f5tts",
+        "piapi/fx-musicgen",
+        "piapi/Qubico/ace-step",
+    ],
     "standard": [
         "elevenlabs/eleven_multilingual_v2",
         "openai/tts-1-hd",
         "google/text-to-speech",
         "fish-speech/default",
+        "piapi/f5tts",
+        "piapi/fx-musicgen",
+        "piapi/Qubico/ace-step",
     ],
     "premium": [
         "elevenlabs/eleven_multilingual_v2",
         "openai/tts-1-hd",
         "google/text-to-speech",
         "fish-speech/default",
+        "piapi/f5tts",
+        "piapi/fx-musicgen",
+        "piapi/Qubico/ace-step",
+    ],
+    "pro": [
+        "elevenlabs/eleven_multilingual_v2",
+        "openai/tts-1-hd",
+        "fish-speech/default",
+        "google/text-to-speech",
+        "piapi/f5tts",
+        "piapi/fx-musicgen",
+        "piapi/Qubico/ace-step",
     ],
     "professional": [
         "elevenlabs/eleven_multilingual_v2",
         "openai/tts-1-hd",
         "fish-speech/default",
         "google/text-to-speech",
+        "piapi/f5tts",
+        "piapi/fx-musicgen",
+        "piapi/Qubico/ace-step",
     ],
     "enterprise": [
         "elevenlabs/eleven_multilingual_v2",
@@ -35,6 +67,9 @@ EXPECTED_GLOBAL_TTS_CHAINS = {
         "fish-speech/default",
         "google/text-to-speech",
         "kokoro/default",
+        "piapi/f5tts",
+        "piapi/fx-musicgen",
+        "piapi/Qubico/ace-step",
     ],
 }
 
@@ -54,17 +89,7 @@ DISALLOWED_CHAPTER_AUDIO_PROVIDERS = (
 
 
 def _configured_chain(config):
-    return [
-        model
-        for model in (
-            config.primary,
-            config.fallback,
-            config.fallback2,
-            config.fallback3,
-            config.fallback4,
-        )
-        if model
-    ]
+    return config.models
 
 
 def test_global_tts_tier_config_preserves_broader_provider_fallbacks():
@@ -82,6 +107,7 @@ def test_global_tts_tier_config_preserves_broader_provider_fallbacks():
     assert "google/text-to-speech" in global_models
     assert "fish-speech/default" in global_models
     assert "kokoro/default" in global_models
+    assert "piapi/f5tts" in global_models
 
 
 def test_chapter_audio_narrator_character_path_uses_scoped_modelslab_chain():

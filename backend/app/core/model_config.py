@@ -1,7 +1,6 @@
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
-from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger()
@@ -138,41 +137,48 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         primary="seedream-t2i",  # Seedream (ModelsLab V7) Per image generation will cost $0.033
         fallback="seedream-4",  # Seedream-4 (ModelsLab V7) Per image generation will cost $0.033
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
+        fallback3="piapi/Qubico/flux1-schnell",
     ),
     ModelTier.BASIC: ModelConfig(
         primary="seedream-4",  # Seedream-4 (ModelsLab V7) Per image generation will cost $0.033
         fallback="imagen-4",  # imagen-4 (ModelsLab API) Per image generation will cost 0.044$
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
+        fallback3="piapi/Qubico/flux1-schnell",
         # fallback2="qwen-image-2512",  # Qwen-Image-2512 (Direct API)
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="imagen-4",  # imagen-4 (ModelsLab API) Per image generation will cost 0.044$
         fallback="nano-banana-t2i",  # nano-banana-t2i (ModelsLab V7) working Your request will cost $0.046
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
+        fallback3="piapi/Qubico/flux1-schnell",
         # fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="nano-banana-t2i",  # nano-banana-t2i (ModelsLab V7) working Your request will cost $0.046
         fallback="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
         fallback2="nano-banana-pro",  #  nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
+        fallback3="piapi/Qubico/flux1-schnell",
         # fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
     ),
     ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
         primary="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
         fallback="imagen-4.0-ultra",  #  imagen-4.0-ultra (ModelsLab API) Per image generation will cost 0.072$
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
+        fallback3="piapi/Qubico/flux1-schnell",
         #  fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
         fallback="imagen-4.0-ultra",  #  imagen-4.0-ultra (ModelsLab API) Per image generation will cost 0.072$
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
+        fallback3="piapi/Qubico/flux1-schnell",
         #  fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         fallback="gpt-image-1.5",  # GPT-Image-1.5 (Direct API)
         fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
+        fallback3="piapi/Qubico/flux1-schnell",
         # fallback3="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
     ),
 }
@@ -266,44 +272,49 @@ VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
         primary="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p - basic lip-sync capable
         fallback="wan2.6-i2v",  # Wan2.6-I2V (ModelsLab) - upgraded fallback
-        fallback2=None,
-        fallback3=None,
+        fallback2="piapi/kling",
+        fallback3="piapi/wan2.1-i2v",
     ),
     ModelTier.BASIC: ModelConfig(
         primary="wan2.6-i2v",  # Wan2.6-I2V (ModelsLab) 720p - better audio sync
         fallback="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p fallback
-        fallback2=None,
-        fallback3=None,
+        fallback2="piapi/kling",
+        fallback3="piapi/wan2.1-i2v",
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) - talking head specialist
         fallback="wan2.6-i2v",  # Wan2.6-I2V fallback
         fallback2="wan2.5-i2v",  # Wan2.5-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling",
+        fallback4="piapi/wan2.1-i2v",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="omni-human",  # Omni-Human (ModelsLab) - high quality talking head
         fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling",
+        fallback4="piapi/wan2.1-i2v",
     ),
     ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
         primary="omni-human",  # Omni-Human (ModelsLab) - professional quality
         fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling",
+        fallback4="piapi/wan2.1-i2v",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="omni-human",  # Omni-Human (ModelsLab) - professional quality
         fallback="omni-human-1.5",  # Omni-Human-1.5 fallback
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling",
+        fallback4="piapi/wan2.1-i2v",
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="omni-human-1.5",  # Omni-Human-1.5 - best for enterprise (stable)
         fallback="omni-human",  # Omni-Human fallback
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
-        fallback3=None,
+        fallback3="piapi/kling",
+        fallback4="piapi/wan2.1-i2v",
     ),
 }
 
@@ -356,36 +367,54 @@ AUDIO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         primary="eleven_turbo_v2",
         fallback="eleven_multilingual_v2",
         fallback2="eleven_english_v1",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/Qubico/ace-step",
     ),
     ModelTier.BASIC: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="eleven_turbo_v2",
         fallback2="eleven_english_v1",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/Qubico/ace-step",
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
         fallback2="eleven_english_v1",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/Qubico/ace-step",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
         fallback2="eleven_english_v1",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/Qubico/ace-step",
     ),
     ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
-        fallback2=None,
+        fallback2="piapi/f5tts",
+        fallback3="piapi/fx-musicgen",
+        fallback4="piapi/Qubico/ace-step",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
-        fallback2=None,
+        fallback2="piapi/f5tts",
+        fallback3="piapi/fx-musicgen",
+        fallback4="piapi/Qubico/ace-step",
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="eleven_multilingual_v2",
         fallback="elevenlabs/eleven_multilingual_v2",  # Direct ElevenLabs Fallback
-        fallback2=None,
+        fallback2="piapi/f5tts",
+        fallback3="piapi/fx-musicgen",
+        fallback4="piapi/Qubico/ace-step",
     ),
 }
 
@@ -395,35 +424,53 @@ TTS_TIER_CONFIG: Dict[ModelTier, ModelConfig] = {
         primary="elevenlabs/eleven_turbo_v2",
         fallback="openai/tts-1",
         fallback2="google/text-to-speech",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/Qubico/ace-step",
     ),
     ModelTier.BASIC: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="google/text-to-speech",
+        fallback3="piapi/f5tts",
+        fallback4="piapi/fx-musicgen",
+        fallback5="piapi/Qubico/ace-step",
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="google/text-to-speech",
         fallback3="fish-speech/default",
+        fallback4="piapi/f5tts",
+        fallback5="piapi/fx-musicgen",
+        fallback6="piapi/Qubico/ace-step",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="google/text-to-speech",
         fallback3="fish-speech/default",
+        fallback4="piapi/f5tts",
+        fallback5="piapi/fx-musicgen",
+        fallback6="piapi/Qubico/ace-step",
     ),
     ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="fish-speech/default",
         fallback3="google/text-to-speech",
+        fallback4="piapi/f5tts",
+        fallback5="piapi/fx-musicgen",
+        fallback6="piapi/Qubico/ace-step",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
         fallback="openai/tts-1-hd",
         fallback2="fish-speech/default",
         fallback3="google/text-to-speech",
+        fallback4="piapi/f5tts",
+        fallback5="piapi/fx-musicgen",
+        fallback6="piapi/Qubico/ace-step",
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="elevenlabs/eleven_multilingual_v2",
@@ -431,6 +478,9 @@ TTS_TIER_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="fish-speech/default",
         fallback3="google/text-to-speech",
         fallback4="kokoro/default",
+        fallback5="piapi/f5tts",
+        fallback6="piapi/fx-musicgen",
+        fallback7="piapi/Qubico/ace-step",
     ),
 }
 
