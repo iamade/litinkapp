@@ -233,15 +233,19 @@ class PiAPIVideoAdapter:
         duration: Optional[float],
         aspect_ratio: Optional[str],
     ) -> Dict[str, Any]:
-        input_payload: Dict[str, Any] = {"image_url": image_url, "prompt": prompt}
-        if duration is not None:
-            input_payload["duration"] = duration
+        input_payload: Dict[str, Any] = {
+            "image_url": image_url,
+            "prompt": prompt,
+            "duration": int(duration or 5),
+            "version": "2.5",
+            "mode": "std",
+        }
         if aspect_ratio:
             input_payload["aspect_ratio"] = aspect_ratio
 
         result = await self.piapi.create_and_poll(
             model=model_id,
-            task_type="image2video",
+            task_type="video_generation",
             input=input_payload,
         )
         return {

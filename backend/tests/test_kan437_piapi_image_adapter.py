@@ -49,6 +49,7 @@ async def test_modelslab_failure_falls_back_to_piapi_and_persists():
     )
     assert result["provider_url"] == "https://cdn.piapi.ai/generated.png"
     assert result["metadata"]["provider"] == "piapi"
-    assert result["metadata"]["model"] == "flux-schnell"
-    assert piapi.calls[0]["model"] == "flux-schnell"
+    assert result["metadata"]["model"] == "Qubico/flux1-schnell"
+    assert piapi.calls[0]["model"] == "Qubico/flux1-schnell"
+    assert piapi.calls[0]["task_type"] == "txt2img"
     storage.persist_from_url.assert_awaited_once()
