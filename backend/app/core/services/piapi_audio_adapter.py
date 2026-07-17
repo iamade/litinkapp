@@ -308,13 +308,17 @@ class PiAPIAudioAdapter:
         style: Optional[str],
         model_id: str,
     ) -> Dict[str, Any]:
-        input_payload: Dict[str, Any] = {"prompt": prompt, "duration": duration}
-        if style:
-            input_payload["style"] = style
+        style_prompt = f"{style}: {prompt}" if style else prompt
+        input_payload: Dict[str, Any] = {
+            "style_prompt": style_prompt,
+            "negative_prompt": "low quality, distorted, clipping",
+            "lyrics": "[Instrumental]",
+            "duration": duration,
+        }
 
         result = await self.piapi.create_and_poll(
             model=model_id,
-            task_type="music",
+            task_type="txt2audio",
             input=input_payload,
         )
         return self._standardize_piapi_result(result)

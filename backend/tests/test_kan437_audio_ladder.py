@@ -39,7 +39,7 @@ def test_piapi_audio_fallbacks_are_appended_to_raw_configs():
 
         assert "piapi/f5tts" in audio_models
         assert "piapi/fx-musicgen" in audio_models
-        assert "piapi/ace-step" in audio_models
+        assert "piapi/Qubico/ace-step" in audio_models
         assert "piapi/f5tts" in tts_models
         assert "piapi/fx-musicgen" in tts_models
-        assert "piapi/ace-step" in tts_models
+        assert "piapi/Qubico/ace-step" in tts_models
