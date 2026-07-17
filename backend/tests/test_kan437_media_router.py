@@ -31,4 +31,4 @@ def test_router_normalizes_provider_prefixes():
     ladder = router.resolve(tier="free", media_type="image")
 
     assert ladder[0] == "modelslab/seedream-t2i"
-    assert "piapi/flux-schnell" in ladder
+    assert "piapi/Qubico/flux1-schnell" in ladder
