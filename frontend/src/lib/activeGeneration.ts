@@ -18,6 +18,10 @@ function emit(eventName: string) {
   window.dispatchEvent(new Event(eventName));
 }
 
+export interface CreditsPollingSession {
+  stop: () => void;
+}
+
 export function startCreditsPolling() {
   activeGenerationCount += 1;
   if (activeGenerationCount === 1) {
@@ -26,12 +30,31 @@ export function startCreditsPolling() {
 }
 
 export function endCreditsPolling() {
-  activeGenerationCount = Math.max(0, activeGenerationCount - 1);
+  if (activeGenerationCount === 0) return;
+
+  activeGenerationCount -= 1;
   if (activeGenerationCount === 0) {
     emit(CREDITS_POLLING_END_EVENT);
   }
 }
 
+export function startCreditsPollingSession(): CreditsPollingSession {
+  let stopped = false;
+  startCreditsPolling();
+
+  return {
+    stop: () => {
+      if (stopped) return;
+      stopped = true;
+      endCreditsPolling();
+    },
+  };
+}
+
 export function getActiveGenerationCount(): number {
   return activeGenerationCount;
+}
+
+export function __resetActiveGenerationStateForTests() {
+  activeGenerationCount = 0;
 }

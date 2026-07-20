@@ -2,10 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { userService } from '../services/userService';
 import { toast } from 'react-hot-toast';
 import { dispatchCreditsRefresh } from '../lib/credits';
-import {
-  endCreditsPolling,
-  startCreditsPolling,
-} from "../lib/activeGeneration";
+import { startCreditsPollingSession } from "../lib/activeGeneration";
 
 export interface SceneImage {
   sceneNumber: number;
@@ -551,11 +548,19 @@ export const useImageGeneration = (
   const startPollingSceneImage = (sceneNumber: number, recordId: string) => {
     if (!chapterId) return;
 
-    startCreditsPolling();
+    const creditsPolling = startCreditsPollingSession();
+    let isStopped = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const stopPolling = () => {
+      if (isStopped) return;
+      isStopped = true;
       clearInterval(pollInterval);
-      endCreditsPolling();
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      creditsPolling.stop();
       setPollingIntervals(prev => {
         const newMap = new Map(prev);
         newMap.delete(recordId);
@@ -666,7 +671,7 @@ export const useImageGeneration = (
     setPollingIntervals(prev => new Map(prev).set(recordId, pollInterval));
 
     // Timeout
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       stopPolling();
 
       // Check if still generating and mark as failed
@@ -767,11 +772,19 @@ export const useImageGeneration = (
   const startPollingCharacterImage = (characterName: string, recordId: string) => {
     if (!chapterId) return;
 
-    startCreditsPolling();
+    const creditsPolling = startCreditsPollingSession();
+    let isStopped = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const stopPolling = () => {
+      if (isStopped) return;
+      isStopped = true;
       clearInterval(pollInterval);
-      endCreditsPolling();
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      creditsPolling.stop();
       setPollingIntervals(prev => {
         const newMap = new Map(prev);
         newMap.delete(recordId);
@@ -843,7 +856,7 @@ export const useImageGeneration = (
     setPollingIntervals(prev => new Map(prev).set(recordId, pollInterval));
 
     // Set a timeout to stop polling after 5 minutes
-    setTimeout(() => {
+    timeoutId = setTimeout(() => {
       stopPolling();
 
       // Check if still generating and mark as failed
