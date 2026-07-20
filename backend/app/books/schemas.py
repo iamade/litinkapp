@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Any, Dict, Optional, List
 from datetime import datetime
 
@@ -52,14 +52,8 @@ class SectionInput(BaseModel):
 
 
 class BookStructureInput(BaseModel):
-    structure_type: Optional[str] = "flat"
-    has_sections: Optional[bool] = False
-    sections: Optional[List[Dict[str, Any]]] = []
-    chapters: Optional[List[Dict[str, Any]]] = []
-    structure_metadata: Optional[Dict[str, Any]] = {}  # Add this
-
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "structure_type": "tablet",
                 "has_sections": True,
@@ -79,6 +73,13 @@ class BookStructureInput(BaseModel):
                 ],
             }
         }
+    )
+
+    structure_type: Optional[str] = "flat"
+    has_sections: Optional[bool] = False
+    sections: Optional[List[Dict[str, Any]]] = []
+    chapters: Optional[List[Dict[str, Any]]] = []
+    structure_metadata: Optional[Dict[str, Any]] = {}  # Add this
 
 
 # class BookStructureInput(BaseModel):
@@ -93,7 +94,7 @@ class BookStructureInput(BaseModel):
 #         return getattr(self, key, default)
 
 #     class Config:
-#         schema_extra = {
+#         json_schema_extra = {
 #             "example": {
 #                 "structure_type": "hierarchical",
 #                 "has_sections": True,
