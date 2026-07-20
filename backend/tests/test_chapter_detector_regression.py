@@ -9,8 +9,10 @@ Root cause: SPECIAL_SECTIONS didn't include these patterns, causing Moby Dick's
 Chapter 1 to position 3 (off-by-2).
 """
 
-import pytest
+import itertools
 import re
+
+import pytest
 from app.core.services.file import BookStructureDetector
 
 
@@ -386,6 +388,63 @@ class TestKan434Kan440SharedParserScope:
             ])
 
         assert self.processor._find_chapter_number_and_title(lines) == []
+
+    def test_orwell_pdf_page_number_run_is_not_comprehensive_fallback_chapters(self):
+        content = self._book([
+            "Dedication",
+            _long_filler(90),
+            "PREFACE",
+            _long_filler(90),
+            "PART ONE",
+            "I",
+            _long_filler(90),
+            *list(
+                itertools.chain.from_iterable(
+                    [[str(page), _long_filler(90)] for page in range(5, 15)]
+                )
+            ),
+            "II",
+            _long_filler(90),
+            "PART TWO",
+            "III",
+            _long_filler(90),
+            *list(
+                itertools.chain.from_iterable(
+                    [[str(page), _long_filler(90)] for page in range(97, 105)]
+                )
+            ),
+            "IV",
+            _long_filler(90),
+            "APPENDIX. The Principles of Newspeak",
+            _long_filler(90),
+            *list(
+                itertools.chain.from_iterable(
+                    [[str(page), _long_filler(90)] for page in range(272, 275)]
+                )
+            ),
+        ])
+
+        result = self.processor.detect_structure(content)
+
+        assert result["has_sections"] is True
+        sections = result["sections"]
+        assert [section["title"] for section in sections] == [
+            "Dedication",
+            "PREFACE",
+            "PART ONE",
+            "PART TWO",
+            "APPENDIX. The Principles of Newspeak",
+        ]
+        assert sections[0]["content_type"] == "front_matter"
+        assert sections[1]["content_type"] == "front_matter"
+        assert sections[-1]["content_type"] == "back_matter"
+        assert [chapter["number"] for chapter in sections[2]["chapters"]] == ["1", "2"]
+        assert [chapter["number"] for chapter in sections[3]["chapters"]] == ["3", "4"]
+        assert all(
+            chapter["number"] not in {"5", "6", "97", "98", "272"}
+            for section in sections
+            for chapter in section.get("chapters", [])
+        )
 
     def test_part_to_chapter_hierarchy_survives_bare_part_headings(self):
         content = self._book([

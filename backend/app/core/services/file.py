@@ -304,9 +304,58 @@ class BookStructureDetector:
         print(f"[CHAPTER DETECTION] Validated semantic sequence: {first} to {last}")
         return chapter_headers
 
+    def _find_running_page_number_lines(self, lines: List[str]) -> set[int]:
+        """Find bare Arabic page-number runs that should not become chapters."""
+        rejected: set[int] = set()
+        current_segment: List[tuple[int, int]] = []
+
+        def _flush_segment() -> None:
+            nonlocal current_segment
+            if len(current_segment) < 3:
+                current_segment = []
+                return
+
+            numbers = [number for _line_num, number in current_segment]
+            expected_from_one = list(range(1, len(numbers) + 1))
+            if numbers == expected_from_one:
+                current_segment = []
+                return
+
+            is_page_run = numbers[0] != 1
+            if len(numbers) >= 8 and max(numbers) > len(numbers) + 3:
+                is_page_run = True
+            if len(numbers) >= 3 and numbers[0] == 1 and numbers[1] != 2:
+                is_page_run = True
+
+            if is_page_run:
+                rejected.update(line_num for line_num, _number in current_segment)
+                print(
+                    "[CHAPTER DETECTION] Rejected fallback page-number run "
+                    f"{numbers[0]} to {numbers[-1]}"
+                )
+
+            current_segment = []
+
+        for line_num, raw_line in enumerate(lines):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            if self._match_section_patterns(line) or self._match_special_sections(line):
+                _flush_segment()
+                continue
+
+            match = re.match(r"^(\d{1,3})\.?$", line)
+            if match and self._has_substantial_following_content(lines, line_num):
+                current_segment.append((line_num, int(match.group(1))))
+
+        _flush_segment()
+        return rejected
+
     def detect_structure(self, content: str) -> Dict[str, Any]:
         """Enhanced structure detection that skips TOC sections"""
         lines = content.split("\n")
+        page_number_line_nums = self._find_running_page_number_lines(lines)
 
         # Try the improved chapter detection first for books with number + title format
         chapter_headers = self._find_chapter_number_and_title(lines)
@@ -430,7 +479,7 @@ class BookStructureDetector:
                         "type": section_match["type"],
                         "chapters": [],
                         "content": self._extract_section_content(
-                            content, line, lines, line_num
+                            content, line, lines, line_num, page_number_line_nums
                         ),
                     }
                 continue
@@ -452,7 +501,7 @@ class BookStructureDetector:
                     "type": "special",
                     "chapters": [],
                     "content": self._extract_section_content(
-                        content, line, lines, line_num
+                        content, line, lines, line_num, page_number_line_nums
                     ),
                     "content_type": _classify_section_type(line),
                 }
@@ -460,6 +509,12 @@ class BookStructureDetector:
 
             # Check if line matches chapter pattern
             chapter_match = self._match_chapter_patterns(line)
+            if chapter_match and line_num in page_number_line_nums:
+                print(
+                    "[HIERARCHICAL] Skipped fallback page number: "
+                    f"{LogSanitizer.redact(line, label='line')}"
+                )
+                continue
             if chapter_match and self._has_substantial_following_content(
                 lines, line_num
             ):
@@ -494,6 +549,7 @@ class BookStructureDetector:
                     "line_num": line_num,
                     "number": chapter_number,
                     "raw_title": line,
+                    "ignored_chapter_line_nums": page_number_line_nums,
                 }
                 chapter_content = self._extract_chapter_content(
                     content, chapter_info, lines
@@ -708,6 +764,9 @@ class BookStructureDetector:
         if isinstance(chapter_info_or_title, dict):
             chapter_title = chapter_info_or_title.get("title", "Unknown")
             start_line = chapter_info_or_title["title_line_num"] + 1
+            ignored_chapter_line_nums = set(
+                chapter_info_or_title.get("ignored_chapter_line_nums") or []
+            )
         else:
             # chapter_info_or_title is a string (chapter_title), line_num is provided
             if line_num is None:
@@ -716,6 +775,7 @@ class BookStructureDetector:
                 )
             chapter_title = chapter_info_or_title
             start_line = line_num + 1
+            ignored_chapter_line_nums = set()
 
         print(
             "[CONTENT EXTRACTION] Extracting content for: "
@@ -734,7 +794,7 @@ class BookStructureDetector:
             is_chapter_break = False
 
             # Fast path optimization: check if line might be a chapter header
-            if len(line) < 150:
+            if i not in ignored_chapter_line_nums and len(line) < 150:
                 # If it's just a number, do the relaxed check
                 if re.match(r"^(\d+)$", line) and i < len(lines) - 5:
                     for j in range(i + 1, min(i + 5, len(lines))):
@@ -1036,10 +1096,16 @@ class BookStructureDetector:
         return most_common_type
 
     def _extract_section_content(
-        self, full_content: str, section_title: str, lines: List[str], start_line: int
+        self,
+        full_content: str,
+        section_title: str,
+        lines: List[str],
+        start_line: int,
+        ignored_chapter_line_nums: Optional[set[int]] = None,
     ) -> str:
         """Extract content for a specific section"""
         content_lines = []
+        ignored_chapter_line_nums = ignored_chapter_line_nums or set()
 
         # Start from the line after the section title
         for i in range(start_line + 1, len(lines)):
@@ -1051,7 +1117,10 @@ class BookStructureDetector:
             if (
                 self._match_section_patterns(line)
                 or self._match_special_sections(line)
-                or self._match_chapter_patterns(line)
+                or (
+                    i not in ignored_chapter_line_nums
+                    and self._match_chapter_patterns(line)
+                )
             ):
                 break
 
@@ -1068,6 +1137,7 @@ class BookStructureDetector:
         lines = content.split("\n")
         all_items = []  # Collect all items first, classify later
         in_toc_section = False
+        page_number_line_nums = self._find_running_page_number_lines(lines)
 
         FRONT_MATTER_TITLES = {
             "etymology", "extracts", "extract", "epigraph",
@@ -1125,6 +1195,7 @@ class BookStructureDetector:
                     "line_num": line_num,
                     "number": None,
                     "raw_title": special_title,
+                    "ignored_chapter_line_nums": page_number_line_nums,
                 }
                 extracted_content = self._extract_chapter_content(
                     content, chapter_info, lines
@@ -1144,6 +1215,12 @@ class BookStructureDetector:
                 continue
 
             chapter_match = self._match_chapter_patterns(line)
+            if chapter_match and line_num in page_number_line_nums:
+                print(
+                    f"[FLAT CHAPTERS] Skipped fallback page number: "
+                    f"{LogSanitizer.redact(line, label='line')}"
+                )
+                continue
             if chapter_match:
                 # Guard: require substantial following content to avoid matching page numbers
                 if not self._has_substantial_following_content(lines, line_num):
@@ -1183,6 +1260,7 @@ class BookStructureDetector:
                     "line_num": line_num,
                     "number": chapter_number,
                     "raw_title": line,
+                    "ignored_chapter_line_nums": page_number_line_nums,
                 }
                 extracted_content = self._extract_chapter_content(
                     content, chapter_info, lines
