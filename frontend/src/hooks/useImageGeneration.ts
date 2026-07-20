@@ -40,6 +40,8 @@ interface ImageGenerationOptions {
   customPrompt?: string;
 }
 
+type StopPolling = () => void;
+
 export const useImageGeneration = (
   chapterId: string | null, 
   selectedScriptId: string | null,
@@ -50,10 +52,10 @@ export const useImageGeneration = (
   const [isLoading, setIsLoading] = useState(false);
   const [generatingScenes, setGeneratingScenes] = useState<Set<number>>(new Set());
   const [generatingCharacters, setGeneratingCharacters] = useState<Set<string>>(new Set());
-  const [pollingIntervals, setPollingIntervals] = useState<Map<string, NodeJS.Timeout>>(new Map());
 
   const inflightRef = useRef<string | null>(null);
   const isMountedRef = useRef(true);
+  const pollingStopsRef = useRef<Map<string, StopPolling>>(new Map());
 
   const resolvePreviewAssetUrl = (
     record: { image_url?: string; watermarked_image_url?: string; watermarked_url?: string } | null | undefined,
@@ -69,10 +71,10 @@ export const useImageGeneration = (
 
     return () => {
       isMountedRef.current = false;
-      // Clear all polling intervals on unmount
-      pollingIntervals.forEach(interval => clearInterval(interval));
+      pollingStopsRef.current.forEach(stopPolling => stopPolling());
+      pollingStopsRef.current.clear();
     };
-  }, [pollingIntervals]);
+  }, []);
 
   const loadImages = useCallback(async () => {
 
@@ -561,11 +563,7 @@ export const useImageGeneration = (
         timeoutId = null;
       }
       creditsPolling.stop();
-      setPollingIntervals(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(recordId);
-        return newMap;
-      });
+      pollingStopsRef.current.delete(recordId);
     };
 
     const pollInterval = setInterval(async () => {
@@ -667,8 +665,7 @@ export const useImageGeneration = (
       }
     }, 3000); // Poll every 3 seconds
 
-    // Store the interval
-    setPollingIntervals(prev => new Map(prev).set(recordId, pollInterval));
+    pollingStopsRef.current.set(recordId, stopPolling);
 
     // Timeout
     timeoutId = setTimeout(() => {
@@ -785,11 +782,7 @@ export const useImageGeneration = (
         timeoutId = null;
       }
       creditsPolling.stop();
-      setPollingIntervals(prev => {
-        const newMap = new Map(prev);
-        newMap.delete(recordId);
-        return newMap;
-      });
+      pollingStopsRef.current.delete(recordId);
     };
 
     const pollInterval = setInterval(async () => {
@@ -852,8 +845,7 @@ export const useImageGeneration = (
       }
     }, 3000); // Poll every 3 seconds
 
-    // Store the interval so we can clear it later
-    setPollingIntervals(prev => new Map(prev).set(recordId, pollInterval));
+    pollingStopsRef.current.set(recordId, stopPolling);
 
     // Set a timeout to stop polling after 5 minutes
     timeoutId = setTimeout(() => {
