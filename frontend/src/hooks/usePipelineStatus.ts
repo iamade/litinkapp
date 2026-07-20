@@ -31,6 +31,16 @@ export const usePipelineStatus = (
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
 
+  // Stop polling
+  const stopPolling = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+      endCreditsPolling();
+    }
+    setIsPolling(false);
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -102,16 +112,6 @@ export const usePipelineStatus = (
     startCreditsPolling();
     pollingIntervalRef.current = setInterval(fetchPipelineStatus, refreshInterval);
   }, [fetchPipelineStatus, refreshInterval, autoRefresh]);
-
-  // Stop polling
-  const stopPolling = useCallback(() => {
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
-      endCreditsPolling();
-    }
-    setIsPolling(false);
-  }, []);
 
   // Retry generation
   const retryGeneration = useCallback(async (step?: string) => {
