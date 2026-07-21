@@ -1,11 +1,27 @@
 import os
+import re
 
 from app.core.config import settings
 from loguru import logger
 
 logger.remove()
 
-LOG_DIR =os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+IDENTITY_LIKE_PATTERN = re.compile(r"\b[A-Z2-7]{58}\b")
+
+
+def redact_identity_like_output(message: object) -> str:
+    """Redact startup identity values such as Algorand account addresses."""
+    return IDENTITY_LIKE_PATTERN.sub("[REDACTED_IDENTITY]", str(message))
+
+
+def _redact_log_record(record):
+    record["message"] = redact_identity_like_output(record["message"])
+
+
+logger.configure(patcher=_redact_log_record)
+
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
 # LOG_DIR =os.path.join(os.path.dirname(__file__), "logs")
 
 LOG_FORMAT = (
