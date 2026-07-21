@@ -517,3 +517,236 @@ class AudioExport(SQLModel, table=True):
             onupdate=func.current_timestamp(),
         ),
     )
+
+
+# ── KAN-439: Production Bible, Voice Casting, Dialogue Manifest ──
+
+
+class ProductionBible(SQLModel, table=True):
+    """Versioned project-scoped production bible.
+
+    Stores characters, objects, locations, voices, pronunciation guides,
+    style/world rules, and approved reference assets for a project.
+    Each update creates a new version; the latest version is the active one.
+    """
+    __tablename__ = "production_bibles"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    project_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    version: int = Field(default=1, nullable=False)
+    is_active: bool = Field(default=True, nullable=False)
+
+    # Core bible content as JSONB
+    characters: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    objects: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    locations: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    voices: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    pronunciation: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    style_rules: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    world_rules: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    approved_reference_assets: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+
+    # Metadata
+    change_log: Optional[str] = Field(default=None, sa_column=Column(pg.TEXT))
+    created_by: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
+    )
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+
+class VoiceCasting(SQLModel, table=True):
+    """Deterministic project-scoped voice casting.
+
+    Maps (project_id, character_name) → (voice_id, provider, model).
+    Stable across reruns — NOT based on hash(character_name) alone.
+    Uses a composite unique constraint on (project_id, character_name).
+    """
+    __tablename__ = "voice_castings"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    project_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    character_name: str = Field(nullable=False, index=True)
+    voice_id: str = Field(nullable=False)
+    provider: str = Field(nullable=False)
+    model: Optional[str] = Field(default=None)
+
+    # Voice metadata
+    voice_metadata: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+
+    # Lock flag — once cast, can be locked to prevent accidental changes
+    is_locked: bool = Field(default=False)
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+    # Composite unique constraint: one voice per character per project
+    __table_args__ = (
+        sa.UniqueConstraint("project_id", "character_name", name="uq_voice_casting_project_character"),
+    )
+
+
+class DialogueManifest(SQLModel, table=True):
+    """Immutable dialogue manifest.
+
+    Links approved text → speaker → audio → subtitle → lip-sync → merge output.
+    Once created, records are immutable (enforced at the application layer).
+    """
+    __tablename__ = "dialogue_manifests"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    project_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    video_generation_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id", ondelete="SET NULL"),
+            index=True,
+        ),
+    )
+
+    # Immutable content hash (SHA-256 of text + speaker + scene_id)
+    content_hash: str = Field(nullable=False, unique=True, index=True)
+
+    # Dialogue data
+    scene_id: str = Field(nullable=False, index=True)
+    speaker: str = Field(nullable=False)
+    text: str = Field(nullable=False, sa_column=Column(pg.TEXT))
+    sequence_order: int = Field(default=0)
+
+    # Linked outputs (immutable once set)
+    audio_url: Optional[str] = Field(default=None)
+    audio_duration_seconds: Optional[float] = Field(default=None)
+    audio_generation_id: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
+    )
+    subtitle_url: Optional[str] = Field(default=None)
+    subtitle_format: Optional[str] = Field(default=None)
+    lip_sync_url: Optional[str] = Field(default=None)
+    lip_sync_status: Optional[str] = Field(default=None)
+    merge_output_url: Optional[str] = Field(default=None)
+    merge_status: Optional[str] = Field(default=None)
+
+    # Voice used for this line
+    voice_id: Optional[str] = Field(default=None)
+    voice_provider: Optional[str] = Field(default=None)
+
+    # Scene state for previous-frame chaining
+    scene_state: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    previous_frame_url: Optional[str] = Field(default=None)
+    continuity_frame_url: Optional[str] = Field(default=None)
+
+    # Status tracking
+    status: str = Field(default="pending")
+    is_finalized: bool = Field(default=False)
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
