@@ -446,6 +446,64 @@ class TestKan434Kan440SharedParserScope:
             for chapter in section.get("chapters", [])
         )
 
+    def test_orwell_pdf_direct_detector_preserves_parts_and_read_only_matter(self):
+        """Production-shape PDFs with real Parts must not flatten direct candidates."""
+
+        def chapter_body(label: str) -> str:
+            return "\n".join(
+                f"{label} line {idx} carries enough narrative prose for extraction."
+                for idx in range(14)
+            )
+
+        lines = [
+            "PREFACE",
+            _long_filler(90),
+            "PART ONE",
+        ]
+        for idx in range(1, 11):
+            lines.extend([
+                str(idx),
+                f"Oceania Heading {idx}",
+                chapter_body(f"part one chapter {idx}"),
+            ])
+        lines.append("PART TWO")
+        for idx in range(1, 11):
+            lines.extend([
+                str(idx),
+                f"Brotherhood Heading {idx}",
+                chapter_body(f"part two chapter {idx}"),
+            ])
+        lines.extend([
+            "APPENDIX. The Principles of Newspeak",
+            _long_filler(90),
+        ])
+
+        result = self.processor.detect_structure(self._book(lines))
+
+        assert result["has_sections"] is True
+        assert result["chapters"] == []
+        sections = result["sections"]
+        assert [section["title"] for section in sections] == [
+            "PREFACE",
+            "PART ONE",
+            "PART TWO",
+            "APPENDIX. The Principles of Newspeak",
+        ]
+        assert sections[0]["content_type"] == "front_matter"
+        assert sections[-1]["content_type"] == "back_matter"
+        assert [chapter["number"] for chapter in sections[1]["chapters"]] == [
+            str(idx) for idx in range(1, 11)
+        ]
+        assert [chapter["number"] for chapter in sections[2]["chapters"]] == [
+            str(idx) for idx in range(1, 11)
+        ]
+        assert "PART TWO" not in sections[1]["chapters"][-1]["content"]
+        assert all(
+            chapter["content_type"] == "chapter"
+            for section in sections[1:3]
+            for chapter in section["chapters"]
+        )
+
     def test_part_to_chapter_hierarchy_survives_bare_part_headings(self):
         content = self._book([
             "Title Page",

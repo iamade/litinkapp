@@ -356,6 +356,26 @@ class BookStructureDetector:
         _flush_segment()
         return rejected
 
+    def _has_meaningful_structural_markers(self, lines: List[str]) -> bool:
+        """Detect section/special boundaries before allowing direct flat parsing."""
+        for line_num, raw_line in enumerate(lines):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            if self._match_section_patterns(line) and (
+                self._has_substantial_following_content(lines, line_num)
+                or self._has_following_chapter_before_next_section(lines, line_num)
+            ):
+                return True
+
+            if self._match_special_sections(line) and self._has_substantial_following_content(
+                lines, line_num
+            ):
+                return True
+
+        return False
+
     def detect_structure(self, content: str) -> Dict[str, Any]:
         """Enhanced structure detection that skips TOC sections"""
         lines = content.split("\n")
@@ -364,7 +384,9 @@ class BookStructureDetector:
         # Try the improved chapter detection first for books with number + title format
         chapter_headers = self._find_chapter_number_and_title(lines)
 
-        if len(chapter_headers) >= 8:  # Expect at least 8-9 chapters
+        has_structural_markers = self._has_meaningful_structural_markers(lines)
+
+        if len(chapter_headers) >= 8 and not has_structural_markers:
             print(
                 f"[STRUCTURE DETECTION] Using direct chapter detection: {len(chapter_headers)} chapters"
             )
@@ -387,6 +409,11 @@ class BookStructureDetector:
                 "chapters": flat_chapters,
                 "structure_type": "flat",
             }
+        if len(chapter_headers) >= 8 and has_structural_markers:
+            print(
+                "[STRUCTURE DETECTION] Bypassing direct chapter detection because "
+                "section/special markers are present"
+            )
 
         # Fallback to comprehensive pattern matching
         print("[STRUCTURE DETECTION] Using comprehensive pattern matching")
@@ -848,6 +875,13 @@ class BookStructureDetector:
             ]:
                 print(
                     f"[CONTENT EXTRACTION] Stopped at back-matter boundary: "
+                    f"{LogSanitizer.redact(line, label='line')}"
+                )
+                break
+
+            if self._match_section_patterns(line):
+                print(
+                    f"[CONTENT EXTRACTION] Stopped at section boundary: "
                     f"{LogSanitizer.redact(line, label='line')}"
                 )
                 break
