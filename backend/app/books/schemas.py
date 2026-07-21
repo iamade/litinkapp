@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Any, Dict, Optional, List
 from datetime import datetime
 
@@ -24,8 +24,7 @@ class Section(SectionBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChapterInput(BaseModel):
@@ -52,14 +51,8 @@ class SectionInput(BaseModel):
 
 
 class BookStructureInput(BaseModel):
-    structure_type: Optional[str] = "flat"
-    has_sections: Optional[bool] = False
-    sections: Optional[List[Dict[str, Any]]] = []
-    chapters: Optional[List[Dict[str, Any]]] = []
-    structure_metadata: Optional[Dict[str, Any]] = {}  # Add this
-
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "structure_type": "tablet",
                 "has_sections": True,
@@ -79,6 +72,13 @@ class BookStructureInput(BaseModel):
                 ],
             }
         }
+    )
+
+    structure_type: Optional[str] = "flat"
+    has_sections: Optional[bool] = False
+    sections: Optional[List[Dict[str, Any]]] = []
+    chapters: Optional[List[Dict[str, Any]]] = []
+    structure_metadata: Optional[Dict[str, Any]] = {}  # Add this
 
 
 # class BookStructureInput(BaseModel):
@@ -93,7 +93,7 @@ class BookStructureInput(BaseModel):
 #         return getattr(self, key, default)
 
 #     class Config:
-#         schema_extra = {
+#         json_schema_extra = {
 #             "example": {
 #                 "structure_type": "hierarchical",
 #                 "has_sections": True,
@@ -135,8 +135,7 @@ class Chapter(ChapterBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Enhanced Chapter with section relationship
@@ -170,8 +169,7 @@ class Book(BookBase):
     updated_at: datetime
     chapters: Optional[List[Chapter]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ✅ ADD: New preview schema that extends Book
@@ -238,5 +236,4 @@ class BookWithDraftChapters(Book):
     updated_at: datetime
     chapters: Optional[List[ChapterDraft]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -3,6 +3,8 @@ from typing import Dict, Any, Optional
 import asyncio
 from app.core.config import settings
 
+PLACEHOLDER_CREATOR_MNEMONIC = "your-creator-mnemonic"
+
 
 class BlockchainService:
     """Blockchain service for NFT creation using Algorand"""
@@ -39,26 +41,53 @@ class BlockchainService:
     def _init_creator_account(self):
         """Initialize creator account"""
         try:
-            if settings.CREATOR_MNEMONIC and settings.CREATOR_MNEMONIC != "your-creator-mnemonic":
-                # Validate mnemonic length
+            is_production = settings.ENVIRONMENT == "production"
+            has_configured_mnemonic = (
+                settings.CREATOR_MNEMONIC
+                and settings.CREATOR_MNEMONIC != PLACEHOLDER_CREATOR_MNEMONIC
+            )
+
+            if has_configured_mnemonic:
                 mnemonic_words = settings.CREATOR_MNEMONIC.split()
                 if len(mnemonic_words) != 25:
-                    print(f"⚠️  Invalid mnemonic length: {len(mnemonic_words)} words (expected 25)")
-                    print("🔄 Generating new account for development...")
-                    private_key, address = algosdk.account.generate_account()
-                    print(f"✅ Generated new creator account: {address}")
-                    return private_key
-                
-                return algosdk.mnemonic.to_private_key(settings.CREATOR_MNEMONIC)
-            else:
-                # Generate new account for demo
-                private_key, address = algosdk.account.generate_account()
-                print(f"✅ Generated new creator account: {address}")
-                return private_key
-        except Exception as e:
-            print(f"❌ Creator account initialization error: {e}")
-            print("🔄 Falling back to mock mode...")
+                    return self._handle_creator_account_bootstrap_error(
+                        "Invalid CREATOR_MNEMONIC format",
+                        is_production,
+                    )
+
+                try:
+                    return algosdk.mnemonic.to_private_key(settings.CREATOR_MNEMONIC)
+                except Exception:
+                    return self._handle_creator_account_bootstrap_error(
+                        "Invalid CREATOR_MNEMONIC value",
+                        is_production,
+                    )
+
+            if is_production:
+                raise RuntimeError(
+                    "CREATOR_MNEMONIC must be configured for production blockchain bootstrap"
+                )
+
+            private_key, _address = algosdk.account.generate_account()
+            print("Generated development creator account for non-production blockchain mode")
+            return private_key
+        except RuntimeError:
+            raise
+        except Exception:
+            if settings.ENVIRONMENT == "production":
+                raise RuntimeError(
+                    "Creator account initialization failed in production"
+                )
+            print("Creator account initialization failed; using blockchain mock mode")
             return None
+
+    def _handle_creator_account_bootstrap_error(
+        self, message: str, is_production: bool
+    ):
+        if is_production:
+            raise RuntimeError(f"{message}; refusing production blockchain bootstrap")
+        print(f"{message}; using blockchain mock mode")
+        return None
     
     async def create_badge_nft(
         self,
