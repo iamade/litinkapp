@@ -9,8 +9,10 @@ Root cause: SPECIAL_SECTIONS didn't include these patterns, causing Moby Dick's
 Chapter 1 to position 3 (off-by-2).
 """
 
-import pytest
+import itertools
 import re
+
+import pytest
 from app.core.services.file import BookStructureDetector
 
 
@@ -387,6 +389,63 @@ class TestKan434Kan440SharedParserScope:
 
         assert self.processor._find_chapter_number_and_title(lines) == []
 
+    def test_orwell_pdf_page_number_run_is_not_comprehensive_fallback_chapters(self):
+        content = self._book([
+            "Dedication",
+            _long_filler(90),
+            "PREFACE",
+            _long_filler(90),
+            "PART ONE",
+            "I",
+            _long_filler(90),
+            *list(
+                itertools.chain.from_iterable(
+                    [[str(page), _long_filler(90)] for page in range(5, 15)]
+                )
+            ),
+            "II",
+            _long_filler(90),
+            "PART TWO",
+            "III",
+            _long_filler(90),
+            *list(
+                itertools.chain.from_iterable(
+                    [[str(page), _long_filler(90)] for page in range(97, 105)]
+                )
+            ),
+            "IV",
+            _long_filler(90),
+            "APPENDIX. The Principles of Newspeak",
+            _long_filler(90),
+            *list(
+                itertools.chain.from_iterable(
+                    [[str(page), _long_filler(90)] for page in range(272, 275)]
+                )
+            ),
+        ])
+
+        result = self.processor.detect_structure(content)
+
+        assert result["has_sections"] is True
+        sections = result["sections"]
+        assert [section["title"] for section in sections] == [
+            "Dedication",
+            "PREFACE",
+            "PART ONE",
+            "PART TWO",
+            "APPENDIX. The Principles of Newspeak",
+        ]
+        assert sections[0]["content_type"] == "front_matter"
+        assert sections[1]["content_type"] == "front_matter"
+        assert sections[-1]["content_type"] == "back_matter"
+        assert [chapter["number"] for chapter in sections[2]["chapters"]] == ["1", "2"]
+        assert [chapter["number"] for chapter in sections[3]["chapters"]] == ["3", "4"]
+        assert all(
+            chapter["number"] not in {"5", "6", "97", "98", "272"}
+            for section in sections
+            for chapter in section.get("chapters", [])
+        )
+
     def test_part_to_chapter_hierarchy_survives_bare_part_headings(self):
         content = self._book([
             "Title Page",
@@ -601,3 +660,162 @@ class TestKan434Kan440SharedParserScope:
         assert chapters[-1]["title"] == "Chapter 366"
         assert "Chapter 1" in payload["text"]
         assert "Chapter 366" in payload["text"]
+
+    @pytest.mark.asyncio
+    async def test_type_zero_page_split_spine_reconstructs_chapters_not_pages(
+        self, monkeypatch
+    ):
+        from app.core.services.file import FileService
+
+        def paragraphs(label: str, count: int = 12) -> str:
+            return "".join(
+                f"<p>{label} paragraph {idx} carries enough narrative prose for reconstruction.</p>"
+                for idx in range(count)
+            )
+
+        class FakeSpineItem:
+            def __init__(self, uid, name, media_type, content, item_type=0):
+                self.uid = uid
+                self.media_type = media_type
+                self._name = name
+                self._content = content.encode("utf-8")
+                self._type = item_type
+
+            def get_id(self):
+                return self.uid
+
+            def get_name(self):
+                return self._name
+
+            def get_type(self):
+                return self._type
+
+            def get_content(self):
+                return self._content
+
+        class FakeBook:
+            def __init__(self):
+                self.items = {
+                    "cover": FakeSpineItem("cover", "images/cover.jpg", "image/jpeg", "cover", 1),
+                    "style": FakeSpineItem("style", "styles/book.css", "text/css", "body {}", 2),
+                }
+                self.spine = [("cover", "no"), ("style", "no")]
+
+                page_no = 0
+
+                def add_page(body: str):
+                    nonlocal page_no
+                    page_no += 1
+                    uid = f"page_{page_no:03d}"
+                    self.items[uid] = FakeSpineItem(
+                        uid,
+                        f"text/{uid}.xhtml",
+                        "application/xhtml+xml",
+                        f"<html><body>{body}</body></html>",
+                    )
+                    self.spine.append((uid, "yes"))
+
+                add_page(f"<p>PREFACE</p>{paragraphs('front matter')}")
+                add_page(
+                    "<p>CONTENTS</p>"
+                    "<p>CHAPTER I</p><p>CHAPTER II</p><p>CHAPTER III</p>"
+                    "<p>CHAPTER IV</p><p>CHAPTER V</p><p>CHAPTER VI</p>"
+                )
+
+                roman = ["I", "II", "III", "IV", "V", "VI"]
+                for chapter_idx, numeral in enumerate(roman, start=1):
+                    add_page(
+                        f"<p>CHAPTER {numeral}</p>"
+                        f"{paragraphs(f'chapter {chapter_idx} opening')}"
+                    )
+                    for fragment_idx in range(58):
+                        add_page(paragraphs(f"chapter {chapter_idx} page fragment {fragment_idx}"))
+
+                add_page(
+                    "<p>THE FULL PROJECT GUTENBERG LICENSE</p>"
+                    f"{paragraphs('license back matter')}"
+                )
+                for license_idx in range(9):
+                    add_page(paragraphs(f"license continuation {license_idx}"))
+
+                assert page_no == 366
+                assert len(self.spine) == 368
+
+            def get_metadata(self, *_args):
+                return []
+
+            def get_item_with_id(self, item_id):
+                return self.items.get(item_id)
+
+            def get_items(self):
+                return list(self.items.values())
+
+        monkeypatch.setattr(
+            "app.core.services.file.epub.read_epub",
+            lambda _file_path: FakeBook(),
+        )
+
+        file_service = FileService()
+
+        chapters = file_service.extract_epub_chapters("great-expectations-shape.epub")
+        payload = await file_service.process_epub("great-expectations-shape.epub")
+
+        chapter_items = [c for c in chapters if c.get("content_type") == "chapter"]
+
+        assert len(chapters) == 8
+        assert [c["title"] for c in chapter_items] == [
+            "Chapter 1",
+            "Chapter 2",
+            "Chapter 3",
+            "Chapter 4",
+            "Chapter 5",
+            "Chapter 6",
+        ]
+        assert chapters[0]["title"] == "PREFACE"
+        assert chapters[0]["content_type"] == "front_matter"
+        assert chapters[-1]["title"] == "THE FULL PROJECT GUTENBERG LICENSE"
+        assert chapters[-1]["content_type"] == "back_matter"
+        assert "chapter 1 page fragment 57" in chapter_items[0]["content"]
+        assert len(payload["chapters"]) == len(chapters)
+
+    @pytest.mark.asyncio
+    async def test_unreconstructable_epub_upload_raises_clear_error(
+        self, tmp_path, monkeypatch
+    ):
+        from ebooklib import epub
+        from app.core.services.file import FileService
+
+        epub_path = tmp_path / "unreconstructable.epub"
+        book = epub.EpubBook()
+        book.set_identifier("kan-445-unreconstructable")
+        book.set_title("Unreconstructable EPUB")
+        book.set_language("en")
+
+        page = epub.EpubHtml(title="", file_name="page.xhtml", lang="en")
+        page.content = (
+            "<html><body><p>"
+            + "lowercase narrative without recoverable headings " * 120
+            + "</p></body></html>"
+        )
+        book.add_item(page)
+        book.add_item(epub.EpubNcx())
+        book.add_item(epub.EpubNav())
+        book.spine = [page]
+        epub.write_epub(str(epub_path), book)
+        epub_bytes = epub_path.read_bytes()
+
+        async def fake_download(_storage_path):
+            return epub_bytes
+
+        monkeypatch.setattr(
+            "app.core.services.storage.storage_service.download",
+            fake_download,
+        )
+
+        with pytest.raises(ValueError, match="Could not reconstruct chapters from this EPUB"):
+            await FileService().extract_chapters_with_new_flow(
+                content="lowercase narrative without recoverable headings",
+                book_type="entertainment",
+                original_filename="unreconstructable.epub",
+                storage_path="uploads/unreconstructable.epub",
+            )
