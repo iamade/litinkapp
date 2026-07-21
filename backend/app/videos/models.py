@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlmodel import Field, SQLModel, Column, Relationship
 from sqlalchemy.dialects import postgresql as pg
-from sqlalchemy import text, func, ForeignKey
+from sqlalchemy import text, func, ForeignKey, Text, Integer
 from enum import Enum
 
 
@@ -500,6 +500,305 @@ class AudioExport(SQLModel, table=True):
     export_url: Optional[str] = Field(default=None)
     error_message: Optional[str] = Field(default=None)
 
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# KAN-438: Cinematic Dialogue Episode Gate models
+# ---------------------------------------------------------------------------
+
+class SequenceUnitType(str, Enum):
+    IDENT_TITLE = "ident_title"
+    PROLOGUE = "prologue"
+    DIALOGUE_ACT = "dialogue_act"
+    CLIMAX_RESOLUTION = "climax_resolution"
+    CLOSING_BOOKEND = "closing_bookend"
+    END_TITLE_CREDITS = "end_title_credits"
+
+
+class SequenceUnitStatus(str, Enum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+
+
+class LineTrackingStatus(str, Enum):
+    UNASSIGNED = "unassigned"
+    CHARACTER_ASSIGNED = "character_assigned"
+    VOICE_ASSIGNED = "voice_assigned"
+    SCENE_ASSIGNED = "scene_assigned"
+    SHOT_ASSIGNED = "shot_assigned"
+    AUDIO_GENERATED = "audio_generated"
+    LIPSYNC_QUEUED = "lipsync_queued"
+    LIPSYNC_COMPLETE = "lipsync_complete"
+    PLACED = "placed"
+
+
+class ShotDiversityReportStatus(str, Enum):
+    PENDING = "pending"
+    ANALYZING = "analyzing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ContinuityReferenceType(str, Enum):
+    CHARACTER = "character"
+    WORLD = "world"
+    PROP = "prop"
+    LOCATION = "location"
+
+
+class SequenceUnit(SQLModel, table=True):
+    """Represents a structural unit within an episode's cinematic sequence."""
+    __tablename__ = "sequence_units"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    video_generation_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+    )
+    unit_type: SequenceUnitType = Field(
+        sa_column=Column(
+            pg.ENUM(SequenceUnitType, name="sequence_unit_type", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+        ),
+    )
+    unit_order: int = Field(nullable=False)
+    title: str = Field(nullable=False)
+    script_content: Optional[str] = Field(default=None, sa_column=Column(Text))
+    duration_seconds: Optional[float] = Field(default=None)
+    status: SequenceUnitStatus = Field(
+        default=SequenceUnitStatus.PENDING,
+        sa_column=Column(
+            pg.ENUM(SequenceUnitStatus, name="sequence_unit_status", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+            server_default=text("'pending'"),
+        ),
+    )
+    unit_metadata: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column("metadata", pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+
+class LineTracking(SQLModel, table=True):
+    """Tracks individual dialogue lines through the cinematic pipeline."""
+    __tablename__ = "line_tracking"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    sequence_unit_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("sequence_units.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    video_generation_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id"),
+            nullable=False,
+            index=True,
+        ),
+    )
+    line_text: str = Field(default=None, sa_column=Column(Text, nullable=False))
+    character_name: Optional[str] = Field(default=None)
+    voice_id: Optional[str] = Field(default=None)
+    scene_id: Optional[str] = Field(default=None)
+    shot_id: Optional[str] = Field(default=None)
+    source_audio_url: Optional[str] = Field(default=None)
+    lipsync_task_id: Optional[str] = Field(default=None)
+    resolved_provider: Optional[str] = Field(default=None)
+    resolved_model: Optional[str] = Field(default=None)
+    timeline_position_ms: Optional[int] = Field(default=None)
+    status: LineTrackingStatus = Field(
+        default=LineTrackingStatus.UNASSIGNED,
+        sa_column=Column(
+            pg.ENUM(LineTrackingStatus, name="line_tracking_status", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+            server_default=text("'unassigned'"),
+        ),
+    )
+    line_metadata: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column("metadata", pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+
+class ShotDiversityReport(SQLModel, table=True):
+    """Stores per-shot diversity analysis to detect duplicate/near-duplicate shots."""
+    __tablename__ = "shot_diversity_reports"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    video_generation_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    total_shots: int = Field(nullable=False)
+    duplicate_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    near_duplicate_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    unique_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    intentional_motif_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    report_data: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(pg.JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    )
+    status: ShotDiversityReportStatus = Field(
+        default=ShotDiversityReportStatus.PENDING,
+        sa_column=Column(
+            pg.ENUM(ShotDiversityReportStatus, name="shot_diversity_report_status", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+            server_default=text("'pending'"),
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+
+class ContinuityReference(SQLModel, table=True):
+    """Stores character/world/prop/location continuity references for visual consistency."""
+    __tablename__ = "continuity_references"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    video_generation_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    reference_type: ContinuityReferenceType = Field(
+        sa_column=Column(
+            pg.ENUM(ContinuityReferenceType, name="continuity_reference_type", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+        ),
+    )
+    reference_id: str = Field(nullable=False)
+    reference_data: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(pg.JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    )
+    shot_ids: List[str] = Field(
+        default=[],
+        sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb")),
+    )
+    adjacent_shot_qa: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(
