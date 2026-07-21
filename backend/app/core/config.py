@@ -314,6 +314,13 @@ class Settings(BaseSettings):
     Z_AI_BASE_URL: str = "https://api.z.ai/api/coding/paas/v4"
     Z_AI_FREE_MODEL: str = "glm-5.2"
 
+    # KAN-447: Kimi / Moonshot credentials (chat-only, no media API yet)
+    KIMI_API_KEY: Optional[str] = None
+    KIMI_BASE_URL: str = "https://api.moonshot.cn/v1"
+
+    # KAN-447: Z.AI media-specific base URL (separate from coding plan URL)
+    Z_AI_MEDIA_BASE_URL: str = "https://api.z.ai/api/paas/v4"
+
     PIAPI_API_KEY_LITINKAI: Optional[str] = None
     PIAPI_BASE_URL: str = "https://api.piapi.ai/v1"
     PIAPI_FREE_MODEL: str = "gpt-4o-mini"
