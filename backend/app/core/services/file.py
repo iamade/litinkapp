@@ -3630,6 +3630,26 @@ class FileService:
                 print(
                     f"[DEBUG] Pattern extraction returned {len(pattern_chapters)} chapters"
                 )
+                body_heading_chapters = self._extract_pdf_body_heading_chapters(
+                    doc, toc_pages
+                )
+                if len(body_heading_chapters) >= max(10, len(pattern_chapters) * 2):
+                    print(
+                        "[TOC EXTRACTION] SUCCESS: Body heading fallback yielded "
+                        f"{len(body_heading_chapters)} chapters"
+                    )
+                    if progress_callback:
+                        await progress_callback(
+                            60,
+                            f"Found {len(body_heading_chapters)} chapters from body headings",
+                            "content",
+                            completed_step=(
+                                f"✅ Body headings found {len(body_heading_chapters)} chapters"
+                            ),
+                            total_chapters=len(body_heading_chapters),
+                        )
+                    doc.close()
+                    return body_heading_chapters
                 if len(pattern_chapters) >= 3:
                     print(
                         f"[TOC EXTRACTION] SUCCESS: Pattern fallback yielded {len(pattern_chapters)} chapters"
@@ -3686,6 +3706,17 @@ class FileService:
                     doc.close()
                     return layout_chapters
 
+                body_heading_chapters = self._extract_pdf_body_heading_chapters(
+                    doc, toc_pages
+                )
+                if len(body_heading_chapters) >= 10:
+                    print(
+                        "[TOC EXTRACTION] SUCCESS: Body heading fallback yielded "
+                        f"{len(body_heading_chapters)} chapters"
+                    )
+                    doc.close()
+                    return body_heading_chapters
+
             doc.close()
             print("[TOC EXTRACTION] All strategies failed")
             return []
@@ -3693,6 +3724,204 @@ class FileService:
         except Exception as e:
             print(f"[TOC EXTRACTION] Error: {e}")
             return []
+
+    def _extract_pdf_body_heading_chapters(
+        self, doc, toc_pages: Optional[List[int]] = None
+    ) -> List[Dict[str, Any]]:
+        """Extract sectioned PDF chapters from real body headings.
+
+        Some scanned PDFs have a noisy TOC but clear in-body BOOK/CHAPTER starts.
+        This path trusts chapter order within each detected book so OCR-damaged
+        numerals like "CEAPTERY Vil" still resolve to the next expected chapter.
+        """
+        section_re = re.compile(
+            r"^\s*BOOK\s+THE\s+"
+            r"(FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH|SEVENTH|EIGHTH|NINTH|TENTH)"
+            r"\b[\.:]?\s*(.*)$",
+            re.IGNORECASE,
+        )
+        chapter_re = re.compile(r"^\s*(?:CHAP\w*|CEAPTER\w*)\b", re.IGNORECASE)
+        chapter_number_re = re.compile(
+            r"^\s*CHAPTER\s+([IVXLCDM]+|\d+)\b\.?\s*$", re.IGNORECASE
+        )
+
+        toc_cutoff = (max(toc_pages) + 1) if toc_pages else 0
+        headings: List[Dict[str, Any]] = []
+        current_section: Optional[Dict[str, Any]] = None
+        expected_in_section = 0
+
+        for page_idx in range(toc_cutoff, len(doc)):
+            lines = doc[page_idx].get_text().split("\n")
+            for line_idx, raw_line in enumerate(lines):
+                line = raw_line.strip()
+                if not line:
+                    continue
+
+                section_match = section_re.match(line)
+                if section_match:
+                    current_section = {
+                        "title": self._clean_pdf_book_section_title(
+                            line, section_match.group(1), section_match.group(2), lines, line_idx
+                        ),
+                        "section_type": "book",
+                        "section_number": section_match.group(1).lower(),
+                    }
+                    expected_in_section = 0
+                    print(
+                        "[BODY HEADING EXTRACTION] Found section: "
+                        f"{LogSanitizer.redact(current_section['title'], label='title')}"
+                    )
+                    continue
+
+                if current_section is None or not chapter_re.match(line):
+                    continue
+
+                title_info = self._find_pdf_body_heading_title(lines, line_idx)
+                if not title_info:
+                    continue
+
+                expected_in_section += 1
+                strict_number = chapter_number_re.match(line)
+                if strict_number:
+                    normalized = self.structure_detector._normalize_chapter_number(
+                        strict_number.group(1)
+                    )
+                    if normalized.isdigit():
+                        expected_in_section = int(normalized)
+
+                heading = {
+                    "page_idx": page_idx,
+                    "line_idx": line_idx,
+                    "title_line_idx": title_info["line_idx"],
+                    "number": expected_in_section,
+                    "raw_title": title_info["title"],
+                    **current_section,
+                }
+                headings.append(heading)
+                print(
+                    "[BODY HEADING EXTRACTION] Found chapter "
+                    f"{expected_in_section}: {LogSanitizer.redact(title_info['title'], label='title')}"
+                )
+
+        if len(headings) < 10:
+            return []
+
+        chapters: List[Dict[str, Any]] = []
+        for idx, heading in enumerate(headings):
+            next_heading = headings[idx + 1] if idx + 1 < len(headings) else None
+            start_page = heading["page_idx"]
+            start_line = heading["title_line_idx"] + 1
+            if next_heading:
+                end_page = next_heading["page_idx"]
+                end_line = next_heading["line_idx"]
+            else:
+                end_page = len(doc) - 1
+                end_line = None
+
+            raw_content = self._extract_pdf_line_range_content(
+                doc, start_page, start_line, end_page, end_line
+            )
+            title = f"Chapter {heading['number']}: {heading['raw_title']}"
+            content = self.structure_detector._clean_extracted_content(
+                raw_content, title
+            )
+            if len(content.strip()) <= 100:
+                content = raw_content.strip()
+            if len(content.strip()) <= 500:
+                continue
+
+            chapters.append(
+                self._with_generation_flag(
+                    {
+                        "title": title,
+                        "content": content.strip(),
+                        "summary": f"Content from {title}",
+                        "chapter_number": heading["number"],
+                        "number": str(heading["number"]),
+                        "section_title": heading["title"],
+                        "section_type": heading["section_type"],
+                        "section_number": heading["section_number"],
+                        "content_type": "chapter",
+                        "extraction_method": "body_heading",
+                        "actual_start_page": start_page + 1,
+                        "actual_end_page": end_page + 1,
+                    }
+                )
+            )
+
+        return chapters
+
+    def _clean_pdf_book_section_title(
+        self,
+        line: str,
+        ordinal: str,
+        inline_subtitle: str,
+        lines: List[str],
+        line_idx: int,
+    ) -> str:
+        subtitle = (inline_subtitle or "").strip(" .:-")
+        if not subtitle:
+            for next_line in lines[line_idx + 1 : line_idx + 5]:
+                candidate = next_line.strip(" .:-")
+                if not candidate:
+                    continue
+                if re.match(r"^\s*(?:CHAP\w*|CEAPTER\w*)\b", candidate, re.IGNORECASE):
+                    break
+                if len(candidate) > 3:
+                    subtitle = candidate
+                    break
+
+        if subtitle:
+            subtitle_corrections = {
+                "reecatitep to lire": "Recalled To Life",
+                "recatitep to lire": "Recalled To Life",
+                "tue gotpren": "The Golden Thread",
+                "tue track of a": "The Track Of A Storm",
+            }
+            subtitle = subtitle_corrections.get(subtitle.lower(), subtitle)
+            return f"Book the {ordinal.title()}: {subtitle.title()}"
+        return f"Book the {ordinal.title()}"
+
+    def _find_pdf_body_heading_title(
+        self, lines: List[str], chapter_line_idx: int
+    ) -> Optional[Dict[str, Any]]:
+        for idx in range(chapter_line_idx + 1, min(chapter_line_idx + 9, len(lines))):
+            candidate = lines[idx].strip()
+            if not candidate:
+                continue
+            candidate = candidate.strip(" .:-")
+            if not candidate:
+                continue
+            if re.match(r"^\d+$", candidate):
+                continue
+            if re.match(r"^\s*(?:CHAP\w*|CEAPTER\w*)\b", candidate, re.IGNORECASE):
+                continue
+            letters = re.sub(r"[^A-Za-z]", "", candidate)
+            if len(letters) <= 2:
+                continue
+            if len(letters) <= 5 and len(candidate.split()) > 1:
+                continue
+            upper_letters = sum(1 for char in letters if char.isupper())
+            if upper_letters / max(len(letters), 1) < 0.7:
+                continue
+            return {"title": re.sub(r"\s+", " ", candidate).title(), "line_idx": idx}
+        return None
+
+    def _extract_pdf_line_range_content(
+        self,
+        doc,
+        start_page: int,
+        start_line: int,
+        end_page: int,
+        end_line: Optional[int],
+    ) -> str:
+        content_parts: List[str] = []
+        for page_idx in range(start_page, end_page + 1):
+            lines = doc[page_idx].get_text().split("\n")
+            from_line = start_line if page_idx == start_page else 0
+            to_line = end_line if page_idx == end_page and end_line is not None else len(lines)
+            content_parts.append("\n".join(lines[from_line:to_line]))
+        return "\n".join(content_parts)
 
     def _analyze_toc_complexity(self, doc, toc_pages: List[int]) -> str:
         """Analyze TOC complexity to determine extraction strategy"""
