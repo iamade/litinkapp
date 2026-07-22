@@ -262,7 +262,7 @@ export const apiClient = {
     }
 
     const shouldRefreshCredits =
-      method !== "GET" &&
+      ["POST", "PUT", "PATCH", "DELETE"].includes(method) &&
       (endpoint.startsWith("/promo/") || endpoint.includes("/generate") || endpoint.includes("/credits"));
 
     if (shouldRefreshCredits) {

@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { userService } from '../services/userService';
 import { dispatchCreditsRefresh } from '../lib/credits';
+import { startCreditsPollingSession } from "../lib/activeGeneration";
 
 // Legacy hook signature for backward compatibility
 export type UseAudioParams = { chapterId?: string | null; scriptId?: string | null; versionToken?: unknown; videoGenerationId?: string | null };
@@ -210,9 +211,21 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken, videoGen
     }
     
     setIsGenerating(true);  // Mark as generating when we have a videoGenerationId
+    const creditsPolling = startCreditsPollingSession();
 
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: NodeJS.Timeout | null = null;
     let isActive = true;
+
+    const stopPolling = () => {
+      if (!isActive) return;
+      isActive = false;
+      setIsGenerating(false);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      creditsPolling.stop();
+    };
 
     const pollStatus = async () => {
       try {
@@ -245,6 +258,7 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken, videoGen
           }
           
           // Stop polling - we're done
+          stopPolling();
           return;
         }
 
@@ -266,9 +280,7 @@ export function useAudioGeneration({ chapterId, scriptId, versionToken, videoGen
     pollStatus();
 
     return () => {
-      isActive = false;
-      setIsGenerating(false);  // Clear generating state on cleanup
-      clearTimeout(timeoutId);
+      stopPolling();
     };
   }, [videoGenerationId, loadAudio]);
 
