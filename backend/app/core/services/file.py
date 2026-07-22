@@ -190,7 +190,7 @@ class BookStructureDetector:
         # Special sections that should be treated as standalone/read-only matter.
         self.SPECIAL_SECTIONS = [
             r"(?i)^preface[\s\-:]*(.*)$",
-            r"(?i)^contents?\b[\s\-:]*(.*)$",
+            r"(?i)^contents?\s*$",
             r"(?i)^table\s+of\s+contents?\b[\s\-:]*(.*)$",
             r"(?i)^introduction[\s\-:]*(.*)$",
             r"(?i)^foreword[\s\-:]*(.*)$",
@@ -292,6 +292,12 @@ class BookStructureDetector:
             print(
                 f"[CHAPTER DETECTION] Rejected bare-number sequence {first} to {last}: "
                 "does not start at Chapter 1"
+            )
+            return []
+        expected_numbers = list(range(1, len(numbers) + 1))
+        if numbers != expected_numbers:
+            print(
+                f"[CHAPTER DETECTION] Rejected gappy bare-number sequence {first} to {last}"
             )
             return []
         if consecutive_ratio >= 0.95 and len(chapter_headers) >= 200:
@@ -419,6 +425,39 @@ class BookStructureDetector:
                     return "front_matter"
             return "special"
 
+        preface_lines: List[str] = []
+        front_matter_emitted = False
+
+        def _emit_preface_front_matter() -> None:
+            nonlocal front_matter_emitted, preface_lines
+            if front_matter_emitted:
+                return
+            if preface_lines:
+                last_line = preface_lines[-1].strip()
+                if (
+                    self._match_section_patterns(last_line)
+                    or self._match_special_sections(last_line)
+                    or self._match_chapter_patterns(last_line)
+                ):
+                    preface_lines = preface_lines[:-1]
+            content_text = "\n".join(line for line in preface_lines if line).strip()
+            if len(content_text) > 500:
+                sections.append(
+                    {
+                        "title": "Front Matter",
+                        "number": "0",
+                        "type": "special",
+                        "chapters": [],
+                        "content": content_text,
+                        "content_type": "front_matter",
+                    }
+                )
+                print(
+                    "[HIERARCHICAL] Preserved pre-body PDF pages as front matter"
+                )
+            front_matter_emitted = True
+            preface_lines = []
+
         def _flush_chapter_group():
             nonlocal chapter_group
             if not chapter_group:
@@ -476,6 +515,9 @@ class BookStructureDetector:
             ):
                 continue
 
+            if not sections and current_section is None and not chapter_group:
+                preface_lines.append(line)
+
             # Check if line matches any section pattern
             section_match = self._match_section_patterns(line)
             if section_match:
@@ -483,6 +525,7 @@ class BookStructureDetector:
                 if self._has_substantial_following_content(
                     lines, line_num
                 ) or self._has_following_chapter_before_next_section(lines, line_num):
+                    _emit_preface_front_matter()
                     _flush_chapter_group()
                     # Save previous section if exists
                     if current_section:
@@ -505,6 +548,7 @@ class BookStructureDetector:
             if special_match and self._has_substantial_following_content(
                 lines, line_num
             ):
+                _emit_preface_front_matter()
                 _flush_chapter_group()
                 # Save previous section if exists
                 if current_section:
@@ -534,6 +578,8 @@ class BookStructureDetector:
             if chapter_match and self._has_substantial_following_content(
                 lines, line_num
             ):
+                if current_section is None and not chapter_group:
+                    _emit_preface_front_matter()
                 # Build a proper title
                 chapter_number = chapter_match["number"]
                 chapter_subtitle = chapter_match.get("title", "").strip()
@@ -997,8 +1043,16 @@ class BookStructureDetector:
         for pattern in self.SECTION_PATTERNS:
             match = re.match(pattern, line)
             if match:
+                raw_number = match.group(1)
+                if (
+                    isinstance(raw_number, str)
+                    and raw_number.islower()
+                    and len(raw_number) == 1
+                    and not raw_number.isdigit()
+                ):
+                    continue
                 return {
-                    "number": match.group(1),
+                    "number": raw_number,
                     "title": match.group(2).strip() if len(match.groups()) > 1 else "",
                     "type": self._get_section_type(pattern),
                 }
@@ -1006,8 +1060,12 @@ class BookStructureDetector:
 
     def _match_special_sections(self, line: str) -> Optional[Dict]:
         """Match line against special section patterns"""
+        stripped_line = (line or "").strip()
+        first_alpha = re.search(r"[A-Za-z]", stripped_line)
+        if first_alpha and first_alpha.group(0).islower() and len(stripped_line.split()) > 2:
+            return None
         for pattern in self.SPECIAL_SECTIONS:
-            match = re.match(pattern, line)
+            match = re.match(pattern, stripped_line)
             if match:
                 return {
                     "number": "0",  # Special sections don't have numbers
@@ -3998,6 +4056,106 @@ class FileService:
 
     def _process_pdf_bookmarks(self, doc, toc) -> List[Dict[str, Any]]:
         """Process PDF bookmarks into chapters"""
+        if any(item[0] > 1 for item in toc):
+            chapters = []
+            current_section: Optional[Dict[str, Any]] = None
+            leaf_items = [
+                (idx, level, title, page)
+                for idx, (level, title, page) in enumerate(toc)
+                if idx + 1 == len(toc) or toc[idx + 1][0] <= level
+            ]
+            leaf_index_by_toc_index = {idx: pos for pos, (idx, *_rest) in enumerate(leaf_items)}
+
+            for idx, (level, title, page) in enumerate(toc):
+                title_clean = (title or "").strip()
+                if not title_clean:
+                    continue
+
+                if level == 1:
+                    classified_type = self._classify_spine_item(title_clean, "", 0)
+                    has_children = idx + 1 < len(toc) and toc[idx + 1][0] > level
+                    if has_children and classified_type == "chapter":
+                        current_section = {
+                            "title": title_clean,
+                            "section_type": self._extract_section_type(title_clean),
+                            "section_number": self._extract_section_number(title_clean),
+                        }
+                        continue
+
+                    start_page = max(page - 1, 0)
+                    next_leaf_pos = leaf_index_by_toc_index.get(idx, -1) + 1
+                    if next_leaf_pos < len(leaf_items):
+                        end_page = max(leaf_items[next_leaf_pos][3] - 2, start_page)
+                    else:
+                        end_page = len(doc) - 1
+
+                    chapter_text = ""
+                    for p in range(start_page, min(end_page + 1, len(doc))):
+                        chapter_text += doc[p].get_text()
+
+                    if len(chapter_text.strip()) > 500:
+                        chapters.append(
+                            self._with_generation_flag(
+                                {
+                                    "title": title_clean,
+                                    "content": chapter_text.strip(),
+                                    "summary": "",
+                                    "chapter_number": None,
+                                    "number": None,
+                                    "content_type": (
+                                        classified_type
+                                        if classified_type != "chapter"
+                                        else "chapter"
+                                    ),
+                                }
+                            )
+                        )
+                    current_section = None
+                    continue
+
+                leaf_pos = leaf_index_by_toc_index.get(idx)
+                if leaf_pos is None:
+                    continue
+
+                start_page = max(page - 1, 0)
+                if leaf_pos + 1 < len(leaf_items):
+                    end_page = max(leaf_items[leaf_pos + 1][3] - 2, start_page)
+                else:
+                    end_page = len(doc) - 1
+
+                chapter_text = ""
+                for p in range(start_page, min(end_page + 1, len(doc))):
+                    chapter_text += doc[p].get_text()
+
+                if len(chapter_text.strip()) <= 500:
+                    continue
+
+                chapter_number = sum(
+                    1 for chapter in chapters if chapter.get("content_type") == "chapter"
+                ) + 1
+                chapter_data = self._with_generation_flag(
+                    {
+                        "title": title_clean,
+                        "content": chapter_text.strip(),
+                        "summary": "",
+                        "chapter_number": chapter_number,
+                        "number": str(chapter_number),
+                        "content_type": "chapter",
+                    }
+                )
+                if current_section:
+                    chapter_data.update(
+                        {
+                            "section_title": current_section["title"],
+                            "section_type": current_section["section_type"],
+                            "section_number": current_section["section_number"],
+                        }
+                    )
+                chapters.append(chapter_data)
+
+            print(f"[TOC EXTRACTION] Processed {len(chapters)} chapters from hierarchical bookmarks")
+            return chapters
+
         chapters = []
         main_chapters = [item for item in toc if item[0] == 1]  # Level 1 items only
 
