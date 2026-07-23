@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlmodel import Field, SQLModel, Column, Relationship
 from sqlalchemy.dialects import postgresql as pg
+from sqlalchemy import text, func, ForeignKey, Text, Integer
 from sqlalchemy import text, func, ForeignKey
 from enum import Enum
 
@@ -499,6 +500,455 @@ class AudioExport(SQLModel, table=True):
 
     export_url: Optional[str] = Field(default=None)
     error_message: Optional[str] = Field(default=None)
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# KAN-438: Cinematic Dialogue Episode Gate models
+# ---------------------------------------------------------------------------
+
+class SequenceUnitType(str, Enum):
+    IDENT_TITLE = "ident_title"
+    PROLOGUE = "prologue"
+    DIALOGUE_ACT = "dialogue_act"
+    CLIMAX_RESOLUTION = "climax_resolution"
+    CLOSING_BOOKEND = "closing_bookend"
+    END_TITLE_CREDITS = "end_title_credits"
+
+
+class SequenceUnitStatus(str, Enum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+
+
+class LineTrackingStatus(str, Enum):
+    UNASSIGNED = "unassigned"
+    CHARACTER_ASSIGNED = "character_assigned"
+    VOICE_ASSIGNED = "voice_assigned"
+    SCENE_ASSIGNED = "scene_assigned"
+    SHOT_ASSIGNED = "shot_assigned"
+    AUDIO_GENERATED = "audio_generated"
+    LIPSYNC_QUEUED = "lipsync_queued"
+    LIPSYNC_COMPLETE = "lipsync_complete"
+    PLACED = "placed"
+
+
+class ShotDiversityReportStatus(str, Enum):
+    PENDING = "pending"
+    ANALYZING = "analyzing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ContinuityReferenceType(str, Enum):
+    CHARACTER = "character"
+    WORLD = "world"
+    PROP = "prop"
+    LOCATION = "location"
+
+
+class SequenceUnit(SQLModel, table=True):
+    """Represents a structural unit within an episode's cinematic sequence."""
+    __tablename__ = "sequence_units"
+# ── KAN-439: Production Bible, Voice Casting, Dialogue Manifest ──
+
+
+class ProductionBible(SQLModel, table=True):
+    """Versioned project-scoped production bible.
+
+    Stores characters, objects, locations, voices, pronunciation guides,
+    style/world rules, and approved reference assets for a project.
+    Each update creates a new version; the latest version is the active one.
+    """
+    __tablename__ = "production_bibles"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    video_generation_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        ),
+    )
+    unit_type: SequenceUnitType = Field(
+        sa_column=Column(
+            pg.ENUM(SequenceUnitType, name="sequence_unit_type", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+        ),
+    )
+    unit_order: int = Field(nullable=False)
+    title: str = Field(nullable=False)
+    script_content: Optional[str] = Field(default=None, sa_column=Column(Text))
+    duration_seconds: Optional[float] = Field(default=None)
+    status: SequenceUnitStatus = Field(
+        default=SequenceUnitStatus.PENDING,
+        sa_column=Column(
+            pg.ENUM(SequenceUnitStatus, name="sequence_unit_status", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+            server_default=text("'pending'"),
+        ),
+    )
+    unit_metadata: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column("metadata", pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+
+class LineTracking(SQLModel, table=True):
+    """Tracks individual dialogue lines through the cinematic pipeline."""
+    __tablename__ = "line_tracking"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    sequence_unit_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("sequence_units.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    video_generation_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id"),
+            nullable=False,
+            index=True,
+        ),
+    )
+    line_text: str = Field(default=None, sa_column=Column(Text, nullable=False))
+    character_name: Optional[str] = Field(default=None)
+    voice_id: Optional[str] = Field(default=None)
+    scene_id: Optional[str] = Field(default=None)
+    shot_id: Optional[str] = Field(default=None)
+    source_audio_url: Optional[str] = Field(default=None)
+    lipsync_task_id: Optional[str] = Field(default=None)
+    resolved_provider: Optional[str] = Field(default=None)
+    resolved_model: Optional[str] = Field(default=None)
+    timeline_position_ms: Optional[int] = Field(default=None)
+    status: LineTrackingStatus = Field(
+        default=LineTrackingStatus.UNASSIGNED,
+        sa_column=Column(
+            pg.ENUM(LineTrackingStatus, name="line_tracking_status", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+            server_default=text("'unassigned'"),
+        ),
+    )
+    line_metadata: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column("metadata", pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
+    project_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    version: int = Field(default=1, nullable=False)
+    is_active: bool = Field(default=True, nullable=False)
+
+    # Core bible content as JSONB
+    characters: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    objects: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    locations: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+    voices: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    pronunciation: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    style_rules: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    world_rules: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    approved_reference_assets: List[Dict[str, Any]] = Field(
+        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+    )
+
+    # Metadata
+    change_log: Optional[str] = Field(default=None, sa_column=Column(pg.TEXT))
+    created_by: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
+    )
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+
+class ShotDiversityReport(SQLModel, table=True):
+    """Stores per-shot diversity analysis to detect duplicate/near-duplicate shots."""
+    __tablename__ = "shot_diversity_reports"
+class VoiceCasting(SQLModel, table=True):
+    """Deterministic project-scoped voice casting.
+
+    Maps (project_id, character_name) → (voice_id, provider, model).
+    Stable across reruns — NOT based on hash(character_name) alone.
+    Uses a composite unique constraint on (project_id, character_name).
+    """
+    __tablename__ = "voice_castings"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    video_generation_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    total_shots: int = Field(nullable=False)
+    duplicate_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    near_duplicate_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    unique_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    intentional_motif_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    report_data: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(pg.JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    )
+    status: ShotDiversityReportStatus = Field(
+        default=ShotDiversityReportStatus.PENDING,
+        sa_column=Column(
+            pg.ENUM(ShotDiversityReportStatus, name="shot_diversity_report_status", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+            server_default=text("'pending'"),
+        ),
+    )
+    project_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    character_name: str = Field(nullable=False, index=True)
+    voice_id: str = Field(nullable=False)
+    provider: str = Field(nullable=False)
+    model: Optional[str] = Field(default=None)
+
+    # Voice metadata
+    voice_metadata: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+
+    # Lock flag — once cast, can be locked to prevent accidental changes
+    is_locked: bool = Field(default=False)
+
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            pg.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+            onupdate=func.current_timestamp(),
+        ),
+    )
+
+
+class ContinuityReference(SQLModel, table=True):
+    """Stores character/world/prop/location continuity references for visual consistency."""
+    __tablename__ = "continuity_references"
+    # Composite unique constraint: one voice per character per project
+    __table_args__ = (
+        sa.UniqueConstraint("project_id", "character_name", name="uq_voice_casting_project_character"),
+    )
+
+
+class DialogueManifest(SQLModel, table=True):
+    """Immutable dialogue manifest.
+
+    Links approved text → speaker → audio → subtitle → lip-sync → merge output.
+    Once created, records are immutable (enforced at the application layer).
+    """
+    __tablename__ = "dialogue_manifests"
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+        default_factory=uuid.uuid4,
+    )
+    video_generation_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    reference_type: ContinuityReferenceType = Field(
+        sa_column=Column(
+            pg.ENUM(ContinuityReferenceType, name="continuity_reference_type", values_callable=lambda e: [m.value for m in e]),
+            nullable=False,
+        ),
+    )
+    reference_id: str = Field(nullable=False)
+    reference_data: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(pg.JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+    )
+    shot_ids: List[str] = Field(
+        default=[],
+        sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb")),
+    )
+    adjacent_shot_qa: Dict[str, Any] = Field(
+        default={},
+        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
+    project_id: uuid.UUID = Field(
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("projects.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    video_generation_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            pg.UUID(as_uuid=True),
+            ForeignKey("video_generations.id", ondelete="SET NULL"),
+            index=True,
+        ),
+    )
+
+    # Immutable content hash (SHA-256 of text + speaker + scene_id)
+    content_hash: str = Field(nullable=False, unique=True, index=True)
+
+    # Dialogue data
+    scene_id: str = Field(nullable=False, index=True)
+    speaker: str = Field(nullable=False)
+    text: str = Field(nullable=False, sa_column=Column(pg.TEXT))
+    sequence_order: int = Field(default=0)
+
+    # Linked outputs (immutable once set)
+    audio_url: Optional[str] = Field(default=None)
+    audio_duration_seconds: Optional[float] = Field(default=None)
+    audio_generation_id: Optional[uuid.UUID] = Field(
+        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
+    )
+    subtitle_url: Optional[str] = Field(default=None)
+    subtitle_format: Optional[str] = Field(default=None)
+    lip_sync_url: Optional[str] = Field(default=None)
+    lip_sync_status: Optional[str] = Field(default=None)
+    merge_output_url: Optional[str] = Field(default=None)
+    merge_status: Optional[str] = Field(default=None)
+
+    # Voice used for this line
+    voice_id: Optional[str] = Field(default=None)
+    voice_provider: Optional[str] = Field(default=None)
+
+    # Scene state for previous-frame chaining
+    scene_state: Dict[str, Any] = Field(
+        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+    )
+    previous_frame_url: Optional[str] = Field(default=None)
+    continuity_frame_url: Optional[str] = Field(default=None)
+
+    # Status tracking
+    status: str = Field(default="pending")
+    is_finalized: bool = Field(default=False)
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
