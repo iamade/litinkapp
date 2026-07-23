@@ -50,7 +50,7 @@ class TestKimiMediaAdapter:
         assert result["status"] == "unsupported"
         assert result["provider"] == "kimi"
         assert result["modality"] == "image"
-        assert "not supported" in result["message"].lower() or "no documented" in result["message"].lower()
+        assert "not supported" in result["message"].lower() or "does not provide a documented" in result["message"].lower()
 
     @pytest.mark.asyncio
     async def test_kimi_video_unsupported(self):

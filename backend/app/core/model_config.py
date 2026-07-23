@@ -138,6 +138,8 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback="seedream-4",  # Seedream-4 (ModelsLab V7) Per image generation will cost $0.033
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         fallback3="piapi/Qubico/flux1-schnell",
+        # KAN-447: GLM image (additive, not reordering existing)
+        fallback4="glm/glm-image",
     ),
     ModelTier.BASIC: ModelConfig(
         primary="seedream-4",  # Seedream-4 (ModelsLab V7) Per image generation will cost $0.033
