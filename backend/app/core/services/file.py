@@ -191,6 +191,7 @@ class BookStructureDetector:
         self.SPECIAL_SECTIONS = [
             r"(?i)^preface[\s\-:]*(.*)$",
             r"(?i)^contents?\s*$",
+            r"(?i)^contents?\b[\s\-:]*(.*)$",
             r"(?i)^table\s+of\s+contents?\b[\s\-:]*(.*)$",
             r"(?i)^introduction[\s\-:]*(.*)$",
             r"(?i)^foreword[\s\-:]*(.*)$",
@@ -1053,6 +1054,8 @@ class BookStructureDetector:
                     continue
                 return {
                     "number": raw_number,
+                return {
+                    "number": match.group(1),
                     "title": match.group(2).strip() if len(match.groups()) > 1 else "",
                     "type": self._get_section_type(pattern),
                 }
@@ -1066,6 +1069,8 @@ class BookStructureDetector:
             return None
         for pattern in self.SPECIAL_SECTIONS:
             match = re.match(pattern, stripped_line)
+        for pattern in self.SPECIAL_SECTIONS:
+            match = re.match(pattern, line)
             if match:
                 return {
                     "number": "0",  # Special sections don't have numbers
