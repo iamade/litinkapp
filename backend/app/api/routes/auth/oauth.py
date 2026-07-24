@@ -33,8 +33,19 @@ def _invalid_oauth_state_redirect() -> RedirectResponse:
 
 
 def _absolute_oauth_redirect_uri(request: Request, provider: str) -> str:
-    """Build the exact absolute callback URI used for both OAuth phases."""
-    for base_url in (settings.OAUTH_REDIRECT_BASE_URL, settings.API_BASE_URL):
+    """Build the exact absolute callback URI used for both OAuth phases.
+    
+    KAN-388: When OAUTH_PRODUCTION_REDIRECT is True, only OAUTH_REDIRECT_BASE_URL
+    is used (API_BASE_URL fallback is skipped). This prevents accidental fallback
+    to the Render onrender.com URL when the custom domain (api.litinkai.com) is
+    intended for production.
+    """
+    # Production guard: only use the explicit OAUTH_REDIRECT_BASE_URL
+    base_urls = [settings.OAUTH_REDIRECT_BASE_URL]
+    if not settings.OAUTH_PRODUCTION_REDIRECT:
+        base_urls.append(settings.API_BASE_URL)
+    
+    for base_url in base_urls:
         parsed = urlsplit(base_url.rstrip('/')) if base_url else None
         if not parsed or parsed.scheme not in {"http", "https"} or not parsed.netloc:
             continue
