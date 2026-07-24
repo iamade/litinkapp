@@ -1053,8 +1053,6 @@ class BookStructureDetector:
                 ):
                     continue
                 return {
-                    "number": raw_number,
-                return {
                     "number": match.group(1),
                     "title": match.group(2).strip() if len(match.groups()) > 1 else "",
                     "type": self._get_section_type(pattern),
