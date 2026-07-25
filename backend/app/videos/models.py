@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlmodel import Field, SQLModel, Column, Relationship
 from sqlalchemy.dialects import postgresql as pg
+import sqlalchemy as sa
 from sqlalchemy import text, func, ForeignKey
 from enum import Enum
 
