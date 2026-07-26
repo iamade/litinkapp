@@ -187,7 +187,7 @@ def upgrade() -> None:
         ),
         sa.Column("scene_id", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
         sa.Column("speaker", sqlmodel.sql.sqltypes.AutoString(), nullable=False),
-        sa.Column("text", sa.TEXT(), nullable=False),
+        sa.Column("manifest_text", sa.TEXT(), nullable=False),
         sa.Column("sequence_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("audio_url", sqlmodel.sql.sqltypes.AutoString(), nullable=True),
         sa.Column("audio_duration_seconds", sa.Float(), nullable=True),
