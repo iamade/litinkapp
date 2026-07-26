@@ -85,7 +85,7 @@ class DialogueManifestCreate(BaseModel):
     project_id: uuid.UUID
     scene_id: str
     speaker: str
-    text: str
+    manifest_text: str
     sequence_order: int = 0
     video_generation_id: Optional[uuid.UUID] = None
     voice_id: Optional[str] = None
@@ -350,7 +350,7 @@ async def create_dialogue_manifest(
             project_id=body.project_id,
             scene_id=body.scene_id,
             speaker=body.speaker,
-            text=body.text,
+            manifest_text=body.manifest_text,
             sequence_order=body.sequence_order,
             video_generation_id=body.video_generation_id,
             voice_id=body.voice_id,
@@ -626,7 +626,7 @@ def _manifest_to_dict(manifest) -> Dict[str, Any]:
         "content_hash": manifest.content_hash,
         "scene_id": manifest.scene_id,
         "speaker": manifest.speaker,
-        "text": manifest.text,
+        "manifest_text": manifest.manifest_text,
         "sequence_order": manifest.sequence_order,
         "audio_url": manifest.audio_url,
         "audio_duration_seconds": manifest.audio_duration_seconds,
