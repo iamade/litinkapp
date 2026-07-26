@@ -703,7 +703,7 @@ class DialogueManifest(SQLModel, table=True):
     # Dialogue data
     scene_id: str = Field(nullable=False, index=True)
     speaker: str = Field(nullable=False)
-    text: str = Field(nullable=False, sa_column=Column(pg.TEXT))
+    manifest_text: str = Field(nullable=False, sa_column=Column(pg.TEXT))
     sequence_order: int = Field(default=0)
 
     # Linked outputs (immutable once set)

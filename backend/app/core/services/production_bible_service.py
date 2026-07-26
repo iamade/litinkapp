@@ -389,10 +389,10 @@ class DialogueManifestService:
     """
 
     @staticmethod
-    def _compute_content_hash(scene_id: str, speaker: str, text: str) -> str:
+    def _compute_content_hash(scene_id: str, speaker: str, manifest_text: str) -> str:
         """Compute a SHA-256 content hash for immutability verification."""
         payload = json.dumps(
-            {"scene_id": scene_id, "speaker": speaker, "text": text},
+            {"scene_id": scene_id, "speaker": speaker, "text": manifest_text},
             sort_keys=True,
         )
         return hashlib.sha256(payload.encode()).hexdigest()
@@ -403,7 +403,7 @@ class DialogueManifestService:
         project_id: uuid.UUID,
         scene_id: str,
         speaker: str,
-        text: str,
+        manifest_text: str,
         sequence_order: int = 0,
         video_generation_id: Optional[uuid.UUID] = None,
         voice_id: Optional[str] = None,
@@ -417,7 +417,7 @@ class DialogueManifestService:
         The content_hash ensures uniqueness — identical text+speaker+scene_id
         will produce the same hash, preventing duplicates.
         """
-        content_hash = self._compute_content_hash(scene_id, speaker, text)
+        content_hash = self._compute_content_hash(scene_id, speaker, manifest_text)
 
         # Check for existing entry with same hash
         existing = await session.exec(
@@ -434,7 +434,7 @@ class DialogueManifestService:
             content_hash=content_hash,
             scene_id=scene_id,
             speaker=speaker,
-            text=text,
+            manifest_text=manifest_text,
             sequence_order=sequence_order,
             voice_id=voice_id,
             voice_provider=voice_provider,
