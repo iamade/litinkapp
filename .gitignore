@@ -11,6 +11,8 @@ env.*
 # Backend environments
 backend/.envs/*
 !backend/.envs/.env.example
+# KAN-402: dedicated MinIO container env template is safe to track (no secrets).
+!backend/.envs/.env.minio.example
 
 # Frontend environments
 frontend/.env.production

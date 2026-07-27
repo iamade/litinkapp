@@ -82,7 +82,7 @@ class S3StorageService:
             )
             self.bucket_name = settings.S3_BUCKET_NAME
 
-        print(f"[STORAGE INIT] Final bucket_name={self.bucket_name}")
+        logger.info("[STORAGE INIT] Final bucket_name=%s", self.bucket_name)
 
         # Ensure bucket exists (for MinIO)
         if self.use_minio:

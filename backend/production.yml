@@ -136,9 +136,12 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+    # KAN-402: same pattern as local.yml — source root creds from a
+    # dedicated env file (not the api env file) so the MinIO container
+    # only sees the two keys it needs and the app+container creds cannot
+    # drift after a volume reset.
+    env_file:
+      - ${MINIO_ENV_FILE:-./.envs/.env.minio}
     command: server /data --console-address ":9001"
     volumes:
       - litinkai_minio_data:/data
