@@ -321,65 +321,67 @@ def create_safe_openai_messages(
 ) -> Tuple[List[Dict[str, str]], int]:
     """
     Create safe OpenAI messages that won't exceed token limits.
-    
+
+    Applies SEC-02 structural isolation: the system role contains only the
+    caller's system prompt plus a reinforcement line; the user role contains
+    the caller's content wrapped in `<user-content>...</user-content>` tags.
+
     Args:
-        system_prompt: System prompt
-        user_content: User content
-        max_tokens: Maximum tokens for the model
-        reserved_tokens: Tokens to reserve for response
-        
+        system_prompt: System prompt (trusted application instructions).
+        user_content: User content (untrusted ingested text).
+        max_tokens: Maximum tokens for the model.
+        reserved_tokens: Tokens to reserve for response.
+
     Returns:
-        Tuple of (messages, total_tokens)
+        Tuple of (messages, total_tokens).
     """
+    from app.core.security.prompt_isolation import (
+        SYSTEM_REINFORCEMENT,
+        build_isolated_messages,
+    )
+
     token_counter = TokenCounter()
     chunker = TextChunker(token_counter)
-    
+
     # Sanitize content
     system_prompt = TextSanitizer.sanitize_for_openai(system_prompt)
     user_content = TextSanitizer.sanitize_for_openai(user_content)
-    
-    # Count system prompt tokens
-    system_tokens = token_counter.count_tokens(system_prompt)
-    
-    # Calculate available tokens for user content
-    available_tokens = max_tokens - reserved_tokens - system_tokens - 10  # Buffer
-    
+
+    # Build a sample message to measure the structural overhead
+    sample_messages = build_isolated_messages(
+        system_prompt=system_prompt,
+        user_content="",
+        reinforce_system=True,
+    )
+    structural_overhead = token_counter.count_message_tokens(sample_messages)
+    system_tokens_only = token_counter.count_tokens(sample_messages[0]["content"])
+
+    # Available tokens for the raw user content after tags + reinforcement.
+    available_tokens = (
+        max_tokens - reserved_tokens - structural_overhead - 10  # buffer
+    )
+
     if available_tokens <= 0:
-        raise ValueError(f"System prompt too long: {system_tokens} tokens")
-    
-    # Check if user content fits
-    user_tokens = token_counter.count_tokens(user_content)
-    
-    if user_tokens <= available_tokens:
-        # Content fits, return as is
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ]
-        total_tokens = system_tokens + user_tokens + 10  # +10 for message overhead
-        return messages, total_tokens
+        raise ValueError(f"System prompt + isolation overhead too long")
+
+    if token_counter.count_tokens(user_content) <= available_tokens:
+        final_content = user_content
     else:
-        # Content too long, need to chunk
         chunks = chunker.chunk_text_by_tokens(user_content, available_tokens, 0)
-        
         if not chunks:
             raise ValueError("Could not create valid chunks from content")
-        
-        # Use the first chunk
-        first_chunk = chunks[0]
-        truncated_content = first_chunk['text']
-        
-        # Add truncation notice
+        final_content = chunks[0]["text"]
         if len(chunks) > 1:
-            truncated_content += "\n\n[Content truncated due to length limits]"
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": truncated_content}
-        ]
-        
-        total_tokens = token_counter.count_message_tokens(messages)
-        return messages, total_tokens
+            final_content += "\n\n[Content truncated due to length limits]"
+
+    messages = build_isolated_messages(
+        system_prompt=system_prompt,
+        user_content=final_content,
+        reinforce_system=True,
+    )
+    total_tokens = token_counter.count_message_tokens(messages)
+
+    return messages, total_tokens
 
 
 class LogSanitizer:
