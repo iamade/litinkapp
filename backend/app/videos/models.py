@@ -647,35 +647,52 @@ class ProductionBible(SQLModel, table=True):
         ),
         default_factory=uuid.uuid4,
     )
-    video_generation_id: uuid.UUID = Field(
+    project_id: uuid.UUID = Field(
         sa_column=Column(
             pg.UUID(as_uuid=True),
-            ForeignKey("video_generations.id", ondelete="CASCADE"),
+            ForeignKey("projects.id", ondelete="CASCADE"),
             nullable=False,
             index=True,
         ),
     )
-    unit_type: SequenceUnitType = Field(
-        sa_column=Column(
-            pg.ENUM(SequenceUnitType, name="sequence_unit_type", values_callable=lambda e: [m.value for m in e]),
-            nullable=False,
-        ),
+    version: int = Field(default=1, nullable=False)
+    is_active: bool = Field(default=True, nullable=False)
+    characters: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb")),
     )
-    unit_order: int = Field(nullable=False)
-    title: str = Field(nullable=False)
-    script_content: Optional[str] = Field(default=None, sa_column=Column(Text))
-    duration_seconds: Optional[float] = Field(default=None)
-    status: SequenceUnitStatus = Field(
-        default=SequenceUnitStatus.PENDING,
-        sa_column=Column(
-            pg.ENUM(SequenceUnitStatus, name="sequence_unit_status", values_callable=lambda e: [m.value for m in e]),
-            nullable=False,
-            server_default=text("'pending'"),
-        ),
+    objects: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb")),
     )
-    unit_metadata: Dict[str, Any] = Field(
-        default={},
-        sa_column=Column("metadata", pg.JSONB, server_default=text("'{}'::jsonb")),
+    locations: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb")),
+    )
+    voices: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
+    pronunciation: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
+    style_rules: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
+    world_rules: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
+    )
+    approved_reference_assets: Optional[Dict[str, Any]] = Field(
+        default=None,
+        sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb")),
+    )
+    change_log: Optional[str] = Field(default=None, sa_column=Column(Text))
+    created_by: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(pg.UUID(as_uuid=True), index=True),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -1044,32 +1061,6 @@ class DialogueManifest(SQLModel, table=True):
             server_default=text("gen_random_uuid()"),
         ),
         default_factory=uuid.uuid4,
-    )
-    video_generation_id: uuid.UUID = Field(
-        sa_column=Column(
-            pg.UUID(as_uuid=True),
-            ForeignKey("video_generations.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-    )
-    reference_type: ContinuityReferenceType = Field(
-        sa_column=Column(
-            pg.ENUM(ContinuityReferenceType, name="continuity_reference_type", values_callable=lambda e: [m.value for m in e]),
-            nullable=False,
-        ),
-    )
-    reference_id: str = Field(nullable=False)
-    reference_data: Dict[str, Any] = Field(
-        default={},
-        sa_column=Column(pg.JSONB, nullable=False, server_default=text("'{}'::jsonb")),
-    )
-    shot_ids: List[str] = Field(
-        default=[],
-        sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb")),
-    )
-    adjacent_shot_qa: Dict[str, Any] = Field(
-        default={},
-        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
     )
     project_id: uuid.UUID = Field(
         sa_column=Column(
