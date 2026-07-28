@@ -2189,6 +2189,56 @@ class FileService:
         except Exception:
             pass
 
+        # KAN-445: Many production EPUBs expose XHTML spine items as
+        # ITEM_UNKNOWN (type 0) instead of ITEM_DOCUMENT.  Since spine
+        # items are by definition in the reading order, treat any type-0
+        # item that is NOT clearly a non-document type (image, style,
+        # font, cover, navigation) as document content.
+        try:
+            item_type = item.get_type()
+            non_document_types = {
+                ebooklib.ITEM_IMAGE,
+                ebooklib.ITEM_STYLE,
+                ebooklib.ITEM_FONT,
+                ebooklib.ITEM_COVER,
+                ebooklib.ITEM_NAVIGATION,
+            }
+            if item_type == 0 and item_type not in non_document_types:
+                # Check media_type first for a definitive answer
+                media_type = (getattr(item, "media_type", "") or "").lower()
+                if media_type in {"application/xhtml+xml", "text/html"}:
+                    return True
+                # For type-0 spine items, also accept by href extension
+                item_name = ""
+                try:
+                    item_name = (item.get_name() or "").lower()
+                except Exception:
+                    item_name = ""
+                if item_name.endswith((".xhtml", ".html", ".htm")):
+                    return True
+                # Content sniff for type-0 items — be more aggressive since
+                # these are spine items (reading order) and very likely document content
+                try:
+                    raw_content = item.get_content()
+                except Exception:
+                    # If we can't get content but it's a type-0 spine item,
+                    # still treat it as document — the caller will handle None
+                    return True
+                if not isinstance(raw_content, (bytes, bytearray)):
+                    # Empty content but type-0 spine item — treat as document
+                    return True
+                sample = bytes(raw_content[:512]).decode(
+                    "utf-8", errors="ignore"
+                ).lower()
+                if any(marker in sample for marker in ("<html", "<body", "<!doctype html", "<p>", "<div", "<h1", "<h2", "<h3", "<span", "<section", "<article")):
+                    return True
+                # Type-0 spine item with non-HTML content — still treat as document
+                # since it's in the reading order. Better to extract text and find
+                # it's empty than to skip it entirely.
+                return True
+        except Exception:
+            pass
+
         media_type = (getattr(item, "media_type", "") or "").lower()
         if media_type in {"application/xhtml+xml", "text/html"}:
             return True
