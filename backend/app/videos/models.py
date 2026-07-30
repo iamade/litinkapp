@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any
 from sqlmodel import Field, SQLModel, Column, Relationship
 from sqlalchemy.dialects import postgresql as pg
 import sqlalchemy as sa
-from sqlalchemy import text, func, ForeignKey, Text, Integer, UniqueConstraint
+from sqlalchemy import func, ForeignKey, Text, Integer, UniqueConstraint
 from enum import Enum
 
 
@@ -48,7 +48,7 @@ class VideoGeneration(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -87,25 +87,25 @@ class VideoGeneration(SQLModel, table=True):
 
     # JSON fields
     task_meta: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     script_data: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     audio_files: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     image_data: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     video_data: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     merge_data: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     lipsync_data: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
 
     created_at: datetime = Field(
@@ -113,7 +113,7 @@ class VideoGeneration(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -121,7 +121,7 @@ class VideoGeneration(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -148,7 +148,7 @@ class AudioGeneration(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -190,7 +190,7 @@ class AudioGeneration(SQLModel, table=True):
     model_id: Optional[str] = Field(default=None)
     error_message: Optional[str] = Field(default=None)
     audio_metadata: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
 
     created_at: datetime = Field(
@@ -198,7 +198,7 @@ class AudioGeneration(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
 
@@ -213,7 +213,7 @@ class ImageGeneration(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -265,7 +265,7 @@ class ImageGeneration(SQLModel, table=True):
     progress: int = Field(default=0)
 
     meta: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
 
     created_at: datetime = Field(
@@ -273,7 +273,7 @@ class ImageGeneration(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -281,7 +281,7 @@ class ImageGeneration(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -300,7 +300,7 @@ class Script(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -319,34 +319,34 @@ class Script(SQLModel, table=True):
 
     # JSON fields
     characters: List[str] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
     # Character IDs linking to Plot Overview characters (UUIDs as strings)
     character_ids: List[str] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
     # Editable scene descriptions
     scene_descriptions: List[str] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
     # Scene order for storyboard
     scene_order: List[int] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
     # Storyboard configuration: key_scene_images, deselected_images, image_order
     storyboard_config: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     character_details: Optional[str] = Field(
         default=None
     )  # The code treats it as string sometimes? "character_details": character_details (string from _generate_character_details)
 
     evaluation: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
 
     emotional_map: List[Dict[str, Any]] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
 
     created_at: datetime = Field(
@@ -354,7 +354,7 @@ class Script(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -362,7 +362,7 @@ class Script(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -375,7 +375,7 @@ class VideoSegment(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -401,10 +401,10 @@ class VideoSegment(SQLModel, table=True):
     action_count: int = Field(default=0)
 
     camera_movements: List[str] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
     character_names: List[str] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
 
     status: str = Field(default="pending")
@@ -416,7 +416,7 @@ class VideoSegment(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
 
@@ -431,7 +431,7 @@ class PipelineStepModel(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -453,7 +453,7 @@ class PipelineStepModel(SQLModel, table=True):
     retry_count: int = Field(default=0)
 
     step_data: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
 
     created_at: datetime = Field(
@@ -461,7 +461,7 @@ class PipelineStepModel(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
 
@@ -473,7 +473,7 @@ class AudioExport(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -488,14 +488,14 @@ class AudioExport(SQLModel, table=True):
 
     # Store list of audio file IDs included in the export
     audio_files: List[str] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
 
     mix_settings: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     export_metadata: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
 
     export_url: Optional[str] = Field(default=None)
@@ -506,7 +506,7 @@ class AudioExport(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -514,7 +514,7 @@ class AudioExport(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -574,7 +574,7 @@ class SequenceUnit(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -601,19 +601,19 @@ class SequenceUnit(SQLModel, table=True):
         sa_column=Column(
             pg.ENUM(SequenceUnitStatus, name="sequence_unit_status", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
-            server_default=text("'pending'"),
+            server_default="'pending'",
         ),
     )
     unit_metadata: Dict[str, Any] = Field(
         default={},
-        sa_column=Column("metadata", pg.JSONB, server_default=text("'{}'::jsonb")),
+        sa_column=Column("metadata", pg.JSONB, server_default="'{}'::jsonb"),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -621,7 +621,7 @@ class SequenceUnit(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -643,7 +643,7 @@ class ProductionBible(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -670,19 +670,19 @@ class ProductionBible(SQLModel, table=True):
         sa_column=Column(
             pg.ENUM(SequenceUnitStatus, name="sequence_unit_status", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
-            server_default=text("'pending'"),
+            server_default="'pending'",
         ),
     )
     unit_metadata: Dict[str, Any] = Field(
         default={},
-        sa_column=Column("metadata", pg.JSONB, server_default=text("'{}'::jsonb")),
+        sa_column=Column("metadata", pg.JSONB, server_default="'{}'::jsonb"),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -690,7 +690,7 @@ class ProductionBible(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -704,7 +704,7 @@ class LineTracking(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -738,12 +738,12 @@ class LineTracking(SQLModel, table=True):
         sa_column=Column(
             pg.ENUM(LineTrackingStatus, name="line_tracking_status", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
-            server_default=text("'unassigned'"),
+            server_default="'unassigned'",
         ),
     )
     line_metadata: Dict[str, Any] = Field(
         default={},
-        sa_column=Column("metadata", pg.JSONB, server_default=text("'{}'::jsonb")),
+        sa_column=Column("metadata", pg.JSONB, server_default="'{}'::jsonb"),
     )
     project_id: uuid.UUID = Field(
         sa_column=Column(
@@ -758,28 +758,28 @@ class LineTracking(SQLModel, table=True):
 
     # Core bible content as JSONB
     characters: List[Dict[str, Any]] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
     objects: List[Dict[str, Any]] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
     locations: List[Dict[str, Any]] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
     voices: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     pronunciation: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     style_rules: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     world_rules: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     approved_reference_assets: List[Dict[str, Any]] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb"))
+        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
     )
 
     # Metadata
@@ -793,7 +793,7 @@ class LineTracking(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -801,7 +801,7 @@ class LineTracking(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -815,7 +815,7 @@ class ShotDiversityReport(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -829,30 +829,30 @@ class ShotDiversityReport(SQLModel, table=True):
     total_shots: int = Field(nullable=False)
     duplicate_count: int = Field(
         default=0,
-        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+        sa_column=Column(Integer, nullable=False, server_default="0"),
     )
     near_duplicate_count: int = Field(
         default=0,
-        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+        sa_column=Column(Integer, nullable=False, server_default="0"),
     )
     unique_count: int = Field(
         default=0,
-        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+        sa_column=Column(Integer, nullable=False, server_default="0"),
     )
     intentional_motif_count: int = Field(
         default=0,
-        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+        sa_column=Column(Integer, nullable=False, server_default="0"),
     )
     report_data: Dict[str, Any] = Field(
         default={},
-        sa_column=Column(pg.JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        sa_column=Column(pg.JSONB, nullable=False, server_default="'{}'::jsonb"),
     )
     status: ShotDiversityReportStatus = Field(
         default=ShotDiversityReportStatus.PENDING,
         sa_column=Column(
             pg.ENUM(ShotDiversityReportStatus, name="shot_diversity_report_status", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
-            server_default=text("'pending'"),
+            server_default="'pending'",
         ),
     )
     created_at: datetime = Field(
@@ -860,7 +860,7 @@ class ShotDiversityReport(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -868,7 +868,7 @@ class ShotDiversityReport(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -887,7 +887,7 @@ class VoiceCasting(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -901,30 +901,30 @@ class VoiceCasting(SQLModel, table=True):
     total_shots: int = Field(nullable=False)
     duplicate_count: int = Field(
         default=0,
-        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+        sa_column=Column(Integer, nullable=False, server_default="0"),
     )
     near_duplicate_count: int = Field(
         default=0,
-        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+        sa_column=Column(Integer, nullable=False, server_default="0"),
     )
     unique_count: int = Field(
         default=0,
-        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+        sa_column=Column(Integer, nullable=False, server_default="0"),
     )
     intentional_motif_count: int = Field(
         default=0,
-        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+        sa_column=Column(Integer, nullable=False, server_default="0"),
     )
     report_data: Dict[str, Any] = Field(
         default={},
-        sa_column=Column(pg.JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        sa_column=Column(pg.JSONB, nullable=False, server_default="'{}'::jsonb"),
     )
     status: ShotDiversityReportStatus = Field(
         default=ShotDiversityReportStatus.PENDING,
         sa_column=Column(
             pg.ENUM(ShotDiversityReportStatus, name="shot_diversity_report_status", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
-            server_default=text("'pending'"),
+            server_default="'pending'",
         ),
     )
     project_id: uuid.UUID = Field(
@@ -942,7 +942,7 @@ class VoiceCasting(SQLModel, table=True):
 
     # Voice metadata
     voice_metadata: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
 
     # Lock flag — once cast, can be locked to prevent accidental changes
@@ -953,7 +953,7 @@ class VoiceCasting(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -961,7 +961,7 @@ class VoiceCasting(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -980,7 +980,7 @@ class ContinuityReference(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -1000,22 +1000,22 @@ class ContinuityReference(SQLModel, table=True):
     reference_id: str = Field(nullable=False)
     reference_data: Dict[str, Any] = Field(
         default={},
-        sa_column=Column(pg.JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        sa_column=Column(pg.JSONB, nullable=False, server_default="'{}'::jsonb"),
     )
     shot_ids: List[str] = Field(
         default=[],
-        sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb")),
+        sa_column=Column(pg.JSONB, server_default="'[]'::jsonb"),
     )
     adjacent_shot_qa: Dict[str, Any] = Field(
         default={},
-        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
+        sa_column=Column(pg.JSONB, server_default="'{}'::jsonb"),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -1023,7 +1023,7 @@ class ContinuityReference(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
@@ -1041,7 +1041,7 @@ class DialogueManifest(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             primary_key=True,
-            server_default=text("gen_random_uuid()"),
+            server_default="gen_random_uuid()",
         ),
         default_factory=uuid.uuid4,
     )
@@ -1061,15 +1061,15 @@ class DialogueManifest(SQLModel, table=True):
     reference_id: str = Field(nullable=False)
     reference_data: Dict[str, Any] = Field(
         default={},
-        sa_column=Column(pg.JSONB, nullable=False, server_default=text("'{}'::jsonb")),
+        sa_column=Column(pg.JSONB, nullable=False, server_default="'{}'::jsonb"),
     )
     shot_ids: List[str] = Field(
         default=[],
-        sa_column=Column(pg.JSONB, server_default=text("'[]'::jsonb")),
+        sa_column=Column(pg.JSONB, server_default="'[]'::jsonb"),
     )
     adjacent_shot_qa: Dict[str, Any] = Field(
         default={},
-        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
+        sa_column=Column(pg.JSONB, server_default="'{}'::jsonb"),
     )
     project_id: uuid.UUID = Field(
         sa_column=Column(
@@ -1116,7 +1116,7 @@ class DialogueManifest(SQLModel, table=True):
 
     # Scene state for previous-frame chaining
     scene_state: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb"))
+        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
     )
     previous_frame_url: Optional[str] = Field(default=None)
     continuity_frame_url: Optional[str] = Field(default=None)
@@ -1130,7 +1130,7 @@ class DialogueManifest(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
         ),
     )
     updated_at: datetime = Field(
@@ -1138,7 +1138,7 @@ class DialogueManifest(SQLModel, table=True):
         sa_column=Column(
             pg.TIMESTAMP(timezone=True),
             nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
+            server_default="CURRENT_TIMESTAMP",
             onupdate=func.current_timestamp(),
         ),
     )
