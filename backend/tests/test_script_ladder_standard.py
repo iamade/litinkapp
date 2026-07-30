@@ -2,6 +2,7 @@ from app.core.model_config import ModelTier, SCRIPT_MODEL_CONFIG, get_model_conf
 
 
 def test_standard_script_ladder_order():
+    # KAN-450: MiniMax-M2.7-highspeed appended as fallback
     assert SCRIPT_MODEL_CONFIG[ModelTier.STANDARD].models == [
         "zai/glm-5.1",
         "zai/glm-5.2",
@@ -11,6 +12,7 @@ def test_standard_script_ladder_order():
         "openai/gpt-5.4",
         "anthropic/claude-sonnet-4-6",
         "anthropic/claude-opus-4-6",
+        "minimax/MiniMax-M2.7-highspeed",
     ]
 
 
@@ -24,7 +26,8 @@ def test_legacy_pro_value_uses_standard_script_ladder():
     assert get_model_config("script", "pro") is SCRIPT_MODEL_CONFIG[ModelTier.STANDARD]
 
 
-def test_every_script_ladder_has_eight_slots_and_at_most_two_ollama_models():
+def test_every_script_ladder_has_at_least_eight_slots_and_at_most_two_ollama_models():
+    # KAN-450: MiniMax fallbacks extend beyond original 8-slot ladder
     for tier, config in SCRIPT_MODEL_CONFIG.items():
-        assert len(config.models) == 8, tier
+        assert len(config.models) >= 8, tier
         assert sum(model.startswith("ollama/") for model in config.models) <= 2, tier
