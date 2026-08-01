@@ -177,11 +177,13 @@ class ShotDiversityService:
         insert_query = text(
             """
             INSERT INTO shot_diversity_reports (
-                id, video_generation_id, summary, duplicate_details,
-                near_duplicate_details, created_at, updated_at
+                id, video_generation_id, total_shots, duplicate_count,
+                near_duplicate_count, unique_count, intentional_motif_count,
+                report_data, status, created_at, updated_at
             ) VALUES (
-                :id, :vg_id, :summary, :dup_details,
-                :near_dup_details, :created_at, :updated_at
+                :id, :vg_id, :total, :duplicates,
+                :near_duplicates, :unique, :motifs,
+                :report_data, 'completed', :created_at, :updated_at
             )
             RETURNING *
             """
@@ -191,29 +193,17 @@ class ShotDiversityService:
             {
                 "id": report_id,
                 "vg_id": video_generation_id,
-                "summary": json.dumps(summary),
-                "dup_details": json.dumps(duplicates),
-                "near_dup_details": json.dumps(near_duplicates),
+                "total": summary["total"],
+                "duplicates": summary["duplicates"],
+                "near_duplicates": summary["near_duplicates"],
+                "unique": summary["unique"],
+                "motifs": summary["motifs"],
+                "report_data": json.dumps(summary),
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
             },
         )
         report_row = dict(result.mappings().first())
-        if report_row.get("summary") and isinstance(report_row["summary"], str):
-            report_row["summary"] = json.loads(report_row["summary"])
-        if report_row.get("duplicate_details") and isinstance(
-            report_row["duplicate_details"], str
-        ):
-            report_row["duplicate_details"] = json.loads(
-                report_row["duplicate_details"]
-            )
-        if report_row.get("near_duplicate_details") and isinstance(
-            report_row["near_duplicate_details"], str
-        ):
-            report_row["near_duplicate_details"] = json.loads(
-                report_row["near_duplicate_details"]
-            )
-
         await session.commit()
         return {
             "report_id": report_id,
@@ -241,9 +231,10 @@ class ShotDiversityService:
             }
 
         report = dict(row)
-        for field in ("summary", "duplicate_details", "near_duplicate_details"):
-            if report.get(field) and isinstance(report[field], str):
-                report[field] = json.loads(report[field])
+        data = report.get("report_data") or {}
+        if isinstance(data, str):
+            data = json.loads(data)
+        report.update(data)
         report["found"] = True
         return report
 
@@ -268,27 +259,17 @@ class ShotDiversityService:
             raise ValueError(f"Shot diversity report {report_id} not found")
 
         report = dict(row)
-        summary = report.get("summary")
-        if summary and isinstance(summary, str):
+        summary = report.get("report_data") or {}
+        if isinstance(summary, str):
             summary = json.loads(summary)
-        else:
-            summary = {}
 
         # Add the shot to motif_ids
         motif_ids = set(summary.get("motif_ids", []))
         motif_ids.add(shot_id)
 
         # Remove from duplicate/near_duplicate ids
-        dup_details = report.get("duplicate_details")
-        if dup_details and isinstance(dup_details, str):
-            dup_details = json.loads(dup_details)
-        else:
-            dup_details = []
-        near_dup_details = report.get("near_duplicate_details")
-        if near_dup_details and isinstance(near_dup_details, str):
-            near_dup_details = json.loads(near_dup_details)
-        else:
-            near_dup_details = []
+        dup_details = summary.get("duplicate_details", [])
+        near_dup_details = summary.get("near_duplicate_details", [])
 
         # Filter out pairs that involve the motif shot
         dup_details = [
@@ -307,6 +288,8 @@ class ShotDiversityService:
         summary["motifs"] = len(motif_ids)
         summary["duplicates"] = len(dup_details)
         summary["near_duplicates"] = len(near_dup_details)
+        summary["duplicate_details"] = dup_details
+        summary["near_duplicate_details"] = near_dup_details
         summary.setdefault("motif_reasons", {})[shot_id] = reason
 
         # Also update the video_segment metadata to flag it as intentional motif
@@ -323,9 +306,10 @@ class ShotDiversityService:
         update_query = text(
             """
             UPDATE shot_diversity_reports
-            SET summary = :summary,
-                duplicate_details = :dup_details,
-                near_duplicate_details = :near_dup_details,
+            SET report_data = :summary,
+                duplicate_count = :duplicates,
+                near_duplicate_count = :near_duplicates,
+                intentional_motif_count = :motifs,
                 updated_at = :updated_at
             WHERE id = :report_id
             RETURNING *
@@ -336,15 +320,15 @@ class ShotDiversityService:
             {
                 "report_id": report_id,
                 "summary": json.dumps(summary),
-                "dup_details": json.dumps(dup_details),
-                "near_dup_details": json.dumps(near_dup_details),
+                "duplicates": summary["duplicates"],
+                "near_duplicates": summary["near_duplicates"],
+                "motifs": summary["motifs"],
                 "updated_at": datetime.utcnow(),
             },
         )
         updated = dict(result.mappings().first())
-        for field in ("summary", "duplicate_details", "near_duplicate_details"):
-            if updated.get(field) and isinstance(updated[field], str):
-                updated[field] = json.loads(updated[field])
+        if updated.get("report_data") and isinstance(updated["report_data"], str):
+            updated["report_data"] = json.loads(updated["report_data"])
 
         await session.commit()
         return updated

@@ -234,34 +234,39 @@ class CinematicEpisodeGateService:
                 f"Invalid stage '{stage}'. Must be one of: {LINE_TRACKING_STAGES}"
             )
 
-        stage_index = LINE_TRACKING_STAGES.index(stage)
-
+        allowed_data = {
+            "character_name", "voice_id", "scene_id", "shot_id",
+            "source_audio_url", "lipsync_task_id", "resolved_provider",
+            "resolved_model", "timeline_position_ms", "metadata",
+        }
+        sets = ["status = :stage", "updated_at = :updated_at"]
+        params: Dict[str, Any] = {
+            "line_id": line_tracking_id,
+            "stage": stage,
+            "updated_at": datetime.utcnow(),
+        }
+        for field, value in data.items():
+            if field not in allowed_data:
+                continue
+            if field == "metadata" and isinstance(value, (dict, list)):
+                value = json.dumps(value)
+            sets.append(f"{field} = :{field}")
+            params[field] = value
         update_query = text(
-            """
+            f"""
             UPDATE line_tracking
-            SET current_stage = :stage,
-                stage_index = :stage_index,
-                stage_data = :stage_data,
-                updated_at = :updated_at
+            SET {', '.join(sets)}
             WHERE id = :line_id
             RETURNING *
             """
         )
-        result = await session.execute(
-            update_query,
-            {
-                "line_id": line_tracking_id,
-                "stage": stage,
-                "stage_index": stage_index,
-                "stage_data": json.dumps(data),
-                "updated_at": datetime.utcnow(),
-            },
-        )
-        row = dict(result.mappings().first())
+        result = await session.execute(update_query, params)
+        mapping = result.mappings().first()
+        row = dict(mapping) if mapping else {}
         if not row:
             raise ValueError(f"Line tracking record {line_tracking_id} not found")
-        if row.get("stage_data") and isinstance(row["stage_data"], str):
-            row["stage_data"] = json.loads(row["stage_data"])
+        if row.get("metadata") and isinstance(row["metadata"], str):
+            row["metadata"] = json.loads(row["metadata"])
         await session.commit()
         return row
 
@@ -273,15 +278,15 @@ class CinematicEpisodeGateService:
             """
             SELECT * FROM line_tracking
             WHERE sequence_unit_id = :unit_id
-            ORDER BY line_index
+            ORDER BY created_at
             """
         )
         result = await session.execute(query, {"unit_id": sequence_unit_id})
         rows = []
         for row in result.mappings():
             d = dict(row)
-            if d.get("stage_data") and isinstance(d["stage_data"], str):
-                d["stage_data"] = json.loads(d["stage_data"])
+            if d.get("metadata") and isinstance(d["metadata"], str):
+                d["metadata"] = json.loads(d["metadata"])
             rows.append(d)
         return rows
 
@@ -295,14 +300,14 @@ class CinematicEpisodeGateService:
             FROM line_tracking lt
             JOIN sequence_units su ON lt.sequence_unit_id = su.id
             WHERE su.video_generation_id = :vg_id
-            ORDER BY su.unit_order, lt.line_index
+            ORDER BY su.unit_order, lt.created_at
             """
         )
         result = await session.execute(query, {"vg_id": video_generation_id})
         rows = []
         for row in result.mappings():
             d = dict(row)
-            if d.get("stage_data") and isinstance(d["stage_data"], str):
-                d["stage_data"] = json.loads(d["stage_data"])
+            if d.get("metadata") and isinstance(d["metadata"], str):
+                d["metadata"] = json.loads(d["metadata"])
             rows.append(d)
         return rows
