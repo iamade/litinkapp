@@ -779,6 +779,141 @@ class TestKan434Kan440SharedParserScope:
         assert len(payload["chapters"]) == len(chapters)
 
     @pytest.mark.asyncio
+    async def test_kan445_production_shape_uses_explicit_sequence_fallback(
+        self, monkeypatch
+    ):
+        """Faithful fallback for the unavailable 368-spine/351k-char fixture."""
+        from app.core.services.file import FileService
+
+        def roman(number: int) -> str:
+            values = (
+                (50, "L"),
+                (40, "XL"),
+                (10, "X"),
+                (9, "IX"),
+                (5, "V"),
+                (4, "IV"),
+                (1, "I"),
+            )
+            result = ""
+            for value, numeral in values:
+                while number >= value:
+                    result += numeral
+                    number -= value
+            return result
+
+        def prose(label: str) -> str:
+            return "".join(
+                f"<p>{label} paragraph {index} carries production-shaped narrative "
+                "text across an OCR-exported page for exact aggregate reconstruction.</p>"
+                for index in range(8)
+            )
+
+        class FakeSpineItem:
+            def __init__(self, uid, name, media_type, content, item_type=0):
+                self.uid = uid
+                self.media_type = media_type
+                self._name = name
+                self._content = content.encode("utf-8")
+                self._type = item_type
+
+            def get_id(self):
+                return self.uid
+
+            def get_name(self):
+                return self._name
+
+            def get_type(self):
+                return self._type
+
+            def get_content(self):
+                return self._content
+
+        class FakeBook:
+            def __init__(self):
+                self.items = {
+                    "cover": FakeSpineItem(
+                        "cover", "cover.jpg", "image/jpeg", "cover", 1
+                    ),
+                    "style": FakeSpineItem(
+                        "style", "book.css", "text/css", "body {}", 2
+                    ),
+                }
+                self.spine = [("cover", "no"), ("style", "no")]
+                page_number = 0
+
+                def add_page(body):
+                    nonlocal page_number
+                    page_number += 1
+                    uid = f"page_{page_number:03d}"
+                    self.items[uid] = FakeSpineItem(
+                        uid,
+                        f"text/{uid}.xhtml",
+                        "application/xhtml+xml",
+                        f"<html><body>{body}</body></html>",
+                    )
+                    self.spine.append((uid, "yes"))
+
+                add_page(f"<p>PREFACE</p>{prose('preface')}")
+                add_page(
+                    "<p>CONTENTS</p>"
+                    + "".join(
+                        f"<p>CHAPTER {roman(number)}</p>"
+                        for number in range(1, 60)
+                    )
+                )
+                for number in range(1, 60):
+                    add_page(
+                        f"<p>CHAPTER {roman(number)}</p>"
+                        f"{prose(f'chapter {number} opening')}"
+                    )
+                    for fragment in range(5):
+                        add_page(prose(f"chapter {number} continuation {fragment}"))
+                add_page(
+                    "<p>THE FULL PROJECT GUTENBERG LICENSE</p>"
+                    + prose("license opening")
+                )
+                for fragment in range(9):
+                    add_page(prose(f"license continuation {fragment}"))
+
+                assert page_number == 366
+                assert len(self.spine) == 368
+
+            def get_metadata(self, *_args):
+                return []
+
+            def get_item_with_id(self, item_id):
+                return self.items.get(item_id)
+
+            def get_items(self):
+                return list(self.items.values())
+
+        monkeypatch.setattr(
+            "app.core.services.file.epub.read_epub", lambda _file_path: FakeBook()
+        )
+
+        service = FileService()
+        # Reproduce the production failure mode: the generic detector rejects the
+        # aggregate despite valid explicit chapter headings remaining in the text.
+        monkeypatch.setattr(
+            service.structure_detector,
+            "detect_structure",
+            lambda _text: {"has_sections": False, "chapters": [], "sections": []},
+        )
+
+        chapters = service.extract_epub_chapters("greatexpectation-epub.epub")
+        payload = await service.process_epub("greatexpectation-epub.epub")
+        body = [item for item in chapters if item["content_type"] == "chapter"]
+
+        assert len(body) == 59
+        assert [item["number"] for item in body] == [str(i) for i in range(1, 60)]
+        assert chapters[0]["content_type"] == "front_matter"
+        assert chapters[-1]["content_type"] == "back_matter"
+        assert "chapter 1 continuation 4" in body[0]["content"]
+        assert len(payload["text"]) > 300_000
+        assert payload["chapters"] == chapters
+
+    @pytest.mark.asyncio
     async def test_unreconstructable_epub_upload_raises_clear_error(
         self, tmp_path, monkeypatch
     ):

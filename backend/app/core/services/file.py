@@ -2366,13 +2366,159 @@ class FileService:
                 "[EPUB] Aggregate reconstruction failed semantic chapter gate "
                 f"({len(semantic_chapters)} chapter-like items)"
             )
-            return []
+            reconstructed = self._reconstruct_epub_explicit_chapter_sequence(full_text)
+            if not reconstructed:
+                return []
 
         print(
             "[EPUB] Aggregate reconstruction produced "
             f"{len(reconstructed)} items with {len(semantic_chapters)} chapters"
         )
         return reconstructed
+
+    def _reconstruct_epub_explicit_chapter_sequence(
+        self, full_text: str
+    ) -> List[Dict[str, Any]]:
+        """Recover page-split books from their ordered explicit chapter headings.
+
+        OCR/page-export EPUBs can expose hundreds of XHTML pages as type-0 spine
+        items.  Once those pages are aggregated, the general structure detector
+        can reject the whole book because page numbers and a duplicated contents
+        list obscure its semantic gates.  Explicit ``CHAPTER I`` headings still
+        provide a reliable bounded signal: choose the longest sequential run
+        beginning at chapter one, preferring the run with the most body text.
+        This also avoids selecting a compact table-of-contents copy of the same
+        chapter sequence.
+        """
+        lines = full_text.splitlines()
+        candidates: List[Dict[str, Any]] = []
+
+        for line_num, raw_line in enumerate(lines):
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if not re.match(r"(?i)^chap(?:ter|\.)\s+", line):
+                continue
+
+            match = self.structure_detector._match_chapter_patterns(line)
+            if not match:
+                continue
+
+            normalized = str(match.get("number", ""))
+            if not normalized.isdigit():
+                continue
+            number = int(normalized)
+            if number < 1 or number > 500:
+                continue
+
+            subtitle = re.sub(r"\s+", " ", match.get("title", "") or "").strip()
+            title = f"Chapter {number}"
+            if subtitle and not self._is_narrative_prose_title(subtitle):
+                title = f"{title}: {subtitle}"
+            candidates.append({"line": line_num, "number": number, "title": title})
+
+        sequences: List[List[Dict[str, Any]]] = []
+        for start_index, candidate in enumerate(candidates):
+            if candidate["number"] != 1:
+                continue
+            sequence = [candidate]
+            expected = 2
+            for following in candidates[start_index + 1 :]:
+                if following["number"] == expected:
+                    sequence.append(following)
+                    expected += 1
+            if len(sequence) >= 2:
+                sequences.append(sequence)
+
+        if not sequences:
+            return []
+
+        def sequence_score(sequence: List[Dict[str, Any]]) -> tuple[int, int]:
+            # Internal chapter gaps distinguish a real body from a compact TOC.
+            internal_chars = sum(
+                sum(len(line) for line in lines[current["line"] : following["line"]])
+                for current, following in zip(sequence, sequence[1:])
+            )
+            return len(sequence), internal_chars
+
+        sequence = max(sequences, key=sequence_score)
+        first_line = sequence[0]["line"]
+        last_line = sequence[-1]["line"]
+
+        back_matter_line = len(lines)
+        back_matter_title = "Back Matter"
+        for line_num in range(last_line + 1, len(lines)):
+            title = re.sub(r"\s+", " ", lines[line_num]).strip()
+            if not title or len(title) > 160:
+                continue
+            content_type = self._classify_spine_item(title, "", 0)
+            if content_type in {"back_matter", "metadata"}:
+                back_matter_line = line_num
+                back_matter_title = title
+                break
+
+        recovered: List[Dict[str, Any]] = []
+        front_content = "\n".join(lines[:first_line]).strip()
+        if len(front_content) >= 100:
+            recovered.append(
+                self._with_generation_flag(
+                    {
+                        "number": None,
+                        "title": "Front Matter",
+                        "content": front_content,
+                        "type": "front_matter",
+                        "content_type": "front_matter",
+                    }
+                )
+            )
+
+        for index, chapter in enumerate(sequence):
+            end_line = (
+                sequence[index + 1]["line"]
+                if index + 1 < len(sequence)
+                else back_matter_line
+            )
+            content = "\n".join(lines[chapter["line"] : end_line]).strip()
+            if len(content) < 100:
+                continue
+            recovered.append(
+                self._with_generation_flag(
+                    {
+                        "number": str(chapter["number"]),
+                        "title": chapter["title"],
+                        "content": content,
+                        "type": "chapter",
+                        "content_type": "chapter",
+                    }
+                )
+            )
+
+        back_content = "\n".join(lines[back_matter_line:]).strip()
+        if len(back_content) >= 100:
+            back_type = self._classify_spine_item(back_matter_title, "", 0)
+            if back_type == "chapter":
+                back_type = "back_matter"
+            recovered.append(
+                self._with_generation_flag(
+                    {
+                        "number": None,
+                        "title": back_matter_title,
+                        "content": back_content,
+                        "type": back_type,
+                        "content_type": back_type,
+                    }
+                )
+            )
+
+        recovered_chapters = [
+            item for item in recovered if item.get("content_type") == "chapter"
+        ]
+        if len(recovered_chapters) < 2:
+            return []
+
+        print(
+            "[EPUB] Explicit heading reconstruction produced "
+            f"{len(recovered)} items with {len(recovered_chapters)} chapters"
+        )
+        return recovered
 
     def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
