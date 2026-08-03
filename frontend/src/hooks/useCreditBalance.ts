@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiClient } from "../lib/api";
+import {
+  CREDITS_POLLING_END_EVENT,
+  CREDITS_POLLING_START_EVENT,
+} from "../lib/activeGeneration";
 import {
   CREDITS_REFRESH_EVENT,
   CreditBalanceResponse,
@@ -14,10 +18,13 @@ export function useCreditBalance(options: UseCreditBalanceOptions = {}) {
   const { enabled = true, refreshIntervalMs = 45000 } = options;
   const [balance, setBalance] = useState<number>(0);
   const [loading, setLoading] = useState(false);
+  const intervalRef = useRef<number | null>(null);
+  const pendingRef = useRef(false);
 
   const refreshBalance = useCallback(async () => {
-    if (!enabled) return;
+    if (!enabled || pendingRef.current) return;
 
+    pendingRef.current = true;
     try {
       setLoading(true);
       const response = await apiClient.get<CreditBalanceResponse>("/credits/balance");
@@ -26,14 +33,32 @@ export function useCreditBalance(options: UseCreditBalanceOptions = {}) {
       // Silently fail to avoid noisy toasts in global UI surfaces.
     } finally {
       setLoading(false);
+      pendingRef.current = false;
     }
   }, [enabled]);
+
+  const startInterval = useCallback(() => {
+    if (intervalRef.current) return;
+    intervalRef.current = window.setInterval(() => {
+      refreshBalance();
+    }, refreshIntervalMs);
+  }, [refreshBalance, refreshIntervalMs]);
+
+  const stopInterval = useCallback(() => {
+    if (intervalRef.current) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
 
     refreshBalance();
 
+    // Coalesce rapid refresh events: if a request is already in flight, the
+    // burst of CREDITS_REFRESH_EVENT dispatches during a generation does not
+    // create additional GET /credits/balance calls (KAN-436).
     const onRefresh = () => {
       refreshBalance();
     };
@@ -42,19 +67,26 @@ export function useCreditBalance(options: UseCreditBalanceOptions = {}) {
       refreshBalance();
     };
 
+    // Suspend the background interval while long-running generation jobs are
+    // actively polling; rely on completion/focus/events instead (KAN-436).
+    const onPollingStart = () => stopInterval();
+    const onPollingEnd = () => startInterval();
+
     window.addEventListener(CREDITS_REFRESH_EVENT, onRefresh);
     window.addEventListener("focus", onFocus);
+    window.addEventListener(CREDITS_POLLING_START_EVENT, onPollingStart);
+    window.addEventListener(CREDITS_POLLING_END_EVENT, onPollingEnd);
 
-    const intervalId = window.setInterval(() => {
-      refreshBalance();
-    }, refreshIntervalMs);
+    startInterval();
 
     return () => {
       window.removeEventListener(CREDITS_REFRESH_EVENT, onRefresh);
       window.removeEventListener("focus", onFocus);
-      window.clearInterval(intervalId);
+      window.removeEventListener(CREDITS_POLLING_START_EVENT, onPollingStart);
+      window.removeEventListener(CREDITS_POLLING_END_EVENT, onPollingEnd);
+      stopInterval();
     };
-  }, [enabled, refreshBalance, refreshIntervalMs]);
+  }, [enabled, refreshBalance, refreshIntervalMs, startInterval, stopInterval]);
 
   return {
     balance,
