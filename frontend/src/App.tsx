@@ -130,6 +130,7 @@ function App() {
                     <Navbar />
                     <Routes>
                       <Route path="/" element={<HomePage />} />
+                      <Route path="/login" element={<Navigate to="/auth?mode=login" replace />} />
                       <Route path="/auth" element={<AuthPage />} />
                       <Route path="/dashboard" element={<ExplorerModeRouteGate><ProtectedRoute><Dashboard /></ProtectedRoute></ExplorerModeRouteGate>} />
                       <Route path="/author" element={<ProtectedRoute><AuthorPanel /></ProtectedRoute>} />
