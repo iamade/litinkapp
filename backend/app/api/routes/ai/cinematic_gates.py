@@ -11,7 +11,7 @@ import uuid
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Body
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -51,6 +51,25 @@ class SequenceUnitResponse(BaseModel):
     title: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_uuids(cls, data: Any) -> Any:
+        """KAN-452: coerce UUID → str on response validation.
+
+        ORM `SequenceUnit.id` / `video_generation_id` are `uuid.UUID` with
+        `pg.UUID(as_uuid=True)`. Services return raw dicts from raw-SQL, so
+        these values land on the route as Python `uuid.UUID` instances.
+        Strict Pydantic v2 rejects `UUID` against a `str` field declaration,
+        so this `mode="before"` validator coerces UUID values to str before
+        field-level validation runs.
+        """
+        if isinstance(data, dict):
+            for field_name in ("id", "video_generation_id"):
+                v = data.get(field_name)
+                if isinstance(v, uuid.UUID):
+                    data[field_name] = str(v)
+        return data
+
 
 class SequenceUnitUpdate(BaseModel):
     unit_type: Optional[str] = None
@@ -82,6 +101,17 @@ class LineTrackingResponse(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
     unit_type: Optional[str] = None
     unit_order: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_uuids(cls, data: Any) -> Any:
+        """KAN-452: coerce UUID → str on response validation (see SequenceUnitResponse)."""
+        if isinstance(data, dict):
+            for field_name in ("id", "sequence_unit_id", "video_generation_id"):
+                v = data.get(field_name)
+                if isinstance(v, uuid.UUID):
+                    data[field_name] = str(v)
+        return data
 
 
 class ShotDiversitySummary(BaseModel):
@@ -124,6 +154,17 @@ class ContinuityReferenceResponse(BaseModel):
     reference_data: Optional[Dict[str, Any]] = None
     shot_ids: List[str] = Field(default_factory=list)
     adjacent_shot_qa: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_uuids(cls, data: Any) -> Any:
+        """KAN-452: coerce UUID → str on response validation (see SequenceUnitResponse)."""
+        if isinstance(data, dict):
+            for field_name in ("id", "video_generation_id"):
+                v = data.get(field_name)
+                if isinstance(v, uuid.UUID):
+                    data[field_name] = str(v)
+        return data
 
 
 class EpisodeGateStatusResponse(BaseModel):
