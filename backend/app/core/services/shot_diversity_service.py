@@ -64,6 +64,12 @@ class ShotDiversityService:
         - Store results in shot_diversity_reports table
         - Return summary {total, duplicates, near_duplicates, unique, motifs}
         """
+        # Generate report_id up-front so both the empty-segments path and the
+        # populated path return the same contract (KAN-454). Always INSERT a
+        # report row so callers can resolve it by id, even when there are no
+        # segments to analyze.
+        report_id = str(uuid.uuid4())
+
         # Fetch all video segments
         query = text(
             """
@@ -76,13 +82,46 @@ class ShotDiversityService:
         segments = [dict(row) for row in result.mappings()]
 
         if not segments:
-            return {
+            empty_summary = {
                 "total": 0,
                 "duplicates": 0,
                 "near_duplicates": 0,
                 "unique": 0,
                 "motifs": 0,
                 "details": [],
+            }
+            empty_insert = text(
+                """
+                INSERT INTO shot_diversity_reports (
+                    id, video_generation_id, total_shots, duplicate_count,
+                    near_duplicate_count, unique_count, intentional_motif_count,
+                    report_data, status, created_at, updated_at
+                ) VALUES (
+                    :id, :vg_id, :total, :duplicates,
+                    :near_duplicates, :unique, :motifs,
+                    :report_data, 'completed', :created_at, :updated_at
+                )
+                """
+            )
+            await session.execute(
+                empty_insert,
+                {
+                    "id": report_id,
+                    "vg_id": video_generation_id,
+                    "total": 0,
+                    "duplicates": 0,
+                    "near_duplicates": 0,
+                    "unique": 0,
+                    "motifs": 0,
+                    "report_data": json.dumps(empty_summary),
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                },
+            )
+            await session.commit()
+            return {
+                "report_id": report_id,
+                **empty_summary,
             }
 
         # Compute hashes for all segments
@@ -173,7 +212,6 @@ class ShotDiversityService:
         }
 
         # Store report in shot_diversity_reports table
-        report_id = str(uuid.uuid4())
         insert_query = text(
             """
             INSERT INTO shot_diversity_reports (
