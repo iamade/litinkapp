@@ -21,6 +21,7 @@ REQUIRED_UNIT_TYPES = [
     "climax_resolution",
     "closing_bookend",
     "end_title_credits",
+    "scene",  # KAN-458: scene-level unit
 ]
 
 # Valid line tracking stages in order

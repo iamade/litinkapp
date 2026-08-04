@@ -538,6 +538,7 @@ class SequenceUnitType(str, Enum):
     CLIMAX_RESOLUTION = "climax_resolution"
     CLOSING_BOOKEND = "closing_bookend"
     END_TITLE_CREDITS = "end_title_credits"
+    SCENE = "scene"  # KAN-458: scene-level unit (PSQ harness posts with unit_type="scene")
 
 
 class SequenceUnitStatus(str, Enum):

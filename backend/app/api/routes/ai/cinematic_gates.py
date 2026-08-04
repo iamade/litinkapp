@@ -33,7 +33,7 @@ router = APIRouter()
 
 
 class SequenceUnitCreate(BaseModel):
-    unit_type: str = Field(..., description="One of: ident_title, prologue, dialogue_act, climax_resolution, closing_bookend, end_title_credits")
+    unit_type: str = Field(..., description="One of: ident_title, prologue, dialogue_act, climax_resolution, closing_bookend, end_title_credits, scene")
     unit_order: int = Field(..., description="Ordering index for the unit")
     title: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
