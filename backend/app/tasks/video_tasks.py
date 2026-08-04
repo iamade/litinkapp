@@ -705,11 +705,11 @@ async def extract_scene_dialogue_and_generate_audio(
                 insert_query = text(
                     """
                     INSERT INTO video_segments (
-                        video_generation_id, scene_id, segment_index, scene_description,
+                        video_generation_id, scene_id, segment_index, scene_number, sequence_index, scene_description,
                         audio_url, character_name, dialogue_text, generation_method,
                         status, processing_service, metadata
                     ) VALUES (
-                        :video_generation_id, :scene_id, :segment_index, :scene_description,
+                        :video_generation_id, :scene_id, :segment_index, :scene_number, :sequence_index, :scene_description,
                         :audio_url, :character_name, :dialogue_text, :generation_method,
                         :status, :processing_service, :metadata
                     )
@@ -722,6 +722,8 @@ async def extract_scene_dialogue_and_generate_audio(
                         "video_generation_id": video_gen_id,
                         "scene_id": scene_id,
                         "segment_index": scene_number,
+                        "scene_number": scene_number,
+                        "sequence_index": scene_number,
                         "scene_description": scene_description,
                         "audio_url": audio_file.get("audio_url"),
                         "character_name": audio_file.get("character"),
@@ -2120,11 +2122,11 @@ async def generate_scene_videos(
                         insert_query = text(
                             """
                             INSERT INTO video_segments (
-                                video_generation_id, user_id, scene_id, scene_number, scene_description,
+                                video_generation_id, user_id, scene_id, scene_number, sequence_index, scene_description,
                                 video_url, status, target_duration,
                                 character_count, dialogue_count, action_count
                             ) VALUES (
-                                :video_generation_id, :user_id, :scene_id, :scene_number, :scene_description,
+                                :video_generation_id, :user_id, :scene_id, :scene_number, :sequence_index, :scene_description,
                                 :video_url, :status, :target_duration,
                                 :character_count, :dialogue_count, :action_count
                             ) RETURNING id
@@ -2138,6 +2140,7 @@ async def generate_scene_videos(
                                 "user_id": db_user_id,
                                 "scene_id": scene_id,
                                 "scene_number": scene_num,
+                                "sequence_index": scene_num,
                                 "scene_description": scene_description,
                                 "video_url": video_url,
                                 "status": "completed",
@@ -2223,10 +2226,10 @@ async def generate_scene_videos(
                 fail_insert_query = text(
                     """
                     INSERT INTO video_segments (
-                        video_generation_id, user_id, scene_id, scene_number, scene_description,
+                        video_generation_id, user_id, scene_id, scene_number, sequence_index, scene_description,
                         status, character_count, dialogue_count, action_count
                     ) VALUES (
-                        :video_generation_id, :user_id, :scene_id, :scene_number, :scene_description,
+                        :video_generation_id, :user_id, :scene_id, :scene_number, :sequence_index, :scene_description,
                         :status, :character_count, :dialogue_count, :action_count
                     )
                 """
@@ -2239,6 +2242,7 @@ async def generate_scene_videos(
                         "user_id": db_user_id,
                         "scene_id": scene_id,
                         "scene_number": scene_num,
+                        "sequence_index": scene_num,
                         "scene_description": scene_description,
                         "status": "failed",
                         "character_count": 0,

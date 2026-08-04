@@ -393,6 +393,13 @@ class VideoSegment(SQLModel, table=True):
 
     scene_id: str = Field(nullable=False)
     scene_number: int = Field(nullable=False)
+    # KAN-438 regression fix: this column was missing from the original
+    # migration. It is the canonical ordering key used by
+    # shot_diversity_service.py:72 and continuity_service.py:177.
+    # Populated by backfill (existing rows) and by the `video_tasks.py`
+    # insert paths (new rows). Backed by an index added in migration
+    # `kan_438_video_segments_sequence_index`.
+    sequence_index: int = Field(nullable=False, index=True)
     video_url: Optional[str] = Field(default=None)
     scene_description: Optional[str] = Field(default=None)
 
