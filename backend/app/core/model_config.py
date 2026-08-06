@@ -145,6 +145,8 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         fallback3="piapi/Qubico/flux1-schnell",
         # fallback2="qwen-image-2512",  # Qwen-Image-2512 (Direct API)
+        # KAN-447: GLM image (additive, not reordering existing)
+        fallback4="glm/glm-image",
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="imagen-4",  # imagen-4 (ModelsLab API) Per image generation will cost 0.044$
@@ -152,6 +154,8 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         fallback3="piapi/Qubico/flux1-schnell",
         # fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
+        # KAN-447: GLM image (additive)
+        fallback4="glm/glm-image",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="nano-banana-t2i",  # nano-banana-t2i (ModelsLab V7) working Your request will cost $0.046
@@ -159,6 +163,8 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="nano-banana-pro",  #  nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         fallback3="piapi/Qubico/flux1-schnell",
         # fallback="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
+        # KAN-447: GLM image (additive)
+        fallback4="glm/glm-image",
     ),
     ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
         primary="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
@@ -166,6 +172,8 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         fallback3="piapi/Qubico/flux1-schnell",
         #  fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API
+        # KAN-447: GLM image (additive)
+        fallback4="glm/glm-image",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="seedream-4.5",  # seedream-4.5 (ModelsLab V7) working Your request will cost $0.06
@@ -173,6 +181,8 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
         fallback3="piapi/Qubico/flux1-schnell",
         #  fallback2="gpt-image-1.5",  # GPT-Image-1.5 (Direct API
+        # KAN-447: GLM image (additive)
+        fallback4="glm/glm-image",
     ),
     ModelTier.ENTERPRISE: ModelConfig(
         primary="nano-banana-pro",  # nano-banana-pro (ModelsLab V7) working Your request will cost $0.18 per image
@@ -180,6 +190,8 @@ IMAGE_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="nano-banana",  # Nano Banana / Gemini-2.5 (Direct API)
         fallback3="piapi/Qubico/flux1-schnell",
         # fallback3="nano-banana-pro",  # Nano Banana Pro / Gemini-3 (Direct API)
+        # KAN-447: GLM image (additive)
+        fallback4="glm/glm-image",
     ),
 }
 
@@ -274,12 +286,16 @@ VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback="wan2.6-i2v",  # Wan2.6-I2V (ModelsLab) - upgraded fallback
         fallback2="piapi/kling",
         fallback3="piapi/wan2.1-i2v",
+        # KAN-447: GLM video (additive)
+        fallback4="glm/cogvideox-3",
     ),
     ModelTier.BASIC: ModelConfig(
         primary="wan2.6-i2v",  # Wan2.6-I2V (ModelsLab) 720p - better audio sync
         fallback="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p fallback
         fallback2="piapi/kling",
         fallback3="piapi/wan2.1-i2v",
+        # KAN-447: GLM video (additive)
+        fallback4="glm/cogvideox-3",
     ),
     ModelTier.STANDARD: ModelConfig(
         primary="omni-human-1.5",  # Omni-Human-1.5 (ModelsLab) - talking head specialist
@@ -287,6 +303,8 @@ VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="wan2.5-i2v",  # Wan2.5-I2V fallback
         fallback3="piapi/kling",
         fallback4="piapi/wan2.1-i2v",
+        # KAN-447: GLM video (additive)
+        fallback5="glm/cogvideox-3",
     ),
     ModelTier.PREMIUM: ModelConfig(
         primary="omni-human",  # Omni-Human (ModelsLab) - high quality talking head
@@ -294,6 +312,8 @@ VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
         fallback3="piapi/kling",
         fallback4="piapi/wan2.1-i2v",
+        # KAN-447: GLM video (additive)
+        fallback5="glm/cogvideox-3",
     ),
     ModelTier.PRO: ModelConfig(  # KAN-tier-mapping: "pro" alias for PROFESSIONAL
         primary="omni-human",  # Omni-Human (ModelsLab) - professional quality
@@ -301,6 +321,8 @@ VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
         fallback3="piapi/kling",
         fallback4="piapi/wan2.1-i2v",
+        # KAN-447: GLM video (additive)
+        fallback5="glm/cogvideox-3",
     ),
     ModelTier.PROFESSIONAL: ModelConfig(
         primary="omni-human",  # Omni-Human (ModelsLab) - professional quality
@@ -315,6 +337,8 @@ VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback2="wan2.6-i2v",  # Wan2.6-I2V fallback
         fallback3="piapi/kling",
         fallback4="piapi/wan2.1-i2v",
+        # KAN-447: GLM video (additive)
+        fallback5="glm/cogvideox-3",
     ),
 }
 

@@ -23,10 +23,11 @@ class MediaRouter:
     }
 
     SUPPORTED_PROVIDERS = {
-        "image": {"modelslab", "piapi"},
-        "video": {"modelslab", "piapi"},
-        "audio": {"modelslab", "piapi", "elevenlabs"},
-        "tts": {"modelslab", "piapi", "elevenlabs"},
+        # KAN-447: kimi and glm added additively — no existing providers reordered
+        "image": {"modelslab", "piapi", "glm"},
+        "video": {"modelslab", "piapi", "glm"},
+        "audio": {"modelslab", "piapi", "elevenlabs", "kimi", "glm"},
+        "tts": {"modelslab", "piapi", "elevenlabs", "kimi", "glm"},
     }
 
     def resolve(self, tier: str | ModelTier, media_type: str) -> List[str]:
