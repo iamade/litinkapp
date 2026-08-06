@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
@@ -26,7 +27,12 @@ def _get_logger():
     return loguru.logger
 
 
+def _redact_identity_like_output(message: object) -> str:
+    return re.sub(r"\b[A-Z2-7]{58}\b", "[REDACTED_IDENTITY]", str(message))
+
+
 _fake_logging.get_logger = _get_logger
+_fake_logging.redact_identity_like_output = _redact_identity_like_output
 sys.modules["app.core.logging"] = _fake_logging
 
 # Lightweight stubs so tests can import storage service without optional deps installed.

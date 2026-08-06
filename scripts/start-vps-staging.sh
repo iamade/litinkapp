@@ -17,6 +17,10 @@ if [ "$ENV_FILE" = "./.envs/.env.local" ] || [ "$ENV_FILE" = ".envs/.env.local" 
 fi
 
 echo "Starting LitInkAI VPS staging tunnel backend..."
+redact_startup_logs() {
+  sed -E 's/[A-Z2-7]{58}/[REDACTED_IDENTITY]/g'
+}
+
 if ! pgrep -f "ssh .*5432:127.0.0.1:5432.*72.62.97.111" > /dev/null; then
   echo "❌ ERROR: SSH staging tunnel not running. Run: make tunnel-staging"
   exit 1
@@ -42,12 +46,12 @@ for i in {1..60}; do
   fi
   if echo "$logs" | grep -Eq "Traceback|FAILED|ValueError|ModuleNotFoundError"; then
     echo "❌ API startup failed. Recent logs:"
-    echo "$logs"
+    echo "$logs" | redact_startup_logs
     exit 1
   fi
   if [ "$i" -eq 60 ]; then
     echo "❌ API did not finish startup within 120 seconds. Recent logs:"
-    echo "$logs"
+    echo "$logs" | redact_startup_logs
     exit 1
   fi
   sleep 2
