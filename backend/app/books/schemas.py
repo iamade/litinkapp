@@ -24,8 +24,7 @@ class Section(SectionBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChapterInput(BaseModel):
@@ -135,8 +134,7 @@ class Chapter(ChapterBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Enhanced Chapter with section relationship
@@ -170,8 +168,7 @@ class Book(BookBase):
     updated_at: datetime
     chapters: Optional[List[Chapter]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ✅ ADD: New preview schema that extends Book
@@ -238,5 +235,4 @@ class BookWithDraftChapters(Book):
     updated_at: datetime
     chapters: Optional[List[ChapterDraft]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
