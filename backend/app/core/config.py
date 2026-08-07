@@ -181,6 +181,10 @@ class Settings(BaseSettings):
     ALGORAND_SERVER: str = "https://testnet-api.algonode.cloud"
     ALGORAND_INDEXER: str = "https://testnet-idx.algonode.cloud"
     CREATOR_MNEMONIC: Optional[str] = None
+    # Hotfix 2026-08-06: allow prod boot without a valid Algorand mnemonic.
+    # When true, blockchain runs in mock mode (creator_account=None) even in production.
+    # Algorand is slated for removal (hackathon-era feature) — see AFD ticket.
+    SKIP_BLOCKCHAIN_BOOTSTRAP: bool = False
 
     # Email Configuration
     MAIL_SERVICE: str = "mailpit"  # mailpit for dev, mailgun for production

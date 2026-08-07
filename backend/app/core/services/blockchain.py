@@ -41,6 +41,13 @@ class BlockchainService:
     def _init_creator_account(self):
         """Initialize creator account"""
         try:
+            if settings.SKIP_BLOCKCHAIN_BOOTSTRAP:
+                print(
+                    "SKIP_BLOCKCHAIN_BOOTSTRAP=true: blockchain running in mock mode "
+                    "(no creator account); NFT operations disabled"
+                )
+                return None
+
             is_production = settings.ENVIRONMENT == "production"
             has_configured_mnemonic = (
                 settings.CREATOR_MNEMONIC
