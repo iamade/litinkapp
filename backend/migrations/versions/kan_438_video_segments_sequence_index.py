@@ -24,7 +24,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = 'kan_438_video_segments_sequence_index'
+revision = 'kan438_seg_seq_idx'
 down_revision = 'merge_kan438_439'
 branch_labels = None
 depends_on = None
