@@ -14,7 +14,7 @@ import uuid
 
 
 # Valid continuity reference types
-VALID_REF_TYPES = {"character", "world_element", "prop", "location"}
+VALID_REF_TYPES = {"character", "world", "prop", "location"}
 
 
 class ContinuityService:
@@ -27,6 +27,7 @@ class ContinuityService:
         ref_id: str,
         ref_data: Dict[str, Any],
         session: AsyncSession,
+        shot_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Create a continuity reference for a character, world element, prop, or location.
 
@@ -45,11 +46,11 @@ class ContinuityService:
         insert_query = text(
             """
             INSERT INTO continuity_references (
-                id, video_generation_id, ref_type, ref_id, ref_data,
-                adjacent_shot_qa, created_at, updated_at
+                id, video_generation_id, reference_type, reference_id, reference_data,
+                shot_ids, adjacent_shot_qa, created_at, updated_at
             ) VALUES (
                 :id, :vg_id, :ref_type, :ref_id, :ref_data,
-                NULL, :created_at, :updated_at
+                :shot_ids, :adjacent_shot_qa, :created_at, :updated_at
             )
             RETURNING *
             """
@@ -62,13 +63,16 @@ class ContinuityService:
                 "ref_type": ref_type,
                 "ref_id": ref_id,
                 "ref_data": json.dumps(ref_data),
+                "shot_ids": json.dumps(shot_ids or []),
+                "adjacent_shot_qa": json.dumps({}),
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
             },
         )
         row = dict(result.mappings().first())
-        if row.get("ref_data") and isinstance(row["ref_data"], str):
-            row["ref_data"] = json.loads(row["ref_data"])
+        for field in ("reference_data", "shot_ids", "adjacent_shot_qa"):
+            if row.get(field) and isinstance(row[field], str):
+                row[field] = json.loads(row[field])
         await session.commit()
         return row
 
@@ -83,7 +87,7 @@ class ContinuityService:
             query = text(
                 """
                 SELECT * FROM continuity_references
-                WHERE video_generation_id = :vg_id AND ref_type = :ref_type
+                WHERE video_generation_id = :vg_id AND reference_type = :ref_type
                 ORDER BY created_at
                 """
             )
@@ -95,7 +99,7 @@ class ContinuityService:
                 """
                 SELECT * FROM continuity_references
                 WHERE video_generation_id = :vg_id
-                ORDER BY ref_type, created_at
+                ORDER BY reference_type, created_at
                 """
             )
             result = await session.execute(query, {"vg_id": video_generation_id})
@@ -103,8 +107,8 @@ class ContinuityService:
         rows = []
         for row in result.mappings():
             d = dict(row)
-            if d.get("ref_data") and isinstance(d["ref_data"], str):
-                d["ref_data"] = json.loads(d["ref_data"])
+            if d.get("reference_data") and isinstance(d["reference_data"], str):
+                d["reference_data"] = json.loads(d["reference_data"])
             if d.get("adjacent_shot_qa") and isinstance(d["adjacent_shot_qa"], str):
                 d["adjacent_shot_qa"] = json.loads(d["adjacent_shot_qa"])
             rows.append(d)
@@ -114,14 +118,16 @@ class ContinuityService:
         self, reference_id: str, update_data: Dict[str, Any], session: AsyncSession
     ) -> Dict[str, Any]:
         """Update a continuity reference."""
-        allowed_fields = {"ref_type", "ref_id", "ref_data", "adjacent_shot_qa"}
+        field_map = {"ref_type": "reference_type", "ref_id": "reference_id", "ref_data": "reference_data"}
+        allowed_fields = {"reference_type", "reference_id", "reference_data", "shot_ids", "adjacent_shot_qa"}
         sets = []
         params: Dict[str, Any] = {"reference_id": reference_id, "updated_at": datetime.utcnow()}
 
         for field, value in update_data.items():
+            field = field_map.get(field, field)
             if field not in allowed_fields:
                 continue
-            if field in ("ref_data", "adjacent_shot_qa") and isinstance(value, (dict, list)):
+            if field in ("reference_data", "shot_ids", "adjacent_shot_qa") and isinstance(value, (dict, list)):
                 value = json.dumps(value)
             sets.append(f"{field} = :{field}")
             params[field] = value
@@ -143,7 +149,7 @@ class ContinuityService:
         row = dict(result.mappings().first())
         if not row:
             raise ValueError(f"Continuity reference {reference_id} not found")
-        for field in ("ref_data", "adjacent_shot_qa"):
+        for field in ("reference_data", "shot_ids", "adjacent_shot_qa"):
             if row.get(field) and isinstance(row[field], str):
                 row[field] = json.loads(row[field])
         await session.commit()
@@ -197,18 +203,18 @@ class ContinuityService:
         location_refs = {}
         prop_refs = {}
         for ref in references:
-            ref_data = ref.get("ref_data")
+            ref_data = ref.get("reference_data")
             if isinstance(ref_data, str):
                 try:
                     ref_data = json.loads(ref_data)
                 except (json.JSONDecodeError, TypeError):
                     ref_data = {}
-            if ref["ref_type"] == "character":
-                char_refs[ref["ref_id"]] = ref_data or {}
-            elif ref["ref_type"] == "location":
-                location_refs[ref["ref_id"]] = ref_data or {}
-            elif ref["ref_type"] == "prop":
-                prop_refs[ref["ref_id"]] = ref_data or {}
+            if ref["reference_type"] == "character":
+                char_refs[ref["reference_id"]] = ref_data or {}
+            elif ref["reference_type"] == "location":
+                location_refs[ref["reference_id"]] = ref_data or {}
+            elif ref["reference_type"] == "prop":
+                prop_refs[ref["reference_id"]] = ref_data or {}
 
         pairs_checked = 0
         inconsistencies_found = 0

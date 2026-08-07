@@ -11,7 +11,7 @@ import uuid
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Body
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -33,9 +33,9 @@ router = APIRouter()
 
 
 class SequenceUnitCreate(BaseModel):
-    unit_type: str = Field(..., description="One of: ident_title, prologue, dialogue_act, climax_resolution, closing_bookend, end_title_credits")
+    unit_type: str = Field(..., description="One of: ident_title, prologue, dialogue_act, climax_resolution, closing_bookend, end_title_credits, scene")
     unit_order: int = Field(..., description="Ordering index for the unit")
-    title: Optional[str] = None
+    title: str = Field(..., min_length=1, description="Display title (required; DB schema enforces NOT NULL)")
     metadata: Optional[Dict[str, Any]] = None
 
 
@@ -51,6 +51,25 @@ class SequenceUnitResponse(BaseModel):
     title: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_uuids(cls, data: Any) -> Any:
+        """KAN-452: coerce UUID → str on response validation.
+
+        ORM `SequenceUnit.id` / `video_generation_id` are `uuid.UUID` with
+        `pg.UUID(as_uuid=True)`. Services return raw dicts from raw-SQL, so
+        these values land on the route as Python `uuid.UUID` instances.
+        Strict Pydantic v2 rejects `UUID` against a `str` field declaration,
+        so this `mode="before"` validator coerces UUID values to str before
+        field-level validation runs.
+        """
+        if isinstance(data, dict):
+            for field_name in ("id", "video_generation_id"):
+                v = data.get(field_name)
+                if isinstance(v, uuid.UUID):
+                    data[field_name] = str(v)
+        return data
+
 
 class SequenceUnitUpdate(BaseModel):
     unit_type: Optional[str] = None
@@ -60,19 +79,39 @@ class SequenceUnitUpdate(BaseModel):
 
 
 class LineTrackingStageUpdate(BaseModel):
-    stage: str = Field(..., description="One of: character_assigned, voice_assigned, scene_assigned, shot_assigned, audio_generated, lipsync_queued, lipsync_complete, placed")
-    data: Dict[str, Any] = Field(default_factory=dict)
+    status: str = Field(..., description="The next line-tracking pipeline status")
+    character_name: Optional[str] = None
+    voice_id: Optional[str] = None
+    scene_id: Optional[str] = None
+    shot_id: Optional[str] = None
+    source_audio_url: Optional[str] = None
+    lipsync_task_id: Optional[str] = None
+    resolved_provider: Optional[str] = None
+    resolved_model: Optional[str] = None
+    timeline_position_ms: Optional[int] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class LineTrackingResponse(BaseModel):
     id: str
     sequence_unit_id: str
-    current_stage: Optional[str] = None
-    stage_index: Optional[int] = None
-    stage_data: Optional[Dict[str, Any]] = None
-    line_index: Optional[int] = None
+    video_generation_id: str
+    line_text: str
+    status: str
+    metadata: Optional[Dict[str, Any]] = None
     unit_type: Optional[str] = None
     unit_order: Optional[int] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_uuids(cls, data: Any) -> Any:
+        """KAN-452: coerce UUID → str on response validation (see SequenceUnitResponse)."""
+        if isinstance(data, dict):
+            for field_name in ("id", "sequence_unit_id", "video_generation_id"):
+                v = data.get(field_name)
+                if isinstance(v, uuid.UUID):
+                    data[field_name] = str(v)
+        return data
 
 
 class ShotDiversitySummary(BaseModel):
@@ -101,18 +140,31 @@ class MotifMarkRequest(BaseModel):
 
 
 class ContinuityReferenceCreate(BaseModel):
-    ref_type: str = Field(..., description="One of: character, world_element, prop, location")
-    ref_id: str
-    ref_data: Dict[str, Any]
+    reference_type: str = Field(..., description="One of: character, world, prop, location")
+    reference_id: str
+    reference_data: Dict[str, Any]
+    shot_ids: List[str] = Field(default_factory=list)
 
 
 class ContinuityReferenceResponse(BaseModel):
     id: str
     video_generation_id: str
-    ref_type: str
-    ref_id: str
-    ref_data: Optional[Dict[str, Any]] = None
+    reference_type: str
+    reference_id: str
+    reference_data: Optional[Dict[str, Any]] = None
+    shot_ids: List[str] = Field(default_factory=list)
     adjacent_shot_qa: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_uuids(cls, data: Any) -> Any:
+        """KAN-452: coerce UUID → str on response validation (see SequenceUnitResponse)."""
+        if isinstance(data, dict):
+            for field_name in ("id", "video_generation_id"):
+                v = data.get(field_name)
+                if isinstance(v, uuid.UUID):
+                    data[field_name] = str(v)
+        return data
 
 
 class EpisodeGateStatusResponse(BaseModel):
@@ -142,7 +194,7 @@ _continuity_service = ContinuityService()
 
 
 @router.post(
-    "/video-generations/{vg_id}/sequence-units",
+    "/{vg_id}/sequence-units",
     response_model=List[SequenceUnitResponse],
 )
 async def create_sequence_units(
@@ -161,7 +213,7 @@ async def create_sequence_units(
 
 
 @router.get(
-    "/video-generations/{vg_id}/sequence-units",
+    "/{vg_id}/sequence-units",
     response_model=List[SequenceUnitResponse],
 )
 async def list_sequence_units(
@@ -177,7 +229,7 @@ async def list_sequence_units(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put(
+@router.patch(
     "/sequence-units/{unit_id}",
     response_model=SequenceUnitResponse,
 )
@@ -204,7 +256,7 @@ async def update_sequence_unit(
 
 
 @router.get(
-    "/video-generations/{vg_id}/line-tracking",
+    "/{vg_id}/line-tracking",
     response_model=List[LineTrackingResponse],
 )
 async def get_full_line_tracking(
@@ -220,7 +272,7 @@ async def get_full_line_tracking(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/line-tracking/{line_id}/stage")
+@router.patch("/line-tracking/{line_id}")
 async def update_line_tracking_stage(
     line_id: str,
     request: LineTrackingStageUpdate,
@@ -229,8 +281,9 @@ async def update_line_tracking_stage(
 ):
     """Update a line tracking record's stage as it progresses through the pipeline."""
     try:
+        data = request.model_dump(exclude={"status"}, exclude_none=True)
         result = await _gate_service.track_line_through_pipeline(
-            line_id, request.stage, request.data, session
+            line_id, request.status, data, session
         )
         return result
     except ValueError as e:
@@ -245,7 +298,7 @@ async def update_line_tracking_stage(
 
 
 @router.post(
-    "/video-generations/{vg_id}/shot-diversity/analyze",
+    "/{vg_id}/shot-diversity/analyze",
     response_model=ShotDiversityReportResponse,
 )
 async def analyze_shot_diversity(
@@ -261,7 +314,7 @@ async def analyze_shot_diversity(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/video-generations/{vg_id}/shot-diversity")
+@router.get("/{vg_id}/shot-diversity")
 async def get_shot_diversity_report(
     vg_id: str,
     session: AsyncSession = Depends(get_session),
@@ -275,7 +328,7 @@ async def get_shot_diversity_report(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/shot-diversity/{report_id}/motif")
+@router.patch("/shot-diversity/{report_id}/motif")
 async def mark_intentional_motif(
     report_id: str,
     request: MotifMarkRequest,
@@ -300,7 +353,7 @@ async def mark_intentional_motif(
 
 
 @router.post(
-    "/video-generations/{vg_id}/continuity/references",
+    "/{vg_id}/continuity-references",
     response_model=ContinuityReferenceResponse,
 )
 async def create_continuity_reference(
@@ -312,7 +365,12 @@ async def create_continuity_reference(
     """Create a continuity reference for a character, world element, prop, or location."""
     try:
         result = await _continuity_service.create_reference(
-            vg_id, request.ref_type, request.ref_id, request.ref_data, session
+            vg_id,
+            request.reference_type,
+            request.reference_id,
+            request.reference_data,
+            session,
+            shot_ids=request.shot_ids,
         )
         return result
     except ValueError as e:
@@ -322,24 +380,24 @@ async def create_continuity_reference(
 
 
 @router.get(
-    "/video-generations/{vg_id}/continuity/references",
+    "/{vg_id}/continuity-references",
     response_model=List[ContinuityReferenceResponse],
 )
 async def list_continuity_references(
     vg_id: str,
-    ref_type: Optional[str] = None,
+    reference_type: Optional[str] = None,
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_active_user),
 ):
     """List continuity references, optionally filtered by type."""
     try:
-        result = await _continuity_service.get_references(vg_id, ref_type, session)
+        result = await _continuity_service.get_references(vg_id, reference_type, session)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/video-generations/{vg_id}/continuity/adjacent-shot-qa")
+@router.post("/{vg_id}/adjacent-shot-qa")
 async def run_adjacent_shot_qa(
     vg_id: str,
     session: AsyncSession = Depends(get_session),
@@ -353,7 +411,7 @@ async def run_adjacent_shot_qa(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/video-generations/{vg_id}/continuity/validate-tracks")
+@router.get("/{vg_id}/track-consistency")
 async def validate_track_consistency(
     vg_id: str,
     session: AsyncSession = Depends(get_session),
@@ -373,7 +431,7 @@ async def validate_track_consistency(
 
 
 @router.get(
-    "/video-generations/{vg_id}/episode-gate-status",
+    "/{vg_id}/gate-status",
     response_model=EpisodeGateStatusResponse,
 )
 async def get_episode_gate_status(
