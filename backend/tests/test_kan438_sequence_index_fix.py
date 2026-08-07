@@ -49,7 +49,7 @@ def test_migration_is_chained_after_merge_kan438_439():
         "migrations/versions/kan_438_video_segments_sequence_index.py"
     )
     assert "down_revision = 'merge_kan438_439'" in migration
-    assert "revision = 'kan_438_video_segments_sequence_index'" in migration
+    assert "revision = 'kan438_seg_seq_idx'" in migration
 
 
 def test_video_segment_sqlmodel_declares_sequence_index():

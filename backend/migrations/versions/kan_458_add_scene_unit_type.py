@@ -32,7 +32,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'kan_458_add_scene_unit_type'
-down_revision = 'kan_438_video_segments_sequence_index'
+down_revision = 'kan438_seg_seq_idx'
 branch_labels = None
 depends_on = None
 

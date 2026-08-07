@@ -106,7 +106,7 @@ def test_migration_file_exists_and_correct():
         "Migration upgrade() must run ALTER TYPE ... ADD VALUE 'scene'"
     )
     assert "revision = 'kan_458_add_scene_unit_type'" in src
-    assert "down_revision = 'kan_438_video_segments_sequence_index'" in src
+    assert "down_revision = 'kan438_seg_seq_idx'" in src
 
 
 # --------------------------------------------------------------------------- #
