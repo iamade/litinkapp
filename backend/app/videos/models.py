@@ -529,6 +529,7 @@ class SequenceUnitType(str, Enum):
     PROLOGUE = "prologue"
     DIALOGUE_ACT = "dialogue_act"
     CLIMAX_RESOLUTION = "climax_resolution"
+    SCENE = "scene"  # KAN-458
     CLOSING_BOOKEND = "closing_bookend"
     END_TITLE_CREDITS = "end_title_credits"
 
