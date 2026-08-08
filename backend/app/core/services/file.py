@@ -2366,6 +2366,11 @@ class FileService:
                 "[EPUB] Aggregate reconstruction failed semantic chapter gate "
                 f"({len(semantic_chapters)} chapter-like items)"
             )
+            heading_reconstructed = self._reconstruct_epub_chapters_from_heading_lines(
+                full_text
+            )
+            if heading_reconstructed:
+                return heading_reconstructed
             return []
 
         print(
@@ -2373,6 +2378,154 @@ class FileService:
             f"{len(reconstructed)} items with {len(semantic_chapters)} chapters"
         )
         return reconstructed
+
+    def _reconstruct_epub_chapters_from_heading_lines(
+        self, full_text: str
+    ) -> List[Dict[str, Any]]:
+        """Fallback for large page-split EPUBs whose structure detector misses chapters."""
+        lines = [line.strip() for line in full_text.splitlines()]
+
+        candidates: List[Dict[str, Any]] = []
+        for line_num, line in enumerate(lines):
+            if not line or not re.match(r"(?i)^chap(?:ter|\.)?\s+", line):
+                continue
+
+            match = self.structure_detector._match_chapter_patterns(line)
+            if not match:
+                continue
+
+            normalized_number = str(match.get("number") or "").strip()
+            if not normalized_number.isdigit():
+                continue
+            chapter_number = int(normalized_number)
+            if chapter_number < 1 or chapter_number > 200:
+                continue
+
+            title_suffix = (match.get("title") or "").strip(" .:-")
+            title_line_num = line_num
+            if not title_suffix:
+                for next_line_num in range(line_num + 1, min(line_num + 6, len(lines))):
+                    next_line = lines[next_line_num].strip()
+                    if not next_line:
+                        continue
+                    if self.structure_detector._match_chapter_patterns(next_line):
+                        break
+                    if self.structure_detector._match_special_sections(next_line):
+                        break
+                    if self._is_semantic_heading_candidate(next_line):
+                        title_suffix = next_line
+                        title_line_num = next_line_num
+                    break
+
+            title = f"Chapter {chapter_number}"
+            if title_suffix:
+                title = f"{title}: {title_suffix}"
+
+            candidates.append(
+                {
+                    "line_num": line_num,
+                    "title_line_num": title_line_num,
+                    "number": chapter_number,
+                    "title": title,
+                }
+            )
+
+        if len(candidates) < 2:
+            return []
+
+        reconstructed: List[Dict[str, Any]] = []
+        first_chapter_line = candidates[0]["line_num"]
+        front_text = "\n".join(lines[:first_chapter_line]).strip()
+        if len(front_text) >= 100:
+            front_title = self._first_special_section_title(front_text) or "Front Matter"
+            reconstructed.append(
+                self._with_generation_flag(
+                    {
+                        "number": None,
+                        "title": front_title,
+                        "content": front_text,
+                        "type": "front_matter",
+                        "content_type": "front_matter",
+                    }
+                )
+            )
+
+        chapter_count = 0
+        for idx, candidate in enumerate(candidates):
+            next_line = (
+                candidates[idx + 1]["line_num"]
+                if idx + 1 < len(candidates)
+                else len(lines)
+            )
+            content_start = min(candidate["title_line_num"] + 1, next_line)
+            content = "\n".join(lines[content_start:next_line]).strip()
+            if len(content) < 300:
+                continue
+
+            chapter_count += 1
+            reconstructed.append(
+                self._with_generation_flag(
+                    {
+                        "number": str(chapter_count),
+                        "title": candidate["title"],
+                        "content": content,
+                        "type": "chapter",
+                        "content_type": "chapter",
+                    }
+                )
+            )
+
+        if chapter_count < 2:
+            return []
+
+        last_chapter_line = candidates[-1]["line_num"]
+        trailing_text = "\n".join(lines[last_chapter_line:]).strip()
+        back_title = self._first_back_matter_title(trailing_text)
+        if back_title:
+            back_start = self._find_line_index(lines, back_title, start=last_chapter_line)
+            if back_start is not None:
+                back_text = "\n".join(lines[back_start:]).strip()
+                if len(back_text) >= 100:
+                    reconstructed.append(
+                        self._with_generation_flag(
+                            {
+                                "number": None,
+                                "title": back_title,
+                                "content": back_text,
+                                "type": "back_matter",
+                                "content_type": "back_matter",
+                            }
+                        )
+                    )
+
+        print(
+            "[EPUB] Aggregate heading-line fallback produced "
+            f"{len(reconstructed)} items with {chapter_count} chapters"
+        )
+        return reconstructed
+
+    def _first_special_section_title(self, text: str) -> Optional[str]:
+        for line in text.splitlines():
+            line = line.strip()
+            if line and self.structure_detector._match_special_sections(line):
+                return line
+        return None
+
+    def _first_back_matter_title(self, text: str) -> Optional[str]:
+        for line in text.splitlines():
+            line = line.strip()
+            if line and self._classify_spine_item(line, "", 0) == "back_matter":
+                return line
+        return None
+
+    @staticmethod
+    def _find_line_index(
+        lines: List[str], needle: str, start: int = 0
+    ) -> Optional[int]:
+        for idx in range(start, len(lines)):
+            if lines[idx].strip() == needle:
+                return idx
+        return None
 
     def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
