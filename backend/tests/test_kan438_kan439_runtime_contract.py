@@ -48,7 +48,9 @@ def test_kan439_orm_models_match_migrated_schema():
     assert "total_shots" not in _columns(VoiceCasting)
     assert "reference_type" not in _columns(DialogueManifest)
     assert "project_id" in _columns(DialogueManifest)
-    assert "manifest_text" in _columns(DialogueManifest)
+    # ORM attribute is manifest_text but DB column is mapped to "text"
+    assert "text" in _columns(DialogueManifest)
+    assert "manifest_text" not in _columns(DialogueManifest)
 
 
 def test_kan439_multi_shot_dialogue_and_continuity_payload_survives_orm_construction():

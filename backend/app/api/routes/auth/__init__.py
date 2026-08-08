@@ -6,6 +6,7 @@ from .refresh import router as refresh_router
 from .activate import router as activate_router
 from .logout import router as logout_router
 from .oauth import router as oauth_router
+from .session import router as session_router
 
 router = APIRouter()
 
@@ -16,4 +17,5 @@ router.include_router(password_reset_router)
 router.include_router(refresh_router)
 router.include_router(activate_router)
 router.include_router(logout_router)
+router.include_router(session_router)
 router.include_router(oauth_router)
