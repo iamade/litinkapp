@@ -778,6 +778,45 @@ class TestKan434Kan440SharedParserScope:
         assert "chapter 1 page fragment 57" in chapter_items[0]["content"]
         assert len(payload["chapters"]) == len(chapters)
 
+    def test_aggregate_heading_line_fallback_when_structure_detector_misses_chapters(
+        self,
+    ):
+        from app.core.services.file import FileService
+
+        def prose(label: str, count: int = 30) -> str:
+            return "\n".join(
+                f"{label} paragraph {idx} carries enough narrative detail for the parser."
+                for idx in range(count)
+            )
+
+        full_text = "\n\n".join(
+            [
+                "PREFACE\n" + prose("front matter", 12),
+                "CHAPTER I.\nMy Father's Family\n" + prose("chapter one", 45),
+                "CHAPTER II.\nI Observe\n" + prose("chapter two", 45),
+                "CHAPTER III.\nI Have a Change\n" + prose("chapter three", 45),
+                "THE FULL PROJECT GUTENBERG LICENSE\n" + prose("license", 12),
+            ]
+        )
+
+        file_service = FileService()
+        file_service.structure_detector.detect_structure = lambda _text: {
+            "chapters": [],
+            "sections": [],
+        }
+
+        chapters = file_service._reconstruct_epub_chapters_from_text(full_text)
+        chapter_items = [c for c in chapters if c.get("content_type") == "chapter"]
+
+        assert [c["title"] for c in chapter_items] == [
+            "Chapter 1: My Father's Family",
+            "Chapter 2: I Observe",
+            "Chapter 3: I Have a Change",
+        ]
+        assert chapters[0]["content_type"] == "front_matter"
+        assert chapters[-1]["content_type"] == "back_matter"
+        assert "chapter two paragraph 44" in chapter_items[1]["content"]
+
     @pytest.mark.asyncio
     async def test_unreconstructable_epub_upload_raises_clear_error(
         self, tmp_path, monkeypatch
