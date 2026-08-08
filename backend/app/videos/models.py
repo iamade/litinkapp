@@ -1015,7 +1015,7 @@ class DialogueManifest(SQLModel, table=True):
     # Dialogue data
     scene_id: str = Field(nullable=False, index=True)
     speaker: str = Field(nullable=False)
-    manifest_text: str = Field(default=None, sa_column=Column(pg.TEXT, nullable=False))
+    manifest_text: str = Field(default=None, sa_column=Column("text", pg.TEXT, nullable=False))
     sequence_order: int = Field(default=0)
 
     # Linked outputs (immutable once set)
