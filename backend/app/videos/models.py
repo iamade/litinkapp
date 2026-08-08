@@ -655,20 +655,6 @@ class ProductionBible(SQLModel, table=True):
         ),
         default_factory=uuid.uuid4,
     )
-    video_generation_id: uuid.UUID = Field(
-        sa_column=Column(
-            pg.UUID(as_uuid=True),
-            ForeignKey("video_generations.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        ),
-    )
-    unit_type: SequenceUnitType = Field(
-        sa_column=Column(
-            pg.ENUM(SequenceUnitType, name="sequence_unit_type", values_callable=lambda e: [m.value for m in e]),
-            nullable=False,
-        ),
-    )
     unit_order: int = Field(nullable=False)
     title: str = Field(nullable=False)
     script_content: Optional[str] = Field(default=None, sa_column=Column(Text))
@@ -752,48 +738,6 @@ class LineTracking(SQLModel, table=True):
     line_metadata: Dict[str, Any] = Field(
         default={},
         sa_column=Column("metadata", pg.JSONB, server_default="'{}'::jsonb"),
-    )
-    project_id: uuid.UUID = Field(
-        sa_column=Column(
-            pg.UUID(as_uuid=True),
-            ForeignKey("projects.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        )
-    )
-    version: int = Field(default=1, nullable=False)
-    is_active: bool = Field(default=True, nullable=False)
-
-    # Core bible content as JSONB
-    characters: List[Dict[str, Any]] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
-    )
-    objects: List[Dict[str, Any]] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
-    )
-    locations: List[Dict[str, Any]] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
-    )
-    voices: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
-    )
-    pronunciation: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
-    )
-    style_rules: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
-    )
-    world_rules: Dict[str, Any] = Field(
-        default={}, sa_column=Column(pg.JSONB, server_default="'{}'::jsonb")
-    )
-    approved_reference_assets: List[Dict[str, Any]] = Field(
-        default=[], sa_column=Column(pg.JSONB, server_default="'[]'::jsonb")
-    )
-
-    # Metadata
-    change_log: Optional[str] = Field(default=None, sa_column=Column(pg.TEXT))
-    created_by: Optional[uuid.UUID] = Field(
-        default=None, sa_column=Column(pg.UUID(as_uuid=True), index=True)
     )
 
     created_at: datetime = Field(
@@ -899,14 +843,6 @@ class VoiceCasting(SQLModel, table=True):
         ),
         default_factory=uuid.uuid4,
     )
-    video_generation_id: uuid.UUID = Field(
-        sa_column=Column(
-            pg.UUID(as_uuid=True),
-            ForeignKey("video_generations.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-    )
-    total_shots: int = Field(nullable=False)
     duplicate_count: int = Field(
         default=0,
         sa_column=Column(Integer, nullable=False, server_default="0"),
@@ -1057,12 +993,6 @@ class DialogueManifest(SQLModel, table=True):
         sa_column=Column(
             pg.UUID(as_uuid=True),
             ForeignKey("video_generations.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-    )
-    reference_type: ContinuityReferenceType = Field(
-        sa_column=Column(
-            pg.ENUM(ContinuityReferenceType, name="continuity_reference_type", values_callable=lambda e: [m.value for m in e]),
             nullable=False,
         ),
     )
