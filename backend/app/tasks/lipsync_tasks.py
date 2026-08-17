@@ -379,10 +379,10 @@ async def apply_lip_sync_to_single_scene(
         insert_query = text(
             """
             INSERT INTO video_segments (
-                video_generation_id, scene_id, scene_description, video_url, duration_seconds,
+                video_generation_id, scene_id, scene_number, sequence_index, scene_description, video_url, duration_seconds,
                 width, height, fps, generation_method, status, processing_service, processing_model, metadata
             ) VALUES (
-                :video_generation_id, :scene_id, :scene_description, :video_url, :duration_seconds,
+                :video_generation_id, :scene_id, :scene_number, :sequence_index, :scene_description, :video_url, :duration_seconds,
                 :width, :height, :fps, :generation_method, :status, :processing_service, :processing_model, :metadata
             ) RETURNING id
         """
@@ -401,6 +401,11 @@ async def apply_lip_sync_to_single_scene(
             {
                 "video_generation_id": video_gen_id,
                 "scene_id": scene_id,
+                # lipsync recovery rows are not part of the canonical scene order.
+                # scene_number/sequence_index both default to 0 so NOT NULL passes
+                # but the records sort at the head of any ORDER BY sequence_index.
+                "scene_number": 0,
+                "sequence_index": 0,
                 "scene_description": f"Lip-synced version of {scene_id}",
                 "video_url": final_lipsync_url,
                 "duration_seconds": scene_video.get("duration", 3.0),
@@ -437,10 +442,10 @@ async def apply_lip_sync_to_single_scene(
             fail_insert_query = text(
                 """
                 INSERT INTO video_segments (
-                    video_generation_id, scene_id, scene_description, generation_method,
+                    video_generation_id, scene_id, scene_number, sequence_index, scene_description, generation_method,
                     status, error_message, processing_service, processing_model, metadata
                 ) VALUES (
-                    :video_generation_id, :scene_id, :scene_description, :generation_method,
+                    :video_generation_id, :scene_id, :scene_number, :sequence_index, :scene_description, :generation_method,
                     :status, :error_message, :processing_service, :processing_model, :metadata
                 )
             """
@@ -451,6 +456,8 @@ async def apply_lip_sync_to_single_scene(
                 {
                     "video_generation_id": video_gen_id,
                     "scene_id": scene_id,
+                    "scene_number": 0,
+                    "sequence_index": 0,
                     "scene_description": f"Failed lip sync for {scene_id}",
                     "generation_method": "lip_sync",
                     "status": "failed",

@@ -253,6 +253,11 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET_NAME: str = "litinkai-staging"  # Default matches staging / VPS env files
     MINIO_SECURE: bool = False  # Use HTTP in development
+    # KAN-402: container-side root credentials. Read from the same env file
+    # as the api service so a `docker compose down -v` cannot desync the
+    # container's MINIO_ROOT_USER/PASSWORD from the app's access/secret key.
+    MINIO_ROOT_USER: Optional[str] = None
+    MINIO_ROOT_PASSWORD: Optional[str] = None
     MINIO_PUBLIC_URL: str = (
         "http://localhost:9000"  # Browser/public URL (without bucket name)
     )
@@ -393,6 +398,12 @@ class Settings(BaseSettings):
         KAN-402: warn loudly when a staging/production environment uses MinIO
         without an externally reachable provider-facing URL. Provider callbacks /
         fetch-backs will fail if the bucket is only reachable from inside Docker.
+
+        Also detect env-key drift between the app config (MINIO_ACCESS_KEY /
+        MINIO_SECRET_KEY) and the container root credentials (MINIO_ROOT_USER /
+        MINIO_ROOT_PASSWORD). After a `docker compose down -v`, the local
+        MinIO container recreates with whatever the compose file sets, so the
+        app and container MUST agree or uploads will 500.
         """
         import warnings
 
@@ -409,6 +420,29 @@ class Settings(BaseSettings):
                     RuntimeWarning,
                     stacklevel=2,
                 )
+        # KAN-402: detect app↔container credential drift. Skip the check
+        # when MINIO_ROOT_USER is not provided (e.g. when the env file is
+        # secrets-only and only the access key pair is set).
+        root_user = getattr(self, "MINIO_ROOT_USER", None)
+        root_password = getattr(self, "MINIO_ROOT_PASSWORD", None)
+        if root_user and self.MINIO_ACCESS_KEY and root_user != self.MINIO_ACCESS_KEY:
+            warnings.warn(
+                "KAN-402 drift: MINIO_ACCESS_KEY does not match MINIO_ROOT_USER. "
+                "The local MinIO container authenticates with MINIO_ROOT_USER after "
+                "a volume reset, so this mismatch will cause upload 500s. "
+                f"MINIO_ACCESS_KEY={self.MINIO_ACCESS_KEY!r} "
+                f"MINIO_ROOT_USER={root_user!r}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        if root_password and self.MINIO_SECRET_KEY and root_password != self.MINIO_SECRET_KEY:
+            warnings.warn(
+                "KAN-402 drift: MINIO_SECRET_KEY does not match MINIO_ROOT_PASSWORD. "
+                "The local MinIO container authenticates with MINIO_ROOT_PASSWORD after "
+                "a volume reset, so this mismatch will cause upload 500s.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     def model_post_init(self, __context: object) -> None:
         self.minio_env_check()

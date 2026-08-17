@@ -133,10 +133,31 @@ class ScriptModelRouter:
                             import json
 
                             parsed_response = json.loads(parsed_response)
-                        generated_content = parsed_response["choices"][0]["message"][
-                            "content"
-                        ]
-                        usage_raw = parsed_response["usage"]
+                        if not isinstance(parsed_response, dict):
+                            raise ValueError(
+                                f"Parsed response is not a dict: {type(parsed_response)}"
+                            )
+                        choices = parsed_response.get("choices")
+                        if not choices or not isinstance(choices, list):
+                            raise ValueError(
+                                "Parsed response missing 'choices' array"
+                            )
+                        first_choice = choices[0]
+                        if not isinstance(first_choice, dict):
+                            raise ValueError(
+                                "First choice is not a dict"
+                            )
+                        message = first_choice.get("message")
+                        if not isinstance(message, dict):
+                            raise ValueError(
+                                "First choice missing 'message' dict"
+                            )
+                        generated_content = message.get("content")
+                        if generated_content is None:
+                            raise ValueError(
+                                "Model returned no content in raw JSON response"
+                            )
+                        usage_raw = parsed_response.get("usage") or {}
                         logger.info(
                             f"[ScriptModelRouter] Parsed raw JSON response for {model}"
                         )
@@ -158,13 +179,23 @@ class ScriptModelRouter:
             raise ValueError(f"Failed to parse API response: {str(e)}")
 
         # Normalize usage to dict for consistent access
-        if isinstance(usage_raw, dict):
-            usage = usage_raw
+        if usage_raw is None:
+            usage = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
+        elif isinstance(usage_raw, dict):
+            usage = {
+                "prompt_tokens": usage_raw.get("prompt_tokens", 0),
+                "completion_tokens": usage_raw.get("completion_tokens", 0),
+                "total_tokens": usage_raw.get("total_tokens", 0),
+            }
         else:
             usage = {
-                "prompt_tokens": usage_raw.prompt_tokens,
-                "completion_tokens": usage_raw.completion_tokens,
-                "total_tokens": usage_raw.total_tokens,
+                "prompt_tokens": getattr(usage_raw, "prompt_tokens", 0),
+                "completion_tokens": getattr(usage_raw, "completion_tokens", 0),
+                "total_tokens": getattr(usage_raw, "total_tokens", 0),
             }
 
         # Clean narrator elements from cinematic scripts
@@ -465,16 +496,73 @@ What is it? You look worried.
                 temperature=temperature,
             )
 
+            # Normalize response shape and usage safely
+            if hasattr(response, "choices") and response.choices:
+                result_content = response.choices[0].message.content
+                usage_raw = response.usage
+            elif hasattr(response, "json"):
+                try:
+                    parsed_response = response.json()
+                    if isinstance(parsed_response, str):
+                        parsed_response = json.loads(parsed_response)
+                    if not isinstance(parsed_response, dict):
+                        raise ValueError(
+                            f"Parsed response is not a dict: {type(parsed_response)}"
+                        )
+                    choices = parsed_response.get("choices")
+                    if not choices or not isinstance(choices, list):
+                        raise ValueError("Parsed response missing 'choices' array")
+                    message = choices[0].get("message") if isinstance(choices[0], dict) else None
+                    if not isinstance(message, dict):
+                        raise ValueError("First choice missing 'message' dict")
+                    result_content = message.get("content")
+                    usage_raw = parsed_response.get("usage")
+                except Exception as json_error:
+                    logger.error(
+                        f"[ScriptModelRouter] Failed to parse analysis JSON response: {str(json_error)}"
+                    )
+                    raise ValueError(
+                        f"Failed to parse JSON API response: {str(json_error)}"
+                    )
+            else:
+                raise ValueError("Invalid response format: no choices or json method available")
+
+            if not result_content:
+                logger.warning(
+                    f"[ScriptModelRouter] Model {model} returned empty/None content for {analysis_type}"
+                )
+                raise Exception(
+                    f"Model {model} returned empty response for {analysis_type}"
+                )
+
+            if isinstance(usage_raw, dict):
+                usage = {
+                    "prompt_tokens": usage_raw.get("prompt_tokens", 0),
+                    "completion_tokens": usage_raw.get("completion_tokens", 0),
+                    "total_tokens": usage_raw.get("total_tokens", 0),
+                }
+            elif usage_raw is None:
+                usage = {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
+            else:
+                usage = {
+                    "prompt_tokens": getattr(usage_raw, "prompt_tokens", 0),
+                    "completion_tokens": getattr(usage_raw, "completion_tokens", 0),
+                    "total_tokens": getattr(usage_raw, "total_tokens", 0),
+                }
+
             # Calculate cost
-            usage = response.usage
             cost_per_1k_input = (
                 config.cost_per_1k_input if config.cost_per_1k_input else 0.0
             )
             cost_per_1k_output = (
                 config.cost_per_1k_output if config.cost_per_1k_output else 0.0
             )
-            input_cost = (usage.prompt_tokens / 1000) * cost_per_1k_input
-            output_cost = (usage.completion_tokens / 1000) * cost_per_1k_output
+            input_cost = (usage["prompt_tokens"] / 1000) * cost_per_1k_input
+            output_cost = (usage["completion_tokens"] / 1000) * cost_per_1k_output
             total_cost = input_cost + output_cost
 
             # Track the cost
@@ -486,19 +574,10 @@ What is it? You look worried.
             await self.cost_tracker.track(
                 user_tier=tier_enum,
                 model=model,
-                input_tokens=usage.prompt_tokens,
-                output_tokens=usage.completion_tokens,
+                input_tokens=usage["prompt_tokens"],
+                output_tokens=usage["completion_tokens"],
                 cost=total_cost,
             )
-
-            result_content = response.choices[0].message.content
-            if not result_content:
-                logger.warning(
-                    f"[ScriptModelRouter] Model {model} returned empty/None content for {analysis_type}"
-                )
-                raise Exception(
-                    f"Model {model} returned empty response for {analysis_type}"
-                )
 
             # Strip <think>...</think> reasoning tags from reasoning models (KAN-181)
             # Some free-tier reasoning models (stepfun, qwen) wrap output in thinking tags
@@ -521,9 +600,9 @@ What is it? You look worried.
                 "model": model,
                 "model_used": model,
                 "usage": {
-                    "prompt_tokens": usage.prompt_tokens,
-                    "completion_tokens": usage.completion_tokens,
-                    "total_tokens": usage.total_tokens,
+                    "prompt_tokens": usage["prompt_tokens"],
+                    "completion_tokens": usage["completion_tokens"],
+                    "total_tokens": usage["total_tokens"],
                     "estimated_cost": total_cost,
                 },
             }

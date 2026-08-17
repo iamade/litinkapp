@@ -23,6 +23,10 @@ class MediaRouter:
     }
 
     SUPPORTED_PROVIDERS = {
+        "image": {"modelslab", "piapi"},
+        "video": {"modelslab", "piapi"},
+        "audio": {"modelslab", "piapi", "elevenlabs"},
+        "tts": {"modelslab", "piapi", "elevenlabs"},
         # KAN-447: kimi and glm added additively — no existing providers reordered
         "image": {"modelslab", "piapi", "glm"},
         "video": {"modelslab", "piapi", "glm"},

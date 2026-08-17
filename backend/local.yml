@@ -148,9 +148,19 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+    # KAN-402: source MinIO root creds from a dedicated env file so a
+    # `docker compose down -v` reset can never desync the container's
+    # MINIO_ROOT_USER/PASSWORD from the app's MINIO_ACCESS_KEY/SECRET_KEY.
+    # We do not reuse the api service's env_file (e.g. .env.local) here
+    # because that would leak DB creds, API keys, and other secrets into
+    # the MinIO container's process env. A small dedicated file keeps the
+    # MinIO container's surface area to only the two keys it needs.
+    #
+    # Copy backend/.envs/.env.minio.example to backend/.envs/.env.minio
+    # and keep its values in sync with MINIO_ACCESS_KEY / MINIO_SECRET_KEY
+    # in the api env file.
+    env_file:
+      - ${MINIO_ENV_FILE:-./.envs/.env.minio}
     command: server /data --console-address ":9001"
     volumes:
       - litinkai_minio_data:/data

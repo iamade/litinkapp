@@ -191,6 +191,9 @@ class BookStructureDetector:
         # Special sections that should be treated as standalone/read-only matter.
         self.SPECIAL_SECTIONS = [
             r"(?i)^preface[\s\-:]*(.*)$",
+            r"(?i)^contents?\s*$",
+            r"(?i)^contents?\b[\s\-:]*(.*)$",
+            r"(?i)^table\s+of\s+contents?\b[\s\-:]*(.*)$",
             r"(?i)^introduction[\s\-:]*(.*)$",
             r"(?i)^foreword[\s\-:]*(.*)$",
             r"(?i)^prologue[\s\-:]*(.*)$",
@@ -209,6 +212,8 @@ class BookStructureDetector:
             r"(?i)^index[\s\-:]*(.*)$",
             r"(?i)^references[\s\-:]*(.*)$",
             r"(?i)^glossary[\s\-:]*(.*)$",
+            r"(?i)^the\s+full\s+project\s+gutenberg\s+license[\s\-:]*(.*)$",
+            r"(?i)^project\s+gutenberg\s+license[\s\-:]*(.*)$",
         ]
 
     @staticmethod
@@ -291,6 +296,12 @@ class BookStructureDetector:
                 "does not start at Chapter 1"
             )
             return []
+        expected_numbers = list(range(1, len(numbers) + 1))
+        if numbers != expected_numbers:
+            print(
+                f"[CHAPTER DETECTION] Rejected gappy bare-number sequence {first} to {last}"
+            )
+            return []
         if consecutive_ratio >= 0.95 and len(chapter_headers) >= 200:
             print(
                 f"[CHAPTER DETECTION] Rejected running page-number sequence {first} to {last}"
@@ -305,9 +316,58 @@ class BookStructureDetector:
         print(f"[CHAPTER DETECTION] Validated semantic sequence: {first} to {last}")
         return chapter_headers
 
+    def _find_running_page_number_lines(self, lines: List[str]) -> set[int]:
+        """Find bare Arabic page-number runs that should not become chapters."""
+        rejected: set[int] = set()
+        current_segment: List[tuple[int, int]] = []
+
+        def _flush_segment() -> None:
+            nonlocal current_segment
+            if len(current_segment) < 3:
+                current_segment = []
+                return
+
+            numbers = [number for _line_num, number in current_segment]
+            expected_from_one = list(range(1, len(numbers) + 1))
+            if numbers == expected_from_one:
+                current_segment = []
+                return
+
+            is_page_run = numbers[0] != 1
+            if len(numbers) >= 8 and max(numbers) > len(numbers) + 3:
+                is_page_run = True
+            if len(numbers) >= 3 and numbers[0] == 1 and numbers[1] != 2:
+                is_page_run = True
+
+            if is_page_run:
+                rejected.update(line_num for line_num, _number in current_segment)
+                print(
+                    "[CHAPTER DETECTION] Rejected fallback page-number run "
+                    f"{numbers[0]} to {numbers[-1]}"
+                )
+
+            current_segment = []
+
+        for line_num, raw_line in enumerate(lines):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            if self._match_section_patterns(line) or self._match_special_sections(line):
+                _flush_segment()
+                continue
+
+            match = re.match(r"^(\d{1,3})\.?$", line)
+            if match and self._has_substantial_following_content(lines, line_num):
+                current_segment.append((line_num, int(match.group(1))))
+
+        _flush_segment()
+        return rejected
+
     def detect_structure(self, content: str) -> Dict[str, Any]:
         """Enhanced structure detection that skips TOC sections"""
         lines = content.split("\n")
+        page_number_line_nums = self._find_running_page_number_lines(lines)
 
         # Try the improved chapter detection first for books with number + title format
         chapter_headers = self._find_chapter_number_and_title(lines)
@@ -347,13 +407,14 @@ class BookStructureDetector:
         FRONT_MATTER_TITLES = {
             "etymology", "extracts", "extract", "epigraph", "preface",
             "foreword", "introduction", "dedication", "acknowledgments",
-            "acknowledgements", "prologue",
+            "acknowledgements", "prologue", "contents", "table of contents",
         }
         BACK_MATTER_TITLES = {
             "epilogue", "afterword", "appendix", "index", "bibliography",
             "glossary", "endnotes", "footnotes", "colophon", "imprint",
             "copyright", "about the author", "suggested reading",
             "references", "notes", "conclusion",
+            "project gutenberg license", "the full project gutenberg license",
         }
 
         def _classify_section_type(line_or_title: str) -> str:
@@ -365,6 +426,39 @@ class BookStructureDetector:
                 if title_lower == pattern or title_lower.startswith(pattern):
                     return "front_matter"
             return "special"
+
+        preface_lines: List[str] = []
+        front_matter_emitted = False
+
+        def _emit_preface_front_matter() -> None:
+            nonlocal front_matter_emitted, preface_lines
+            if front_matter_emitted:
+                return
+            if preface_lines:
+                last_line = preface_lines[-1].strip()
+                if (
+                    self._match_section_patterns(last_line)
+                    or self._match_special_sections(last_line)
+                    or self._match_chapter_patterns(last_line)
+                ):
+                    preface_lines = preface_lines[:-1]
+            content_text = "\n".join(line for line in preface_lines if line).strip()
+            if len(content_text) > 500:
+                sections.append(
+                    {
+                        "title": "Front Matter",
+                        "number": "0",
+                        "type": "special",
+                        "chapters": [],
+                        "content": content_text,
+                        "content_type": "front_matter",
+                    }
+                )
+                print(
+                    "[HIERARCHICAL] Preserved pre-body PDF pages as front matter"
+                )
+            front_matter_emitted = True
+            preface_lines = []
 
         def _flush_chapter_group():
             nonlocal chapter_group
@@ -396,7 +490,18 @@ class BookStructureDetector:
 
             # Check if we've moved past TOC (substantial content indicates real chapters)
             if (
-                in_toc_section and len(line) > 100
+                in_toc_section
+                and (
+                    len(line) > 100
+                    or (
+                        (
+                            self._match_chapter_patterns(line)
+                            or self._match_special_sections(line)
+                            or self._match_section_patterns(line)
+                        )
+                        and self._has_substantial_following_content(lines, line_num)
+                    )
+                )
             ):  # Substantial content indicates we're past TOC
                 in_toc_section = False
 
@@ -412,6 +517,9 @@ class BookStructureDetector:
             ):
                 continue
 
+            if not sections and current_section is None and not chapter_group:
+                preface_lines.append(line)
+
             # Check if line matches any section pattern
             section_match = self._match_section_patterns(line)
             if section_match:
@@ -419,6 +527,7 @@ class BookStructureDetector:
                 if self._has_substantial_following_content(
                     lines, line_num
                 ) or self._has_following_chapter_before_next_section(lines, line_num):
+                    _emit_preface_front_matter()
                     _flush_chapter_group()
                     # Save previous section if exists
                     if current_section:
@@ -431,7 +540,7 @@ class BookStructureDetector:
                         "type": section_match["type"],
                         "chapters": [],
                         "content": self._extract_section_content(
-                            content, line, lines, line_num
+                            content, line, lines, line_num, page_number_line_nums
                         ),
                     }
                 continue
@@ -441,6 +550,7 @@ class BookStructureDetector:
             if special_match and self._has_substantial_following_content(
                 lines, line_num
             ):
+                _emit_preface_front_matter()
                 _flush_chapter_group()
                 # Save previous section if exists
                 if current_section:
@@ -453,7 +563,7 @@ class BookStructureDetector:
                     "type": "special",
                     "chapters": [],
                     "content": self._extract_section_content(
-                        content, line, lines, line_num
+                        content, line, lines, line_num, page_number_line_nums
                     ),
                     "content_type": _classify_section_type(line),
                 }
@@ -461,9 +571,17 @@ class BookStructureDetector:
 
             # Check if line matches chapter pattern
             chapter_match = self._match_chapter_patterns(line)
+            if chapter_match and line_num in page_number_line_nums:
+                print(
+                    "[HIERARCHICAL] Skipped fallback page number: "
+                    f"{LogSanitizer.redact(line, label='line')}"
+                )
+                continue
             if chapter_match and self._has_substantial_following_content(
                 lines, line_num
             ):
+                if current_section is None and not chapter_group:
+                    _emit_preface_front_matter()
                 # Build a proper title
                 chapter_number = chapter_match["number"]
                 chapter_subtitle = chapter_match.get("title", "").strip()
@@ -495,6 +613,7 @@ class BookStructureDetector:
                     "line_num": line_num,
                     "number": chapter_number,
                     "raw_title": line,
+                    "ignored_chapter_line_nums": page_number_line_nums,
                 }
                 chapter_content = self._extract_chapter_content(
                     content, chapter_info, lines
@@ -709,6 +828,9 @@ class BookStructureDetector:
         if isinstance(chapter_info_or_title, dict):
             chapter_title = chapter_info_or_title.get("title", "Unknown")
             start_line = chapter_info_or_title["title_line_num"] + 1
+            ignored_chapter_line_nums = set(
+                chapter_info_or_title.get("ignored_chapter_line_nums") or []
+            )
         else:
             # chapter_info_or_title is a string (chapter_title), line_num is provided
             if line_num is None:
@@ -717,6 +839,7 @@ class BookStructureDetector:
                 )
             chapter_title = chapter_info_or_title
             start_line = line_num + 1
+            ignored_chapter_line_nums = set()
 
         print(
             "[CONTENT EXTRACTION] Extracting content for: "
@@ -735,7 +858,7 @@ class BookStructureDetector:
             is_chapter_break = False
 
             # Fast path optimization: check if line might be a chapter header
-            if len(line) < 150:
+            if i not in ignored_chapter_line_nums and len(line) < 150:
                 # If it's just a number, do the relaxed check
                 if re.match(r"^(\d+)$", line) and i < len(lines) - 5:
                     for j in range(i + 1, min(i + 5, len(lines))):
@@ -922,6 +1045,14 @@ class BookStructureDetector:
         for pattern in self.SECTION_PATTERNS:
             match = re.match(pattern, line)
             if match:
+                raw_number = match.group(1)
+                if (
+                    isinstance(raw_number, str)
+                    and raw_number.islower()
+                    and len(raw_number) == 1
+                    and not raw_number.isdigit()
+                ):
+                    continue
                 return {
                     "number": match.group(1),
                     "title": match.group(2).strip() if len(match.groups()) > 1 else "",
@@ -931,6 +1062,12 @@ class BookStructureDetector:
 
     def _match_special_sections(self, line: str) -> Optional[Dict]:
         """Match line against special section patterns"""
+        stripped_line = (line or "").strip()
+        first_alpha = re.search(r"[A-Za-z]", stripped_line)
+        if first_alpha and first_alpha.group(0).islower() and len(stripped_line.split()) > 2:
+            return None
+        for pattern in self.SPECIAL_SECTIONS:
+            match = re.match(pattern, stripped_line)
         for pattern in self.SPECIAL_SECTIONS:
             match = re.match(pattern, line)
             if match:
@@ -1037,10 +1174,16 @@ class BookStructureDetector:
         return most_common_type
 
     def _extract_section_content(
-        self, full_content: str, section_title: str, lines: List[str], start_line: int
+        self,
+        full_content: str,
+        section_title: str,
+        lines: List[str],
+        start_line: int,
+        ignored_chapter_line_nums: Optional[set[int]] = None,
     ) -> str:
         """Extract content for a specific section"""
         content_lines = []
+        ignored_chapter_line_nums = ignored_chapter_line_nums or set()
 
         # Start from the line after the section title
         for i in range(start_line + 1, len(lines)):
@@ -1052,7 +1195,10 @@ class BookStructureDetector:
             if (
                 self._match_section_patterns(line)
                 or self._match_special_sections(line)
-                or self._match_chapter_patterns(line)
+                or (
+                    i not in ignored_chapter_line_nums
+                    and self._match_chapter_patterns(line)
+                )
             ):
                 break
 
@@ -1069,17 +1215,20 @@ class BookStructureDetector:
         lines = content.split("\n")
         all_items = []  # Collect all items first, classify later
         in_toc_section = False
+        page_number_line_nums = self._find_running_page_number_lines(lines)
 
         FRONT_MATTER_TITLES = {
             "etymology", "extracts", "extract", "epigraph",
             "preface", "foreword", "introduction", "dedication",
             "acknowledgments", "acknowledgements",
+            "contents", "table of contents",
         }
         BACK_MATTER_TITLES = {
             "epilogue", "afterword", "appendix",
             "index", "bibliography", "glossary", "endnotes", "footnotes",
             "colophon", "imprint", "copyright",
             "about the author", "suggested reading", "references", "notes",
+            "project gutenberg license", "the full project gutenberg license",
         }
 
         for line_num, line in enumerate(lines):
@@ -1091,7 +1240,19 @@ class BookStructureDetector:
             if self._is_toc_section(line):
                 in_toc_section = True
                 continue
-            if in_toc_section and len(line) > 100:
+            if (
+                in_toc_section
+                and (
+                    len(line) > 100
+                    or (
+                        (
+                            self._match_chapter_patterns(line)
+                            or self._match_special_sections(line)
+                        )
+                        and self._has_substantial_following_content(lines, line_num)
+                    )
+                )
+            ):
                 in_toc_section = False
             if in_toc_section:
                 continue
@@ -1126,6 +1287,7 @@ class BookStructureDetector:
                     "line_num": line_num,
                     "number": None,
                     "raw_title": special_title,
+                    "ignored_chapter_line_nums": page_number_line_nums,
                 }
                 extracted_content = self._extract_chapter_content(
                     content, chapter_info, lines
@@ -1145,6 +1307,12 @@ class BookStructureDetector:
                 continue
 
             chapter_match = self._match_chapter_patterns(line)
+            if chapter_match and line_num in page_number_line_nums:
+                print(
+                    f"[FLAT CHAPTERS] Skipped fallback page number: "
+                    f"{LogSanitizer.redact(line, label='line')}"
+                )
+                continue
             if chapter_match:
                 # Guard: require substantial following content to avoid matching page numbers
                 if not self._has_substantial_following_content(lines, line_num):
@@ -1184,6 +1352,7 @@ class BookStructureDetector:
                     "line_num": line_num,
                     "number": chapter_number,
                     "raw_title": line,
+                    "ignored_chapter_line_nums": page_number_line_nums,
                 }
                 extracted_content = self._extract_chapter_content(
                     content, chapter_info, lines
@@ -2005,6 +2174,352 @@ class FileService:
     def _is_semantic_heading_candidate(self, title: str) -> bool:
         return self.structure_detector._is_semantic_heading_candidate(title)
 
+    @staticmethod
+    def _is_epub_document_item(item: Any) -> bool:
+        """Return True for EPUB spine items that contain HTML/XHTML content.
+
+        Some valid EPUBs expose chapter pages as generic EpubItem objects with
+        get_type() == ITEM_UNKNOWN/0 instead of ITEM_DOCUMENT. Media type and
+        href are more reliable for deciding whether the payload is parseable
+        document content.
+        """
+        try:
+            if item.get_type() == ebooklib.ITEM_DOCUMENT:
+                return True
+        except Exception:
+            pass
+
+        media_type = (getattr(item, "media_type", "") or "").lower()
+        if media_type in {"application/xhtml+xml", "text/html"}:
+            return True
+
+        item_name = ""
+        try:
+            item_name = (item.get_name() or "").lower()
+        except Exception:
+            item_name = ""
+        if item_name.endswith((".xhtml", ".html", ".htm")):
+            return True
+
+        # Last-resort sniff for malformed manifests that omit the media type.
+        try:
+            raw_content = item.get_content()
+        except Exception:
+            return False
+        if not isinstance(raw_content, (bytes, bytearray)):
+            return False
+        sample = bytes(raw_content[:512]).decode(
+            "utf-8", errors="ignore"
+        ).lower()
+        return any(
+            marker in sample
+            for marker in ("<html", "<body", "<!doctype html")
+        )
+
+    @staticmethod
+    def _epub_spine_item_id(spine_entry: Any) -> Any:
+        """Return the idref/item id from an ebooklib spine entry."""
+        if isinstance(spine_entry, (tuple, list)) and spine_entry:
+            return spine_entry[0]
+        return spine_entry
+
+    def _get_epub_item_by_spine_id(self, book: Any, item_id: Any) -> Any:
+        """Resolve a spine idref to a manifest item, including href-based idrefs."""
+        if hasattr(item_id, "get_content"):
+            return item_id
+
+        item = book.get_item_with_id(item_id)
+        if item:
+            return item
+
+        item_id_str = str(item_id)
+        for manifest_item in book.get_items():
+            item_name = ""
+            try:
+                item_name = manifest_item.get_name()
+            except Exception:
+                item_name = ""
+
+            if (
+                manifest_item.get_id() == item_id
+                or item_name == item_id_str
+                or item_name.endswith("/" + item_id_str)
+            ):
+                return manifest_item
+        return None
+
+    def _iter_epub_spine_items(self, book: Any):
+        """Yield spine items in reading order with their index and idref."""
+        for idx, spine_entry in enumerate(book.spine):
+            item_id = self._epub_spine_item_id(spine_entry)
+            yield idx, item_id, self._get_epub_item_by_spine_id(book, item_id)
+
+    @staticmethod
+    def _clean_epub_soup_text(soup: BeautifulSoup) -> str:
+        """Extract EPUB text while preserving block boundaries as line breaks."""
+        text = soup.get_text("\n")
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        return "\n".join(chunk for chunk in chunks if chunk)
+
+    def _flatten_detected_epub_structure(
+        self, structure_result: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Flatten BookStructureDetector output into EPUB chapter dictionaries."""
+        flattened: List[Dict[str, Any]] = []
+        chapter_number = 0
+
+        if structure_result.get("has_sections"):
+            for section in structure_result.get("sections") or []:
+                section_content_type = section.get("content_type")
+                section_type = section.get("type", "section")
+                chapters = section.get("chapters") or []
+
+                if chapters:
+                    for chapter in chapters:
+                        content_type = chapter.get("content_type") or "chapter"
+                        number = chapter.get("number")
+                        if content_type == "chapter":
+                            chapter_number += 1
+                            number = str(chapter_number)
+                        flattened.append(
+                            self._with_generation_flag(
+                                {
+                                    "number": number,
+                                    "title": chapter.get("title", f"Chapter {chapter_number}"),
+                                    "content": chapter.get("content", ""),
+                                    "type": content_type,
+                                    "content_type": content_type,
+                                    "section_title": section.get("title"),
+                                    "section_type": section_type,
+                                    "section_number": section.get("number"),
+                                }
+                            )
+                        )
+                    continue
+
+                content_type = (
+                    section_content_type
+                    if section_content_type in ("front_matter", "back_matter", "metadata")
+                    else self._classify_spine_item(
+                        section.get("title", ""),
+                        "",
+                        len((section.get("content") or "").split()),
+                    )
+                )
+                number = None
+                if content_type == "chapter":
+                    chapter_number += 1
+                    number = str(chapter_number)
+                flattened.append(
+                    self._with_generation_flag(
+                        {
+                            "number": number,
+                            "title": section.get("title", f"Section {len(flattened) + 1}"),
+                            "content": section.get("content", ""),
+                            "type": content_type,
+                            "content_type": content_type,
+                            "section_type": section_type,
+                            "section_number": section.get("number"),
+                        }
+                    )
+                )
+        else:
+            for chapter in structure_result.get("chapters") or []:
+                content_type = chapter.get("content_type") or "chapter"
+                number = chapter.get("number")
+                if content_type == "chapter":
+                    chapter_number += 1
+                    number = str(chapter_number)
+                flattened.append(
+                    self._with_generation_flag(
+                        {
+                            "number": number,
+                            "title": chapter.get("title", f"Chapter {chapter_number}"),
+                            "content": chapter.get("content", ""),
+                            "type": content_type,
+                            "content_type": content_type,
+                        }
+                    )
+                )
+
+        return [item for item in flattened if len(item.get("content", "").strip()) >= 100]
+
+    def _reconstruct_epub_chapters_from_text(self, full_text: str) -> List[Dict[str, Any]]:
+        """Reconstruct chapters from aggregate page-split EPUB spine text."""
+        if not full_text or not full_text.strip():
+            return []
+
+        print("[EPUB] Reconstructing chapter structure from aggregate spine text")
+        structure_result = self.structure_detector.detect_structure(full_text)
+        reconstructed = self._flatten_detected_epub_structure(structure_result)
+        reconstructed = self._filter_front_back_matter_structural(reconstructed)
+
+        semantic_chapters = [
+            ch
+            for ch in reconstructed
+            if ch.get("content_type") == "chapter"
+            and self._is_chapter_like(ch.get("title", ""))
+        ]
+        if len(semantic_chapters) < 2:
+            print(
+                "[EPUB] Aggregate reconstruction failed semantic chapter gate "
+                f"({len(semantic_chapters)} chapter-like items)"
+            )
+            reconstructed = self._reconstruct_epub_explicit_chapter_sequence(full_text)
+            if not reconstructed:
+                return []
+
+        print(
+            "[EPUB] Aggregate reconstruction produced "
+            f"{len(reconstructed)} items with {len(semantic_chapters)} chapters"
+        )
+        return reconstructed
+
+    def _reconstruct_epub_explicit_chapter_sequence(
+        self, full_text: str
+    ) -> List[Dict[str, Any]]:
+        """Recover page-split books from their ordered explicit chapter headings.
+
+        OCR/page-export EPUBs can expose hundreds of XHTML pages as type-0 spine
+        items.  Once those pages are aggregated, the general structure detector
+        can reject the whole book because page numbers and a duplicated contents
+        list obscure its semantic gates.  Explicit ``CHAPTER I`` headings still
+        provide a reliable bounded signal: choose the longest sequential run
+        beginning at chapter one, preferring the run with the most body text.
+        This also avoids selecting a compact table-of-contents copy of the same
+        chapter sequence.
+        """
+        lines = full_text.splitlines()
+        candidates: List[Dict[str, Any]] = []
+
+        for line_num, raw_line in enumerate(lines):
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if not re.match(r"(?i)^chap(?:ter|\.)\s+", line):
+                continue
+
+            match = self.structure_detector._match_chapter_patterns(line)
+            if not match:
+                continue
+
+            normalized = str(match.get("number", ""))
+            if not normalized.isdigit():
+                continue
+            number = int(normalized)
+            if number < 1 or number > 500:
+                continue
+
+            subtitle = re.sub(r"\s+", " ", match.get("title", "") or "").strip()
+            title = f"Chapter {number}"
+            if subtitle and not self._is_narrative_prose_title(subtitle):
+                title = f"{title}: {subtitle}"
+            candidates.append({"line": line_num, "number": number, "title": title})
+
+        sequences: List[List[Dict[str, Any]]] = []
+        for start_index, candidate in enumerate(candidates):
+            if candidate["number"] != 1:
+                continue
+            sequence = [candidate]
+            expected = 2
+            for following in candidates[start_index + 1 :]:
+                if following["number"] == expected:
+                    sequence.append(following)
+                    expected += 1
+            if len(sequence) >= 2:
+                sequences.append(sequence)
+
+        if not sequences:
+            return []
+
+        def sequence_score(sequence: List[Dict[str, Any]]) -> tuple[int, int]:
+            # Internal chapter gaps distinguish a real body from a compact TOC.
+            internal_chars = sum(
+                sum(len(line) for line in lines[current["line"] : following["line"]])
+                for current, following in zip(sequence, sequence[1:])
+            )
+            return len(sequence), internal_chars
+
+        sequence = max(sequences, key=sequence_score)
+        first_line = sequence[0]["line"]
+        last_line = sequence[-1]["line"]
+
+        back_matter_line = len(lines)
+        back_matter_title = "Back Matter"
+        for line_num in range(last_line + 1, len(lines)):
+            title = re.sub(r"\s+", " ", lines[line_num]).strip()
+            if not title or len(title) > 160:
+                continue
+            content_type = self._classify_spine_item(title, "", 0)
+            if content_type in {"back_matter", "metadata"}:
+                back_matter_line = line_num
+                back_matter_title = title
+                break
+
+        recovered: List[Dict[str, Any]] = []
+        front_content = "\n".join(lines[:first_line]).strip()
+        if len(front_content) >= 100:
+            recovered.append(
+                self._with_generation_flag(
+                    {
+                        "number": None,
+                        "title": "Front Matter",
+                        "content": front_content,
+                        "type": "front_matter",
+                        "content_type": "front_matter",
+                    }
+                )
+            )
+
+        for index, chapter in enumerate(sequence):
+            end_line = (
+                sequence[index + 1]["line"]
+                if index + 1 < len(sequence)
+                else back_matter_line
+            )
+            content = "\n".join(lines[chapter["line"] : end_line]).strip()
+            if len(content) < 100:
+                continue
+            recovered.append(
+                self._with_generation_flag(
+                    {
+                        "number": str(chapter["number"]),
+                        "title": chapter["title"],
+                        "content": content,
+                        "type": "chapter",
+                        "content_type": "chapter",
+                    }
+                )
+            )
+
+        back_content = "\n".join(lines[back_matter_line:]).strip()
+        if len(back_content) >= 100:
+            back_type = self._classify_spine_item(back_matter_title, "", 0)
+            if back_type == "chapter":
+                back_type = "back_matter"
+            recovered.append(
+                self._with_generation_flag(
+                    {
+                        "number": None,
+                        "title": back_matter_title,
+                        "content": back_content,
+                        "type": back_type,
+                        "content_type": back_type,
+                    }
+                )
+            )
+
+        recovered_chapters = [
+            item for item in recovered if item.get("content_type") == "chapter"
+        ]
+        if len(recovered_chapters) < 2:
+            return []
+
+        print(
+            "[EPUB] Explicit heading reconstruction produced "
+            f"{len(recovered)} items with {len(recovered_chapters)} chapters"
+        )
+        return recovered
+
     def __init__(self):
         self.upload_dir = settings.UPLOAD_DIR
         self.ai_service = AIService()
@@ -2333,7 +2848,8 @@ class FileService:
             "index", "bibliography", "glossary", "endnotes", "footnotes",
             "colophon", "imprint", "copyright",
             "about the author", "suggested reading", "references", "notes",
-            "the principles of newspeak",
+            "the principles of newspeak", "project gutenberg license",
+            "the full project gutenberg license",
         }
 
         for pattern in FRONT_MATTER_TITLES:
@@ -2344,10 +2860,15 @@ class FileService:
             if title_lower == pattern or title_lower.startswith(pattern):
                 return "back_matter"
 
+        if "project gutenberg license" in title_lower:
+            return "back_matter"
+
+        if title_lower in {"contents", "table of contents"}:
+            return "front_matter"
+
         # Gutenberg-style boilerplate
         GENERIC_BOILERPLATE = [
             r"(?i)project.?gutenberg",
-            r"(?i)\blicense\b",
             r"(?i)produced by.*(?:project gutenberg|distributed proof)",
             r"(?i)start of (?:the )?project gutenberg",
             r"(?i)end of (?:the )?project gutenberg",
@@ -2545,25 +3066,10 @@ class FileService:
 
             chapter_number = 0
             skipped_count = 0
+            untitled_page_fragment_count = 0
+            aggregate_text_parts: List[str] = []
 
-            for idx, (item_id, _) in enumerate(spine):
-                item = book.get_item_with_id(item_id)
-
-                if not item:
-                    # Fallback: some EPUBs use the manifest href as the spine idref
-                    for manifest_item in book.get_items():
-                        if (
-                            manifest_item.get_id() == item_id
-                            or manifest_item.get_name() == item_id
-                            or manifest_item.get_name().endswith("/" + item_id)
-                        ):
-                            item = manifest_item
-                            print(
-                                f"[EPUB] Item {idx}: Resolved idref '{item_id}' via manifest name "
-                                f"'{manifest_item.get_name()}'"
-                            )
-                            break
-
+            for idx, item_id, item in self._iter_epub_spine_items(book):
                 if not item:
                     print(f"[EPUB] Item {idx}: Could not get item with id '{item_id}'")
                     continue
@@ -2571,13 +3077,17 @@ class FileService:
                 item_type = item.get_type()
                 print(f"[EPUB] Item {idx} (id: {item_id}): type = {item_type}")
 
-                if item_type == ebooklib.ITEM_DOCUMENT:
+                if self._is_epub_document_item(item):
                     # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
                     soup = BeautifulSoup(item.get_content(), "lxml")
 
                     # Remove script and style elements
                     for script in soup(["script", "style"]):
                         script.decompose()
+
+                    clean_text = self._clean_epub_soup_text(soup)
+                    if clean_text:
+                        aggregate_text_parts.append(clean_text)
 
                     # Try to split bundled chapters by headings first
                     sub_chapters = self._split_spine_item_by_headings(soup, idx)
@@ -2633,16 +3143,6 @@ class FileService:
                         continue  # Move to next spine item
 
                     # Fall through to original single-chapter logic
-                    # Get text content
-                    text = soup.get_text()
-
-                    # Clean the text
-                    lines = (line.strip() for line in text.splitlines())
-                    chunks = (
-                        phrase.strip() for line in lines for phrase in line.split("  ")
-                    )
-                    clean_text = "\n".join(chunk for chunk in chunks if chunk)
-
                     content_length = len(clean_text.strip())
                     print(f"[EPUB] Item {idx}: content length = {content_length}")
 
@@ -2705,9 +3205,14 @@ class FileService:
                     )
 
                     if content_type == "chapter":
-                        chapter_number += 1
                         if not title:
-                            title = f"Chapter {chapter_number}"
+                            untitled_page_fragment_count += 1
+                            print(
+                                "[EPUB] Treating untitled document item as page fragment "
+                                f"for aggregate reconstruction: item {idx}"
+                            )
+                            continue
+                        chapter_number += 1
                         chapters.append(self._with_generation_flag({
                             "number": str(chapter_number),
                             "title": title,
@@ -2743,11 +3248,21 @@ class FileService:
                 if ch.get("content_type") == "chapter"
                 and self._is_chapter_like(ch.get("title", ""))
             ]
-            if len(semantic_chapters) < 2:
+            needs_aggregate_reconstruction = (
+                len(semantic_chapters) < 2
+                or untitled_page_fragment_count > max(2, len(semantic_chapters))
+            )
+            if needs_aggregate_reconstruction:
                 print(
-                    "[EPUB] Insufficient semantic chapter structure after spine scan "
-                    f"({len(semantic_chapters)} chapter-like items); falling back to text parsing"
+                    "[EPUB] Spine scan needs aggregate reconstruction "
+                    f"({len(semantic_chapters)} chapter-like items, "
+                    f"{untitled_page_fragment_count} untitled page fragments)"
                 )
+                reconstructed = self._reconstruct_epub_chapters_from_text(
+                    "\n\n".join(aggregate_text_parts)
+                )
+                if reconstructed:
+                    return reconstructed
                 return []
 
             print(
@@ -2794,37 +3309,47 @@ class FileService:
                 print(f"[DEBUG] Error extracting author metadata: {e}")
                 author = None
 
-            # Extract text from all document items
+            # Extract text from spine document items in reading order. Some EPUBs
+            # expose HTML page items as ebooklib type 0, so media_type/href decide
+            # document parsing instead of get_type() alone.
             text_content = []
+            processed_items = set()
 
-            for item in book.get_items():
-                if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                    # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
-                    soup = BeautifulSoup(item.get_content(), "lxml")
+            def append_text_from_item(item: Any) -> None:
+                if not item or not self._is_epub_document_item(item):
+                    return
 
-                    # Remove script and style elements
-                    for script in soup(["script", "style"]):
-                        script.decompose()
+                item_key = id(item)
+                try:
+                    item_key = item.get_id() or item.get_name() or item_key
+                except Exception:
+                    pass
+                if item_key in processed_items:
+                    return
+                processed_items.add(item_key)
 
-                    # Get text and clean it
-                    text = soup.get_text()
+                # KAN-367 B5: Use lxml parser (more lenient with malformed EPUB CSS than html.parser)
+                soup = BeautifulSoup(item.get_content(), "lxml")
 
-                    # Break into lines and remove leading/trailing space on each
-                    lines = (line.strip() for line in text.splitlines())
+                # Remove script and style elements
+                for script in soup(["script", "style"]):
+                    script.decompose()
 
-                    # Break multi-headlines into a line each
-                    chunks = (
-                        phrase.strip() for line in lines for phrase in line.split("  ")
-                    )
+                text = self._clean_epub_soup_text(soup)
 
-                    # Drop blank lines
-                    text = "\n".join(chunk for chunk in chunks if chunk)
+                if text:
+                    text_content.append(text)
 
-                    if text:
-                        text_content.append(text)
+            for _, _, item in self._iter_epub_spine_items(book):
+                append_text_from_item(item)
+
+            if not text_content:
+                for item in book.get_items():
+                    append_text_from_item(item)
 
             # Combine all text
             full_text = "\n\n".join(text_content)
+            chapters = self.extract_epub_chapters(file_path)
 
             # Try to extract cover image (optional)
             cover_image_url = None
@@ -2832,6 +3357,7 @@ class FileService:
 
             return {
                 "text": full_text,
+                "chapters": chapters,
                 "author": author,
                 "cover_image_url": cover_image_url,
             }
@@ -3909,6 +4435,106 @@ class FileService:
 
     def _process_pdf_bookmarks(self, doc, toc) -> List[Dict[str, Any]]:
         """Process PDF bookmarks into chapters"""
+        if any(item[0] > 1 for item in toc):
+            chapters = []
+            current_section: Optional[Dict[str, Any]] = None
+            leaf_items = [
+                (idx, level, title, page)
+                for idx, (level, title, page) in enumerate(toc)
+                if idx + 1 == len(toc) or toc[idx + 1][0] <= level
+            ]
+            leaf_index_by_toc_index = {idx: pos for pos, (idx, *_rest) in enumerate(leaf_items)}
+
+            for idx, (level, title, page) in enumerate(toc):
+                title_clean = (title or "").strip()
+                if not title_clean:
+                    continue
+
+                if level == 1:
+                    classified_type = self._classify_spine_item(title_clean, "", 0)
+                    has_children = idx + 1 < len(toc) and toc[idx + 1][0] > level
+                    if has_children and classified_type == "chapter":
+                        current_section = {
+                            "title": title_clean,
+                            "section_type": self._extract_section_type(title_clean),
+                            "section_number": self._extract_section_number(title_clean),
+                        }
+                        continue
+
+                    start_page = max(page - 1, 0)
+                    next_leaf_pos = leaf_index_by_toc_index.get(idx, -1) + 1
+                    if next_leaf_pos < len(leaf_items):
+                        end_page = max(leaf_items[next_leaf_pos][3] - 2, start_page)
+                    else:
+                        end_page = len(doc) - 1
+
+                    chapter_text = ""
+                    for p in range(start_page, min(end_page + 1, len(doc))):
+                        chapter_text += doc[p].get_text()
+
+                    if len(chapter_text.strip()) > 500:
+                        chapters.append(
+                            self._with_generation_flag(
+                                {
+                                    "title": title_clean,
+                                    "content": chapter_text.strip(),
+                                    "summary": "",
+                                    "chapter_number": None,
+                                    "number": None,
+                                    "content_type": (
+                                        classified_type
+                                        if classified_type != "chapter"
+                                        else "chapter"
+                                    ),
+                                }
+                            )
+                        )
+                    current_section = None
+                    continue
+
+                leaf_pos = leaf_index_by_toc_index.get(idx)
+                if leaf_pos is None:
+                    continue
+
+                start_page = max(page - 1, 0)
+                if leaf_pos + 1 < len(leaf_items):
+                    end_page = max(leaf_items[leaf_pos + 1][3] - 2, start_page)
+                else:
+                    end_page = len(doc) - 1
+
+                chapter_text = ""
+                for p in range(start_page, min(end_page + 1, len(doc))):
+                    chapter_text += doc[p].get_text()
+
+                if len(chapter_text.strip()) <= 500:
+                    continue
+
+                chapter_number = sum(
+                    1 for chapter in chapters if chapter.get("content_type") == "chapter"
+                ) + 1
+                chapter_data = self._with_generation_flag(
+                    {
+                        "title": title_clean,
+                        "content": chapter_text.strip(),
+                        "summary": "",
+                        "chapter_number": chapter_number,
+                        "number": str(chapter_number),
+                        "content_type": "chapter",
+                    }
+                )
+                if current_section:
+                    chapter_data.update(
+                        {
+                            "section_title": current_section["title"],
+                            "section_type": current_section["section_type"],
+                            "section_number": current_section["section_number"],
+                        }
+                    )
+                chapters.append(chapter_data)
+
+            print(f"[TOC EXTRACTION] Processed {len(chapters)} chapters from hierarchical bookmarks")
+            return chapters
+
         chapters = []
         main_chapters = [item for item in toc if item[0] == 1]  # Level 1 items only
 
@@ -5705,33 +6331,40 @@ class FileService:
 
             # Build sections (if present)
             section_id_map: Dict[str, uuid.UUID] = {}
-            order = 0
+            chapter_order = 0
+            section_order = 0
 
             # We need to commit deletions before insertions?
             # SQLAlchemy handles transaction, so it should be fine within same transaction.
 
-            for ch in confirmed_chapters:
-                order += 1
-                section_id = None
-                if ch.get("section_title"):
-                    section_key = f"{ch.get('section_title','')}|{ch.get('section_type','')}|{ch.get('section_number','')}"
+            for entry in self._iter_confirmed_structure_entries(confirmed_chapters):
+                if entry["kind"] == "section":
+                    section_data = entry["data"]
+                    section_key = entry["section_key"]
 
                     if section_key not in section_id_map:
-                        # Create new section
                         section = Section(
                             book_id=book_uuid,
-                            title=ch["section_title"],
-                            section_type=ch.get("section_type") or "",
-                            section_number=ch.get("section_number") or "",
-                            order_index=ch.get("section_order", order),
+                            title=section_data["title"],
+                            section_type=section_data.get("section_type") or "",
+                            section_number=section_data.get("section_number") or "",
+                            order_index=section_data.get("order_index", section_order),
                         )
                         session.add(section)
                         await session.flush()  # Flush to get ID
                         await session.refresh(section)
-                        section_id = section.id
-                        section_id_map[section_key] = section_id
-                    else:
-                        section_id = section_id_map[section_key]
+                        section_id_map[section_key] = section.id
+                        section_order += 1
+                        yield f"Created section: {section.title}"
+
+                    continue
+
+                ch = entry["data"]
+                chapter_order += 1
+                section_id = None
+                section_key = entry.get("section_key")
+                if section_key:
+                    section_id = section_id_map.get(section_key)
 
                 # KAN-367 v3: Preserve content_type from detection
                 content_type = ch.get("content_type", "chapter")
@@ -5742,17 +6375,17 @@ class FileService:
                 else:
                     # Use sequential numbering if not provided
                     if chapter_number is None:
-                        chapter_number = order
+                        chapter_number = chapter_order
 
                 chapter = Chapter(
                     book_id=book_uuid,
                     section_id=section_id,
                     chapter_number=chapter_number,
-                    title=ch.get("title", f"Chapter {order}"),
+                    title=ch.get("title", f"Chapter {chapter_order}"),
                     content=self._clean_text_content(ch.get("content", "")),
                     summary=self._clean_text_content(ch.get("summary", "")),
                     content_type=content_type,
-                    order_index=order,
+                    order_index=chapter_order,
                 )
                 session.add(chapter)
                 await session.flush()
@@ -5781,7 +6414,7 @@ class FileService:
                 if book:
                     book.has_sections = bool(section_id_map)
                     book.structure_type = "hierarchical" if section_id_map else "flat"
-                    book.total_chapters = order
+                    book.total_chapters = chapter_order
                     book.status = "READY"
                     book.progress = 100
                     book.progress_message = "Book structure saved successfully"
@@ -5818,7 +6451,7 @@ class FileService:
                 )
                 yield "Structure saved successfully"
                 yield f"- {len(section_id_map)} sections created"
-                yield f"- {order} chapters created"
+                yield f"- {chapter_order} chapters created"
             except Exception as e:
                 print(f"[STRUCTURE SAVE] Failed to update book metadata: {e}")
 
@@ -5827,6 +6460,115 @@ class FileService:
             yield f"Error saving structure: {str(e)}"
             print(f"[STRUCTURE SAVE] Full error: {traceback.format_exc()}")
             raise e
+
+    def _iter_confirmed_structure_entries(
+        self, confirmed_chapters: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Normalize flat and hierarchical preview payloads for persistence."""
+        entries: List[Dict[str, Any]] = []
+
+        def _section_key(section: Dict[str, Any]) -> str:
+            return (
+                f"{section.get('title','')}|"
+                f"{section.get('section_type') or section.get('type') or ''}|"
+                f"{section.get('section_number') or section.get('number') or ''}"
+            )
+
+        for index, item in enumerate(confirmed_chapters):
+            if not isinstance(item, dict):
+                continue
+
+            nested_chapters = item.get("chapters") or []
+            item_content_type = item.get("content_type", "chapter")
+            item_type = item.get("section_type") or item.get("type")
+            item_type_normalized = str(item_type or "").lower()
+            is_section_payload = bool(nested_chapters) or (
+                item_type_normalized in {"part", "book", "section"}
+                and "section_title" not in item
+            )
+            persist_as_section = (
+                bool(nested_chapters) and item_content_type == "chapter"
+            )
+
+            if is_section_payload and persist_as_section:
+                section_data = {
+                    "title": item.get("title", f"Section {index + 1}"),
+                    "section_type": item_type_normalized,
+                    "section_number": item.get("section_number")
+                    or item.get("number")
+                    or "",
+                    "order_index": item.get("order_index", index),
+                }
+                section_key = _section_key(section_data)
+                entries.append(
+                    {
+                        "kind": "section",
+                        "data": section_data,
+                        "section_key": section_key,
+                    }
+                )
+
+                for chapter in nested_chapters:
+                    if not isinstance(chapter, dict):
+                        continue
+                    chapter_data = {
+                        **chapter,
+                        "section_title": section_data["title"],
+                        "section_type": section_data["section_type"],
+                        "section_number": section_data["section_number"],
+                    }
+                    entries.append(
+                        {
+                            "kind": "chapter",
+                            "data": chapter_data,
+                            "section_key": section_key,
+                        }
+                    )
+                continue
+
+            if is_section_payload:
+                entries.append(
+                    {
+                        "kind": "chapter",
+                        "data": {
+                            **item,
+                            "title": item.get("title", f"Chapter {index + 1}"),
+                            "content_type": item_content_type,
+                        },
+                        "section_key": None,
+                    }
+                )
+                continue
+
+            section_key = None
+            if item.get("section_title"):
+                section_key = (
+                    f"{item.get('section_title','')}|"
+                    f"{item.get('section_type','')}|"
+                    f"{item.get('section_number','')}"
+                )
+                entries.append(
+                    {
+                        "kind": "section",
+                        "data": {
+                            "title": item["section_title"],
+                            "section_type": item.get("section_type") or "",
+                            "section_number": item.get("section_number") or "",
+                            "order_index": item.get("section_order", index),
+                        },
+                        "section_key": section_key,
+                    }
+                )
+
+            entries.append(
+                {
+                    "kind": "chapter",
+                    "data": item,
+                    "section_key": section_key,
+                }
+            )
+
+        return entries
 
     async def _compare_with_toc_chapter(
         self, chapter_title: str, extracted_content: str, toc_reference: Dict
@@ -6365,8 +7107,10 @@ class FileService:
                         )
                     return epub_chapters  # Return the chapters directly
                 else:
-                    print(
-                        "[EPUB EXTRACTION] No chapters found in EPUB structure, falling back to text parsing"
+                    raise ValueError(
+                        "Could not reconstruct chapters from this EPUB. "
+                        "The file appears to use a page-split or malformed structure "
+                        "without recoverable chapter headings."
                     )
 
             except Exception as e:
@@ -6383,6 +7127,8 @@ class FileService:
                         os.unlink(extra_temp_path)
                     except:
                         pass
+                if "Could not reconstruct chapters from this EPUB" in str(e):
+                    raise
 
         # Step 2: Try TOC extraction for PDFs
         toc_chapters = []

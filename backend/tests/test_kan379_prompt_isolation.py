@@ -672,6 +672,11 @@ class TestExistingSafeCallSitesStillSafe:
         assert hasattr(prompt_isolation, "assert_isolated")
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# 4. KAN-379: shared helper also enforces SEC-02 isolation
+# ─────────────────────────────────────────────────────────────────────────
+
+
 class TestCreateSafeOpenAIMessages:
     """Confirm the shared helper also enforces SEC-02 isolation."""
 
@@ -718,6 +723,8 @@ class TestCreateSafeOpenAIMessages:
         assert USER_CONTENT_OPEN in user_msg
         assert USER_CONTENT_CLOSE in user_msg
         assert total_tokens > 0
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # 5. KAN-379 Phase 2: file.py call sites refactored to build_isolated_messages
 # ─────────────────────────────────────────────────────────────────────────

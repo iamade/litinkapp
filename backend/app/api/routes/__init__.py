@@ -3,6 +3,7 @@ from .home import router as home_router
 from .auth import router as auth_router
 from .books import router as books_router
 from .ai import router as ai_router
+from .ai.production_bible import router as production_bible_router
 from .profile import router as users_router
 from .quizzes import router as quizzes_router
 from .badges import router as badges_router
@@ -27,6 +28,7 @@ api_router.include_router(auth_router, tags=["authentication"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(books_router, prefix="/books", tags=["books"])
 api_router.include_router(ai_router, prefix="/ai", tags=["ai"])
+api_router.include_router(production_bible_router, prefix="/ai", tags=["production-bible"])
 api_router.include_router(plots_router, prefix="/plots", tags=["plots"])
 api_router.include_router(characters_router, prefix="/characters", tags=["characters"])
 api_router.include_router(chapters_router, prefix="/chapters", tags=["chapters"])
