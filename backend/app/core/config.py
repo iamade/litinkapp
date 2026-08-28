@@ -181,6 +181,10 @@ class Settings(BaseSettings):
     ALGORAND_SERVER: str = "https://testnet-api.algonode.cloud"
     ALGORAND_INDEXER: str = "https://testnet-idx.algonode.cloud"
     CREATOR_MNEMONIC: Optional[str] = None
+    # Hotfix 2026-08-06: allow prod boot without a valid Algorand mnemonic.
+    # When true, blockchain runs in mock mode (creator_account=None) even in production.
+    # Algorand is slated for removal (hackathon-era feature) — see AFD ticket.
+    SKIP_BLOCKCHAIN_BOOTSTRAP: bool = False
 
     # Email Configuration
     MAIL_SERVICE: str = "mailpit"  # mailpit for dev, mailgun for production
@@ -227,6 +231,10 @@ class Settings(BaseSettings):
     STRIPE_PREMIUM_ANNUAL_PRICE_ID: Optional[str] = None
     STRIPE_PROFESSIONAL_MONTHLY_PRICE_ID: Optional[str] = None
     STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID: Optional[str] = None
+
+    # Subscription cancellation policy. When false, users may only schedule
+    # cancellation at period end; immediate Stripe cancellation is rejected.
+    ALLOW_IMMEDIATE_CANCEL: bool = True
 
     # Rate Limiting per Tier (requests per minute)
     RATE_LIMITS: ClassVar[Dict[str, int]] = {

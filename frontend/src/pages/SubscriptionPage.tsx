@@ -8,7 +8,7 @@ import UsageIndicator from "../components/Subscription/UsageIndicator";
 import PromoCodeInput from "../components/Subscription/PromoCodeInput";
 import {
   SubscriptionTier,
-  UserSubscription,
+  SubscriptionStatusResponse,
   SubscriptionUsageStats,
   subscriptionService
 } from "../services/subscriptionService";
@@ -20,12 +20,27 @@ export default function SubscriptionPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [tiers, setTiers] = useState<SubscriptionTier[]>([]);
-  const [currentSubscription, setCurrentSubscription] = useState<UserSubscription | null>(null);
+  const [currentSubscription, setCurrentSubscription] = useState<SubscriptionStatusResponse | null>(null);
   const [usage, setUsage] = useState<SubscriptionUsageStats | null>(null);
   const [loadingData, setLoadingData] = useState(true);
+  const [subscriptionStatusLoading, setSubscriptionStatusLoading] = useState(false);
+  const [subscriptionStatusError, setSubscriptionStatusError] = useState<string | null>(null);
   const [upgrading, setUpgrading] = useState<string | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+
+  const formatDate = (value?: string | null) => {
+    if (!value) return null;
+    return new Date(value).toLocaleDateString();
+  };
+
+  const hasPaidSubscription = Boolean(
+    currentSubscription &&
+    currentSubscription.tier !== "free" &&
+    ["active", "trialing", "past_due"].includes(currentSubscription.status)
+  );
+
+  const renewalDate = formatDate(currentSubscription?.current_period_end);
 
   useEffect(() => {
     // Wait for auth to finish loading before checking if user exists
@@ -47,9 +62,11 @@ export default function SubscriptionPage() {
     }
   }, [user, loading, navigate, location.search]);
 
-  const loadData = async () => {
+  const loadData = async (showPageLoading = true) => {
     try {
-      setLoadingData(true);
+      if (showPageLoading) setLoadingData(true);
+      setSubscriptionStatusLoading(Boolean(user));
+      setSubscriptionStatusError(null);
       const tiersPromise = subscriptionService.getSubscriptionTiers();
       
       let subscriptionData = null;
@@ -57,7 +74,10 @@ export default function SubscriptionPage() {
 
       if (user) {
         const [sub, usage] = await Promise.all([
-          subscriptionService.getCurrentSubscription().catch(() => null),
+          subscriptionService.getSubscriptionStatus().catch((error) => {
+            setSubscriptionStatusError(error instanceof Error ? error.message : "Unable to load subscription status");
+            return null;
+          }),
           subscriptionService.getUsageStats().catch(() => null),
         ]);
         subscriptionData = sub;
@@ -72,7 +92,8 @@ export default function SubscriptionPage() {
     } catch (error) {
       toast.error("Failed to load subscription information");
     } finally {
-      setLoadingData(false);
+      if (showPageLoading) setLoadingData(false);
+      setSubscriptionStatusLoading(false);
     }
   };
 
@@ -106,14 +127,14 @@ export default function SubscriptionPage() {
   };
 
   const handleCancelSubscription = async () => {
-    if (!currentSubscription) return;
+    if (!hasPaidSubscription || currentSubscription?.cancel_at_period_end) return;
     
     setCancelling(true);
     try {
-      await subscriptionService.cancelSubscription({ cancel_at_period_end: true });
+      await subscriptionService.cancelSubscription({ immediate: false });
       toast.success("Subscription cancelled. You'll retain access until the end of your billing period.");
       setShowCancelModal(false);
-      loadData(); // Reload to show updated status
+      await loadData(false); // Reload to show updated status
     } catch (error) {
       toast.error("Failed to cancel subscription");
     } finally {
@@ -125,7 +146,7 @@ export default function SubscriptionPage() {
     try {
       await subscriptionService.reactivateSubscription();
       toast.success("Subscription reactivated successfully!");
-      loadData(); // Reload to show updated status
+      loadData(false); // Reload to show updated status
     } catch (error) {
       toast.error("Failed to reactivate subscription");
     }
@@ -134,7 +155,7 @@ export default function SubscriptionPage() {
 
 
   const handlePromoRedeemed = async () => {
-    await loadData();
+    await loadData(false);
   };
 
   if (loading || loadingData) {
@@ -162,74 +183,106 @@ export default function SubscriptionPage() {
         </div>
 
         {/* Current Subscription Status */}
-        {currentSubscription && (
+        {user && (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-6 mb-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Current Plan</h2>
-              <div className="flex items-center gap-2">
-                {currentSubscription.status === "active" ? (
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                ) : currentSubscription.status === "cancelled" ? (
-                  <XCircle className="h-5 w-5 text-red-500" />
-                ) : (
-                  <Settings className="h-5 w-5 text-yellow-500" />
-                )}
-                <span className={`text-sm font-medium capitalize ${
-                  currentSubscription.status === "active" ? "text-green-600" :
-                  currentSubscription.status === "cancelled" ? "text-red-600" :
-                  "text-yellow-600"
-                }`}>
-                  {currentSubscription.status.replace("_", " ")}
-                </span>
-              </div>
+              {currentSubscription && (
+                <div className="flex items-center gap-2">
+                  {currentSubscription.status === "active" ? (
+                    <CheckCircle className="h-5 w-5 text-green-500" />
+                  ) : currentSubscription.status === "cancelled" ? (
+                    <XCircle className="h-5 w-5 text-red-500" />
+                  ) : (
+                    <Settings className="h-5 w-5 text-yellow-500" />
+                  )}
+                  <span className={`text-sm font-medium capitalize ${
+                    currentSubscription.status === "active" ? "text-green-600" :
+                    currentSubscription.status === "cancelled" ? "text-red-600" :
+                    "text-yellow-600"
+                  }`}>
+                    {currentSubscription.status.replace("_", " ")}
+                  </span>
+                  {currentSubscription.cancel_at_period_end && (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+                      Will not renew
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div>
-                <span className="text-sm text-gray-600 dark:text-gray-400">Plan</span>
-                <p className="font-semibold text-gray-900 dark:text-white capitalize">
-                  {currentSubscription.tier}
-                </p>
+            {subscriptionStatusLoading ? (
+              <div className="flex items-center gap-3 text-gray-600 dark:text-gray-400">
+                <Loader2 className="h-5 w-5 animate-spin text-purple-600" />
+                <span>Loading subscription status...</span>
               </div>
-              <div>
-                <span className="text-sm text-gray-600 dark:text-gray-400">Quality</span>
-                <p className="font-semibold text-gray-900 dark:text-white">
-                  {currentSubscription.video_quality}
-                </p>
+            ) : subscriptionStatusError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+                We couldn't load your subscription status. You can still view plans below.
               </div>
-            </div>
+            ) : currentSubscription ? (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Plan</span>
+                    <p className="font-semibold text-gray-900 dark:text-white capitalize">
+                      {currentSubscription.plan || currentSubscription.tier}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Tier</span>
+                    <p className="font-semibold text-gray-900 dark:text-white capitalize">
+                      {currentSubscription.tier}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                      {currentSubscription.cancel_at_period_end ? "Period ends" : "Renews"}
+                    </span>
+                    <p className="font-semibold text-gray-900 dark:text-white">
+                      {renewalDate || "Not scheduled"}
+                    </p>
+                  </div>
+                </div>
 
-            {/* Usage Indicator */}
-            {usage && (
-              <div className="mb-4">
-                <UsageIndicator usage={usage} />
-              </div>
-            )}
-
-            {/* Subscription Actions */}
-            {currentSubscription.tier !== "free" && (
-              <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
-                {currentSubscription.cancel_at_period_end ? (
-                  <button
-                    onClick={handleReactivateSubscription}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 transition-colors"
-                  >
-                    Reactivate Subscription
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setShowCancelModal(true)}
-                    className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 transition-colors"
-                  >
-                    Cancel Subscription
-                  </button>
-                )}
-                {currentSubscription.current_period_end && (
-                  <div className="text-sm text-gray-600 dark:text-gray-400 flex items-center">
-                    {currentSubscription.cancel_at_period_end ? "Ends" : "Renews"} on{" "}
-                    {new Date(currentSubscription.current_period_end).toLocaleDateString()}
+                {/* Usage Indicator */}
+                {usage && (
+                  <div className="mb-4">
+                    <UsageIndicator usage={usage} />
                   </div>
                 )}
+
+                {/* Subscription Actions */}
+                {hasPaidSubscription && (
+                  <div className="flex flex-col gap-3 pt-4 border-t border-gray-200 dark:border-gray-700 sm:flex-row sm:items-center">
+                    {currentSubscription.cancel_at_period_end ? (
+                      <button
+                        onClick={handleReactivateSubscription}
+                        className="bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 transition-colors"
+                      >
+                        Reactivate Subscription
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setShowCancelModal(true)}
+                        disabled={cancelling}
+                        className="bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Cancel Subscription
+                      </button>
+                    )}
+                    {renewalDate && (
+                      <div className="text-sm text-gray-600 dark:text-gray-400 flex items-center">
+                        {currentSubscription.cancel_at_period_end ? "Ends" : "Renews"} on {renewalDate}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+                No active subscription is currently associated with this account. Choose a plan below to upgrade when you're ready.
               </div>
             )}
           </div>
@@ -366,7 +419,7 @@ export default function SubscriptionPage() {
           onClose={() => setShowCancelModal(false)}
           onConfirm={handleCancelSubscription}
           tier={currentSubscription?.tier || ""}
-          periodEnd={currentSubscription?.current_period_end ? new Date(currentSubscription.current_period_end).toLocaleDateString() : undefined}
+          periodEnd={renewalDate || undefined}
           isLoading={cancelling}
         />
       </div>

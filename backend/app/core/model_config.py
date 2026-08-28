@@ -30,6 +30,12 @@ class ModelConfig:
     fallback5: Optional[str] = None
     fallback6: Optional[str] = None
     fallback7: Optional[str] = None
+    fallback8: Optional[str] = None  # KAN-450: MiniMax extension
+    fallback9: Optional[str] = None  # KAN-450: MiniMax extension
+    fallback10: Optional[str] = None  # KAN-450: MiniMax extension
+    fallback11: Optional[str] = None  # KAN-450: MiniMax extension
+    fallback12: Optional[str] = None  # KAN-450: MiniMax extension
+    fallback13: Optional[str] = None  # KAN-450: MiniMax extension
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     cost_per_1k_input: Optional[float] = None
@@ -48,6 +54,12 @@ class ModelConfig:
                 self.fallback5,
                 self.fallback6,
                 self.fallback7,
+                self.fallback8,
+                self.fallback9,
+                self.fallback10,
+                self.fallback11,
+                self.fallback12,
+                self.fallback13,
             )
             if model
         ]
@@ -55,6 +67,26 @@ class ModelConfig:
 # Script ladders are cheapest-to-most-expensive and capped at two Ollama slots.
 # Token prices below are standard USD per 1M input/output tokens as of 2026-07-12.
 # Subscription/proxy slots need their effective dashboard rate in the COGS audit.
+#
+# ============================================================================
+# KAN-450: MiniMax Model Family — Pricing & Credential Notes
+# ============================================================================
+# MiniMax uses a SUBSCRIPTION CREDIT model, not per-token pricing like OpenAI/Anthropic.
+# Credits are consumed per request and vary by model tier. Estimates below are
+# approximate per-generation credit costs based on platform.minimax.io/docs/guides/pricing:
+#   - MiniMax-M3:          ~$0.02-0.05/1k tokens equiv. (frontier tier, highest credit cost)
+#   - MiniMax-M2.7:        ~$0.015-0.04/1k tokens equiv. (engineering quality)
+#   - MiniMax-M2.7-highspeed: ~$0.012-0.03/1k tokens equiv. (lower latency, slightly cheaper)
+#   - MiniMax-M2.5:        ~$0.008-0.02/1k tokens equiv. (legacy value)
+#   - MiniMax-M2.1:        ~$0.006-0.015/1k tokens equiv. (MoE, efficient)
+#   - MiniMax-M2:          ~$0.004-0.01/1k tokens equiv. (agentic, 200k ctx)
+# Source: https://platform.minimax.io/docs/guides/pricing (accessed 2026-07-30)
+#
+# PRODUCTION CREDENTIALS: MINIMAX_API_KEY is present in the environment (.env) but
+# the production credential decision must be made before using Ade's personal key
+# for live customer-facing calls. Do NOT enable MiniMax as a live provider until
+# LC/Ade approves the credential for production traffic.
+# ============================================================================
 SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
         primary="zai/glm-5.2",  # $1.40/$4.40
@@ -65,6 +97,9 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback5="openai/gpt-5-mini",  # legacy ID: rate confirmation required
         fallback6="anthropic/claude-haiku-4-5-20251001",  # $1/$5
         fallback7="zai/glm-5.1",  # $1.40/$4.40
+        # --- KAN-450: MiniMax model family (additional fallbacks) ---
+        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
+        fallback8="minimax/MiniMax-M2",  # Legacy agentic: 200k ctx, 128k max output. Last-resort fallback.
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.0,
@@ -79,6 +114,10 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback5="openai/gpt-5-mini",  # legacy ID: rate confirmation required
         fallback6="anthropic/claude-haiku-4-5-20251001",  # $1/$5
         fallback7="anthropic/claude-sonnet-4-6",  # $3/$15
+        # --- KAN-450: MiniMax model family (additional fallbacks) ---
+        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
+        fallback8="minimax/MiniMax-M2.5",  # Legacy value: code gen/refactoring. "Peak Performance. Ultimate Value."
+        fallback9="minimax/MiniMax-M2.1",  # 230B total / 10B activated. Enhanced reasoning, code gen.
         max_tokens=4000,
         temperature=0.7,
         cost_per_1k_input=0.00014,
@@ -93,6 +132,12 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback5="openai/gpt-5.4",  # $2.50/$15 (short context)
         fallback6="anthropic/claude-sonnet-4-6",  # $3/$15
         fallback7="anthropic/claude-opus-4-6",  # $5/$25
+        # --- KAN-450: MiniMax model family (additional fallbacks) ---
+        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
+        # NOTE: MiniMax-M2.7-highspeed requires masked-probe pattern: probe the model with a
+        # masked/redacted input before full generation to verify availability and avoid
+        # wasting credits on unavailable instances. See KAN-450 acceptance criteria #3.
+        fallback8="minimax/MiniMax-M2.7-highspeed",  # Fast M2.7 inference, low latency. Masked-probe required.
         max_tokens=8000,
         temperature=0.7,
         cost_per_1k_input=0.00025,
@@ -107,6 +152,9 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback5="openai/gpt-5.4",  # $2.50/$15 (short context)
         fallback6="anthropic/claude-sonnet-4-6",  # $3/$15
         fallback7="anthropic/claude-opus-4-6",  # $5/$25
+        # --- KAN-450: MiniMax model family (additional fallbacks) ---
+        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
+        fallback8="minimax/MiniMax-M2.7",  # Top real-world engineering, character-rich interaction.
         max_tokens=8000,
         temperature=0.75,
         cost_per_1k_input=0.00150,
@@ -121,6 +169,9 @@ SCRIPT_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
         fallback5="openai/gpt-5.4-pro",  # $30/$180 (short context)
         fallback6="anthropic/claude-sonnet-4-6",  # $3/$15
         fallback7="anthropic/claude-opus-4-6",  # $5/$25
+        # --- KAN-450: MiniMax model family (additional fallbacks) ---
+        # MiniMax pricing: subscription-credit based (not per-token). See pricing block below.
+        fallback8="minimax/MiniMax-M3",  # Frontier multimodal coding model, 1M context window.
         max_tokens=16000,
         temperature=0.8,
         cost_per_1k_input=0.00250,
@@ -282,6 +333,11 @@ IMAGE_I2I_MULTI_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
 # UPDATED: All tiers now use ONLY models that accept audio input for lip-sync capability
 # Supported models: wan2.5-i2v, wan2.6-i2v, omni-human, omni-human-1.5
 # These models accept: image + audio + prompt → video with lip-sync
+#
+# KAN-450: MiniMax Hailuo video models (Hailuo-02, Hailuo-01, etc.) are EXCLUDED
+# from Plus plan tiers (FREE/BASIC/STANDARD). They are only available on PREMIUM+
+# tiers when video model expansion is approved. Do NOT add Hailuo models to
+# FREE/BASIC/STANDARD VIDEO_MODEL_CONFIG entries.
 VIDEO_MODEL_CONFIG: Dict[ModelTier, ModelConfig] = {
     ModelTier.FREE: ModelConfig(
         primary="wan2.5-i2v",  # Wan2.5-I2V (ModelsLab) 480p - basic lip-sync capable

@@ -2,6 +2,7 @@ from app.core.model_config import ModelTier, SCRIPT_MODEL_CONFIG
 
 
 def test_pro_script_ladder_order():
+    # KAN-450: MiniMax-M3 appended as fallback
     assert SCRIPT_MODEL_CONFIG[ModelTier.PRO].models == [
         "openai/gpt-5.5",
         "zai/glm-5.2",
@@ -11,4 +12,5 @@ def test_pro_script_ladder_order():
         "openai/gpt-5.4-pro",
         "anthropic/claude-sonnet-4-6",
         "anthropic/claude-opus-4-6",
+        "minimax/MiniMax-M3",
     ]

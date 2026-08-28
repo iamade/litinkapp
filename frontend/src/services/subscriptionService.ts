@@ -39,6 +39,16 @@ export interface UserSubscription {
   updated_at: string;
 }
 
+export interface SubscriptionStatusResponse {
+  plan: SubscriptionTier["tier"];
+  tier: SubscriptionTier["tier"];
+  status: "active" | "cancelled" | "expired" | "past_due" | "trialing";
+  current_period_end?: string | null;
+  cancel_at_period_end: boolean;
+  source: string;
+  stripe_subscription_id?: string | null;
+}
+
 export interface CheckoutSessionCreate {
   tier: "free" | "basic" | "standard" | "pro" | "premium" | "professional" | "enterprise";
   billing_period?: "monthly" | "annual";
@@ -60,6 +70,7 @@ export interface SubscriptionUsageStats {
 }
 
 export interface SubscriptionCancelRequest {
+  immediate?: boolean;
   cancel_at_period_end?: boolean;
 }
 
@@ -90,6 +101,11 @@ export const subscriptionService = {
   // Get current user's subscription
   getCurrentSubscription: async (): Promise<UserSubscription> => {
     return apiClient.get<UserSubscription>("/subscriptions/current");
+  },
+
+  // Get canonical current subscription status
+  getSubscriptionStatus: async (): Promise<SubscriptionStatusResponse> => {
+    return apiClient.get<SubscriptionStatusResponse>("/subscriptions/status");
   },
 
   // Create Stripe checkout session
