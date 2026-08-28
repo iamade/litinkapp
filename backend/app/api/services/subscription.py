@@ -731,8 +731,21 @@ class SubscriptionManager:
             elif customer_email:
                 checkout_kwargs["customer_email"] = customer_email
 
-            # Create Stripe checkout session
-            session = stripe.checkout.Session.create(**checkout_kwargs)
+            # Create Stripe checkout session. Map Stripe rejections of
+            # misconfigured price IDs to a user-facing 400 (route maps
+            # ValueError -> 400) instead of an opaque 500.
+            try:
+                session = stripe.checkout.Session.create(**checkout_kwargs)
+            except stripe.error.InvalidRequestError as exc:
+                logger.warning(
+                    f"Stripe rejected checkout session for tier={tier.value} "
+                    f"billing_period={billing_period}: {exc}"
+                )
+                raise ValueError(
+                    "Checkout is currently unavailable: the billing plan for this "
+                    "tier is not correctly configured in Stripe. Please contact "
+                    "support."
+                ) from exc
 
             return {"checkout_url": session.url, "session_id": session.id}
 

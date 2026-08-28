@@ -261,3 +261,82 @@ async def test_cancel_endpoint_stripe_missing_immediate_cancels_locally(monkeypa
     assert subscription.status == SubscriptionStatus.CANCELLED
     assert subscription.tier == SubscriptionTier.FREE
     assert fake_session.commits == 1
+
+
+async def test_checkout_service_maps_invalid_price_to_value_error(monkeypatch):
+    """KAN-462: Stripe rejecting a misconfigured price ID must surface as a
+    clear ValueError (route -> 400), never an opaque 500."""
+    import stripe as stripe_module
+
+    def raise_invalid_request(*args, **kwargs):
+        raise stripe_module.error.InvalidRequestError(
+            message="No such price: 'price_1TeQI66U8P1S4aG1xkSBdEiG'",
+            param="line_items[0][price]",
+        )
+
+    monkeypatch.setattr(
+        subscription_service.stripe.checkout.Session, "create", raise_invalid_request
+    )
+    manager = subscription_service.SubscriptionManager(_FakeSession())
+    with pytest.raises(ValueError) as exc_info:
+        await manager.create_checkout_session(
+            user_id=str(USER_ID),
+            tier=SubscriptionTier.BASIC,
+            success_url="https://test.litinkai.com/success",
+            cancel_url="https://test.litinkai.com/cancel",
+            billing_period="monthly",
+        )
+    assert "not correctly configured" in str(exc_info.value)
+
+
+async def test_checkout_endpoint_returns_400_on_invalid_price(monkeypatch):
+    """KAN-462: /subscriptions/checkout returns 400 with a clear message when
+    the configured Stripe price ID does not exist."""
+    import stripe as stripe_module
+
+    def raise_invalid_request(*args, **kwargs):
+        raise stripe_module.error.InvalidRequestError(
+            message="No such price: 'price_1TeQI66U8P1S4aG1xkSBdEiG'",
+            param="line_items[0][price]",
+        )
+
+    monkeypatch.setattr(
+        subscription_service.stripe.checkout.Session, "create", raise_invalid_request
+    )
+
+    user = SimpleNamespace(
+        id=USER_ID,
+        email="psq.kan462.pro@test.litinkai.com",
+        full_name="PSQ Kan462 Pro",
+    )
+
+    async def fake_get_user(*args, **kwargs):
+        return _Result(user)
+
+    async def override_session():
+        yield _FakeSession()
+
+    app.dependency_overrides[subscription_routes.get_session] = override_session
+    app.dependency_overrides[subscription_routes.get_current_active_user] = (
+        lambda: user
+    )
+
+    customer_mock = AsyncMock(return_value="cus_test_kan462_pro")
+    monkeypatch.setattr(
+        subscription_service.stripe_service, "create_or_get_customer", customer_mock
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/subscriptions/checkout",
+            json={
+                "tier": "basic",
+                "success_url": "https://test.litinkai.com/success",
+                "cancel_url": "https://test.litinkai.com/cancel",
+            },
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert "not correctly configured" in response.json()["detail"]
