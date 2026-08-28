@@ -211,3 +211,53 @@ async def test_webhook_subscription_deleted_syncs_local_subscription():
     assert history.event_type == "subscription.deleted"
     assert history.from_status == SubscriptionStatus.ACTIVE
     assert history.to_status == SubscriptionStatus.CANCELLED
+
+
+async def test_cancel_endpoint_falls_back_to_local_when_stripe_missing(monkeypatch):
+    subscription = _subscription()
+    fake_session = _FakeSession(subscription)
+    cancel_mock = AsyncMock(
+        side_effect=Exception(
+            "Request req_test: No such subscription: 'sub_test_kan462_pro'"
+        )
+    )
+    monkeypatch.setattr(subscription_service.stripe_service, "cancel_subscription", cancel_mock)
+
+    async with await _client_with_overrides(fake_session) as client:
+        response = await client.post("/api/v1/subscriptions/cancel", json={})
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "subscription_id": str(SUBSCRIPTION_ID),
+        "status": "active",
+        "cancel_at_period_end": True,
+        "current_period_end": PERIOD_END,
+    }
+    assert subscription.cancel_at_period_end is True
+    assert fake_session.commits == 1
+
+
+async def test_cancel_endpoint_stripe_missing_immediate_cancels_locally(monkeypatch):
+    monkeypatch.setattr(subscription_routes.settings, "ALLOW_IMMEDIATE_CANCEL", True)
+    subscription = _subscription()
+    fake_session = _FakeSession(subscription)
+    cancel_mock = AsyncMock(
+        side_effect=Exception(
+            "Request req_test: No such subscription: 'sub_test_kan462_pro'"
+        )
+    )
+    monkeypatch.setattr(subscription_service.stripe_service, "cancel_subscription", cancel_mock)
+
+    async with await _client_with_overrides(fake_session) as client:
+        response = await client.post(
+            "/api/v1/subscriptions/cancel", json={"immediate": True}
+        )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert response.json()["cancel_at_period_end"] is False
+    assert subscription.status == SubscriptionStatus.CANCELLED
+    assert subscription.tier == SubscriptionTier.FREE
+    assert fake_session.commits == 1
