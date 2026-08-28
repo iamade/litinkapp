@@ -217,6 +217,64 @@ async def test_status_endpoint_sticky_cancel_does_not_downgrade_local_fallback(
     assert body["source"] == "stripe"
 
 
+async def test_webhook_sync_does_not_downgrade_local_cancel_across_repeated_events(
+    monkeypatch,
+):
+    """KAN-462 v10: webhook re-sync must not downgrade a locally-set
+    cancel_at_period_end, even when the same webhook event fires repeatedly
+    (matching the v10 re-test pattern: cap=true at t+0s, reverted to false
+    at t+30s, then persistent across t+60s/t+90s). The fix at line ~524
+    of subscription.py must hold across 3 sequential webhook re-syncs."""
+    subscription = _subscription(cancel_at_period_end=True)
+    # Queue the same subscription object 3 times — one per webhook re-sync
+    # (each re-sync runs a SELECT to load the row).
+    fake_session = _FakeSession(subscription, subscription, subscription)
+    manager = subscription_service.SubscriptionManager(fake_session)
+
+    webhook_payload = {
+        "event_type": "customer.subscription.updated",
+        "subscription_id": "sub_123",
+        "status": "active",
+        "current_period_end": PERIOD_END,
+        # Stripe webhook carries stale cap=false — would clobber if unguarded
+        "cancel_at_period_end": False,
+    }
+
+    # Simulate 3 webhook re-syncs over 60s (v10 evidence: t+0s, t+30s, t+60s)
+    for tick in range(3):
+        await manager.handle_subscription_webhook(
+            "customer.subscription.updated", webhook_payload
+        )
+        assert subscription.cancel_at_period_end is True, (
+            f"Webhook re-sync #{tick + 1} downgraded local cap to False — "
+            f"KAN-462 v10 sticky guard failed"
+        )
+
+    assert fake_session.commits == 3
+
+
+async def test_webhook_sync_preserves_local_cancel_when_stripe_omits_field(monkeypatch):
+    """KAN-462 v10: webhook payload that OMITS cancel_at_period_end (defaults
+    to False on read) must still not clobber a locally-set cap=true. Covers
+    the case where Stripe sends a partial event without the field."""
+    subscription = _subscription(cancel_at_period_end=True)
+    fake_session = _FakeSession(subscription)
+    manager = subscription_service.SubscriptionManager(fake_session)
+
+    await manager.handle_subscription_webhook(
+        "customer.subscription.updated",
+        {
+            "event_type": "customer.subscription.updated",
+            "subscription_id": "sub_123",
+            "status": "active",
+            "current_period_end": PERIOD_END,
+            # NOTE: no cancel_at_period_end key — would default to False
+        },
+    )
+
+    assert subscription.cancel_at_period_end is True
+
+
 async def test_webhook_subscription_deleted_syncs_local_subscription():
     subscription = _subscription(status=SubscriptionStatus.ACTIVE, tier=SubscriptionTier.PRO)
     fake_session = _FakeSession(subscription)
