@@ -15,7 +15,7 @@ import {
   AlertCircle,
   Loader2,
 } from "lucide-react";
-import { apiClient } from "../lib/api";
+import { apiClient, API_BASE_URL } from "../lib/api";
 import { stripeService } from "../services/stripeService";
 import SubscriptionModal from "../components/Subscription/SubscriptionModal";
 import UpgradePrompt from "../components/Subscription/UpgradePrompt";
@@ -771,7 +771,6 @@ export default function BookUpload() {
         }
 
         // Connect to SSE BEFORE starting upload so we receive progress updates
-        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
         const eventSource = new EventSource(`${API_BASE_URL}/books/upload-progress/${progressSessionId}`, {
           withCredentials: true
         });

@@ -1,8 +1,19 @@
 import { dispatchCreditsRefresh, dispatchInsufficientCredits } from "./credits";
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.PROD ? "https://api.litinkai.com/api/v1" : "http://localhost:8000/api/v1");
+const API_BASE_FALLBACK = import.meta.env.PROD
+  ? "https://api.litinkai.com/api/v1"
+  : "http://localhost:8000/api/v1";
+
+function normalizeApiBaseUrl(url: string): string {
+  const normalized = url.trim().replace(/\/+$/, "");
+  return normalized.endsWith("/api/v1") ? normalized : `${normalized}/api/v1`;
+}
+
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
+
+export const API_BASE_URL = configuredApiBaseUrl
+  ? normalizeApiBaseUrl(configuredApiBaseUrl)
+  : API_BASE_FALLBACK;
 export const AUTH_EXPIRED_EVENT = "auth:expired";
 
 // Suppress AUTH_EXPIRED_EVENT during login flow to prevent race condition
