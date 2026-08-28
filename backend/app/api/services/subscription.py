@@ -1,5 +1,5 @@
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import html as html_module
 import stripe
@@ -295,36 +295,141 @@ class SubscriptionManager:
         result = await self.session.exec(statement)
         return result.first()
 
+    @staticmethod
+    def _stripe_ts_to_datetime(value: Optional[int]) -> Optional[datetime]:
+        if value is None:
+            return None
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+
+    @staticmethod
+    def _datetime_to_stripe_ts(value: Optional[datetime]) -> Optional[int]:
+        if value is None:
+            return None
+        return int(value.timestamp())
+
+    @staticmethod
+    def _normalize_stripe_status(status: Optional[str]) -> SubscriptionStatus:
+        if status == "canceled":
+            return SubscriptionStatus.CANCELLED
+        if status == "past_due":
+            return SubscriptionStatus.PAST_DUE
+        if status == "trialing":
+            return SubscriptionStatus.TRIALING
+        if status in {"unpaid", "incomplete_expired"}:
+            return SubscriptionStatus.EXPIRED
+        if status == "active":
+            return SubscriptionStatus.ACTIVE
+        return SubscriptionStatus.ACTIVE
+
+    async def get_subscription_status(self, user_id: uuid.UUID) -> Dict[str, Any]:
+        """Return canonical subscription state, preferring Stripe when available."""
+        subscription = await self.get_subscription(user_id)
+        if not subscription:
+            return {
+                "plan": SubscriptionTier.FREE,
+                "tier": SubscriptionTier.FREE,
+                "status": SubscriptionStatus.ACTIVE,
+                "current_period_end": None,
+                "cancel_at_period_end": False,
+                "source": "local",
+                "stripe_subscription_id": None,
+            }
+
+        source = "local"
+        if subscription.stripe_subscription_id:
+            try:
+                stripe_state = await stripe_service.get_subscription(
+                    subscription.stripe_subscription_id
+                )
+                source = "stripe"
+                subscription.status = self._normalize_stripe_status(
+                    stripe_state.get("status")
+                )
+                subscription.cancel_at_period_end = bool(
+                    stripe_state.get("cancel_at_period_end", False)
+                )
+                if stripe_state.get("current_period_end") is not None:
+                    subscription.current_period_end = self._stripe_ts_to_datetime(
+                        stripe_state.get("current_period_end")
+                    )
+                if subscription.status == SubscriptionStatus.CANCELLED:
+                    subscription.tier = SubscriptionTier.FREE
+                    subscription.cancel_at_period_end = False
+                    subscription.cancelled_at = subscription.cancelled_at or datetime.now(timezone.utc)
+                subscription.stripe_price_id = stripe_state.get("price_id")
+                subscription.updated_at = datetime.now(timezone.utc)
+                self.session.add(subscription)
+                await self.session.commit()
+            except Exception as exc:
+                logger.warning(
+                    "KAN-462: Stripe subscription lookup failed for %s; using local state: %s",
+                    subscription.stripe_subscription_id,
+                    exc,
+                )
+
+        return {
+            "plan": subscription.tier,
+            "tier": subscription.tier,
+            "status": subscription.status,
+            "current_period_end": subscription.current_period_end,
+            "cancel_at_period_end": subscription.cancel_at_period_end,
+            "source": source,
+            "stripe_subscription_id": subscription.stripe_subscription_id,
+        }
+
     async def cancel_subscription(
-        self, user_id: uuid.UUID, cancel_at_period_end: bool = True
+        self, user_id: uuid.UUID, immediate: bool = False
     ) -> Dict[str, Any]:
         """
         Cancel user's subscription
         """
         subscription = await self.get_subscription(user_id)
-        if not subscription or not subscription.stripe_subscription_id:
+        if not subscription:
             raise ValueError("No active subscription found")
+
+        if subscription.status == SubscriptionStatus.CANCELLED:
+            return {
+                "subscription_id": subscription.id,
+                "status": SubscriptionStatus.CANCELLED.value,
+                "cancel_at_period_end": False,
+                "current_period_end": self._datetime_to_stripe_ts(
+                    subscription.current_period_end
+                ),
+            }
+
+        if subscription.cancel_at_period_end and not immediate:
+            return {
+                "subscription_id": subscription.id,
+                "status": subscription.status.value,
+                "cancel_at_period_end": True,
+                "current_period_end": self._datetime_to_stripe_ts(
+                    subscription.current_period_end
+                ),
+            }
+
+        if not subscription.stripe_subscription_id:
+            raise ValueError("No active Stripe subscription found")
+
+        old_status = subscription.status
 
         # Cancel via Stripe
         cancel_result = await stripe_service.cancel_subscription(
-            subscription.stripe_subscription_id
+            subscription.stripe_subscription_id, immediate=immediate
         )
 
         # Update local database
         subscription.cancel_at_period_end = cancel_result["cancel_at_period_end"]
-        subscription.updated_at = datetime.now()
-        if cancel_at_period_end:
-            # If cancelling at period end, we don't set cancelled_at yet?
-            # Or maybe we do? The original code sets it if cancel_at_period_end is True?
-            # Original: if cancel_data.cancel_at_period_end: update_data["cancelled_at"] = "now()"
-            # Wait, usually cancelled_at is when it's fully cancelled.
-            # But let's follow original logic if possible, or standard logic.
-            # Standard: cancel_at_period_end=True means it will cancel later.
-            pass
-        else:
+        if cancel_result.get("current_period_end") is not None:
+            subscription.current_period_end = self._stripe_ts_to_datetime(
+                cancel_result.get("current_period_end")
+            )
+        subscription.updated_at = datetime.now(timezone.utc)
+        if immediate:
             # Immediate cancellation
             subscription.status = SubscriptionStatus.CANCELLED
-            subscription.cancelled_at = datetime.now()
+            subscription.tier = SubscriptionTier.FREE
+            subscription.cancel_at_period_end = False
+            subscription.cancelled_at = datetime.now(timezone.utc)
 
         self.session.add(subscription)
 
@@ -332,9 +437,12 @@ class SubscriptionManager:
         history = SubscriptionHistory(
             user_id=user_id,
             event_type="cancelled",
-            from_status=subscription.status,
-            to_status="cancelled" if not cancel_at_period_end else subscription.status,
-            metadata={"reason": "User requested cancellation"},
+            from_status=old_status.value,
+            to_status=SubscriptionStatus.CANCELLED.value if immediate else subscription.status.value,
+            meta={
+                "reason": "User requested cancellation",
+                "immediate": immediate,
+            },
         )
         self.session.add(history)
 
@@ -347,6 +455,64 @@ class SubscriptionManager:
             "cancel_at_period_end": cancel_result["cancel_at_period_end"],
             "current_period_end": cancel_result.get("current_period_end"),
         }
+
+    async def sync_subscription_from_stripe_event(
+        self, event_type: str, subscription_data: Dict[str, Any]
+    ) -> None:
+        """Sync local subscription row from Stripe subscription webhook data."""
+        stripe_subscription_id = subscription_data.get("id") or subscription_data.get(
+            "subscription_id"
+        )
+        if not stripe_subscription_id:
+            logger.warning("KAN-462: subscription webhook missing subscription id")
+            return
+
+        statement = select(UserSubscription).where(
+            UserSubscription.stripe_subscription_id == stripe_subscription_id
+        )
+        result = await self.session.exec(statement)
+        subscription = result.first()
+        if not subscription:
+            logger.warning(
+                "KAN-462: subscription webhook for unknown subscription %s",
+                stripe_subscription_id,
+            )
+            return
+
+        old_status = subscription.status
+        status = self._normalize_stripe_status(subscription_data.get("status"))
+        subscription.status = status
+        subscription.cancel_at_period_end = bool(
+            subscription_data.get("cancel_at_period_end", False)
+        )
+        if subscription_data.get("current_period_start") is not None:
+            subscription.current_period_start = self._stripe_ts_to_datetime(
+                subscription_data.get("current_period_start")
+            )
+        if subscription_data.get("current_period_end") is not None:
+            subscription.current_period_end = self._stripe_ts_to_datetime(
+                subscription_data.get("current_period_end")
+            )
+        if subscription_data.get("price_id"):
+            subscription.stripe_price_id = subscription_data.get("price_id")
+        if event_type in {"subscription.deleted", "customer.subscription.deleted"}:
+            subscription.status = SubscriptionStatus.CANCELLED
+            subscription.tier = SubscriptionTier.FREE
+            subscription.cancel_at_period_end = False
+            subscription.cancelled_at = datetime.now(timezone.utc)
+        subscription.updated_at = datetime.now(timezone.utc)
+        self.session.add(subscription)
+        self.session.add(
+            SubscriptionHistory(
+                user_id=subscription.user_id,
+                event_type=event_type,
+                from_status=old_status,
+                to_status=subscription.status,
+                stripe_event_id=subscription_data.get("event_id"),
+                meta={"stripe_subscription_id": stripe_subscription_id},
+            )
+        )
+        await self.session.commit()
 
     async def reactivate_subscription(self, user_id: uuid.UUID) -> Dict[str, Any]:
         """
@@ -709,22 +875,17 @@ class SubscriptionManager:
 
             await self._send_payment_confirmation_email(user_id, tier)
 
-        elif event_type == "customer.subscription.deleted":
-            subscription_data = event_data["object"]
+        elif event_type in {"subscription.updated", "customer.subscription.updated"}:
+            subscription_data = event_data.get("object", event_data)
+            await self.sync_subscription_from_stripe_event(event_type, subscription_data)
 
-            # Downgrade to free tier
-            statement = select(UserSubscription).where(
-                UserSubscription.stripe_subscription_id == subscription_data["id"]
+        elif event_type in {"subscription.deleted", "customer.subscription.deleted"}:
+            subscription_data = event_data.get("object", event_data)
+            await self.sync_subscription_from_stripe_event(event_type, subscription_data)
+            logger.info(
+                "Subscription cancelled: %s",
+                subscription_data.get("id") or subscription_data.get("subscription_id"),
             )
-            result = await self.session.exec(statement)
-            subscription = result.first()
-
-            if subscription:
-                subscription.status = SubscriptionStatus.CANCELLED
-                subscription.tier = SubscriptionTier.FREE
-                self.session.add(subscription)
-                await self.session.commit()
-                logger.info(f"Subscription cancelled: {subscription_data['id']}")
 
     async def record_usage(
         self,

@@ -223,7 +223,10 @@ class PaymentMethodInfo(BaseModel):
 class SubscriptionCancelRequest(BaseModel):
     """Cancel subscription request"""
 
-    cancel_at_period_end: bool = True
+    immediate: bool = False
+    # Backward-compatible input accepted by older frontend callers. New callers
+    # should send {"immediate": false} for period-end cancellation.
+    cancel_at_period_end: Optional[bool] = None
 
 
 class SubscriptionCancelResponse(BaseModel):
@@ -233,3 +236,15 @@ class SubscriptionCancelResponse(BaseModel):
     status: str
     cancel_at_period_end: bool
     current_period_end: Optional[int] = None
+
+
+class SubscriptionStatusResponse(BaseModel):
+    """Canonical subscription status for the logged-in user"""
+
+    plan: SubscriptionTier
+    tier: SubscriptionTier
+    status: SubscriptionStatus
+    current_period_end: Optional[datetime] = None
+    cancel_at_period_end: bool = False
+    source: str = "local"
+    stripe_subscription_id: Optional[str] = None
