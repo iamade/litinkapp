@@ -411,11 +411,38 @@ class SubscriptionManager:
             raise ValueError("No active Stripe subscription found")
 
         old_status = subscription.status
+        stripe_missing_fallback = False
 
         # Cancel via Stripe
-        cancel_result = await stripe_service.cancel_subscription(
-            subscription.stripe_subscription_id, immediate=immediate
-        )
+        try:
+            cancel_result = await stripe_service.cancel_subscription(
+                subscription.stripe_subscription_id, immediate=immediate
+            )
+        except Exception as exc:
+            # Orphaned or locally seeded subscription that no longer exists in
+            # Stripe: degrade to local-only cancellation instead of a 500.
+            if getattr(exc, "code", None) != "resource_missing" and (
+                "No such subscription" not in str(exc)
+            ):
+                raise
+            print(
+                "[SubscriptionsAPI] Stripe reports no such subscription "
+                f"({subscription.stripe_subscription_id}); "
+                "falling back to local-only cancellation"
+            )
+            stripe_missing_fallback = True
+            cancel_result = {
+                "subscription_id": subscription.stripe_subscription_id,
+                "status": (
+                    SubscriptionStatus.CANCELLED.value
+                    if immediate
+                    else subscription.status.value
+                ),
+                "cancel_at_period_end": not immediate,
+                "current_period_end": self._datetime_to_stripe_ts(
+                    subscription.current_period_end
+                ),
+            }
 
         # Update local database
         subscription.cancel_at_period_end = cancel_result["cancel_at_period_end"]
@@ -442,6 +469,7 @@ class SubscriptionManager:
             meta={
                 "reason": "User requested cancellation",
                 "immediate": immediate,
+                "stripe_missing_fallback": stripe_missing_fallback,
             },
         )
         self.session.add(history)
