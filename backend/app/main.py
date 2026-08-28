@@ -71,7 +71,6 @@ async def lifespan(app: FastAPI):
         yield
     except Exception as e:
         logger.error(f"Application startup failed: {e}")
-        await redis_client.disconnect()
         await health_checker.cleanup()
         raise
     finally:
