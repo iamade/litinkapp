@@ -186,6 +186,37 @@ async def test_status_endpoint_prefers_stripe_and_persists_real_state(monkeypatc
     assert fake_session.commits == 1
 
 
+async def test_status_endpoint_sticky_cancel_does_not_downgrade_local_fallback(
+    monkeypatch,
+):
+    """KAN-462: local fallback cancel (cap=true) must survive a read-path
+    re-sync where Stripe still reports the subscription active (cap=false).
+    The sync must NOT downgrade cancel_at_period_end back to False."""
+    subscription = _subscription(cancel_at_period_end=True)
+    fake_session = _FakeSession(subscription)
+    get_mock = AsyncMock(
+        return_value={
+            "id": "sub_123",
+            "status": "active",
+            "current_period_end": PERIOD_END,
+            "cancel_at_period_end": False,  # Stripe says active, no cancel scheduled
+            "price_id": "price_pro",
+        }
+    )
+    monkeypatch.setattr(subscription_service.stripe_service, "get_subscription", get_mock)
+
+    async with await _client_with_overrides(fake_session) as client:
+        response = await client.get("/api/v1/subscriptions/status")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    # Local fallback cancel must be sticky — NOT downgraded to False
+    assert body["cancel_at_period_end"] is True
+    assert subscription.cancel_at_period_end is True
+    assert body["source"] == "stripe"
+
+
 async def test_webhook_subscription_deleted_syncs_local_subscription():
     subscription = _subscription(status=SubscriptionStatus.ACTIVE, tier=SubscriptionTier.PRO)
     fake_session = _FakeSession(subscription)

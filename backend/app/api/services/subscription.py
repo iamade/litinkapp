@@ -345,9 +345,20 @@ class SubscriptionManager:
                 subscription.status = self._normalize_stripe_status(
                     stripe_state.get("status")
                 )
-                subscription.cancel_at_period_end = bool(
+                stripe_cancel_at_period_end = bool(
                     stripe_state.get("cancel_at_period_end", False)
                 )
+                # KAN-462: sticky local cancel. A cancel may be committed
+                # locally via the Stripe-missing fallback; the read-path
+                # re-sync must never downgrade cancel_at_period_end back to
+                # False while Stripe still reports the subscription active.
+                # Downgrade only happens via the terminal CANCELLED branch
+                # below (Stripe status == canceled).
+                if not (
+                    subscription.cancel_at_period_end
+                    and not stripe_cancel_at_period_end
+                ):
+                    subscription.cancel_at_period_end = stripe_cancel_at_period_end
                 if stripe_state.get("current_period_end") is not None:
                     subscription.current_period_end = self._stripe_ts_to_datetime(
                         stripe_state.get("current_period_end")
