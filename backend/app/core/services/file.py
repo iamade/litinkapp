@@ -321,6 +321,16 @@ class BookStructureDetector:
         rejected: set[int] = set()
         current_segment: List[tuple[int, int]] = []
 
+        explicit_chapter_heading_count = sum(
+            1
+            for raw_line in lines
+            if re.match(
+                r"^\s*(?:chapter|ch\.?|chap\.?)\s+(?:[ivxlcdm]+|\d+)\b",
+                raw_line.strip(),
+                re.IGNORECASE,
+            )
+        )
+
         def _flush_segment() -> None:
             nonlocal current_segment
             if len(current_segment) < 3:
@@ -330,6 +340,12 @@ class BookStructureDetector:
             numbers = [number for _line_num, number in current_segment]
             expected_from_one = list(range(1, len(numbers) + 1))
             if numbers == expected_from_one:
+                if explicit_chapter_heading_count >= 3:
+                    rejected.update(line_num for line_num, _number in current_segment)
+                    print(
+                        "[CHAPTER DETECTION] Rejected fallback page-number run "
+                        f"{numbers[0]} to {numbers[-1]} before explicit chapter headings"
+                    )
                 current_segment = []
                 return
 
@@ -370,7 +386,7 @@ class BookStructureDetector:
         page_number_line_nums = self._find_running_page_number_lines(lines)
 
         # Try the improved chapter detection first for books with number + title format
-        chapter_headers = self._find_chapter_number_and_title(lines)
+        chapter_headers = self._find_chapter_number_and_title(lines, page_number_line_nums)
 
         if len(chapter_headers) >= 8:  # Expect at least 8-9 chapters
             print(
@@ -584,11 +600,12 @@ class BookStructureDetector:
                     _emit_preface_front_matter()
                 # Build a proper title
                 chapter_number = chapter_match["number"]
+                chapter_display_number = chapter_match.get("raw_number") or chapter_number
                 chapter_subtitle = chapter_match.get("title", "").strip()
 
                 # Create a readable title
                 if chapter_subtitle:
-                    chapter_title = f"Chapter {chapter_number}: {chapter_subtitle}"
+                    chapter_title = f"Chapter {chapter_display_number}: {chapter_subtitle}"
                 else:
                     # No subtitle, look for title in next few lines
                     title_found = None
@@ -602,9 +619,9 @@ class BookStructureDetector:
                                 break
 
                     if title_found:
-                        chapter_title = f"Chapter {chapter_number}: {title_found}"
+                        chapter_title = f"Chapter {chapter_display_number}: {title_found}"
                     else:
-                        chapter_title = f"Chapter {chapter_number}"
+                        chapter_title = f"Chapter {chapter_display_number}"
 
                 # Create chapter_info for extraction
                 chapter_info = {
@@ -916,9 +933,12 @@ class BookStructureDetector:
 
         return content if len(content) > 100 else "Content not available"
 
-    def _find_chapter_number_and_title(self, lines: List[str]) -> List[Dict[str, Any]]:
+    def _find_chapter_number_and_title(
+        self, lines: List[str], ignored_line_nums: Optional[set[int]] = None
+    ) -> List[Dict[str, Any]]:
         """Find chapters by looking for number + title pattern - MORE RESTRICTIVE"""
         chapter_headers = []
+        ignored_line_nums = ignored_line_nums or set()
 
         for line_num, line in enumerate(lines):
             line = line.strip()
@@ -927,6 +947,8 @@ class BookStructureDetector:
 
             # Look for just a number on its own line
             number_match = re.match(r"^(\d+)$", line)
+            if number_match and line_num in ignored_line_nums:
+                continue
             if number_match and line_num < len(lines) - 5:  # Must have content after
                 chapter_number = int(number_match.group(1))
 
