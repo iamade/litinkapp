@@ -90,19 +90,24 @@ class StripeService:
             print(f"[StripeService] Error creating checkout session: {e}")
             raise
 
-    async def cancel_subscription(self, subscription_id: str) -> Dict[str, Any]:
-        """Cancel a subscription"""
+    async def cancel_subscription(
+        self, subscription_id: str, immediate: bool = False
+    ) -> Dict[str, Any]:
+        """Cancel a subscription, either immediately or at period end."""
         try:
-            subscription = stripe.Subscription.modify(
-                subscription_id, cancel_at_period_end=True
-            )
+            if immediate:
+                subscription = stripe.Subscription.cancel(subscription_id)
+            else:
+                subscription = stripe.Subscription.modify(
+                    subscription_id, cancel_at_period_end=True
+                )
 
             print(f"[StripeService] Cancelled subscription {subscription_id}")
             return {
                 "subscription_id": subscription.id,
                 "status": subscription.status,
                 "cancel_at_period_end": subscription.cancel_at_period_end,
-                "current_period_end": subscription.current_period_end,
+                "current_period_end": getattr(subscription, "current_period_end", None),
             }
 
         except Exception as e:
@@ -269,6 +274,8 @@ class StripeService:
             "subscription_id": subscription.id,
             "customer_id": subscription.customer,
             "status": subscription.status,
+            "current_period_end": getattr(subscription, "current_period_end", None),
+            "cancel_at_period_end": getattr(subscription, "cancel_at_period_end", False),
         }
 
     async def _handle_payment_succeeded(self, invoice: Any) -> Dict[str, Any]:

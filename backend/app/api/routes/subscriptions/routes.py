@@ -13,12 +13,14 @@ from app.subscriptions.schemas import (
     SubscriptionUsageStats,
     SubscriptionCancelRequest,
     SubscriptionCancelResponse,
+    SubscriptionStatusResponse,
     WebhookEvent,
 )
 from app.core.database import get_session
 from app.core.auth import get_current_active_user
 from app.api.services.subscription import SubscriptionManager, SubscriptionTier
 from app.core.services.stripe import stripe_service
+from app.core.config import settings
 from app.credits.service import CreditService
 from app.auth.models import User
 
@@ -173,6 +175,20 @@ async def get_usage_stats(
         raise HTTPException(status_code=500, detail="Failed to get usage statistics")
 
 
+@router.get("/status", response_model=SubscriptionStatusResponse)
+async def get_subscription_status(
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Get canonical subscription status for the current user."""
+    try:
+        manager = SubscriptionManager(session)
+        return await manager.get_subscription_status(current_user.id)
+    except Exception as e:
+        print(f"[SubscriptionsAPI] Error getting subscription status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get subscription status")
+
+
 @router.get("/tiers", response_model=List[SubscriptionTierInfo])
 async def get_subscription_tiers(session: AsyncSession = Depends(get_session)):
     """Get available subscription tiers"""
@@ -268,16 +284,31 @@ async def cancel_subscription(
 ):
     """Cancel the current user's subscription"""
     try:
+        immediate = bool(cancel_data.immediate)
+        if cancel_data.cancel_at_period_end is not None:
+            immediate = not cancel_data.cancel_at_period_end
+
+        if immediate and not settings.ALLOW_IMMEDIATE_CANCEL:
+            raise HTTPException(
+                status_code=409,
+                detail="Immediate subscription cancellation is not enabled",
+            )
+
         manager = SubscriptionManager(session)
         result = await manager.cancel_subscription(
-            current_user.id, cancel_at_period_end=cancel_data.cancel_at_period_end
+            current_user.id, immediate=immediate
         )
         # Convert UUID to string
         result["subscription_id"] = str(result["subscription_id"])
         return result
 
+    except HTTPException:
+        raise
+
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        detail = str(e)
+        status_code = 409 if "already cancelled" in detail else 404
+        raise HTTPException(status_code=status_code, detail=detail)
     except Exception as e:
         print(f"[SubscriptionsAPI] Error cancelling subscription: {e}")
         raise HTTPException(status_code=500, detail="Failed to cancel subscription")

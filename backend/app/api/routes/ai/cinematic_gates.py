@@ -11,7 +11,7 @@ import uuid
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Body
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -44,8 +44,14 @@ class SequenceUnitBatchCreate(BaseModel):
 
 
 class SequenceUnitResponse(BaseModel):
-    id: str
-    video_generation_id: str
+    # KAN-456 (option b): declare UUID fields natively + from_attributes=True so ORM
+    # objects with `uuid.UUID` columns validate directly. Pydantic v2 + FastAPI
+    # JSON-serialize `uuid.UUID` → str in JSON output, so wire format is unchanged
+    # (frontend still receives strings). Python instance objects have UUID types.
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    video_generation_id: uuid.UUID
     unit_type: str
     unit_order: int
     title: Optional[str] = None
@@ -93,9 +99,12 @@ class LineTrackingStageUpdate(BaseModel):
 
 
 class LineTrackingResponse(BaseModel):
-    id: str
-    sequence_unit_id: str
-    video_generation_id: str
+    # KAN-456 (option b): UUID fields + from_attributes=True (see SequenceUnitResponse).
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    sequence_unit_id: uuid.UUID
+    video_generation_id: uuid.UUID
     line_text: str
     status: str
     metadata: Optional[Dict[str, Any]] = None
@@ -147,8 +156,11 @@ class ContinuityReferenceCreate(BaseModel):
 
 
 class ContinuityReferenceResponse(BaseModel):
-    id: str
-    video_generation_id: str
+    # KAN-456 (option b): UUID fields + from_attributes=True (see SequenceUnitResponse).
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    video_generation_id: uuid.UUID
     reference_type: str
     reference_id: str
     reference_data: Optional[Dict[str, Any]] = None

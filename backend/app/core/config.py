@@ -232,6 +232,10 @@ class Settings(BaseSettings):
     STRIPE_PROFESSIONAL_MONTHLY_PRICE_ID: Optional[str] = None
     STRIPE_PROFESSIONAL_ANNUAL_PRICE_ID: Optional[str] = None
 
+    # Subscription cancellation policy. When false, users may only schedule
+    # cancellation at period end; immediate Stripe cancellation is rejected.
+    ALLOW_IMMEDIATE_CANCEL: bool = True
+
     # Rate Limiting per Tier (requests per minute)
     RATE_LIMITS: ClassVar[Dict[str, int]] = {
         "free": 10,

@@ -119,3 +119,70 @@ def test_frank_exact_pdf_bookmarks_preserve_volume_hierarchy_for_save():
     assert len(persisted_front) == 1
     assert all(entry["section_key"] for entry in persisted_body)
     assert all(entry["section_key"] is None for entry in persisted_front)
+
+def _last_president_like_text() -> str:
+    romans = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+    titles = [
+        "The Reign of Confusion",
+        "A Strange Message",
+        "The Great Election",
+        "The People Awake",
+        "Dark Counsel",
+        "The March Begins",
+        "A Nation Trembles",
+        "The Hidden Hand",
+        "The Last President",
+        "After the Storm",
+    ]
+
+    def prose(label: str, lines: int = 14) -> list[str]:
+        return [
+            f"{label} narrative line {idx} carries enough production-shaped text for the detector to treat it as body content."
+            for idx in range(lines)
+        ]
+
+    lines = [
+        "THE LAST PRESIDENT",
+        "PREFACE",
+        *prose("front matter", 12),
+    ]
+    page_number = 1
+    for idx, (roman, title) in enumerate(zip(romans, titles), start=1):
+        lines.extend([str(page_number), f"CHAPTER {roman}", title, *prose(f"chapter {idx}", 14)])
+        page_number += 1
+        if idx <= 4:
+            lines.extend([
+                str(page_number),
+                f"Continuation fragment {idx}",
+                *prose(f"chapter {idx} continuation", 14),
+            ])
+            page_number += 1
+    lines.extend(["AFTERWORD", *prose("back matter", 12)])
+    return "\n".join(lines)
+
+
+def test_last_president_like_pdf_text_keeps_roman_chapters_and_continuations():
+    service = FileService()
+    result = _detect_quietly(service, _last_president_like_text())
+
+    sections = result["sections"] or []
+    chapters = [chapter for section in sections for chapter in section.get("chapters") or []]
+
+    assert result["has_sections"] is True
+    assert [chapter["number"] for chapter in chapters] == [str(i) for i in range(1, 11)]
+    assert [chapter["title"] for chapter in chapters] == [
+        "Chapter I: The Reign of Confusion",
+        "Chapter II: A Strange Message",
+        "Chapter III: The Great Election",
+        "Chapter IV: The People Awake",
+        "Chapter V: Dark Counsel",
+        "Chapter VI: The March Begins",
+        "Chapter VII: A Nation Trembles",
+        "Chapter VIII: The Hidden Hand",
+        "Chapter IX: The Last President",
+        "Chapter X: After the Storm",
+    ]
+    assert any(section.get("content_type") == "front_matter" for section in sections)
+    assert any(section.get("content_type") == "back_matter" for section in sections)
+    assert not any("Continuation fragment" in chapter["title"] for chapter in chapters)
+    assert "chapter 1 continuation narrative line 13" in chapters[0]["content"]
