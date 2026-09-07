@@ -2,6 +2,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import * as matchers from "@testing-library/jest-dom/matchers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { toast } from "react-hot-toast";
 import AuthPage from "./AuthPage";
 
 expect.extend(matchers);
@@ -45,6 +46,26 @@ describe("AuthPage OAuth errors", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Your sign-in session expired. Please try signing in with Google again."
+    );
+  });
+
+  it("opens register mode, prefills email, and explains account-unavailable Google redirects", () => {
+    const email = "writer+google@example.com";
+
+    renderAuthPage(
+      `/auth?mode=register&oauth_error=account_unavailable&email=${encodeURIComponent(email)}`
+    );
+
+    expect(screen.getByText("Start Creating AI Videos")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Enter email")).toHaveValue(email);
+    expect(screen.getByRole("button", { name: "Register" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Register to use that Google email with LitInkAI."
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(email);
+    expect(toast.error).toHaveBeenCalledWith(
+      "We couldn't sign in with that Google account. Please choose an active account or use email and password.",
+      { id: "oauth-account-unavailable" }
     );
   });
 });

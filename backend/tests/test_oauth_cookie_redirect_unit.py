@@ -9,6 +9,8 @@ redirect status, Location header, and the auth cookies set by set_auth_cookies.
 
 import secrets
 import time
+import uuid
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -16,8 +18,10 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app.auth.models import User
 from app.auth.oauth_models import OAuthProvider
 from app.auth.oauth_state import oauth_state_store
+from app.auth.schema import AccountStatusSchema, RoleChoicesSchema
 from app.core.database import get_session
 from app.main import app
 
@@ -72,17 +76,31 @@ class _EmptyResult:
         return None
 
 
+class _SingleResult:
+    def __init__(self, value):
+        self.value = value
+
+    def first(self):
+        return self.value
+
+
 class FakeSession:
-    def __init__(self):
+    def __init__(self, exec_results=None):
+        self.exec_results = list(exec_results or [])
         self.added = []
+        self.commits = 0
 
     async def exec(self, statement):
+        if self.exec_results:
+            value = self.exec_results.pop(0)
+            return _SingleResult(value) if value is not None else _EmptyResult()
         return _EmptyResult()
 
     def add(self, item):
         self.added.append(item)
 
     async def commit(self):
+        self.commits += 1
         return None
 
     async def refresh(self, item):
@@ -111,6 +129,19 @@ async def test_oauth_callback_redirect_preserves_auth_cookies():
     """KAN-385/386: the injected response must carry Set-Cookie on 307 redirect."""
     await oauth_state_store.clear()
     state = await _store_valid_state()
+    existing_user = User(
+        id=uuid.uuid4(),
+        email=f"unit.cookie.{secrets.token_hex(4)}@test.litinkai.com",
+        hashed_password="hashed-password",
+        first_name="Cookie",
+        last_name="Test",
+        is_active=True,
+        account_status=AccountStatusSchema.ACTIVE.value,
+        roles=[RoleChoicesSchema.CREATOR],
+        onboarding_completed=False,
+    )
+    fake_session = FakeSession(exec_results=[None, existing_user])
+    app.dependency_overrides[get_session] = lambda: fake_session
 
     token_res = httpx.Response(
         200,
@@ -124,7 +155,7 @@ async def test_oauth_callback_redirect_preserves_auth_cookies():
         200,
         json={
             "sub": f"google_sub_{secrets.token_hex(8)}",
-            "email": f"unit.cookie.{secrets.token_hex(4)}@test.litinkai.com",
+            "email": existing_user.email,
             "email_verified": True,
             "given_name": "Cookie",
             "family_name": "Test",
@@ -155,3 +186,63 @@ async def test_oauth_callback_redirect_preserves_auth_cookies():
     assert "access_token" in cookie_names, f"access_token cookie missing: {set_cookie_headers}"
     assert "refresh_token" in cookie_names, f"refresh_token cookie missing: {set_cookie_headers}"
     assert "logged_in" in cookie_names, f"logged_in cookie missing: {set_cookie_headers}"
+
+
+async def test_google_callback_unknown_email_redirects_to_register_without_creating_account_or_cookies():
+    """KAN-463: unknown Google emails are sent to registration, not auto-created."""
+    await oauth_state_store.clear()
+    state = await _store_valid_state()
+    unknown_email = f"unit.unknown+{secrets.token_hex(4)}@test.litinkai.com"
+    fake_session = FakeSession(exec_results=[None, None])
+    app.dependency_overrides[get_session] = lambda: fake_session
+
+    token_res = httpx.Response(
+        200,
+        json={
+            "access_token": f"fake-google-access-{secrets.token_hex(8)}",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+        },
+    )
+    userinfo_res = httpx.Response(
+        200,
+        json={
+            "sub": f"google_sub_{secrets.token_hex(8)}",
+            "email": unknown_email,
+            "email_verified": True,
+            "given_name": "Unknown",
+            "family_name": "Google",
+            "picture": "https://example.com/pic.png",
+        },
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with patch("app.api.routes.auth.oauth.httpx.AsyncClient") as MockClient:
+            instance = MockClient.return_value
+            instance.__aenter__ = AsyncMock(return_value=instance)
+            instance.__aexit__ = AsyncMock(return_value=False)
+            instance.post = AsyncMock(return_value=token_res)
+            instance.get = AsyncMock(return_value=userinfo_res)
+
+            resp = await client.get(
+                f"/api/v1/auth/{OAuthProvider.GOOGLE.value}?state={state}&code=fake-auth-code",
+                follow_redirects=False,
+            )
+
+    assert resp.status_code == 303, f"Expected register redirect, got {resp.status_code}: {resp.text}"
+    location = resp.headers.get("location", "")
+    assert "%2B" in location and "%40" in location, location
+
+    parsed = urlsplit(location)
+    query = parse_qs(parsed.query)
+    assert parsed.path == "/auth"
+    assert query == {
+        "mode": ["register"],
+        "oauth_error": ["account_unavailable"],
+        "email": [unknown_email],
+    }
+
+    assert fake_session.added == []
+    assert fake_session.commits == 0
+    assert resp.headers.get_list("set-cookie") == []
