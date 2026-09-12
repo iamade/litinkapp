@@ -8,22 +8,18 @@ real Google credentials.
 Covers:
 - Real CSRF state obtained from /auth/login/google.
 - State validation + consumption at /auth/google.
-- Distinct user/session creation for 2 synthetic Google identities.
-- Session independence (distinct access_token cookies / users/me responses).
+- Unknown Google identities redirect to registration instead of being auto-created.
 - State replay rejected.
 """
 
-import asyncio
-import json
 import secrets
 import uuid
-from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.auth.oauth_models import OAuthProvider
@@ -31,10 +27,6 @@ from app.auth.oauth_state import oauth_state_store
 from app.main import app
 
 pytestmark = pytest.mark.asyncio
-
-
-def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _fake_token_response():
@@ -56,11 +48,59 @@ def _fake_userinfo(email: str, sub: str, first: str, last: str):
     }
 
 
-@pytest.fixture(autouse=True)
-def _clean_state_store():
-    oauth_state_store.clear()
-    yield
-    oauth_state_store.clear()
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_state_store():
+    # Swap in an in-memory fake Redis so the runtime callback flow works
+    # without a live Redis (mirrors tests/test_kan385_386_oauth_csrf_state.py).
+    from tests.test_kan385_386_oauth_csrf_state import FakeRedisService
+
+    oauth_state_store._redis_service = FakeRedisService()
+    try:
+        await oauth_state_store.clear()
+        yield
+    finally:
+        await oauth_state_store.clear()
+
+
+class _EmptyResult:
+    """Mimics a SQL result with no rows (unknown email, no OAuth link)."""
+
+    def first(self):
+        return None
+
+
+class _UnknownAccountSession:
+    """Session stub that always reports no existing account for KAN-463."""
+
+    def __init__(self):
+        self.added = []
+        self.commits = 0
+
+    async def exec(self, statement):
+        return _EmptyResult()
+
+    def add(self, item):
+        self.added.append(item)
+
+    async def commit(self):
+        self.commits += 1
+
+    async def refresh(self, item):
+        return None
+
+
+@pytest_asyncio.fixture(autouse=True)
+def _unknown_account_session():
+    # The callback route uses the real get_session dependency, which would
+    # dial a live database. Redirect assertions only need a session that
+    # reports "no account exists", so swap in an in-memory stub and restore
+    # the original wiring afterwards.
+    from app.core.database import get_session
+
+    fake = _UnknownAccountSession()
+    app.dependency_overrides[get_session] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_session, None)
 
 
 class TestOAuthSyntheticCallbackRuntime:
@@ -81,19 +121,21 @@ class TestOAuthSyntheticCallbackRuntime:
         token_res = httpx.Response(200, json=_fake_token_response())
         userinfo_res = httpx.Response(200, json=_fake_userinfo(email, sub, first, last))
 
-        async def mock_post(self, url, **kwargs):
-            if "oauth2.googleapis.com/token" in str(url):
-                return token_res
-            return httpx.Response(404)
+        # Patch only the OAuth route's httpx client constructor, returning a
+        # fully mocked instance. Patching httpx.AsyncClient methods globally
+        # would also intercept this test's own ASGI client and break the
+        # callback request with a 404.
+        def mock_client_factory(*args, **kwargs):
+            instance = AsyncMock()
+            instance.__aenter__ = AsyncMock(return_value=instance)
+            instance.__aexit__ = AsyncMock(return_value=False)
+            instance.post = AsyncMock(return_value=token_res)
+            instance.get = AsyncMock(return_value=userinfo_res)
+            return instance
 
-        async def mock_get(self, url, **kwargs):
-            if "www.googleapis.com/oauth2/v3/userinfo" in str(url):
-                return userinfo_res
-            return httpx.Response(404)
+        return patch("app.api.routes.auth.oauth.httpx.AsyncClient", mock_client_factory)
 
-        return patch("httpx.AsyncClient.post", mock_post), patch("httpx.AsyncClient.get", mock_get)
-
-    async def test_oauth_callback_two_distinct_accounts(self):
+    async def test_oauth_callback_unknown_google_accounts_redirect_to_register(self):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             state1, loc1 = await self._get_real_state(client)
@@ -105,69 +147,38 @@ class TestOAuthSyntheticCallbackRuntime:
                 (state2, "psq.oauth.runtime.a2@test.litinkai.com", f"google_sub_a2_{uuid.uuid4().hex[:8]}", "AdeTwo", "TestB"),
             ]
 
-            sessions = []
+            redirects = []
             for state, email, sub, first, last in accounts:
-                p_post, p_get = await self._mock_google_exchange(email, sub, first, last)
-                with p_post, p_get:
+                p_client = await self._mock_google_exchange(email, sub, first, last)
+                with p_client:
                     resp = await client.get(
                         f"/api/v1/auth/{OAuthProvider.GOOGLE.value}?state={state}&code=synthetic-{sub}",
                         follow_redirects=False,
                     )
-                assert resp.status_code in (302, 307), f"Expected redirect, got {resp.status_code}: {resp.text}"
+                assert resp.status_code == 303, f"Expected redirect, got {resp.status_code}: {resp.text}"
                 loc = resp.headers.get("location", "")
-                assert "localhost:5173" in loc, f"Unexpected redirect target: {loc}"
+                parsed = urlparse(loc)
+                query = parse_qs(parsed.query)
+                assert parsed.path == "/auth"
+                assert query == {
+                    "mode": ["register"],
+                    "oauth_error": ["account_unavailable"],
+                    "email": [email],
+                }
+                assert resp.cookies.get("access_token") is None
+                assert resp.cookies.get("refresh_token") is None
+                redirects.append(loc)
 
-                access = resp.cookies.get("access_token")
-                refresh = resp.cookies.get("refresh_token")
-                assert access, "access_token cookie missing"
-                assert refresh, "refresh_token cookie missing"
-
-                # Verify /users/me with the issued cookies
-                me_resp = await client.get(
-                    "/api/v1/users/me",
-                    cookies={"access_token": access, "refresh_token": refresh},
-                )
-                assert me_resp.status_code == 200, f"/users/me failed: {me_resp.text}"
-                user = me_resp.json()
-                assert user["email"] == email
-                assert user["first_name"] == first
-                sessions.append({
-                    "email": email,
-                    "sub": sub,
-                    "user_id": user["id"],
-                    "access_cookie_prefix": access[:20],
-                    "redirect": loc,
-                })
-
-            # Cross-account isolation
-            assert sessions[0]["user_id"] != sessions[1]["user_id"], "Accounts must map to distinct users"
+            assert redirects[0] != redirects[1], "Distinct emails must remain distinct in redirect query params"
 
             # State replay rejection
-            p_post, p_get = await self._mock_google_exchange(
+            p_client = await self._mock_google_exchange(
                 "replay@test.litinkai.com", f"replay_{uuid.uuid4().hex[:8]}", "Replay", "User"
             )
-            with p_post, p_get:
+            with p_client:
                 replay_resp = await client.get(
                     f"/api/v1/auth/{OAuthProvider.GOOGLE.value}?state={state1}&code=reused",
                     follow_redirects=False,
                 )
-            assert replay_resp.status_code == 400
-            assert "CSRF" in replay_resp.json().get("detail", "")
-
-        evidence_dir = Path("/tmp/psq_evidence")
-        evidence_dir.mkdir(exist_ok=True)
-        summary = {
-            "test": "oauth_synthetic_callback_backend",
-            "timestamp": _now_iso(),
-            "commit": "dbc6d58",
-            "runner": "backend ASGI / docker container litink-backend",
-            "state1_len": len(state1),
-            "state2_len": len(state2),
-            "redirects": [s["redirect"] for s in sessions],
-            "distinct_user_ids": [s["user_id"] for s in sessions],
-            "distinct_emails": [s["email"] for s in sessions],
-            "state_replay_rejected": True,
-            "status": "PASS",
-        }
-        (evidence_dir / "backend_summary.json").write_text(json.dumps(summary, indent=2, default=str))
-        print(json.dumps(summary, indent=2, default=str))
+            assert replay_resp.status_code == 303
+            assert replay_resp.headers["location"].endswith("/auth?oauth_error=invalid_state")

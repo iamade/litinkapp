@@ -38,10 +38,15 @@ export default function AuthPage() {
   const { login, register, resendVerificationEmail } = useAuth();
   const navigate = useNavigate();
   const oauthError = searchParams.get('oauth_error');
+  const accountUnavailableEmail = searchParams.get('email');
 
-  // Sync mode with URL params
+  // Sync form state with URL params supplied by OAuth redirects.
   useEffect(() => {
     setIsLogin(searchParams.get('mode') !== 'register');
+    const queryEmail = searchParams.get('email');
+    if (queryEmail !== null) {
+      setEmail(queryEmail);
+    }
   }, [searchParams]);
 
   useEffect(() => {
@@ -171,6 +176,19 @@ export default function AuthPage() {
                         className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
                     >
                         Your sign-in session expired. Please try signing in with Google again.
+                    </div>
+                )}
+
+                {oauthError === 'account_unavailable' && (
+                    <div
+                        role="alert"
+                        className="mb-6 rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 text-sm text-purple-900 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-100"
+                    >
+                        <p className="font-semibold">Register to use that Google email with LitInkAI.</p>
+                        <p className="mt-1">
+                            We couldn't find an existing account{accountUnavailableEmail ? ` for ${accountUnavailableEmail}` : ""}.
+                            Create one below with email and password, then you can sign in with Google next time.
+                        </p>
                     </div>
                 )}
 
