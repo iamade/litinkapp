@@ -759,6 +759,9 @@ export const userService = {
     character_details: {
       name: string;
       role: string;
+      accent: string;
+      voice_gender: string;
+      voice_characteristics: string;
       physical_description: string;
       personality: string;
       character_arc: string;

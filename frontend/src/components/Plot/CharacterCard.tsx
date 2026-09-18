@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { userService } from '../../services/userService';
+import { applyGeneratedCharacterDetails } from '../../lib/characterDetails';
 import ProtectedImage from '../Common/ProtectedImage';
 
 interface Character {
@@ -239,16 +240,7 @@ const CharacterCard: React.FC<CharacterCardProps> = ({
       );
 
       if (response.success && response.character_details) {
-        setEditedCharacter(prev => ({
-          ...prev,
-          physical_description: response.character_details.physical_description || prev.physical_description,
-          personality: response.character_details.personality || prev.personality,
-          character_arc: response.character_details.character_arc || prev.character_arc,
-          want: response.character_details.want || prev.want,
-          need: response.character_details.need || prev.need,
-          lie: response.character_details.lie || prev.lie,
-          ghost: response.character_details.ghost || prev.ghost,
-        }));
+        setEditedCharacter(prev => applyGeneratedCharacterDetails(prev, response.character_details));
 
         // KAN-370: Persist AI-generated character details to localStorage for refresh survival
         try {

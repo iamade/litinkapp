@@ -3,6 +3,7 @@ import { BookOpen, Loader2, AlertCircle, Wand2, Users, Plus, Trash2, Search, X, 
 import { usePlotGeneration } from "../../hooks/usePlotGeneration";
 import CharacterCard from "./CharacterCard";
 import { userService } from "../../services/userService";
+import { applyGeneratedCharacterDetails } from "../../lib/characterDetails";
 import { toast } from "react-hot-toast";
 import ProtectedImage from '../Common/ProtectedImage';
 
@@ -697,16 +698,7 @@ const PlotOverviewPanel: React.FC<PlotOverviewPanelProps> = ({
       );
 
       if (response.success && response.character_details) {
-        setNewCharacter(prev => ({
-          ...prev,
-          physical_description: response.character_details.physical_description || prev.physical_description,
-          personality: response.character_details.personality || prev.personality,
-          character_arc: response.character_details.character_arc || prev.character_arc,
-          want: response.character_details.want || prev.want,
-          need: response.character_details.need || prev.need,
-          lie: response.character_details.lie || prev.lie,
-          ghost: response.character_details.ghost || prev.ghost,
-        }));
+        setNewCharacter(prev => applyGeneratedCharacterDetails(prev, response.character_details));
 
         toast.success("Character details generated successfully! Review and edit as needed.", {
           id: loadingToast,
