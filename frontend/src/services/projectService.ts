@@ -78,6 +78,13 @@ export const projectService = {
       content_terminology?: string;
       universe_name?: string;
       content_type?: string;
+      // KAN-147: trailer intent persisted on the upload-create path.
+      output_type?: string;
+      trailer_config?: {
+        target_duration_seconds?: number;
+        tone?: string;
+        style?: string;
+      };
       consultation_data?: {
         conversation: Array<{ role: string; content: string }>;
         agreements: {
@@ -105,6 +112,16 @@ export const projectService = {
     }
     if (consultationConfig?.content_type) {
       formData.append("content_type", consultationConfig.content_type);
+    }
+    // KAN-147: persist trailer intent on the upload-create path.
+    if (consultationConfig?.output_type) {
+      formData.append("output_type", consultationConfig.output_type);
+    }
+    if (consultationConfig?.trailer_config) {
+      formData.append(
+        "trailer_config",
+        JSON.stringify(consultationConfig.trailer_config)
+      );
     }
     if (consultationConfig?.consultation_data) {
       formData.append("consultation_data", JSON.stringify(consultationConfig.consultation_data));

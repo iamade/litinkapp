@@ -357,6 +357,10 @@ Based on the above scripts and the user's creative direction, provide your cinem
                     f"- EPUB '{metadata_title}' has {chapter_count} detected chapters. "
                     "Offer adaptation options: 'Create as cinematic universe' and 'Single story adaptation'."
                 )
+                epub_context_lines.append(
+                    "This EPUB is rich source material — consider suggesting trailer mode: "
+                    "a 30-120 second trailer/promo can bring it to life quickly."
+                )
 
         # B4: Multi-file detection — inject explicit user-facing question
         if file_count >= 2:
@@ -434,6 +438,8 @@ Your role is to analyze uploaded documents and guide users to the best creative 
     ],
     "ai_message": "I've analyzed your document... (conversational message for the user)"
 }}
+
+If you recommend or the user chooses "trailer_promo" (Trailer / Promo), your follow_up_questions MUST cover: animation style, desired duration (30-120 seconds), tone, and the key scenes or moments to feature in the trailer.
 
 Be conversational and helpful. Detect what the user needs based on their content."""
 
@@ -555,7 +561,7 @@ You are a project setup assistant for LitInkAI. Your ONLY job is to help the use
 
 CRITICAL RULES:
 1. You CANNOT create content, drafts, storyboards, scripts, or episode plans. Do NOT promise to produce these.
-2. Your role is ONLY to help the user decide: project type (entertainment/training/marketing), content type (cinematic_universe/single_script/ad), terminology (Film/Episode/Part/Module), and universe name.
+2. Your role is ONLY to help the user decide: project type (entertainment/training/marketing), content type (cinematic_universe/single_script/ad/trailer), terminology (Film/Episode/Part/Module), and universe name.
 3. After 2-3 messages, you should have enough info. Recommend clicking "Create Project" button.
 4. NEVER ask more than 1 follow-up question per response.
 5. If the user agrees with anything, says "yes", "sure", "sounds good", "let's go", "ok", or similar — set ready_to_proceed to true IMMEDIATELY.
@@ -565,16 +571,18 @@ CRITICAL RULES:
 Respond in JSON format:
 {{
     "ai_message": "Your response (max 150 words, be concise)",
-    "action_to_take": "cinematic_universe" | "script_expansion" | "storyboard" | null,
+    "action_to_take": "cinematic_universe" | "script_expansion" | "storyboard" | "trailer_promo" | null,
     "follow_up_questions": [],
     "ready_to_proceed": true | false,
     "project_config": {{
         "project_type": "entertainment" | "training" | "marketing",
-        "content_type": "cinematic_universe" | "single_script" | "ad",
+        "content_type": "cinematic_universe" | "single_script" | "ad" | "trailer",
         "terminology": "Film" | "Episode" | "Part" | "Module",
         "universe_name": "If applicable"
     }}
-}}"""
+}}
+
+If action_to_take is "trailer_promo": set project_config.content_type to "trailer" and your follow_up_questions MUST include trailer-specific questions covering animation style, desired duration (30-120 seconds), tone, and key scenes to feature."""
 
         nudge = ""
         if consultation_message_count >= 2:
