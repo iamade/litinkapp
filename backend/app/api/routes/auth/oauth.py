@@ -11,7 +11,6 @@ from app.core.config import settings
 from app.core.database import get_session
 from app.core.logging import get_logger
 from app.auth.models import User
-from app.auth.schema import RoleChoicesSchema, AccountStatusSchema
 from app.auth.oauth_models import UserOAuth, OAuthProvider
 from app.auth.oauth_state import oauth_state_store
 from app.auth.utils import create_jwt_token, set_auth_cookies
@@ -28,6 +27,21 @@ GOOGLE_USER_INFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 def _invalid_oauth_state_redirect() -> RedirectResponse:
     return RedirectResponse(
         url=f"{settings.FRONTEND_URL}/auth?oauth_error=invalid_state",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+def _account_unavailable_redirect(user_email: str | None = None) -> RedirectResponse:
+    params = {"oauth_error": "account_unavailable"}
+    if user_email:
+        params = {
+            "mode": "register",
+            "oauth_error": "account_unavailable",
+            "email": user_email,
+        }
+
+    return RedirectResponse(
+        url=f"{settings.FRONTEND_URL}/auth?{urlencode(params)}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -123,11 +137,7 @@ async def callback(
             provider,
             error or "missing_code",
         )
-        params = {"oauth_error": "account_unavailable"}
-        return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth?{urlencode(params)}",
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        return _account_unavailable_redirect()
 
     # Validate OAuth CSRF state before processing the callback.
     if not state:
@@ -230,32 +240,15 @@ async def callback(
             session.add(new_oauth)
             await session.commit()
         else:
-            # 3. Create new user
-            user = User(
-                email=user_email,
-                first_name=first_name,
-                last_name=last_name,
-                display_name=f"{first_name} {last_name}".strip()
-                or user_email.split("@")[0],
-                avatar_url=avatar_url,
-                is_active=True,
-                account_status=AccountStatusSchema.ACTIVE,
-                roles=[RoleChoicesSchema.CREATOR],  # Default role
-                hashed_password="",  # No password for OAuth users initially
-                onboarding_completed=False,
+            # Unknown Google accounts must register explicitly through the
+            # frontend. Do not create User/UserOAuth rows or issue auth cookies
+            # from the OAuth callback path.
+            logger.info(
+                "OAuth callback found no existing account for provider=%s email=%s",
+                provider,
+                user_email,
             )
-            session.add(user)
-            await session.commit()
-            await session.refresh(user)
-
-            new_oauth = UserOAuth(
-                user_id=user.id,
-                provider=OAuthProvider(provider),
-                provider_user_id=provider_user_id,
-                email=user_email,
-            )
-            session.add(new_oauth)
-            await session.commit()
+            return _account_unavailable_redirect(user_email)
 
     if not user:
         raise HTTPException(status_code=500, detail="Failed to login/create user")

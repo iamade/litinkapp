@@ -347,6 +347,10 @@ async def create_character_placeholder(
                 "personality": existing_char.personality,
                 "entity_type": existing_char.entity_type,
                 "image_url": existing_char.image_url,
+                # KAN-467: echo persisted voice fields (canonical defaults when empty)
+                "accent": existing_char.accent or "neutral",
+                "voice_gender": existing_char.voice_gender or "auto",
+                "voice_characteristics": existing_char.voice_characteristics or None,
                 "message": "Character already exists",
             }
 
@@ -372,6 +376,10 @@ async def create_character_placeholder(
             "physical_description": new_character.physical_description,
             "personality": new_character.personality,
             "image_url": new_character.image_url,
+            # KAN-467: echo persisted voice fields (canonical defaults when empty)
+            "accent": new_character.accent or "neutral",
+            "voice_gender": new_character.voice_gender or "auto",
+            "voice_characteristics": new_character.voice_characteristics or None,
             "message": "Character placeholder created successfully",
         }
 
@@ -735,6 +743,10 @@ async def create_project_character_placeholder(
                 "personality": existing_char.personality,
                 "entity_type": existing_char.entity_type,
                 "image_url": existing_char.image_url,
+                # KAN-467: echo persisted voice fields (canonical defaults when empty)
+                "accent": existing_char.accent or "neutral",
+                "voice_gender": existing_char.voice_gender or "auto",
+                "voice_characteristics": existing_char.voice_characteristics or None,
                 "message": "Character already exists",
             }
 
@@ -763,6 +775,10 @@ async def create_project_character_placeholder(
             "physical_description": new_character.physical_description,
             "personality": new_character.personality,
             "image_url": new_character.image_url,
+            # KAN-467: echo persisted voice fields (canonical defaults when empty)
+            "accent": new_character.accent or "neutral",
+            "voice_gender": new_character.voice_gender or "auto",
+            "voice_characteristics": new_character.voice_characteristics or None,
             "message": "Character placeholder created successfully",
         }
 
