@@ -136,6 +136,13 @@ export default function CreatorStudio() {
     contentType: string;
     terminology: string;
     universeName?: string;
+    // KAN-147: trailer intent forwarded to the upload-create path.
+    outputType?: string;
+    trailerConfig?: {
+      target_duration_seconds?: number;
+      tone?: string;
+      style?: string;
+    };
     consultationData?: {
       conversation: Array<{ role: string; content: string }>;
       agreements: {
@@ -157,6 +164,8 @@ export default function CreatorStudio() {
           content_terminology: config.terminology,
           universe_name: config.universeName,
           content_type: config.contentType,
+          output_type: config.outputType,
+          trailer_config: config.trailerConfig,
           consultation_data: config.consultationData,
         }
       );
