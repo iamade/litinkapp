@@ -586,8 +586,24 @@ class CharacterService:
                 "voice_gender",
                 "voice_characteristics",
             ]:
-                if hasattr(updates, field) and getattr(updates, field) is not None:
-                    update_data[field] = getattr(updates, field)
+                if not hasattr(updates, field):
+                    continue
+                value = getattr(updates, field)
+                if value is None:
+                    continue
+                # KAN-467: empty-string voice fields collapse to canonical
+                # defaults (mirrors create_character's `or` normalization),
+                # so the response echoes a usable value instead of "".
+                if field == "accent" and value == "":
+                    value = "neutral"
+                elif field == "voice_gender" and value == "":
+                    value = "auto"
+                elif field == "voice_characteristics" and value == "":
+                    # Explicit empty string clears to the canonical default (NULL)
+                    update_data[field] = None
+                    continue
+                if value is not None:
+                    update_data[field] = value
 
             if update_data:
                 update_data["updated_at"] = datetime.now(timezone.utc)
@@ -935,7 +951,7 @@ class CharacterService:
                 ghost=character_data.ghost or "",
                 accent=character_data.accent or "neutral",
                 voice_gender=character_data.voice_gender or "auto",
-                voice_characteristics=character_data.voice_characteristics,
+                voice_characteristics=character_data.voice_characteristics or None,
                 image_url=character_data.image_url,
                 image_generation_prompt=character_data.image_generation_prompt,
                 image_metadata=character_data.image_metadata or {},

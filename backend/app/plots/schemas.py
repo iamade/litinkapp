@@ -175,6 +175,22 @@ class CharacterBase(BaseModel):
     )
     model_used: Optional[str] = Field(None, max_length=100, description="AI model used")
 
+    @field_validator(
+        "accent", "voice_gender", "voice_characteristics", mode="before"
+    )
+    @classmethod
+    def _canonicalize_empty_voice_fields(cls, v, info):
+        """KAN-467: empty-string voice fields collapse to canonical defaults so
+        response JSON never carries "" (the UI renders it as unset/default).
+        Legacy rows persisted before canonicalization normalize on read here."""
+        if v == "":
+            if info.field_name == "accent":
+                return "neutral"
+            if info.field_name == "voice_gender":
+                return "auto"
+            return None  # voice_characteristics canonical default: unset
+        return v
+
 
 class CharacterResponse(CharacterBase):
     id: Union[str, uuid.UUID] = Field(..., description="Unique identifier")
