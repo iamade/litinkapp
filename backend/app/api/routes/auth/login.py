@@ -51,6 +51,7 @@ async def login(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail={
                         "status": "error",
+                        "error_code": "INVALID_CREDENTIALS",
                         "message": error_message,
                         "action": "Please check your email and password and try again",
                         "remaining_attempts": remaining_attempts,
@@ -62,6 +63,7 @@ async def login(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "status": "error",
+                        "error_code": "ACCOUNT_INACTIVE",
                         "message": "Your account is not activated",
                         "action": "Please activate your account first",
                     },
@@ -83,7 +85,23 @@ async def login(
                     "roles": user.roles,
                 },
             }
-        return {"message": "Something went wrong with your email or password"}
+        # KAN-471: unknown-email returns the SAME 401 + INVALID_CREDENTIALS
+        # shape as wrong-password so the status code cannot be used to
+        # enumerate registered accounts (previous behavior leaked a 200).
+        remaining_attempts = settings.LOGIN_ATTEMPTS
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "status": "error",
+                "error_code": "INVALID_CREDENTIALS",
+                "message": (
+                    "Invalid credentials. Please check your email and password"
+                    " and try again"
+                ),
+                "action": "Please check your email and password and try again",
+                "remaining_attempts": remaining_attempts,
+            },
+        )
 
     except HTTPException as http_ex:
         raise http_ex
