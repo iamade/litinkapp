@@ -1,4 +1,6 @@
 from typing import List, Optional, Dict, Any
+import json
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from sqlmodel.ext.asyncio.session import AsyncSession
 from pydantic import BaseModel
@@ -67,6 +69,46 @@ def _detect_trailer_intent(
     return "trailer", trailer_config
 
 
+def _resolve_trailer_output(
+    output_type: Optional[str],
+    trailer_config_raw: Optional[str],
+    parsed_consultation_data: Optional[dict],
+) -> tuple[Optional[str], Dict[str, Any]]:
+    """KAN-473: resolve (output_type, trailer_config) for the upload path.
+
+    - output_type absent: legacy KAN-146 detection from consultation_data.
+    - output_type == "trailer": config from the explicit trailer_config form
+      JSON (keys filtered to the known set, merged over defaults), else from
+      consultation agreements, else defaults — NEVER empty on a real trailer
+      run (PSQ completion condition: Workshop must never read an empty
+      config from a real run).
+    - any other explicit output_type: config stays empty.
+    """
+    if output_type is None:
+        return _detect_trailer_intent(parsed_consultation_data)
+
+    if output_type != "trailer":
+        return output_type, {}
+
+    trailer_config: Dict[str, Any] = dict(_TRAILER_CONFIG_DEFAULTS)
+    if trailer_config_raw:
+        try:
+            parsed = json.loads(trailer_config_raw)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            for _key in _TRAILER_CONFIG_KEYS:
+                if parsed.get(_key) not in (None, ""):
+                    trailer_config[_key] = parsed[_key]
+            return output_type, trailer_config
+
+    if parsed_consultation_data:
+        _, detected = _detect_trailer_intent(parsed_consultation_data)
+        if detected:
+            trailer_config.update(detected)
+    return output_type, trailer_config
+
+
 # Consultation Schemas
 class ConsultationRequest(BaseModel):
     """Request to analyze scripts for cinematic universe structure."""
@@ -118,6 +160,7 @@ async def create_project_upload(
     content_type: Optional[str] = Form(None),
     consultation_data: Optional[str] = Form(None),  # JSON string
     output_type: Optional[str] = Form(None),
+    trailer_config: Optional[str] = Form(None),  # KAN-473: JSON string (FE KAN-147 forward)
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
@@ -136,12 +179,12 @@ async def create_project_upload(
         except json.JSONDecodeError:
             pass
 
-    # Detect trailer intent from consultation result if output_type not explicitly set
-    trailer_config: Dict[str, Any] = {}
-    if output_type is None:
-        output_type, trailer_config = _detect_trailer_intent(
-            parsed_consultation_data
-        )
+    # KAN-473: resolve output_type + trailer_config together. Explicit
+    # trailer runs always get a non-empty config (form JSON > consultation
+    # agreements > defaults); absent output_type keeps KAN-146 detection.
+    output_type, trailer_config = _resolve_trailer_output(
+        output_type, trailer_config, parsed_consultation_data
+    )
     if output_type is None:
         output_type = "full_production"
 
