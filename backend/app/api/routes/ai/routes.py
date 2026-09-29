@@ -388,7 +388,9 @@ async def _load_plot_character_map(
     plot_stmt = (
         select(PlotOverview)
         .where(PlotOverview.book_id == book_id, PlotOverview.user_id == user_id)
-        .order_by(desc(PlotOverview.version))
+        # KAN-331: deterministic tiebreak so script resolution and the plot
+        # overview GET always resolve the SAME row (mirrors PlotService.get_plot_overview)
+        .order_by(desc(PlotOverview.version), desc(PlotOverview.created_at))
         .limit(1)
     )
     plot_result = await session.exec(plot_stmt)
@@ -427,9 +429,10 @@ def _extract_script_characters_with_ids(
             continue
 
         canonical = canonical_characters.get(char_name.casefold())
-        if canonical_characters and not canonical:
-            continue
 
+        # KAN-331: keep unmatched (script-only) speakers so the frontend can
+        # render them as warning-state pills instead of silently dropping
+        # them; exact-name matches use the canonical Plot Overview spelling.
         display_name = canonical.name if canonical else char_name.title()
         display_key = display_name.casefold()
         if display_key in seen_names:
