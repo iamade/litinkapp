@@ -2211,6 +2211,56 @@ class FileService:
         except Exception:
             pass
 
+        # KAN-445: Many production EPUBs expose XHTML spine items as
+        # ITEM_UNKNOWN (type 0) instead of ITEM_DOCUMENT.  Since spine
+        # items are by definition in the reading order, treat any type-0
+        # item that is NOT clearly a non-document type (image, style,
+        # font, cover, navigation) as document content.
+        try:
+            item_type = item.get_type()
+            non_document_types = {
+                ebooklib.ITEM_IMAGE,
+                ebooklib.ITEM_STYLE,
+                ebooklib.ITEM_FONT,
+                ebooklib.ITEM_COVER,
+                ebooklib.ITEM_NAVIGATION,
+            }
+            if item_type == 0 and item_type not in non_document_types:
+                # Check media_type first for a definitive answer
+                media_type = (getattr(item, "media_type", "") or "").lower()
+                if media_type in {"application/xhtml+xml", "text/html"}:
+                    return True
+                # For type-0 spine items, also accept by href extension
+                item_name = ""
+                try:
+                    item_name = (item.get_name() or "").lower()
+                except Exception:
+                    item_name = ""
+                if item_name.endswith((".xhtml", ".html", ".htm")):
+                    return True
+                # Content sniff for type-0 items — be more aggressive since
+                # these are spine items (reading order) and very likely document content
+                try:
+                    raw_content = item.get_content()
+                except Exception:
+                    # If we can't get content but it's a type-0 spine item,
+                    # still treat it as document — the caller will handle None
+                    return True
+                if not isinstance(raw_content, (bytes, bytearray)):
+                    # Empty content but type-0 spine item — treat as document
+                    return True
+                sample = bytes(raw_content[:512]).decode(
+                    "utf-8", errors="ignore"
+                ).lower()
+                if any(marker in sample for marker in ("<html", "<body", "<!doctype html", "<p>", "<div", "<h1", "<h2", "<h3", "<span", "<section", "<article")):
+                    return True
+                # Type-0 spine item with non-HTML content — still treat as document
+                # since it's in the reading order. Better to extract text and find
+                # it's empty than to skip it entirely.
+                return True
+        except Exception:
+            pass
+
         media_type = (getattr(item, "media_type", "") or "").lower()
         if media_type in {"application/xhtml+xml", "text/html"}:
             return True
@@ -2367,6 +2417,34 @@ class FileService:
 
         return [item for item in flattened if len(item.get("content", "").strip()) >= 100]
 
+    def _normalize_epub_chapter_title(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize detected chapter titles to Arabic ``Chapter {n}`` form.
+
+        The aggregate EPUB path feeds ``detect_structure`` output directly into
+        the chapter payload.  The detector may carry the raw Roman numeral into
+        the display title (``Chapter I``); downstream consumers expect
+        normalized Arabic numbering, so rebuild the title from the parsed
+        number while preserving any detected subtitle.
+        """
+        if item.get("content_type") != "chapter":
+            return item
+        title = item.get("title", "")
+        match = self.structure_detector._match_chapter_patterns(title)
+        if not match:
+            return item
+        raw_number = str(match.get("raw_number", ""))
+        number = str(match.get("number", ""))
+        if not number.isdigit() or raw_number == number:
+            return item
+        subtitle = re.sub(r"\s+", " ", match.get("title", "") or "").strip(" .:-")
+        new_title = f"Chapter {number}"
+        if subtitle and not self._is_narrative_prose_title(subtitle):
+            new_title = f"{new_title}: {subtitle}"
+        normalized = dict(item)
+        normalized["title"] = new_title
+        normalized["number"] = number
+        return normalized
+
     def _reconstruct_epub_chapters_from_text(self, full_text: str) -> List[Dict[str, Any]]:
         """Reconstruct chapters from aggregate page-split EPUB spine text."""
         if not full_text or not full_text.strip():
@@ -2375,6 +2453,9 @@ class FileService:
         print("[EPUB] Reconstructing chapter structure from aggregate spine text")
         structure_result = self.structure_detector.detect_structure(full_text)
         reconstructed = self._flatten_detected_epub_structure(structure_result)
+        reconstructed = [
+            self._normalize_epub_chapter_title(item) for item in reconstructed
+        ]
         reconstructed = self._filter_front_back_matter_structural(reconstructed)
 
         semantic_chapters = [
@@ -2432,6 +2513,20 @@ class FileService:
                 continue
 
             subtitle = re.sub(r"\s+", " ", match.get("title", "") or "").strip()
+            if not subtitle:
+                # Subtitle lookahead: a bare heading ("CHAPTER I.") is followed
+                # by its title on the next non-empty line.
+                for lookahead in range(line_num + 1, min(line_num + 6, len(lines))):
+                    next_line = re.sub(r"\s+", " ", lines[lookahead]).strip()
+                    if not next_line:
+                        continue
+                    if self.structure_detector._match_chapter_patterns(next_line):
+                        break
+                    if self.structure_detector._match_special_sections(next_line):
+                        break
+                    if self._is_semantic_heading_candidate(next_line):
+                        subtitle = next_line
+                    break
             title = f"Chapter {number}"
             if subtitle and not self._is_narrative_prose_title(subtitle):
                 title = f"{title}: {subtitle}"

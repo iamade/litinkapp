@@ -1,4 +1,4 @@
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +14,7 @@ from app.core.admin_seeder import seed_admin_users
 
 from app.core.logging import get_logger
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from app.core.health import health_checker, ServiceStatus
 import asyncio
 import time
@@ -98,6 +99,69 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan,
 )
+
+# --- KAN-470 / KAN-471: sanitized validation errors -------------------------
+# FastAPI's default RequestValidationError handler echoes pydantic error
+# `input` values (and raw request bodies), which leaked submitted passwords
+# back in 422 responses (KAN-470, P1). Every error entry is rebuilt from
+# safe fields only (loc/msg/type) and a machine-readable error_code is
+# attached (KAN-471 login-flow discriminator).
+SENSITIVE_VALIDATION_FIELDS = frozenset(
+    {
+        "password",
+        "confirm_password",
+        "new_password",
+        "old_password",
+        "current_password",
+        "security_answer",
+        "otp",
+        "token",
+        "secret",
+    }
+)
+
+
+def _validation_error_code(err: dict) -> str:
+    etype = str(err.get("type", ""))
+    loc = err.get("loc") or []
+    field = loc[-1] if loc else ""
+    if not isinstance(field, str):
+        field = ""
+    if etype == "json_invalid":
+        return "VALIDATION_ERROR_MALFORMED_JSON"
+    if etype == "missing":
+        return "VALIDATION_ERROR_MISSING_FIELD"
+    if field == "email" and etype == "value_error":
+        return "VALIDATION_ERROR_EMAIL_FORMAT"
+    if field in {"password", "confirm_password", "new_password"}:
+        return "VALIDATION_ERROR_PASSWORD_POLICY"
+    return "VALIDATION_ERROR"
+
+
+@app.exception_handler(RequestValidationError)
+async def sanitized_validation_handler(
+    request: Request, exc: RequestValidationError
+):
+    """422 responses that never echo submitted values (KAN-470)."""
+    errors = []
+    for err in exc.errors():
+        errors.append(
+            {
+                "loc": list(err.get("loc") or []),
+                "msg": str(err.get("msg", "Validation error")),
+                "type": str(err.get("type", "value_error")),
+                "error_code": _validation_error_code(err),
+            }
+        )
+    logger.warning(
+        f"Validation error 422 on {request.method} {request.url.path}: "
+        f"{len(errors)} error(s) sanitized (no input values echoed)"
+    )
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": errors, "error_code": "VALIDATION_ERROR"},
+    )
+
 
 # CORS middleware - Uses settings.ALLOWED_HOSTS (controlled via env vars)
 app.add_middleware(

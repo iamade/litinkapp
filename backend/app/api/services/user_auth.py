@@ -161,6 +161,7 @@ class UserAuthService:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "status": "error",
+                "error_code": "ACCOUNT_LOCKED",
                 "message": "Your account is temporarily locked",
                 "action": f"Please try again after {remaining_minutes} minutes",
                 "lockout_remaining_minutes": remaining_minutes,

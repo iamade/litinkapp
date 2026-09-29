@@ -65,12 +65,14 @@ async def register_user(
             },
         )
     except Exception as e:
+        # KAN-470: never reflect exception internals (may embed submitted
+        # values) in the response body; full detail goes to server logs only.
         logger.exception(f"Failed to register user {user_data.email}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "status": "error",
-                "message": f"Internal server error during registration: {str(e)}",
+                "message": "Internal server error during registration",
                 "action": "Please try again later or contact support",
             },
         )
