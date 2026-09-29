@@ -3101,6 +3101,73 @@ class FileService:
 
         return chapters
 
+    def _dedupe_chapters_by_number(
+        self, chapters: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """KAN-226: Collapse duplicate chapter entries that share one chapter number.
+
+        Poorly-OCR'd scans (e.g. old public-domain scans with mis-read Roman
+        numerals) can spawn several short, low-value "chapter" fragments lifted
+        from TOC/summary text that all resolve to the same numeral once
+        normalized (e.g. five entries all reading as "Chapter 1"). Run this
+        BEFORE any downstream renumbering, while each entry still carries the
+        raw chapter number the extraction strategy detected. For each
+        duplicated number, keep only the entry with the most substantial body
+        content (the real chapter) and drop the rest. Front/back matter and
+        entries without a parseable number pass through untouched.
+        """
+        if not chapters or len(chapters) < 2:
+            return chapters
+
+        kept_index_by_number: Dict[str, int] = {}
+        order: List[int] = []
+        duplicates_dropped = 0
+
+        for idx, ch in enumerate(chapters):
+            content_type = ch.get("content_type") or "chapter"
+            raw_number = ch.get("number")
+            if content_type != "chapter" or raw_number in (None, ""):
+                order.append(idx)
+                continue
+
+            normalized = self.structure_detector._normalize_chapter_number(str(raw_number))
+            if not str(normalized).isdigit():
+                order.append(idx)
+                continue
+
+            existing_idx = kept_index_by_number.get(normalized)
+            if existing_idx is None:
+                kept_index_by_number[normalized] = idx
+                order.append(idx)
+                continue
+
+            existing = chapters[existing_idx]
+            existing_len = len(existing.get("content", "").strip())
+            current_len = len(ch.get("content", "").strip())
+            duplicates_dropped += 1
+
+            if current_len > existing_len:
+                order = [i for i in order if i != existing_idx]
+                kept_index_by_number[normalized] = idx
+                order.append(idx)
+                print(
+                    f"[DEDUPE] Chapter {normalized}: replacing shorter duplicate "
+                    f"'{LogSanitizer.redact(existing.get('title', ''), label='title')}' with "
+                    f"'{LogSanitizer.redact(ch.get('title', ''), label='title')}'"
+                )
+            else:
+                print(
+                    f"[DEDUPE] Chapter {normalized}: dropping shorter duplicate "
+                    f"'{LogSanitizer.redact(ch.get('title', ''), label='title')}' "
+                    f"(kept '{LogSanitizer.redact(existing.get('title', ''), label='title')}')"
+                )
+
+        if duplicates_dropped:
+            print(f"[DEDUPE] Removed {duplicates_dropped} duplicate chapter-number entries")
+
+        order.sort()
+        return [chapters[i] for i in order]
+
     def _split_spine_item_by_headings(self, soup, item_idx: int) -> List[Dict[str, Any]]:
         """Split a single spine item into sub-chapters by heading elements.
 
@@ -7299,6 +7366,13 @@ class FileService:
                     except:
                         pass
 
+        # KAN-226: Classify front/back matter and collapse duplicate chapter-number
+        # fragments (e.g. OCR-garbled scans) BEFORE deciding whether TOC extraction
+        # succeeded, so every strategy above benefits uniformly.
+        if toc_chapters:
+            toc_chapters = self._dedupe_chapters_by_number(toc_chapters)
+            toc_chapters = self._filter_front_back_matter_structural(toc_chapters)
+
         # FIX: Use TOC chapters if we found ANY reasonable number (lowered threshold)
         if len(toc_chapters) >= 3:  # Reduced from >= 2
             print(f"[TOC EXTRACTION] SUCCESS: Using {len(toc_chapters)} TOC chapters")
@@ -7355,11 +7429,18 @@ class FileService:
                 }
                 extracted_chapters.append(self._with_generation_flag(chapter_data))
 
+        # KAN-226: Collapse duplicate chapter-number fragments before classifying
+        # front/back matter, then classify so TOC/preface/appendix-style entries are
+        # marked use_in_generation=False instead of leaking into the chapter list.
+        extracted_chapters = self._dedupe_chapters_by_number(extracted_chapters)
+        extracted_chapters = self._filter_front_back_matter_structural(extracted_chapters)
+
         # Step 3: Drop chapters with less than 500 chars — likely page headers or misdetections
         pre_filter_count = len(extracted_chapters)
         extracted_chapters = [
             ch for ch in extracted_chapters
             if ch.get("section_type") == "special"
+            or ch.get("content_type") in ("front_matter", "back_matter", "metadata")
             or len(ch.get("content", "").strip()) >= 500
         ]
         if len(extracted_chapters) < pre_filter_count:
