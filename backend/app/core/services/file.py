@@ -2417,6 +2417,34 @@ class FileService:
 
         return [item for item in flattened if len(item.get("content", "").strip()) >= 100]
 
+    def _normalize_epub_chapter_title(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize detected chapter titles to Arabic ``Chapter {n}`` form.
+
+        The aggregate EPUB path feeds ``detect_structure`` output directly into
+        the chapter payload.  The detector may carry the raw Roman numeral into
+        the display title (``Chapter I``); downstream consumers expect
+        normalized Arabic numbering, so rebuild the title from the parsed
+        number while preserving any detected subtitle.
+        """
+        if item.get("content_type") != "chapter":
+            return item
+        title = item.get("title", "")
+        match = self.structure_detector._match_chapter_patterns(title)
+        if not match:
+            return item
+        raw_number = str(match.get("raw_number", ""))
+        number = str(match.get("number", ""))
+        if not number.isdigit() or raw_number == number:
+            return item
+        subtitle = re.sub(r"\s+", " ", match.get("title", "") or "").strip(" .:-")
+        new_title = f"Chapter {number}"
+        if subtitle and not self._is_narrative_prose_title(subtitle):
+            new_title = f"{new_title}: {subtitle}"
+        normalized = dict(item)
+        normalized["title"] = new_title
+        normalized["number"] = number
+        return normalized
+
     def _reconstruct_epub_chapters_from_text(self, full_text: str) -> List[Dict[str, Any]]:
         """Reconstruct chapters from aggregate page-split EPUB spine text."""
         if not full_text or not full_text.strip():
@@ -2425,6 +2453,9 @@ class FileService:
         print("[EPUB] Reconstructing chapter structure from aggregate spine text")
         structure_result = self.structure_detector.detect_structure(full_text)
         reconstructed = self._flatten_detected_epub_structure(structure_result)
+        reconstructed = [
+            self._normalize_epub_chapter_title(item) for item in reconstructed
+        ]
         reconstructed = self._filter_front_back_matter_structural(reconstructed)
 
         semantic_chapters = [
@@ -2482,6 +2513,20 @@ class FileService:
                 continue
 
             subtitle = re.sub(r"\s+", " ", match.get("title", "") or "").strip()
+            if not subtitle:
+                # Subtitle lookahead: a bare heading ("CHAPTER I.") is followed
+                # by its title on the next non-empty line.
+                for lookahead in range(line_num + 1, min(line_num + 6, len(lines))):
+                    next_line = re.sub(r"\s+", " ", lines[lookahead]).strip()
+                    if not next_line:
+                        continue
+                    if self.structure_detector._match_chapter_patterns(next_line):
+                        break
+                    if self.structure_detector._match_special_sections(next_line):
+                        break
+                    if self._is_semantic_heading_candidate(next_line):
+                        subtitle = next_line
+                    break
             title = f"Chapter {number}"
             if subtitle and not self._is_narrative_prose_title(subtitle):
                 title = f"{title}: {subtitle}"
