@@ -23,8 +23,10 @@ def test_kan443_rejects_markdown_headings_and_generic_roles():
         script_lines, canonical
     )
 
-    assert characters == ["Enmeduranki"]
-    assert character_ids == [str(canonical_id)]
+    # KAN-331: MARCUS is a valid script-only speaker → kept as a warning-state
+    # pill (empty id) instead of dropped when a canonical map exists.
+    assert characters == ["Marcus", "Enmeduranki"]
+    assert character_ids == ["", str(canonical_id)]
 
 
 def test_kan443_filters_generic_roles_without_plot_overview():
