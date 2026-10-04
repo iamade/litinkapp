@@ -2445,7 +2445,92 @@ class FileService:
         normalized["number"] = number
         return normalized
 
-    def _reconstruct_epub_chapters_from_text(self, full_text: str) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _normalized_text_size(text: str) -> int:
+        """Count meaningful text characters for aggregate coverage checks."""
+        return len(re.sub(r"\s+", "", text or ""))
+
+    def _aggregate_reconstruction_represents_document(
+        self,
+        reconstructed: List[Dict[str, Any]],
+        full_text: str,
+        fragment_count: int,
+    ) -> bool:
+        """Return True when aggregate output covers a page-fragment EPUB.
+
+        KAN-445: real EPUB page exports can arrive as hundreds of type-0 XHTML
+        spine fragments with no reliable per-fragment chapter title. The
+        aggregate detector may still return one large item that contains the
+        document, but the numbered-chapter semantic gate used to reject it
+        because it had zero Chapter-N-style titles.
+        """
+        if fragment_count < 3 or not reconstructed:
+            return False
+
+        full_size = self._normalized_text_size(full_text)
+        if full_size < 1000:
+            return False
+
+        recovered_size = self._normalized_text_size(
+            "\n".join(str(item.get("content") or "") for item in reconstructed)
+        )
+        if recovered_size < 100:
+            return False
+
+        coverage = recovered_size / max(full_size, 1)
+        if coverage < 0.70:
+            print(
+                "[EPUB] Aggregate reconstruction rejected: "
+                f"coverage {coverage:.2%} across {fragment_count} fragments"
+            )
+            return False
+
+        print(
+            "[EPUB] Aggregate reconstruction covers document "
+            f"({coverage:.2%} across {fragment_count} fragments)"
+        )
+        return True
+
+    def _accept_representative_epub_reconstruction(
+        self, reconstructed: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Ensure representative aggregate output has at least one chapter item."""
+        accepted = [dict(item) for item in reconstructed]
+        chapter_items = [
+            item for item in accepted if item.get("content_type") == "chapter"
+        ]
+
+        if not chapter_items:
+            contentful = [
+                item
+                for item in accepted
+                if len((item.get("content") or "").strip()) >= 100
+            ]
+            if contentful:
+                representative = max(
+                    contentful,
+                    key=lambda item: len((item.get("content") or "").strip()),
+                )
+                representative["content_type"] = "chapter"
+                representative["type"] = "chapter"
+                representative["number"] = "1"
+                if not (representative.get("title") or "").strip():
+                    representative["title"] = "Complete Text"
+
+        chapter_number = 0
+        for item in accepted:
+            if item.get("content_type") == "chapter":
+                chapter_number += 1
+                item["number"] = str(chapter_number)
+            else:
+                item["number"] = None
+            self._with_generation_flag(item)
+
+        return accepted
+
+    def _reconstruct_epub_chapters_from_text(
+        self, full_text: str, fragment_count: int = 0
+    ) -> List[Dict[str, Any]]:
         """Reconstruct chapters from aggregate page-split EPUB spine text."""
         if not full_text or not full_text.strip():
             return []
@@ -2469,15 +2554,21 @@ class FileService:
                 "[EPUB] Aggregate reconstruction failed semantic chapter gate "
                 f"({len(semantic_chapters)} chapter-like items)"
             )
-            reconstructed = self._reconstruct_epub_explicit_chapter_sequence(full_text)
-            if not reconstructed:
+            explicit_reconstructed = self._reconstruct_epub_explicit_chapter_sequence(full_text)
+            if explicit_reconstructed:
+                reconstructed = explicit_reconstructed
+            elif self._aggregate_reconstruction_represents_document(
+                reconstructed, full_text, fragment_count
+            ):
+                reconstructed = self._accept_representative_epub_reconstruction(
+                    reconstructed
+                )
+            else:
                 return []
-            semantic_chapters = [
-                ch
-                for ch in reconstructed
-                if ch.get("content_type") == "chapter"
-                and self._is_chapter_like(ch.get("title", ""))
-            ]
+
+        semantic_chapters = [
+            ch for ch in reconstructed if ch.get("content_type") == "chapter"
+        ]
 
         print(
             "[EPUB] Aggregate reconstruction produced "
@@ -3574,7 +3665,8 @@ class FileService:
                     f"{untitled_page_fragment_count} untitled page fragments)"
                 )
                 reconstructed = self._reconstruct_epub_chapters_from_text(
-                    "\n\n".join(aggregate_text_parts)
+                    "\n\n".join(aggregate_text_parts),
+                    fragment_count=untitled_page_fragment_count,
                 )
                 if reconstructed:
                     return reconstructed
