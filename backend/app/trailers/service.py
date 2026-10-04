@@ -12,7 +12,7 @@ Scoring dimensions:
 """
 
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Sequence, Tuple
 from datetime import datetime, timezone
 import logging
 import json
@@ -28,6 +28,7 @@ from app.trailers.models import (
     TrailerScene,
     TrailerStatus,
     SelectionMethod,
+    TrailerSelection,
 )
 from app.trailers.schemas import (
     TrailerAnalyzeRequest,
@@ -50,6 +51,196 @@ TONE_WEIGHTS = {
     "mysterious": {"action": 0.20, "emotional": 0.25, "visual": 0.30, "narrative": 0.25},
     "default": {"action": 0.30, "emotional": 0.25, "visual": 0.25, "narrative": 0.20},
 }
+
+
+TRAILER_SELECTION_MIN_SCENES = 5
+TRAILER_SELECTION_MAX_SCENES = 8
+TRAILER_ROLE_SEQUENCE = [
+    "hook",
+    "story_setup",
+    "inciting_moment",
+    "rising_action",
+    "showpiece",
+    "emotional_peak",
+    "stakes_turn",
+    "cliffhanger",
+]
+
+
+def _scene_value(scene: Any, key: str, default: Any = None) -> Any:
+    if isinstance(scene, dict):
+        return scene.get(key, default)
+    return getattr(scene, key, default)
+
+
+def _coerce_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_int(value: Any, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def _scene_score(scene: Any, tone: str) -> float:
+    explicit = _coerce_float(_scene_value(scene, "overall_score"), default=-1.0)
+    if explicit >= 0:
+        return explicit
+
+    weights = TONE_WEIGHTS.get(tone, TONE_WEIGHTS["default"])
+    return sum(
+        _coerce_float(_scene_value(scene, f"{dimension}_score")) * weight
+        for dimension, weight in weights.items()
+    )
+
+
+def _scene_source_index(scene: Any, fallback: int) -> int:
+    for key in ("source_index", "scene_index", "order_index"):
+        value = _scene_value(scene, key)
+        if value is not None:
+            return _coerce_int(value, fallback)
+
+    chapter_number = _scene_value(scene, "chapter_number")
+    scene_number = _scene_value(scene, "scene_number")
+    if chapter_number is not None and scene_number is not None:
+        chapter_position = _coerce_int(chapter_number, 0)
+        scene_position = _coerce_int(scene_number, 0)
+        if chapter_position > 0 or scene_position > 0:
+            return chapter_position * 1000 + scene_position
+
+    for key in ("scene_number", "chapter_number"):
+        value = _scene_value(scene, key)
+        coerced = _coerce_int(value, 0)
+        if value is not None and coerced > 0:
+            return coerced
+
+    return fallback
+
+
+def _is_usable_highlight_scene(scene: Any, tone: str) -> bool:
+    description = str(_scene_value(scene, "scene_description", "") or "").strip()
+    if not description:
+        return False
+    title = str(_scene_value(scene, "scene_title", "") or "").strip()
+    has_identifier = bool(title or _scene_value(scene, "chapter_id") or _scene_value(scene, "artifact_id"))
+    return has_identifier and _scene_score(scene, tone) > 0
+
+
+def _selection_count(usable_count: int, target_scene_count: Optional[int], target_duration_seconds: int) -> int:
+    if usable_count < TRAILER_SELECTION_MIN_SCENES:
+        raise ValueError(
+            "select_highlight_scenes requires at least "
+            f"{TRAILER_SELECTION_MIN_SCENES} usable highlight scenes; got {usable_count}"
+        )
+
+    if target_scene_count is None:
+        target_scene_count = round(max(target_duration_seconds, 30) / 8)
+
+    requested = max(
+        TRAILER_SELECTION_MIN_SCENES,
+        min(TRAILER_SELECTION_MAX_SCENES, int(target_scene_count)),
+    )
+    return min(requested, usable_count, TRAILER_SELECTION_MAX_SCENES)
+
+
+def _role_for_position(index: int, count: int) -> str:
+    if count <= 1:
+        return TRAILER_ROLE_SEQUENCE[0]
+    role_index = round(index * (len(TRAILER_ROLE_SEQUENCE) - 1) / (count - 1))
+    return TRAILER_ROLE_SEQUENCE[role_index]
+
+
+def select_highlight_scenes(
+    candidate_scenes: Sequence[Any],
+    *,
+    project_id: Optional[uuid.UUID] = None,
+    trailer_generation_id: Optional[uuid.UUID] = None,
+    target_scene_count: Optional[int] = None,
+    target_duration_seconds: int = 60,
+    tone: str = "epic",
+    selection_method: str = "scored",
+) -> List[TrailerSelection]:
+    """Select the KAN-149 AC1 highlight scene proof surface.
+
+    Returns 5-8 usable highlight scenes, ordered for a stitched trailer proof.
+    Each returned TrailerSelection carries deterministic timing and a
+    trailer_role; callers may persist the returned rows to trailer_selections.
+    """
+    indexed_scenes: List[Tuple[int, Any]] = list(enumerate(candidate_scenes))
+    usable_scenes = [
+        (index, scene)
+        for index, scene in indexed_scenes
+        if _is_usable_highlight_scene(scene, tone)
+    ]
+    count = _selection_count(len(usable_scenes), target_scene_count, target_duration_seconds)
+
+    ranked = sorted(
+        usable_scenes,
+        key=lambda item: (
+            -_scene_score(item[1], tone),
+            _scene_source_index(item[1], item[0]),
+            item[0],
+        ),
+    )[:count]
+    ordered = sorted(ranked, key=lambda item: (_scene_source_index(item[1], item[0]), item[0]))
+
+    per_scene_duration = _clamp(float(max(target_duration_seconds, 30)) / count, 4.0, 12.0)
+    selections: List[TrailerSelection] = []
+    cursor_seconds = 0.0
+
+    for output_index, (source_index, scene) in enumerate(ordered):
+        duration = _coerce_float(_scene_value(scene, "duration_seconds"), per_scene_duration)
+        duration = _clamp(duration if duration > 0 else per_scene_duration, 4.0, 12.0)
+        start_time = round(cursor_seconds, 2)
+        duration = round(duration, 2)
+        cursor_seconds += duration
+
+        scene_id = _scene_value(scene, "id")
+        chapter_id = _scene_value(scene, "chapter_id")
+        artifact_id = _scene_value(scene, "artifact_id")
+        selection_project_id = project_id or _scene_value(scene, "project_id")
+        selection_trailer_generation_id = trailer_generation_id or _scene_value(scene, "trailer_generation_id")
+
+        selections.append(
+            TrailerSelection(
+                project_id=selection_project_id,
+                trailer_generation_id=selection_trailer_generation_id,
+                source_scene_id=scene_id if isinstance(scene_id, uuid.UUID) else None,
+                chapter_id=chapter_id if isinstance(chapter_id, uuid.UUID) else None,
+                artifact_id=artifact_id if isinstance(artifact_id, uuid.UUID) else None,
+                source_index=_scene_source_index(scene, source_index),
+                selection_order=output_index + 1,
+                scene_title=str(_scene_value(scene, "scene_title", "") or "").strip() or None,
+                scene_description=str(_scene_value(scene, "scene_description", "") or "").strip(),
+                overall_score=round(_scene_score(scene, tone), 4),
+                start_time_seconds=start_time,
+                duration_seconds=duration,
+                trailer_role=_role_for_position(output_index, count),
+                selection_reason=_scene_value(scene, "selection_reason"),
+                selection_method=selection_method,
+                is_usable=True,
+                selection_metadata={
+                    "source_position": source_index,
+                    "tone": tone,
+                    "target_duration_seconds": target_duration_seconds,
+                },
+            )
+        )
+
+    return selections
 
 
 class TrailerSceneService:
@@ -111,29 +302,42 @@ class TrailerSceneService:
                 chapter_scenes = await self._analyze_chapter(chapter, trailer_gen.id, weights)
                 all_scenes.extend(chapter_scenes)
             
-            # 4. Rank and select top scenes
-            all_scenes.sort(key=lambda s: s.overall_score, reverse=True)
-            max_scenes = min(config.max_scenes, len(all_scenes))
-            selected_scenes = all_scenes[:max_scenes]
-            
-            # 5. Assign scene numbers to selected scenes
-            total_duration = 0.0
-            for i, scene in enumerate(selected_scenes):
+            # 4. Select the AC1 named surface: 5-8 usable highlights, ordered,
+            # with timing + trailer_role rows for trailer_selections.
+            selection_rows = select_highlight_scenes(
+                all_scenes,
+                project_id=project_id,
+                trailer_generation_id=trailer_gen.id,
+                target_scene_count=min(config.max_scenes, TRAILER_SELECTION_MAX_SCENES),
+                target_duration_seconds=config.target_duration_seconds,
+                tone=config.tone,
+                selection_method=SelectionMethod.AI_AUTO.value,
+            )
+            selected_scene_ids = {row.source_scene_id: row for row in selection_rows}
+            selected_scenes: List[TrailerScene] = []
+
+            # 5. Mirror the AC1 selections onto the legacy trailer_scenes surface
+            # so existing /api/v1/trailers routes continue to see selected scenes.
+            for scene in all_scenes:
+                row = selected_scene_ids.get(scene.id)
+                if row is None:
+                    scene.is_selected = False
+                    scene.scene_number = 0
+                    continue
                 scene.is_selected = True
-                scene.scene_number = i + 1
-                scene.start_time_seconds = total_duration
-                scene.duration_seconds = self._estimate_scene_duration(scene)
-                total_duration += scene.duration_seconds
-            
-            # 6. Mark remaining scenes as not selected
-            for scene in all_scenes[max_scenes:]:
-                scene.is_selected = False
-            
-            # 7. Add all scenes to DB
+                scene.scene_number = row.selection_order
+                scene.start_time_seconds = row.start_time_seconds
+                scene.duration_seconds = row.duration_seconds
+                selected_scenes.append(scene)
+
+            total_duration = sum(row.duration_seconds for row in selection_rows)
+
+            # 6. Add all analyzed candidates plus the narrowed AC1 selections to DB.
             self.session.add_all(all_scenes)
+            self.session.add_all(selection_rows)
             await self.session.commit()
             
-            # 8. Update trailer generation status
+            # 7. Update trailer generation status
             trailer_gen.scenes_selected_count = len(selected_scenes)
             trailer_gen.status = TrailerStatus.SCENES_SELECTED
             if total_duration > 0:
