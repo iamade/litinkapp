@@ -45,7 +45,7 @@ class TestSubscriptionTierConfig:
             SubscriptionTier.BASIC: 'Basic',
             SubscriptionTier.STANDARD: 'Standard',
             SubscriptionTier.PREMIUM: 'Premium',
-            SubscriptionTier.PROFESSIONAL: 'Professional',
+            SubscriptionTier.PROFESSIONAL: 'Pro',
         }
         for tier, name in expected.items():
             assert SubscriptionManager.TIER_LIMITS[tier]['display_name'] == name, f'{tier.value} display_name should be {name}'
