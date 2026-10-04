@@ -2472,6 +2472,12 @@ class FileService:
             reconstructed = self._reconstruct_epub_explicit_chapter_sequence(full_text)
             if not reconstructed:
                 return []
+            semantic_chapters = [
+                ch
+                for ch in reconstructed
+                if ch.get("content_type") == "chapter"
+                and self._is_chapter_like(ch.get("title", ""))
+            ]
 
         print(
             "[EPUB] Aggregate reconstruction produced "
@@ -2496,41 +2502,154 @@ class FileService:
         lines = full_text.splitlines()
         candidates: List[Dict[str, Any]] = []
 
-        for line_num, raw_line in enumerate(lines):
-            line = re.sub(r"\s+", " ", raw_line).strip()
-            if not re.match(r"(?i)^chap(?:ter|\.)\s+", line):
-                continue
+        def clean_line(raw: str) -> str:
+            return re.sub(r"\s+", " ", raw or "").strip()
 
-            match = self.structure_detector._match_chapter_patterns(line)
-            if not match:
-                continue
+        def compact_letter_spaced_words(text: str) -> str:
+            """Normalize OCR/scan headings like C H A P T E R."""
+            compacted = re.sub(
+                r"\b(?:[A-Za-z]\s+){2,}[A-Za-z]\b",
+                lambda match: re.sub(r"\s+", "", match.group(0)),
+                text,
+            )
+            # C H A P T E R I. compacts to CHAPTERI.; restore the boundary so
+            # the normal chapter parser can read the numeral.
+            return re.sub(
+                r"(?i)^(chap(?:ter|\.))([ivxlcdm]+|\d+)([\s\.:\-\u2013\u2014]|$)",
+                r"\1 \2\3",
+                compacted,
+            )
 
-            normalized = str(match.get("number", ""))
-            if not normalized.isdigit():
-                continue
-            number = int(normalized)
-            if number < 1 or number > 500:
-                continue
+        def normalized_heading_forms(raw: str) -> List[str]:
+            line = clean_line(raw)
+            compacted = compact_letter_spaced_words(line)
+            forms = [line]
+            if compacted != line:
+                forms.append(compacted)
+            return forms
 
-            subtitle = re.sub(r"\s+", " ", match.get("title", "") or "").strip()
-            if not subtitle:
-                # Subtitle lookahead: a bare heading ("CHAPTER I.") is followed
-                # by its title on the next non-empty line.
-                for lookahead in range(line_num + 1, min(line_num + 6, len(lines))):
-                    next_line = re.sub(r"\s+", " ", lines[lookahead]).strip()
-                    if not next_line:
-                        continue
-                    if self.structure_detector._match_chapter_patterns(next_line):
-                        break
-                    if self.structure_detector._match_special_sections(next_line):
-                        break
-                    if self._is_semantic_heading_candidate(next_line):
-                        subtitle = next_line
+        def numeric_value(raw_number: str) -> Optional[int]:
+            raw = clean_line(str(raw_number)).strip(".:- ")
+            if raw.isdigit():
+                value = int(raw)
+            elif re.fullmatch(r"(?i)[ivxlcdm]+", raw):
+                value = self.structure_detector._roman_to_int(raw.upper())
+            else:
+                return None
+            if 1 <= value <= 500:
+                return value
+            return None
+
+        def subtitle_after(line_num: int) -> str:
+            # Subtitle lookahead: a bare heading (CHAPTER I. or split CHAPTER/I.)
+            # may be followed by its title on the next non-empty line.
+            for lookahead in range(line_num + 1, min(line_num + 6, len(lines))):
+                next_line = clean_line(lines[lookahead])
+                if not next_line:
+                    continue
+                next_forms = normalized_heading_forms(next_line)
+                if any(
+                    self.structure_detector._match_chapter_patterns(form)
+                    for form in next_forms
+                ):
                     break
+                if any(
+                    self.structure_detector._match_special_sections(form)
+                    for form in next_forms
+                ):
+                    break
+                if self._is_semantic_heading_candidate(next_line):
+                    return next_line
+                break
+            return ""
+
+        def make_candidate(
+            line_num: int,
+            number: int,
+            subtitle: str = "",
+            mode: str = "chapter",
+        ) -> Dict[str, Any]:
             title = f"Chapter {number}"
+            subtitle = clean_line(subtitle)
             if subtitle and not self._is_narrative_prose_title(subtitle):
                 title = f"{title}: {subtitle}"
-            candidates.append({"line": line_num, "number": number, "title": title})
+            return {"line": line_num, "number": number, "title": title, "mode": mode}
+
+        def add_candidate(candidate: Dict[str, Any]) -> None:
+            if not any(
+                existing["line"] == candidate["line"]
+                and existing["number"] == candidate["number"]
+                for existing in candidates
+            ):
+                candidates.append(candidate)
+
+        def parse_chapter_line(line_num: int, raw_line: str) -> Optional[Dict[str, Any]]:
+            for form in normalized_heading_forms(raw_line):
+                if not re.match(r"(?i)^chap(?:ter|\.)\s+", form):
+                    continue
+                match = self.structure_detector._match_chapter_patterns(form)
+                if not match:
+                    continue
+                number = numeric_value(str(match.get("number", "")))
+                if number is None:
+                    continue
+                subtitle = clean_line(match.get("title", "") or "") or subtitle_after(line_num)
+                return make_candidate(line_num, number, subtitle, "chapter")
+            return None
+
+        def parse_split_number_line(raw_line: str) -> Optional[tuple[int, str]]:
+            line = clean_line(raw_line)
+            for form in normalized_heading_forms(line):
+                match = re.match(
+                    r"^([IVXLCDMivxlcdm]+|\d{1,3})\.?\s*(?:[\-:\u2013\u2014]\s*)?(.*)$",
+                    form,
+                )
+                if not match:
+                    continue
+                number = numeric_value(match.group(1))
+                if number is None:
+                    continue
+                subtitle = clean_line(match.group(2) or "")
+                return number, subtitle
+            return None
+
+        for line_num, raw_line in enumerate(lines):
+            line = clean_line(raw_line)
+            if not line:
+                continue
+
+            chapter_candidate = parse_chapter_line(line_num, line)
+            if chapter_candidate:
+                add_candidate(chapter_candidate)
+                continue
+
+            if any(
+                re.match(r"(?i)^chap(?:ter|\.)\.?$", form)
+                for form in normalized_heading_forms(line)
+            ):
+                for lookahead in range(line_num + 1, min(line_num + 6, len(lines))):
+                    next_line = clean_line(lines[lookahead])
+                    if not next_line:
+                        continue
+                    parsed = parse_split_number_line(next_line)
+                    if not parsed:
+                        break
+                    number, subtitle = parsed
+                    if not subtitle:
+                        subtitle = subtitle_after(lookahead)
+                    add_candidate(
+                        make_candidate(line_num, number, subtitle, "split_chapter")
+                    )
+                    break
+                continue
+
+            # Some scan/OCR EPUB exports render body headings as standalone Roman
+            # numerals after a compact TOC. Admit them only into the sequence scorer;
+            # page-number and TOC-like runs lose because their bodies are too short.
+            if re.fullmatch(r"[IVXLCDMivxlcdm]{1,12}\.?", line):
+                number = numeric_value(line)
+                if number is not None:
+                    add_candidate(make_candidate(line_num, number, "", "bare_roman"))
 
         sequences: List[List[Dict[str, Any]]] = []
         for start_index, candidate in enumerate(candidates):
@@ -2548,29 +2667,41 @@ class FileService:
         if not sequences:
             return []
 
-        def sequence_score(sequence: List[Dict[str, Any]]) -> tuple[int, int]:
-            # Internal chapter gaps distinguish a real body from a compact TOC.
-            internal_chars = sum(
-                sum(len(line) for line in lines[current["line"] : following["line"]])
-                for current, following in zip(sequence, sequence[1:])
-            )
-            return len(sequence), internal_chars
+        def back_matter_boundary(sequence: List[Dict[str, Any]]) -> tuple[int, str]:
+            last_line = sequence[-1]["line"]
+            for line_num in range(last_line + 1, len(lines)):
+                title = clean_line(lines[line_num])
+                if not title or len(title) > 160:
+                    continue
+                content_type = self._classify_spine_item(title, "", 0)
+                if content_type in {"back_matter", "metadata"}:
+                    return line_num, title
+            return len(lines), "Back Matter"
+
+        def sequence_score(sequence: List[Dict[str, Any]]) -> tuple[int, int, int]:
+            # Recovered body count and internal chapter gaps distinguish a real
+            # body sequence from a compact TOC. The c16691 Mac trace selected a
+            # one-chapter TOC artifact; score by recoverable chapters first.
+            back_matter_line, _ = back_matter_boundary(sequence)
+            recovered_count = 0
+            internal_chars = 0
+            for index, current in enumerate(sequence):
+                end_line = (
+                    sequence[index + 1]["line"]
+                    if index + 1 < len(sequence)
+                    else back_matter_line
+                )
+                content_length = sum(len(line) for line in lines[current["line"] : end_line])
+                if index + 1 < len(sequence):
+                    internal_chars += content_length
+                if content_length >= 100:
+                    recovered_count += 1
+            return recovered_count, len(sequence), internal_chars
 
         sequence = max(sequences, key=sequence_score)
         first_line = sequence[0]["line"]
-        last_line = sequence[-1]["line"]
 
-        back_matter_line = len(lines)
-        back_matter_title = "Back Matter"
-        for line_num in range(last_line + 1, len(lines)):
-            title = re.sub(r"\s+", " ", lines[line_num]).strip()
-            if not title or len(title) > 160:
-                continue
-            content_type = self._classify_spine_item(title, "", 0)
-            if content_type in {"back_matter", "metadata"}:
-                back_matter_line = line_num
-                back_matter_title = title
-                break
+        back_matter_line, back_matter_title = back_matter_boundary(sequence)
 
         recovered: List[Dict[str, Any]] = []
         front_content = "\n".join(lines[:first_line]).strip()
