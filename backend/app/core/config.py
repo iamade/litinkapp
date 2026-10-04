@@ -165,6 +165,7 @@ class Settings(BaseSettings):
     OAUTH_REDIRECT_BASE_URL: str = (
         ""  # e.g. https://api.litinkai.com/api/v1
     )
+    OAUTH_PRODUCTION_REDIRECT: bool = False  # KAN-388: when True, requires OAUTH_REDIRECT_BASE_URL to be set (skips API_BASE_URL fallback)
 
     # Google
     GOOGLE_CLIENT_ID: Optional[str] = None
