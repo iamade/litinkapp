@@ -4,25 +4,33 @@ import pytest
 
 from app.core.config import Settings
 from app.core.model_config import get_model_config
-from app.core.services import model_fallback as model_fallback_module
 from app.core.services.model_fallback import ModelFallbackManager
-from app.core.services.provider_router import ProviderRouter
+from app.core.services.provider_router import (
+    ProviderNotConfiguredError,
+    ProviderRouter,
+)
 
 
 def _chain(config):
-    return [
-        model
-        for model in (
-            config.primary,
-            config.fallback,
-            config.fallback2,
-            config.fallback3,
-            config.fallback4,
-            config.fallback5,
-            config.fallback6,
-        )
-        if model
-    ]
+    return config.models
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.is_connected = True
+        self.values = {}
+
+    async def connect(self):
+        self.is_connected = True
+
+    async def get(self, key):
+        return self.values.get(key)
+
+    async def set(self, key, value, expire=None):
+        self.values[key] = value
+
+    async def delete(self, key):
+        self.values.pop(key, None)
 
 
 def test_settings_reads_kan401_canonical_provider_keys(monkeypatch):
@@ -47,17 +55,19 @@ def test_settings_keeps_existing_zai_env_spelling_as_legacy_fallback(monkeypatch
     assert settings.z_ai_api_key == "legacy-zai-secret"
 
 
-def test_script_free_chain_preserves_ollama_primary_and_adds_kan401_providers():
+def test_script_free_chain_exposes_current_kan401_provider_ladder():
     config = get_model_config("script", "free")
 
     assert _chain(config) == [
-        "ollama/gemma4:31b",
         "zai/glm-5.2",
+        "ollama/gemma4:31b",
+        "featherless/zai-org/GLM-5.2",
         "piapi/gpt-4o-mini",
-        "featherless/meta-llama/Meta-Llama-3.1-8B-Instruct",
-        "ollama/ministral-3:8b",
-        "ollama/gemma3:12b",
-        "ollama/gemma3:4b",
+        "google/gemini-2.5-flash",
+        "openai/gpt-5-mini",
+        "anthropic/claude-haiku-4-5-20251001",
+        "zai/glm-5.1",
+        "minimax/MiniMax-M2",
     ]
 
 
@@ -76,10 +86,10 @@ def test_provider_router_routes_kan401_prefixed_models():
         "gpt-4o-mini",
     )
     assert router.get_client_and_model(
-        "featherless/meta-llama/Meta-Llama-3.1-8B-Instruct"
+        "featherless/zai-org/GLM-5.2", featherless_active=True
     ) == (
         router.featherless_client,
-        "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "zai-org/GLM-5.2",
     )
 
 
@@ -89,7 +99,7 @@ def test_provider_router_routes_kan401_prefixed_models():
         ("zai/glm-5.2", "Z_AI_API_KEY"),
         ("piapi/gpt-4o-mini", "PIAPI_API_KEY_LITINKAI"),
         (
-            "featherless/meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "featherless/zai-org/GLM-5.2",
             "FEATHERLESS_API_KEY_LITINKAI",
         ),
     ],
@@ -100,14 +110,15 @@ def test_provider_router_reports_exact_missing_kan401_key(model, expected_env):
     router.piapi_client = None
     router.featherless_client = None
 
-    with pytest.raises(ValueError) as exc_info:
-        router.get_client_and_model(model)
+    kwargs = {"featherless_active": True} if model.startswith("featherless/") else {}
+    with pytest.raises(ProviderNotConfiguredError) as exc_info:
+        router.get_client_and_model(model, **kwargs)
 
     assert expected_env in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_script_free_fallback_manager_attempts_full_kan401_chain(monkeypatch):
+async def test_script_free_fallback_manager_attempts_full_kan401_chain_without_redis():
     calls = []
 
     async def no_sleep(_seconds):
@@ -115,13 +126,11 @@ async def test_script_free_fallback_manager_attempts_full_kan401_chain(monkeypat
 
     async def fake_generation(**kwargs):
         calls.append(kwargs["model_id"])
-        if kwargs["model_id"].startswith("featherless/"):
+        if kwargs["model_id"] == "piapi/gpt-4o-mini":
             return {"status": "success"}
         return {"status": "error", "error": "429 rate limit"}
 
-    monkeypatch.setattr(model_fallback_module.asyncio, "sleep", no_sleep)
-
-    manager = ModelFallbackManager()
+    manager = ModelFallbackManager(redis_service=_FakeRedis(), sleep=no_sleep)
     result = await manager.try_with_fallback(
         service_type="script",
         user_tier="free",
@@ -131,9 +140,10 @@ async def test_script_free_fallback_manager_attempts_full_kan401_chain(monkeypat
 
     assert result["status"] == "success"
     assert calls == [
-        "ollama/gemma4:31b",
         "zai/glm-5.2",
+        "ollama/gemma4:31b",
+        "featherless/zai-org/GLM-5.2",
         "piapi/gpt-4o-mini",
-        "featherless/meta-llama/Meta-Llama-3.1-8B-Instruct",
     ]
-    assert result["model_used"] == "featherless/meta-llama/Meta-Llama-3.1-8B-Instruct"
+    assert result["model_used"] == "piapi/gpt-4o-mini"
+    assert result["attempts"] == 4
