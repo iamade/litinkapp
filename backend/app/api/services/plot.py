@@ -1932,10 +1932,12 @@ Return the enhanced script.
             )
 
             # Get plot overview
+            # KAN-331: deterministic tiebreak so this GET and backend script
+            # character resolution always pick the SAME overview row
             statement = (
                 select(PlotOverview)
                 .where(PlotOverview.book_id == book_id, PlotOverview.user_id == user_id)
-                .order_by(desc(PlotOverview.version))
+                .order_by(desc(PlotOverview.version), desc(PlotOverview.created_at))
                 .limit(1)
             )
 
