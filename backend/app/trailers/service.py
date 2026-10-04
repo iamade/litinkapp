@@ -28,7 +28,6 @@ from app.trailers.models import (
     TrailerScene,
     TrailerStatus,
     SelectionMethod,
-    TrailerSelection,
 )
 from app.trailers.schemas import (
     TrailerAnalyzeRequest,
@@ -163,6 +162,87 @@ def _role_for_position(index: int, count: int) -> str:
     return TRAILER_ROLE_SEQUENCE[role_index]
 
 
+
+def _uuid_or_none(value: Any) -> Optional[uuid.UUID]:
+    return value if isinstance(value, uuid.UUID) else None
+
+
+def _set_selection_adapter_fields(
+    scene: TrailerScene,
+    *,
+    source_scene_id: Optional[uuid.UUID],
+    source_index: int,
+    selection_order: int,
+    trailer_role: str,
+    project_id: Optional[uuid.UUID],
+    selection_method: str,
+    tone: str,
+    target_duration_seconds: int,
+) -> None:
+    """Attach non-persistent AC1 adapter fields to a TrailerScene row.
+
+    KAN-149's public selection surface needs ordered scenes with timing and a
+    trailer_role, but LC ruled that persistence must remain on the scaffold's
+    existing trailer_scenes table. These transient attributes keep the adapter
+    contract available to callers/tests without introducing a new SQLModel or
+    table.
+    """
+    object.__setattr__(scene, "source_scene_id", source_scene_id)
+    object.__setattr__(scene, "source_index", source_index)
+    object.__setattr__(scene, "selection_order", selection_order)
+    object.__setattr__(scene, "trailer_role", trailer_role)
+    object.__setattr__(scene, "project_id", project_id)
+    object.__setattr__(scene, "selection_method", selection_method)
+    object.__setattr__(
+        scene,
+        "selection_metadata",
+        {
+            "source_position": source_index,
+            "tone": tone,
+            "target_duration_seconds": target_duration_seconds,
+        },
+    )
+
+
+def _scene_to_trailer_scene(
+    scene: Any,
+    *,
+    selection_order: int,
+    start_time_seconds: float,
+    duration_seconds: float,
+    trailer_generation_id: Optional[uuid.UUID],
+) -> TrailerScene:
+    if isinstance(scene, TrailerScene):
+        scene.scene_number = selection_order
+        scene.start_time_seconds = start_time_seconds
+        scene.duration_seconds = duration_seconds
+        scene.is_selected = True
+        if trailer_generation_id is not None:
+            scene.trailer_generation_id = trailer_generation_id
+        return scene
+
+    generation_id = _uuid_or_none(trailer_generation_id or _scene_value(scene, "trailer_generation_id"))
+    kwargs: Dict[str, Any] = {
+        "scene_number": selection_order,
+        "chapter_id": _uuid_or_none(_scene_value(scene, "chapter_id")),
+        "artifact_id": _uuid_or_none(_scene_value(scene, "artifact_id")),
+        "scene_title": str(_scene_value(scene, "scene_title", "") or "").strip() or None,
+        "scene_description": str(_scene_value(scene, "scene_description", "") or "").strip(),
+        "action_score": _coerce_float(_scene_value(scene, "action_score")),
+        "emotional_score": _coerce_float(_scene_value(scene, "emotional_score")),
+        "visual_score": _coerce_float(_scene_value(scene, "visual_score")),
+        "narrative_score": _coerce_float(_scene_value(scene, "narrative_score")),
+        "overall_score": _coerce_float(_scene_value(scene, "overall_score")),
+        "is_selected": True,
+        "selection_reason": _scene_value(scene, "selection_reason"),
+        "start_time_seconds": start_time_seconds,
+        "duration_seconds": duration_seconds,
+    }
+    if generation_id is not None:
+        kwargs["trailer_generation_id"] = generation_id
+    return TrailerScene(**kwargs)
+
+
 def select_highlight_scenes(
     candidate_scenes: Sequence[Any],
     *,
@@ -172,12 +252,13 @@ def select_highlight_scenes(
     target_duration_seconds: int = 60,
     tone: str = "epic",
     selection_method: str = "scored",
-) -> List[TrailerSelection]:
-    """Select the KAN-149 AC1 highlight scene proof surface.
+) -> List[TrailerScene]:
+    """Select KAN-149 highlight scenes as a TrailerScene adapter.
 
     Returns 5-8 usable highlight scenes, ordered for a stitched trailer proof.
-    Each returned TrailerSelection carries deterministic timing and a
-    trailer_role; callers may persist the returned rows to trailer_selections.
+    Timing is persisted onto the existing trailer_scenes surface; trailer_role
+    and selection_order/source_index are transient adapter attributes so no new
+    table or model is introduced.
     """
     indexed_scenes: List[Tuple[int, Any]] = list(enumerate(candidate_scenes))
     usable_scenes = [
@@ -198,47 +279,42 @@ def select_highlight_scenes(
     ordered = sorted(ranked, key=lambda item: (_scene_source_index(item[1], item[0]), item[0]))
 
     per_scene_duration = _clamp(float(max(target_duration_seconds, 30)) / count, 4.0, 12.0)
-    selections: List[TrailerSelection] = []
+    selections: List[TrailerScene] = []
     cursor_seconds = 0.0
 
-    for output_index, (source_index, scene) in enumerate(ordered):
+    for output_index, (fallback_index, scene) in enumerate(ordered):
         duration = _coerce_float(_scene_value(scene, "duration_seconds"), per_scene_duration)
         duration = _clamp(duration if duration > 0 else per_scene_duration, 4.0, 12.0)
         start_time = round(cursor_seconds, 2)
         duration = round(duration, 2)
         cursor_seconds += duration
 
-        scene_id = _scene_value(scene, "id")
-        chapter_id = _scene_value(scene, "chapter_id")
-        artifact_id = _scene_value(scene, "artifact_id")
-        selection_project_id = project_id or _scene_value(scene, "project_id")
-        selection_trailer_generation_id = trailer_generation_id or _scene_value(scene, "trailer_generation_id")
-
-        selections.append(
-            TrailerSelection(
-                project_id=selection_project_id,
-                trailer_generation_id=selection_trailer_generation_id,
-                source_scene_id=scene_id if isinstance(scene_id, uuid.UUID) else None,
-                chapter_id=chapter_id if isinstance(chapter_id, uuid.UUID) else None,
-                artifact_id=artifact_id if isinstance(artifact_id, uuid.UUID) else None,
-                source_index=_scene_source_index(scene, source_index),
-                selection_order=output_index + 1,
-                scene_title=str(_scene_value(scene, "scene_title", "") or "").strip() or None,
-                scene_description=str(_scene_value(scene, "scene_description", "") or "").strip(),
-                overall_score=round(_scene_score(scene, tone), 4),
-                start_time_seconds=start_time,
-                duration_seconds=duration,
-                trailer_role=_role_for_position(output_index, count),
-                selection_reason=_scene_value(scene, "selection_reason"),
-                selection_method=selection_method,
-                is_usable=True,
-                selection_metadata={
-                    "source_position": source_index,
-                    "tone": tone,
-                    "target_duration_seconds": target_duration_seconds,
-                },
-            )
+        selection_order = output_index + 1
+        source_index = _scene_source_index(scene, fallback_index)
+        adapted_scene = _scene_to_trailer_scene(
+            scene,
+            selection_order=selection_order,
+            start_time_seconds=start_time,
+            duration_seconds=duration,
+            trailer_generation_id=trailer_generation_id,
         )
+        source_scene_id = (
+            adapted_scene.id
+            if isinstance(scene, TrailerScene)
+            else _uuid_or_none(_scene_value(scene, "id"))
+        )
+        _set_selection_adapter_fields(
+            adapted_scene,
+            source_scene_id=source_scene_id,
+            source_index=source_index,
+            selection_order=selection_order,
+            trailer_role=_role_for_position(output_index, count),
+            project_id=project_id or _uuid_or_none(_scene_value(scene, "project_id")),
+            selection_method=selection_method,
+            tone=tone,
+            target_duration_seconds=target_duration_seconds,
+        )
+        selections.append(adapted_scene)
 
     return selections
 
@@ -302,9 +378,10 @@ class TrailerSceneService:
                 chapter_scenes = await self._analyze_chapter(chapter, trailer_gen.id, weights)
                 all_scenes.extend(chapter_scenes)
             
-            # 4. Select the AC1 named surface: 5-8 usable highlights, ordered,
-            # with timing + trailer_role rows for trailer_selections.
-            selection_rows = select_highlight_scenes(
+            # 4. Select the AC1 named surface as an adapter over trailer_scenes:
+            # 5-8 usable highlights, ordered, with timing persisted on the
+            # existing scaffold table and trailer_role exposed transiently.
+            selected_scenes = select_highlight_scenes(
                 all_scenes,
                 project_id=project_id,
                 trailer_generation_id=trailer_gen.id,
@@ -313,28 +390,20 @@ class TrailerSceneService:
                 tone=config.tone,
                 selection_method=SelectionMethod.AI_AUTO.value,
             )
-            selected_scene_ids = {row.source_scene_id: row for row in selection_rows}
-            selected_scenes: List[TrailerScene] = []
+            selected_scene_ids = {scene.id for scene in selected_scenes}
 
-            # 5. Mirror the AC1 selections onto the legacy trailer_scenes surface
-            # so existing /api/v1/trailers routes continue to see selected scenes.
+            # 5. Persist only via the legacy trailer_scenes surface so existing
+            # /api/v1/trailers routes continue to see selected scenes.
             for scene in all_scenes:
-                row = selected_scene_ids.get(scene.id)
-                if row is None:
+                if scene.id not in selected_scene_ids:
                     scene.is_selected = False
                     scene.scene_number = 0
-                    continue
-                scene.is_selected = True
-                scene.scene_number = row.selection_order
-                scene.start_time_seconds = row.start_time_seconds
-                scene.duration_seconds = row.duration_seconds
-                selected_scenes.append(scene)
 
-            total_duration = sum(row.duration_seconds for row in selection_rows)
+            total_duration = sum(scene.duration_seconds for scene in selected_scenes)
 
-            # 6. Add all analyzed candidates plus the narrowed AC1 selections to DB.
+            # 6. Add all analyzed candidates; the selected subset is represented
+            # by is_selected/scene_number/timing on trailer_scenes (no new table).
             self.session.add_all(all_scenes)
-            self.session.add_all(selection_rows)
             await self.session.commit()
             
             # 7. Update trailer generation status

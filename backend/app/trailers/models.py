@@ -7,7 +7,7 @@ TrailerScene - stores selected/analyzed scenes for trailer
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 from sqlmodel import Field, SQLModel, Column, Relationship
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy import text, func, ForeignKey
@@ -138,10 +138,6 @@ class TrailerGeneration(SQLModel, table=True):
         back_populates="trailer_generation",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
-    selections: List["TrailerSelection"] = Relationship(
-        back_populates="trailer_generation",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
-    )
 
 
 class TrailerScene(SQLModel, table=True):
@@ -211,88 +207,3 @@ class TrailerScene(SQLModel, table=True):
 
     # Relationships
     trailer_generation: TrailerGeneration = Relationship(back_populates="scenes")
-
-class TrailerSelection(SQLModel, table=True):
-    """KAN-149 AC1 highlight scene selection for stitched-trailer proof.
-
-    This table is intentionally separate from trailer_scenes: trailer_scenes may
-    contain all analyzed/scored candidates, while trailer_selections is the
-    narrowed, ordered 5-8 scene proof surface with timing and trailer_role.
-    """
-    __tablename__ = "trailer_selections"
-
-    id: uuid.UUID = Field(
-        sa_column=Column(
-            pg.UUID(as_uuid=True),
-            primary_key=True,
-            server_default=text("gen_random_uuid()"),
-        ),
-        default_factory=uuid.uuid4,
-    )
-    trailer_generation_id: Optional[uuid.UUID] = Field(
-        default=None,
-        sa_column=Column(
-            pg.UUID(as_uuid=True),
-            ForeignKey("trailer_generations.id", ondelete="CASCADE"),
-            nullable=True,
-            index=True,
-        ),
-    )
-    project_id: Optional[uuid.UUID] = Field(
-        default=None,
-        sa_column=Column(
-            pg.UUID(as_uuid=True),
-            ForeignKey("projects.id", ondelete="CASCADE"),
-            nullable=True,
-            index=True,
-        ),
-    )
-    source_scene_id: Optional[uuid.UUID] = Field(
-        default=None,
-        sa_column=Column(
-            pg.UUID(as_uuid=True),
-            ForeignKey("trailer_scenes.id", ondelete="SET NULL"),
-            nullable=True,
-            index=True,
-        ),
-    )
-    chapter_id: Optional[uuid.UUID] = Field(
-        default=None,
-        sa_column=Column(pg.UUID(as_uuid=True), nullable=True, index=True),
-    )
-    artifact_id: Optional[uuid.UUID] = Field(
-        default=None,
-        sa_column=Column(pg.UUID(as_uuid=True), nullable=True, index=True),
-    )
-
-    source_index: int = Field(default=0)
-    selection_order: int = Field(nullable=False)
-    scene_title: Optional[str] = Field(default=None)
-    scene_description: str = Field(sa_column=Column(pg.TEXT, nullable=False))
-    overall_score: float = Field(default=0.0)
-
-    # AC1 stitched-trailer proof fields.
-    start_time_seconds: float = Field(default=0.0)
-    duration_seconds: float = Field(default=6.0)
-    trailer_role: str = Field(nullable=False)
-
-    selection_reason: Optional[str] = Field(
-        default=None,
-        sa_column=Column(pg.TEXT),
-    )
-    selection_method: str = Field(default="scored")
-    is_usable: bool = Field(default=True)
-    selection_metadata: Dict[str, Any] = Field(
-        default_factory=dict,
-        sa_column=Column(pg.JSONB, server_default=text("'{}'::jsonb")),
-    )
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        sa_column=Column(
-            pg.TIMESTAMP(timezone=True),
-            nullable=False,
-            server_default=text("CURRENT_TIMESTAMP"),
-        ),
-    )
-
-    trailer_generation: Optional[TrailerGeneration] = Relationship(back_populates="selections")
