@@ -149,9 +149,10 @@ class TestKan226CombinedPipeline:
         assert len(real_chapters) == 2
         titles = [c["title"] for c in real_chapters]
         assert titles == ["Chapter 1: TERRIBLE", "Chapter 9: DOCTOR"]
-        # Position-based renumbering assigns clean sequential numbers once
-        # duplicates are gone.
-        assert [c["number"] for c in real_chapters] == ["1", "2"]
+        # KAN-227: numbers derive from detected headings — after dedupe the
+        # survivors keep their real chapter numbers (sequential renumbering
+        # caused the KAN-227 drift: CHAPTER 9 was displayed as 2).
+        assert [c["number"] for c in real_chapters] == ["1", "9"]
 
         front_back = {c["title"]: c for c in result if c.get("content_type") != "chapter"}
         assert front_back["Table of Contents"]["use_in_generation"] is False
