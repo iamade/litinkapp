@@ -355,8 +355,12 @@ async def create_character_placeholder(
             }
 
         # Create placeholder character
+        # KAN-331: book_id/user_id are nullable=False on Character; thread them
+        # in from request scope so the INSERT doesn't raise NotNullViolation.
         new_character = Character(
             plot_overview_id=plot_overview.id,
+            book_id=book_id,
+            user_id=current_user.id,
             name=character_name,
             entity_type=entity_type,
             role="supporting" if entity_type == "character" else entity_type,
