@@ -1397,12 +1397,25 @@ class BookStructureDetector:
                         f"{LogSanitizer.redact(chapter_title, label='title')}"
                     )
 
-        # KAN-367 v3: Renumber only chapters sequentially from 1
+        # KAN-227: keep heading-derived chapter numbers (II/V/IX stay 2/5/9);
+        # use extraction order ONLY as a fallback for chapters whose headings
+        # carry no usable number, and never emit duplicates (1,1,1).
         chapter_seq = 0
+        seen_chapter_numbers = set()
         for item in all_items:
             if item.get("content_type") == "chapter":
                 chapter_seq += 1
-                item["number"] = str(chapter_seq)
+                detected = str(item.get("number") or "").strip()
+                if detected.isdigit() and detected not in seen_chapter_numbers:
+                    item["number"] = detected
+                else:
+                    # No reliable heading number (or it collided) — assign the
+                    # sequence position, skipping values already taken.
+                    next_num = chapter_seq
+                    while str(next_num) in seen_chapter_numbers:
+                        next_num += 1
+                    item["number"] = str(next_num)
+                seen_chapter_numbers.add(item["number"])
             self._with_generation_flag(item)
 
         print(
@@ -3151,6 +3164,22 @@ class FileService:
             return True
         return False
 
+    def _is_structural_chapter_heading(self, title: str) -> bool:
+        """KAN-227: explicit chapter-pattern headings are structure, not prose.
+
+        Classic Gutenberg headings like ``Chapter IX.`` / ``CHAPTER 3`` end in
+        a period or carry no subtitle, which the narrative-prose filter treats
+        as body text. A heading element whose text matches an explicit chapter
+        pattern is a structural chapter boundary and must never be filtered.
+        """
+        t = re.sub(r"\s+", " ", (title or "").strip())
+        if not t:
+            return False
+        if self._is_chapter_like(t):
+            return True
+        match = self.structure_detector._match_chapter_patterns(t)
+        return bool(match and str(match.get("number", "")).strip())
+
     def _classify_spine_item(self, title: str, item_href: str, word_count: int) -> str:
         """KAN-367 v3: Classify a spine item as front_matter, back_matter, metadata, or chapter.
 
@@ -3263,6 +3292,12 @@ class FileService:
 
         # --- Step 2: Classify all items (PRESERVE, don't drop) ---
         chapter_count = 0
+        seen_chapter_numbers = set()
+        # KAN-226: a run of chapters whose detected numbers already ascend from
+        # 1 (1,2,3…) is a fresh extraction — sequential numbering is correct.
+        # Off-run entries (sparse real numbers like CHAPTER 9, or a detected
+        # duplicate) keep their heading-derived number so it never drifts.
+        expected_seq = 1
         front_count = 0
         back_count = 0
         meta_count = 0
@@ -3313,7 +3348,23 @@ class FileService:
                 ch["content_type"] = "chapter"
                 self._with_generation_flag(ch)
                 chapter_count += 1
-                ch["number"] = str(chapter_count)
+                detected = str(ch.get("number") or "").strip()
+                if (
+                    detected == str(expected_seq)
+                    and detected not in seen_chapter_numbers
+                ):
+                    ch["number"] = detected
+                    expected_seq += 1
+                elif detected.isdigit() and detected not in seen_chapter_numbers and int(detected) > expected_seq - 1:
+                    # Genuine out-of-sequence heading number (e.g. CHAPTER 9
+                    # after the 1-run broke): keep it verbatim.
+                    ch["number"] = detected
+                else:
+                    next_num = expected_seq
+                    while str(next_num) in seen_chapter_numbers:
+                        next_num += 1
+                    ch["number"] = str(next_num)
+                seen_chapter_numbers.add(ch["number"])
 
         print(
             f"[EPUB-STRUCTURAL] Classified: {len(chapters)} total items — "
@@ -3390,6 +3441,19 @@ class FileService:
         order.sort()
         return [chapters[i] for i in order]
 
+    @staticmethod
+    def _next_content_sibling(node: Any) -> Any:
+        """Next sibling skipping whitespace-only text nodes (KAN-227).
+
+        EPUB serializers inject ``\n`` text nodes between elements, so a
+        heading followed only by blank strings has no real content in its own
+        container — the chapter body then lives after an ancestor wrapper.
+        """
+        sib = node.next_sibling
+        while sib is not None and isinstance(sib, str) and not str(sib).strip():
+            sib = sib.next_sibling
+        return sib
+
     def _split_spine_item_by_headings(self, soup, item_idx: int) -> List[Dict[str, Any]]:
         """Split a single spine item into sub-chapters by heading elements.
 
@@ -3399,9 +3463,16 @@ class FileService:
         Returns a list of dicts with 'title' and 'soup_fragment' keys.
         """
         sub_chapters = []
+        seen_headings = set()
 
-        # Find all heading elements
-        headings = soup.find_all(["h1", "h2", "h3", "h4"])
+        # Find all heading elements (deduped: a heading is one element even when
+        # find_all traverses multiple ancestor paths in exotic trees).
+        headings = []
+        for heading in soup.find_all(["h1", "h2", "h3", "h4"]):
+            if id(heading) in seen_headings:
+                continue
+            seen_headings.add(id(heading))
+            headings.append(heading)
 
         if len(headings) < 2:
             # 0 or 1 heading — this item is a single chapter (or no chapter)
@@ -3412,26 +3483,56 @@ class FileService:
             heading_text = heading.get_text().strip()
             if not heading_text:
                 continue
-            if self._is_narrative_prose_title(heading_text):
+            if (
+                self._is_narrative_prose_title(heading_text)
+                and not self._is_structural_chapter_heading(heading_text)
+            ):
                 print(
                     "[EPUB] Ignoring prose-like heading: "
                     f"{LogSanitizer.redact(heading_text, label='title')}"
                 )
                 continue
 
-            # Collect all siblings until the next heading of same or higher level
+            # Collect all siblings until the next heading of same or higher level.
+            #
+            # KAN-227: many EPUBs (Project Gutenberg shape) wrap each heading in
+            # its own container — ``<div class="chapter"><h2>…</h2></div>`` —
+            # with the chapter paragraphs as siblings of the *wrapper*, not of
+            # the heading. Serializers also inject whitespace-only text nodes,
+            # so "no content follows inside this container" means the next
+            # non-blank sibling is absent. Climb ancestors until a container
+            # with a real following sibling is found (bounded by <body>).
+            start_node = heading
+            while (
+                self._next_content_sibling(start_node) is None
+                and start_node.parent is not None
+                and start_node.parent.name not in ("body", "html", "[document]")
+            ):
+                start_node = start_node.parent
+
             content_elements = []
-            sibling = heading.next_sibling
-            heading_level = int(heading.name[1])  # h1=1, h2=2, etc.
+            sibling = self._next_content_sibling(start_node)
+            start_level = int(heading.name[1])  # h1=1, h2=2, etc.
 
             while sibling:
-                if hasattr(sibling, 'name') and sibling.name in ["h1", "h2", "h3", "h4"]:
-                    sibling_level = int(sibling.name[1])
-                    # Stop at same or higher level heading
-                    if sibling_level <= heading_level:
+                if getattr(sibling, "name", None):
+                    # Stop at a same-or-higher-level heading, whether it IS the
+                    # sibling or is nested inside a wrapper sibling (Gutenberg).
+                    nested = (
+                        [sibling]
+                        if sibling.name in ["h1", "h2", "h3", "h4"]
+                        else sibling.find_all(["h1", "h2", "h3", "h4"])
+                    )
+                    stop = False
+                    for sh in nested:
+                        if sh is not heading and int(sh.name[1]) <= start_level:
+                            if sh.get_text().strip():
+                                stop = True
+                                break
+                    if stop:
                         break
                 content_elements.append(sibling)
-                sibling = sibling.next_sibling
+                sibling = self._next_content_sibling(sibling)
 
             # Build content text from elements
             content_parts = []
@@ -3515,22 +3616,34 @@ class FileService:
                                 )
                                 continue
 
-                            # KAN-367 v3: Classify BEFORE incrementing chapter_number
+                            # KAN-227: classify BEFORE numbering
                             content_type = self._classify_spine_item(
                                 sub_title, item_href, sub_word_count
                             )
 
                             if content_type == "chapter":
                                 chapter_number += 1
+                                # KAN-227: derive the chapter number from the
+                                # detected heading when it carries one
+                                # ("CHAPTER 9" stays 9); fall back to the
+                                # chapter-only sequence counter otherwise.
+                                sub_num = None
+                                m = self.structure_detector._match_chapter_patterns(
+                                    sub_title
+                                )
+                                if m:
+                                    _norm = str(m.get("number", ""))
+                                    if _norm.isdigit():
+                                        sub_num = _norm
                                 chapters.append(self._with_generation_flag({
-                                    "number": str(chapter_number),
+                                    "number": sub_num or str(chapter_number),
                                     "title": sub_title,
                                     "content": sub_content,
                                     "type": "chapter",
                                     "content_type": "chapter",
                                 }))
                                 print(
-                                    f"[EPUB] Added chapter {chapter_number}: "
+                                    f"[EPUB] Added chapter {sub_num or chapter_number}: "
                                     f"{LogSanitizer.redact(sub_title, label='title')}"
                                 )
                             else:
@@ -3573,7 +3686,11 @@ class FileService:
                             break
 
                     # If no heading found, use first line as title or try to detect chapter pattern
-                    if title and self._is_narrative_prose_title(title):
+                    if (
+                        title
+                        and self._is_narrative_prose_title(title)
+                        and not self._is_structural_chapter_heading(title)
+                    ):
                         print(
                             "[EPUB] Rejected prose-like title candidate: "
                             f"{LogSanitizer.redact(title, label='title')}"
