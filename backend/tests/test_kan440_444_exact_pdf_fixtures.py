@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 
 import fitz
+import pytest
 
 from app.core.services.file import FileService
 
@@ -186,3 +187,157 @@ def test_last_president_like_pdf_text_keeps_roman_chapters_and_continuations():
     assert any(section.get("content_type") == "back_matter" for section in sections)
     assert not any("Continuation fragment" in chapter["title"] for chapter in chapters)
     assert "chapter 1 continuation narrative line 13" in chapters[0]["content"]
+
+
+# --- KAN-440 regression tests: section-scoped dedupe + matter numbering +
+# bare-heading title cap ---
+
+
+def test_kan440_cross_part_duplicate_numbers_are_section_scoped():
+    """Per-PART numbering restarts must not collide in _dedupe_chapters_by_number.
+
+    The real defect: orwell1984.pdf PART bodies with the same number were
+    compared across sections — a near-tie (21365*2=42730 <= 42828) dropped a
+    real chapter, losing 5 of 23. Intra-section dominance must still fire,
+    and flat/section-less lists keep KAN-226 behavior byte-for-byte.
+    """
+    service = FileService()
+
+    def _mk(title, number, body, section_title=None, section_number=None):
+        chapter = {
+            "title": title,
+            "number": number,
+            "content": body,
+            "content_type": "chapter",
+        }
+        if section_title is not None:
+            chapter["section_title"] = section_title
+            chapter["section_number"] = section_number
+        return chapter
+
+    cross_part = [
+        _mk("Chapter 8", "8", "x" * 21365, "PART ONE", "1"),
+        _mk("Chapter 8", "8", "y" * 42828, "PART THREE", "3"),
+        _mk("Chapter 5", "5", "z" * 8492, "PART TWO", "2"),
+        _mk("Chapter 5", "5", "w" * 29118, "PART THREE", "3"),
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        kept = service._dedupe_chapters_by_number(cross_part)
+    assert [c["title"] for c in kept] == ["Chapter 8", "Chapter 8", "Chapter 5", "Chapter 5"]
+
+    intra_section = [
+        _mk("Chapter 2", "2", "frag " * 40, "PART ONE", "1"),
+        _mk("Chapter 2", "2", "real " * 400, "PART ONE", "1"),
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        kept_intra = service._dedupe_chapters_by_number(intra_section)
+    assert len(kept_intra) == 1
+    assert kept_intra[0]["title"] == "Chapter 2"
+
+    flat = [
+        {"title": "Chapter 1", "number": "1", "content": "frag " * 40, "content_type": "chapter"},
+        {"title": "Chapter 1", "number": "1", "content": "real " * 400, "content_type": "chapter"},
+    ]
+    with contextlib.redirect_stdout(io.StringIO()):
+        kept_flat = service._dedupe_chapters_by_number(flat)
+    assert len(kept_flat) == 1
+
+
+@pytest.mark.asyncio
+async def test_kan440_front_back_matter_hierarchical_numbering_is_none():
+    """Front/back matter sections must surface chapter_number=None.
+
+    At base, Front Matter consumed chapter slot 1 and APPENDIX surfaced as
+    chapter 25 in the BookView — read-only matter must stay unnumbered.
+    """
+    service = FileService()
+    filler = " ".join(["narrative body words"] * 120)
+    structure = {
+        "has_sections": True,
+        "structure_type": "book",
+        "sections": [
+            {
+                "title": "Front Matter",
+                "type": "special",
+                "content_type": "front_matter",
+                "content": filler,
+                "chapters": [],
+            },
+            {
+                "title": "PART ONE",
+                "type": "part",
+                "number": "1",
+                "chapters": [
+                    {"title": "Chapter 1", "number": "1", "content": filler, "content_type": "chapter"},
+                    {"title": "Chapter 2", "number": "2", "content": filler, "content_type": "chapter"},
+                ],
+            },
+            {
+                "title": "APPENDIX.",
+                "type": "special",
+                "content_type": "back_matter",
+                "content": filler,
+                "chapters": [],
+            },
+        ],
+    }
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        chapters = await service._extract_hierarchical_chapters(
+            structure, book_type="entertainment", book_content=filler
+        )
+
+    assert [c["content_type"] for c in chapters] == [
+        "front_matter",
+        "chapter",
+        "chapter",
+        "back_matter",
+    ]
+    assert chapters[0]["chapter_number"] is None
+    assert chapters[-1]["chapter_number"] is None
+    assert [c["chapter_number"] for c in chapters[1:3]] == [2, 3]
+
+
+def test_kan440_bare_numbered_heading_caps_prose_subtitle():
+    """A bare numbered heading must not absorb the next prose line as subtitle.
+
+    Real short titles on the next line (Last-President shape) are still
+    appended; running narrative prose (orwell shape: 52-char sentence that
+    passes the semantic filter) is never appended.
+    """
+    service = FileService()
+
+    def prose(label: str, lines: int = 14) -> str:
+        return "\n".join(
+            f"{label} narrative line {idx} carries enough body text for detection."
+            for idx in range(lines)
+        )
+
+    content = "\n\n".join(
+        [
+            "PART ONE",
+            "Chapter 1",
+            "It was a bright cold day in April, and the clocks were striking thirteen.",
+            prose("chapter 1"),
+            "Chapter 2",
+            "Winston looked round the shabby little room above Mr Charrington",
+            prose("chapter 2"),
+            "PART TWO",
+            "Chapter 3",
+            "The Reign of Confusion",
+            prose("chapter 3"),
+        ]
+    )
+
+    result = _detect_quietly(service, content)
+    titles = [
+        chapter["title"]
+        for section in (result["sections"] or [])
+        for chapter in section.get("chapters") or []
+    ]
+
+    assert "Chapter 1" in titles
+    assert "Chapter 2" in titles
+    assert "Chapter 3: The Reign of Confusion" in titles
+    assert not any("bright cold day" in title for title in titles)
+    assert not any("shabby little room" in title for title in titles)

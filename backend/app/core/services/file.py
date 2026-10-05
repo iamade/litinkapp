@@ -1,7 +1,7 @@
 import uuid
 import aiofiles
 from fastapi import UploadFile
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import os
 import PyPDF2
 import docx
@@ -607,16 +607,27 @@ class BookStructureDetector:
                 if chapter_subtitle:
                     chapter_title = f"Chapter {chapter_display_number}: {chapter_subtitle}"
                 else:
-                    # No subtitle, look for title in next few lines
+                    # KAN-440: the heading line alone matched a chapter pattern
+                    # with a number, so the following line is either a real
+                    # short title (Last-President shape: "CHAPTER I" then "The
+                    # Reign of Confusion") or running narrative prose (orwell
+                    # shape: "Chapter 4" then "Winston looked round the shabby
+                    # little room above Mr", 52 chars that slipped past the
+                    # semantic filter). The FIRST heading-like line after the
+                    # bare numbered heading decides the subtitle, and it is
+                    # appended only when it is short — never append prose.
                     title_found = None
                     for i in range(line_num + 1, min(line_num + 5, len(lines))):
                         next_line = lines[i].strip()
                         if not next_line:
                             continue
-                        if self._is_semantic_heading_candidate(next_line):
-                            if not self._match_chapter_patterns(next_line):
-                                title_found = next_line
-                                break
+                        if not self._is_semantic_heading_candidate(next_line):
+                            continue
+                        if self._match_chapter_patterns(next_line):
+                            break
+                        if len(next_line) <= 48 and len(next_line.split()) <= 8:
+                            title_found = next_line
+                        break
 
                     if title_found:
                         chapter_title = f"Chapter {chapter_display_number}: {title_found}"
@@ -3446,13 +3457,20 @@ class FileService:
         collided (OCR noise); those are KEPT so downstream renumbering can
         assign them unique numbers (KAN-227 semantics). Front/back matter and
         entries without a parseable number pass through untouched.
+
+        KAN-440: the dominance comparison is scoped to INTRA-section
+        duplicates — keyed by (section_title, section_number, number). Books
+        whose numbering restarts per PART/BOOK legitimately repeat numbers
+        across sections, so bodies must never be compared across that
+        boundary. Section-less/flat lists all share the empty section key
+        and keep the KAN-226 behavior byte-for-byte.
         """
         DOMINANCE_RATIO = 2
 
         if not chapters or len(chapters) < 2:
             return chapters
 
-        indices_by_number: Dict[str, List[int]] = {}
+        indices_by_number: Dict[Tuple[str, str, str], List[int]] = {}
         for idx, ch in enumerate(chapters):
             content_type = ch.get("content_type") or "chapter"
             raw_number = ch.get("number")
@@ -3463,11 +3481,16 @@ class FileService:
             )
             if not normalized.isdigit():
                 continue
-            indices_by_number.setdefault(normalized, []).append(idx)
+            section_key = (
+                str(ch.get("section_title") or ""),
+                str(ch.get("section_number") or ""),
+                normalized,
+            )
+            indices_by_number.setdefault(section_key, []).append(idx)
 
         drop = set()
         duplicates_dropped = 0
-        for normalized, idxs in indices_by_number.items():
+        for (_sec_title, _sec_num, normalized), idxs in indices_by_number.items():
             if len(idxs) < 2:
                 continue
             lengths = {
@@ -8112,6 +8135,18 @@ class FileService:
                 f"{LogSanitizer.redact(section_title, label='title')}"
             )
 
+            # KAN-367 v3: propagate content_type from the parent section
+            # so the project upload path can distinguish front/back matter.
+            # KAN-440: front/back/metadata sections are not chapters — their
+            # entries must stay unnumbered (chapter_number=None) instead of
+            # consuming global numbering slots in the BookView (Front Matter
+            # was surfacing as chapter 1 and APPENDIX as chapter 25).
+            is_non_chapter_section = section_content_type in (
+                "front_matter",
+                "back_matter",
+                "metadata",
+            )
+
             # If section has chapters within it, extract them
             if section.get("chapters"):
                 for chapter in section["chapters"]:
@@ -8123,12 +8158,14 @@ class FileService:
                         "section_title": section_title,
                         "section_type": section_type,
                         "section_number": section.get("number", str(section_index + 1)),
-                        "chapter_number": chapter_counter,
+                        "chapter_number": (
+                            None if is_non_chapter_section else chapter_counter
+                        ),
                         "number": raw_number,
                     }
                     # KAN-367 v3: propagate content_type from the parent section
                     # so the project upload path can distinguish front/back matter.
-                    if section_content_type in ("front_matter", "back_matter", "metadata"):
+                    if is_non_chapter_section:
                         chapter_data["content_type"] = section_content_type
                     elif chapter.get("content_type"):
                         chapter_data["content_type"] = chapter["content_type"]
@@ -8143,10 +8180,12 @@ class FileService:
                     "section_title": section_title,
                     "section_type": section_type,
                     "section_number": section.get("number", str(section_index + 1)),
-                    "chapter_number": chapter_counter,
+                    "chapter_number": (
+                        None if is_non_chapter_section else chapter_counter
+                    ),
                 }
                 # KAN-367 v3: propagate content_type from the section level
-                if section_content_type in ("front_matter", "back_matter", "metadata"):
+                if is_non_chapter_section:
                     chapter_data["content_type"] = section_content_type
                 all_chapters.append(self._with_generation_flag(chapter_data))
                 chapter_counter += 1
