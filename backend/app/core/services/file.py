@@ -3180,7 +3180,25 @@ class FileService:
         match = self.structure_detector._match_chapter_patterns(t)
         return bool(match and str(match.get("number", "")).strip())
 
-    def _classify_spine_item(self, title: str, item_href: str, word_count: int) -> str:
+    def _derive_chapter_number_from_title(self, title: str) -> Optional[str]:
+        """KAN-227/KAN-226: pull the chapter number out of a heading title.
+
+        Returns the digit string carried by the heading ("CHAPTER 9" -> "9")
+        or None when the heading has no parseable number. Shared by the
+        bundled-sub-chapter and single-item spine paths so duplicate-number
+        fragments are visible as duplicates BEFORE any renumbering.
+        """
+        m = self.structure_detector._match_chapter_patterns(title or "")
+        if m:
+            _norm = str(m.get("number", ""))
+            if _norm.isdigit():
+                return _norm
+        return None
+
+    def _classify_spine_item(
+        self, title: str, item_href: str, word_count: int,
+        content: Optional[str] = None,
+    ) -> str:
         """KAN-367 v3: Classify a spine item as front_matter, back_matter, metadata, or chapter.
 
         Returns one of: 'chapter', 'front_matter', 'back_matter', 'metadata'.
@@ -3200,6 +3218,10 @@ class FileService:
 
         METADATA_HREFS = {
             "uncopyright.xhtml", "titlepage.xhtml", "halftitlepage.xhtml",
+            # KAN-226: copyright.xhtml was lost when the KAN-131-era
+            # UNCONDITIONAL_HREF list was ported into the classifier — the
+            # copyright/publisher page leaked through as a "chapter".
+            "copyright.xhtml",
         }
         href_basename = href_lower.rsplit("/", 1)[-1] if href_lower else ""
         if href_basename in METADATA_HREFS:
@@ -3246,7 +3268,29 @@ class FileService:
             if re.search(pat, title_lower):
                 return "metadata"
 
+        # KAN-226: publisher/copyright pages whose visible title is the
+        # publisher block or book title (no keyword match) still carry the
+        # legal boilerplate in their body text.
+        if content and self._looks_like_copyright_page(content, word_count):
+            return "metadata"
+
         return "chapter"
+
+    @staticmethod
+    def _looks_like_copyright_page(content: str, word_count: int) -> bool:
+        """KAN-226: detect a copyright/imprint page by its legal boilerplate.
+
+        Short pages (<300 words) containing at least two distinct copyright
+        markers (©, "copyright", "all rights reserved", ISBN) are publisher
+        imprint pages, not chapters. Real narrative chapters are far longer
+        and essentially never combine two markers inside 300 words.
+        """
+        lower = (content or "").lower()
+        if not lower or word_count >= 300:
+            return False
+        markers = ("\u00a9", "copyright", "all rights reserved", "isbn")
+        hits = sum(1 for marker in markers if marker in lower)
+        return hits >= 2
 
     def _filter_front_back_matter_structural(
         self, chapters: List[Dict[str, Any]]
@@ -3305,8 +3349,18 @@ class FileService:
         for i, ch in enumerate(chapters):
             title = ch.get("title", "")
 
-            # Use the classifier for known front/back/metadata titles
-            classified_type = self._classify_spine_item(title, "", len(ch.get("content", "").split()))
+            # KAN-226: extraction-time classification (href + copyright-page
+            # content markers) is authoritative — spine items already marked
+            # front/back matter or metadata must not be re-classified as
+            # chapters just because their title carries no keyword.
+            existing_type = ch.get("content_type")
+            if existing_type in ("front_matter", "back_matter", "metadata"):
+                classified_type = existing_type
+            else:
+                # Use the classifier for known front/back/metadata titles
+                classified_type = self._classify_spine_item(
+                    title, "", len(ch.get("content", "").split())
+                )
 
             if classified_type != "chapter":
                 ch["content_type"] = classified_type
@@ -3377,69 +3431,70 @@ class FileService:
     def _dedupe_chapters_by_number(
         self, chapters: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """KAN-226: Collapse duplicate chapter entries that share one chapter number.
+        """KAN-226: Collapse duplicate-number fragments into the real chapter.
 
-        Poorly-OCR'd scans (e.g. old public-domain scans with mis-read Roman
-        numerals) can spawn several short, low-value "chapter" fragments lifted
-        from TOC/summary text that all resolve to the same numeral once
-        normalized (e.g. five entries all reading as "Chapter 1"). Run this
-        BEFORE any downstream renumbering, while each entry still carries the
-        raw chapter number the extraction strategy detected. For each
-        duplicated number, keep only the entry with the most substantial body
-        content (the real chapter) and drop the rest. Front/back matter and
+        Poorly-OCR'd scans / mislabelled EPUB sections can spawn several
+        short, low-value "chapter" fragments that all resolve to the same
+        numeral once normalized (e.g. three entries all reading "Chapter 1").
+        Run this BEFORE any downstream renumbering, while each entry still
+        carries the raw chapter number the extraction strategy detected.
+
+        Dominance rule (KAN-226 vs KAN-227 reconciliation): a duplicate is a
+        droppable fragment only when the longest body for that number is at
+        least 2x its size — i.e. a clearly dominant real chapter exists.
+        Comparable-size duplicates are real chapters whose heading numbers
+        collided (OCR noise); those are KEPT so downstream renumbering can
+        assign them unique numbers (KAN-227 semantics). Front/back matter and
         entries without a parseable number pass through untouched.
         """
+        DOMINANCE_RATIO = 2
+
         if not chapters or len(chapters) < 2:
             return chapters
 
-        kept_index_by_number: Dict[str, int] = {}
-        order: List[int] = []
-        duplicates_dropped = 0
-
+        indices_by_number: Dict[str, List[int]] = {}
         for idx, ch in enumerate(chapters):
             content_type = ch.get("content_type") or "chapter"
             raw_number = ch.get("number")
             if content_type != "chapter" or raw_number in (None, ""):
-                order.append(idx)
                 continue
-
-            normalized = self.structure_detector._normalize_chapter_number(str(raw_number))
-            if not str(normalized).isdigit():
-                order.append(idx)
+            normalized = str(
+                self.structure_detector._normalize_chapter_number(str(raw_number))
+            )
+            if not normalized.isdigit():
                 continue
+            indices_by_number.setdefault(normalized, []).append(idx)
 
-            existing_idx = kept_index_by_number.get(normalized)
-            if existing_idx is None:
-                kept_index_by_number[normalized] = idx
-                order.append(idx)
+        drop = set()
+        duplicates_dropped = 0
+        for normalized, idxs in indices_by_number.items():
+            if len(idxs) < 2:
                 continue
-
-            existing = chapters[existing_idx]
-            existing_len = len(existing.get("content", "").strip())
-            current_len = len(ch.get("content", "").strip())
-            duplicates_dropped += 1
-
-            if current_len > existing_len:
-                order = [i for i in order if i != existing_idx]
-                kept_index_by_number[normalized] = idx
-                order.append(idx)
-                print(
-                    f"[DEDUPE] Chapter {normalized}: replacing shorter duplicate "
-                    f"'{LogSanitizer.redact(existing.get('title', ''), label='title')}' with "
-                    f"'{LogSanitizer.redact(ch.get('title', ''), label='title')}'"
-                )
-            else:
-                print(
-                    f"[DEDUPE] Chapter {normalized}: dropping shorter duplicate "
-                    f"'{LogSanitizer.redact(ch.get('title', ''), label='title')}' "
-                    f"(kept '{LogSanitizer.redact(existing.get('title', ''), label='title')}')"
-                )
+            lengths = {
+                i: len(chapters[i].get("content", "").strip()) for i in idxs
+            }
+            max_len = max(lengths.values())
+            for i in idxs:
+                if lengths[i] < max_len and lengths[i] * DOMINANCE_RATIO <= max_len:
+                    drop.add(i)
+                    duplicates_dropped += 1
+                    print(
+                        f"[DEDUPE] Chapter {normalized}: dropping fragment "
+                        f"'{LogSanitizer.redact(chapters[i].get('title', ''), label='title')}' "
+                        f"({lengths[i]} chars) — dominant body is {max_len} chars"
+                    )
+                elif lengths[i] < max_len:
+                    print(
+                        f"[DEDUPE] Chapter {normalized}: keeping comparable duplicate "
+                        f"'{LogSanitizer.redact(chapters[i].get('title', ''), label='title')}' "
+                        f"({lengths[i]} chars vs {max_len}) — OCR-number collision, "
+                        "renumbering must disambiguate"
+                    )
 
         if duplicates_dropped:
             print(f"[DEDUPE] Removed {duplicates_dropped} duplicate chapter-number entries")
 
-        order.sort()
-        return [chapters[i] for i in order]
+        return [ch for i, ch in enumerate(chapters) if i not in drop]
 
     @staticmethod
     def _next_content_sibling(node: Any) -> Any:
@@ -3618,7 +3673,8 @@ class FileService:
 
                             # KAN-227: classify BEFORE numbering
                             content_type = self._classify_spine_item(
-                                sub_title, item_href, sub_word_count
+                                sub_title, item_href, sub_word_count,
+                                content=sub_content,
                             )
 
                             if content_type == "chapter":
@@ -3627,14 +3683,9 @@ class FileService:
                                 # detected heading when it carries one
                                 # ("CHAPTER 9" stays 9); fall back to the
                                 # chapter-only sequence counter otherwise.
-                                sub_num = None
-                                m = self.structure_detector._match_chapter_patterns(
+                                sub_num = self._derive_chapter_number_from_title(
                                     sub_title
                                 )
-                                if m:
-                                    _norm = str(m.get("number", ""))
-                                    if _norm.isdigit():
-                                        sub_num = _norm
                                 chapters.append(self._with_generation_flag({
                                     "number": sub_num or str(chapter_number),
                                     "title": sub_title,
@@ -3724,7 +3775,7 @@ class FileService:
                     item_href = item.get_name() if hasattr(item, "get_name") else ""
                     word_count = len(clean_text.split())
                     content_type = self._classify_spine_item(
-                        title or "", item_href, word_count
+                        title or "", item_href, word_count, content=clean_text
                     )
 
                     if content_type == "chapter":
@@ -3736,15 +3787,20 @@ class FileService:
                             )
                             continue
                         chapter_number += 1
+                        # KAN-226/KAN-227: single-item path must also derive the
+                        # number from the heading — counter-only numbering hid
+                        # duplicate-number fragments (3x "Chapter 1") from the
+                        # dedupe pass and let renumbering spread them to 2, 3, 4.
+                        derived_num = self._derive_chapter_number_from_title(title)
                         chapters.append(self._with_generation_flag({
-                            "number": str(chapter_number),
+                            "number": derived_num or str(chapter_number),
                             "title": title,
                             "content": clean_text,
                             "type": "chapter",
                             "content_type": "chapter",
                         }))
                         print(
-                            f"[EPUB] Added chapter {chapter_number}: "
+                            f"[EPUB] Added chapter {derived_num or chapter_number}: "
                             f"{LogSanitizer.redact(title, label='title')}"
                         )
                     else:
@@ -3762,6 +3818,11 @@ class FileService:
                             f"[EPUB] Classified as {content_type}: "
                             f"{LogSanitizer.redact(title, label='title')}"
                         )
+
+            # --- KAN-226: collapse duplicate-numbered fragments (3x
+            # "Chapter 1") BEFORE structural renumbering can spread them
+            # across fake unique numbers ---
+            chapters = self._dedupe_chapters_by_number(chapters)
 
             # --- Dynamic front/back matter filter (structural) ---
             chapters = self._filter_front_back_matter_structural(chapters)
