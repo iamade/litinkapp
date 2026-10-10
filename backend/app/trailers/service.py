@@ -445,11 +445,6 @@ class TrailerSceneService:
         # Get all chapters from all books
         all_chapters = []
         for book in books:
-            chapters_result = await self.session.execute(
-                select(Book.__fields__['chapters'].type).where(
-                    Book.__fields__['id'].type.book_id == book.id
-                )
-            )
             # Get chapters through relationship
             chapters_result = await self.session.execute(
                 select(Chapter).where(Chapter.book_id == book.id).order_by(Chapter.chapter_number)
