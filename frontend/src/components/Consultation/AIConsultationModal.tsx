@@ -436,6 +436,14 @@ export function AIConsultationModal({
         contentType: "ad",
         terminology: "Part",
       },
+      // KAN-147: route the trailer action through the canonical config path
+      // (contentType "trailer" per the backend consultation contract), not
+      // the marketing_ad/"ad" config or the generic action-id fallback.
+      trailer_promo: {
+        projectType: "marketing",
+        contentType: "trailer",
+        terminology: "Part",
+      },
     };
 
     const config = configMap[action.id] || {

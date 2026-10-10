@@ -429,3 +429,92 @@ async def test_book_upload_context_suggests_trailer_mode_for_rich_source():
 async def test_trailer_promo_label_preserved():
     src = _consultation_source()
     assert '"label": "Trailer / Promo"' in src
+
+
+# ---------------------------------------------------------------------------
+# 5. KAN-147: explicit FE/BE create contract — project_type="marketing" is
+#    accepted and the trailer_config Form field (JSON string) persists verbatim.
+# ---------------------------------------------------------------------------
+
+
+async def test_project_type_enum_includes_marketing():
+    assert ProjectType("marketing") is ProjectType.MARKETING
+    assert ProjectType.MARKETING.value == "marketing"
+
+
+async def test_upload_create_accepts_marketing_and_explicit_trailer_config(
+    monkeypatch,
+):
+    fake_session = _FakeSession(results=[])
+
+    async def override_session():
+        return fake_session
+
+    async def override_user():
+        return _user()
+
+    async def fake_background(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        project_routes, "_process_project_upload_background", fake_background
+    )
+    monkeypatch.setattr(
+        "app.core.services.file.FileService", _FakeFileService
+    )
+
+    upload_route = None
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        if path.endswith("/projects/upload") and "POST" in getattr(
+            route, "methods", set()
+        ):
+            upload_route = route
+            break
+    assert upload_route is not None, "upload route not found"
+
+    app.dependency_overrides[project_routes.get_session] = override_session
+    app.dependency_overrides[project_routes.get_current_user] = override_user
+    try:
+        for dep in upload_route.dependant.dependencies:
+            if dep.call in (
+                project_routes.get_session,
+                project_routes.get_current_user,
+            ):
+                continue
+
+            async def _credit_override():
+                return uuid.uuid4()
+
+            app.dependency_overrides[dep.call] = _credit_override
+
+        explicit_config = {
+            "target_duration_seconds": 45,
+            "tone": "bold",
+            "style": "neon",
+        }
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/api/v1/projects/upload",
+                files={"files": ("promo.md", b"PROMO SOURCE", "text/markdown")},
+                data={
+                    "project_type": "marketing",
+                    "output_type": "trailer",
+                    "trailer_config": json.dumps(explicit_config),
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 202, response.text
+    assert response.json()["status"] == "processing"
+
+    project = _project_added(fake_session)
+    # KAN-147: "marketing" is now a valid ProjectType; the explicit FE
+    # trailer_config Form field is persisted verbatim, not replaced by
+    # detection defaults.
+    assert project.project_type == ProjectType.MARKETING
+    assert project.output_type == "trailer"
+    assert project.trailer_config == explicit_config

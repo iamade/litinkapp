@@ -118,6 +118,7 @@ async def create_project_upload(
     content_type: Optional[str] = Form(None),
     consultation_data: Optional[str] = Form(None),  # JSON string
     output_type: Optional[str] = Form(None),
+    trailer_config: Optional[str] = Form(None),  # JSON string (KAN-147 FE contract)
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     reservation_id: uuid.UUID = Depends(require_credits(OperationType.TEXT_GEN, TEXT_GEN)),
@@ -136,14 +137,32 @@ async def create_project_upload(
         except json.JSONDecodeError:
             pass
 
+    # KAN-147: FE sends trailer_config as an explicit JSON string Form field;
+    # explicit values win over detected ones, with known-key defaults
+    # underlying anything missing.
+    parsed_trailer_config: Dict[str, Any] = {}
+    if trailer_config:
+        try:
+            _parsed_trailer = json.loads(trailer_config)
+        except json.JSONDecodeError:
+            _parsed_trailer = None
+        if isinstance(_parsed_trailer, dict):
+            parsed_trailer_config = _parsed_trailer
+
     # Detect trailer intent from consultation result if output_type not explicitly set
-    trailer_config: Dict[str, Any] = {}
+    resolved_trailer_config: Dict[str, Any] = {}
     if output_type is None:
-        output_type, trailer_config = _detect_trailer_intent(
+        output_type, resolved_trailer_config = _detect_trailer_intent(
             parsed_consultation_data
         )
     if output_type is None:
         output_type = "full_production"
+    if parsed_trailer_config:
+        resolved_trailer_config = {
+            **_TRAILER_CONFIG_DEFAULTS,
+            **resolved_trailer_config,
+            **parsed_trailer_config,
+        }
 
     consultation_config = (
         {
@@ -166,7 +185,7 @@ async def create_project_upload(
         input_prompt,
         consultation_config,
         output_type=output_type,
-        trailer_config=trailer_config,
+        trailer_config=resolved_trailer_config,
     )
 
     background_tasks.add_task(

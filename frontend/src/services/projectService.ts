@@ -5,7 +5,7 @@ export type ProjectStatus = "draft" | "generating" | "review" | "completed" | "p
 export interface Project {
   id: string;
   title: string;
-  project_type: "entertainment" | "training" | "advert" | "music_video";
+  project_type: "entertainment" | "training" | "advert" | "music_video" | "marketing";
   workflow_mode: "explorer_agentic" | "creator_interactive";
   status: ProjectStatus;
   created_at: string;

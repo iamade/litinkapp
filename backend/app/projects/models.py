@@ -12,6 +12,7 @@ class ProjectType(str, Enum):
     TRAINING = "training"
     ADVERT = "advert"
     MUSIC_VIDEO = "music_video"
+    MARKETING = "marketing"  # KAN-147: consultation canonical union
 
 
 class WorkflowMode(str, Enum):
