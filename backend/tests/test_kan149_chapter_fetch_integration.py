@@ -92,6 +92,30 @@ async def test_get_project_chapters_real_rows_complete_and_ordered():
         user_id = uuid.uuid4()
         project_id = uuid.uuid4()
         async with AsyncSession(engine) as session:
+            # KAN-149 (c17890/c17905): FK parents. books.project_id ->
+            # projects.id and projects.user_id -> user.id are enforced by
+            # Postgres; the published version inserted neither parent, so
+            # real-row runs died with IntegrityError on INSERT INTO books.
+            from app.auth.models import User
+            from app.projects.models import Project, ProjectType, WorkflowMode
+
+            session.add(User(
+                id=user_id,
+                email="kan149-it@example.invalid",
+                hashed_password="not-a-real-hash",
+            ))
+            session.add(Project(
+                id=project_id,
+                user_id=user_id,
+                title="KAN-149 IT Project",
+                project_type=ProjectType.ENTERTAINMENT,
+                workflow_mode=WorkflowMode.EXPLORER,
+            ))
+            # books.project_id -> projects.id AND projects.book_id -> books.id
+            # form a CIRCULAR FK pair, so the unit-of-work cannot order the two
+            # tables; without this flush, books flush first and the FK check
+            # fails (ForeignKeyViolationError: books_project_id_fkey).
+            await session.flush()
             book1 = Book(
                 id=uuid.uuid4(), user_id=user_id, title="KAN-149 IT B1",
                 book_type="fiction", project_id=project_id, total_chapters=5,
