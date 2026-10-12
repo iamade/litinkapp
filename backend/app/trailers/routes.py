@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_session
@@ -78,16 +79,18 @@ async def analyze_project_for_trailer(
         
         # Get selected scenes for response
         selected_scenes = await service.session.execute(
-            """
-            SELECT * FROM trailer_scenes 
-            WHERE trailer_generation_id = :tg_id AND is_selected = true
-            ORDER BY scene_number
-            """,
+            text(
+                """
+                SELECT * FROM trailer_scenes 
+                WHERE trailer_generation_id = :tg_id AND is_selected = true
+                ORDER BY scene_number
+                """
+            ),
             {"tg_id": str(trailer_gen.id)},
         )
         
         scenes_response = []
-        for scene in selected_scenes:
+        for scene in selected_scenes.all():
             scenes_response.append(SceneScore(
                 chapter_id=scene.chapter_id,
                 scene_title=scene.scene_title,
@@ -244,10 +247,7 @@ async def regenerate_scene_selection(
     try:
         # Get existing trailer generation
         existing = await service.session.execute(
-            """
-            SELECT * FROM trailer_generations WHERE id = :id
-            """,
-            {"id": str(trailer_id)},
+            select(TrailerGeneration).where(TrailerGeneration.id == trailer_id)
         )
         trailer_gen = existing.scalar_one_or_none()
 
@@ -261,9 +261,7 @@ async def regenerate_scene_selection(
 
         # Delete existing scenes
         await service.session.execute(
-            """
-            DELETE FROM trailer_scenes WHERE trailer_generation_id = :tg_id
-            """,
+            text("DELETE FROM trailer_scenes WHERE trailer_generation_id = :tg_id"),
             {"tg_id": str(trailer_id)},
         )
         await service.session.commit()
