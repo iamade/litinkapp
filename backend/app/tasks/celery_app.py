@@ -79,6 +79,7 @@ celery_app.conf.imports = [
     "app.tasks.embedding_tasks",
     "app.tasks.plot_tasks",
     "app.tasks.media_backfill_task",
+    "app.tasks.model_watcher_tasks",
 ]
 
 # Celery Beat periodic schedule
@@ -90,6 +91,11 @@ celery_app.conf.beat_schedule = {
     "reconcile-failed-credits": {
         "task": "app.tasks.credit_tasks.reconcile_failed_credits",
         "schedule": 900,  # every 15 minutes (seconds)
+    },
+    # KAN-448: daily model deprecation sweep
+    "model-deprecation-daily-check": {
+        "task": "app.tasks.model_watcher_tasks.run_model_deprecation_check",
+        "schedule": 86400,  # every 24 hours (seconds)
     },
 }
 
