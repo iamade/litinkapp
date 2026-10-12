@@ -50,10 +50,41 @@ async def test_get_project_chapters_real_rows_complete_and_ordered():
     from sqlmodel import SQLModel
     from sqlmodel.ext.asyncio.session import AsyncSession
 
+    import app.auth.models  # noqa: F401 - register User table for FK resolution
+    import app.projects.models  # noqa: F401 - register Project table for FK resolution
     from app.books.models import Book, Chapter
     from app.trailers.service import TrailerSceneService
 
     engine = create_async_engine(TEST_DATABASE_URL)
+
+    # create_type=False PG enums are owned by app migrations; pre-create them
+    # in the disposable DB so SQLModel.metadata.create_all can resolve them.
+    from sqlalchemy import text
+
+    from app.projects.models import ArtifactType
+    from app.trailers.models import TrailerStatus, SelectionMethod
+
+    async def _ensure_enum(conn, name, pyenum):
+        q = chr(39)
+        vals = ', '.join(q + v.value + q for v in pyenum)
+        d = chr(36)  # dollar sign for DO $$ ... $$ block
+        ddl = 'DO ' + d*2 + ' BEGIN CREATE TYPE ' + name + ' AS ENUM (' + vals + '); '
+        ddl += 'EXCEPTION WHEN duplicate_object THEN NULL; END ' + d*2 + ';'
+        await conn.execute(text(ddl))
+
+    async with engine.begin() as conn:
+        # pgvector owns the VECTOR type (book-content chunk embeddings use
+        # VECTOR(1536)); the pgvector image ships the extension but never
+        # installs it into a new database. Without this line, create_all
+        # fails with UndefinedObjectError: type "vector" does not exist
+        # (KAN-149 c17890/c17905 runnability defect).
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        await _ensure_enum(conn, 'artifact_type', ArtifactType)
+        await _ensure_enum(conn, 'trailer_status', TrailerStatus)
+        await _ensure_enum(conn, 'selection_method', SelectionMethod)
+
+
+
     try:
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
