@@ -2,7 +2,7 @@
 
 Suite-gap context: the 5-test adapter suite (test_kan149_highlight_scene_selection.py)
 bypasses the real chapter-fetch path. This test locks the behavioral surface the
-2026-10-12 re-drive proved live: TrailerService._get_project_chapters must fetch
+2026-10-12 re-drive proved live: TrailerSceneService._get_project_chapters must fetch
 ALL chapters of EVERY book in a project, ordered by chapter_number, from REAL
 database rows.
 
@@ -51,7 +51,7 @@ async def test_get_project_chapters_real_rows_complete_and_ordered():
     from sqlmodel.ext.asyncio.session import AsyncSession
 
     from app.books.models import Book, Chapter
-    from app.trailers.service import TrailerService
+    from app.trailers.service import TrailerSceneService
 
     engine = create_async_engine(TEST_DATABASE_URL)
     try:
@@ -84,7 +84,7 @@ async def test_get_project_chapters_real_rows_complete_and_ordered():
                 ))
             await session.commit()
 
-            service = TrailerService(session)
+            service = TrailerSceneService(session)
             fetched = await service._get_project_chapters(project_id)
 
             assert len(fetched) == 8, (
