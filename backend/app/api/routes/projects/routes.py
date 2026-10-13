@@ -23,6 +23,49 @@ import uuid
 
 router = APIRouter()
 
+# KAN-146: trailer-intent detection for the create path.
+_TRAILER_ACTIONS = {"trailer_promo", "trailer", "promo"}
+_TRAILER_CONFIG_KEYS = ("target_duration_seconds", "tone", "style")
+_TRAILER_CONFIG_DEFAULTS = {
+    "target_duration_seconds": 90,
+    "tone": "epic",
+    "style": "cinematic",
+}
+
+
+def _detect_trailer_intent(
+    parsed_consultation_data: Optional[dict],
+) -> tuple[Optional[str], Dict[str, Any]]:
+    """KAN-146: detect trailer intent from a parsed consultation payload.
+
+    Returns (output_type, trailer_config). output_type is "trailer" when any
+    of recommended_action / action_to_take / agreements.content_type hits the
+    trailer action set (agreements.content_type case-insensitively); the FE
+    sends agreements.content_type per AIConsultationModal.tsx. trailer_config
+    starts from defaults and overrides only the three known keys when present
+    in agreements.
+    """
+    if not parsed_consultation_data:
+        return None, {}
+    recommended = parsed_consultation_data.get("recommended_action", "") or ""
+    action = parsed_consultation_data.get("action_to_take", "") or ""
+    agreements = parsed_consultation_data.get("agreements", {}) or {}
+    agreement_content_type = str(
+        agreements.get("content_type", "") or ""
+    ).strip().lower()
+    trailer_intent = (
+        recommended in _TRAILER_ACTIONS
+        or action in _TRAILER_ACTIONS
+        or agreement_content_type in _TRAILER_ACTIONS
+    )
+    if not trailer_intent:
+        return None, {}
+    trailer_config: Dict[str, Any] = dict(_TRAILER_CONFIG_DEFAULTS)
+    for _key in _TRAILER_CONFIG_KEYS:
+        if agreements.get(_key) not in (None, ""):
+            trailer_config[_key] = agreements[_key]
+    return "trailer", trailer_config
+
 
 # Consultation Schemas
 class ConsultationRequest(BaseModel):
@@ -94,12 +137,11 @@ async def create_project_upload(
             pass
 
     # Detect trailer intent from consultation result if output_type not explicitly set
-    _TRAILER_ACTIONS = {"trailer_promo", "trailer", "promo"}
-    if output_type is None and parsed_consultation_data:
-        recommended = parsed_consultation_data.get("recommended_action", "") or ""
-        action = parsed_consultation_data.get("action_to_take", "") or ""
-        if recommended in _TRAILER_ACTIONS or action in _TRAILER_ACTIONS:
-            output_type = "trailer"
+    trailer_config: Dict[str, Any] = {}
+    if output_type is None:
+        output_type, trailer_config = _detect_trailer_intent(
+            parsed_consultation_data
+        )
     if output_type is None:
         output_type = "full_production"
 
@@ -124,6 +166,7 @@ async def create_project_upload(
         input_prompt,
         consultation_config,
         output_type=output_type,
+        trailer_config=trailer_config,
     )
 
     background_tasks.add_task(

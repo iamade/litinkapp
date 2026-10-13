@@ -1,6 +1,6 @@
 import uuid
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 from app.projects.models import ProjectType, WorkflowMode, ProjectStatus, ArtifactType
 
@@ -36,6 +36,7 @@ class ProjectBase(BaseModel):
 
 class ProjectCreate(ProjectBase):
     output_type: Optional[str] = "full_production"
+    trailer_config: Dict[str, Any] = {}
 
 
 class ProjectUpdate(BaseModel):
@@ -52,6 +53,23 @@ class ProjectUpdate(BaseModel):
     rights_notes: Optional[str] = None
     content_classification: Optional[str] = None
     requires_attribution: Optional[bool] = None
+    # KAN-146: allow updating output_type + trailer_config via PATCH
+    output_type: Optional[str] = None
+    trailer_config: Optional[Dict[str, Any]] = None
+
+    @field_validator("output_type")
+    @classmethod
+    def validate_output_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in {
+            "full_production",
+            "trailer",
+            "short_clip",
+            "ad",
+        }:
+            raise ValueError(
+                "output_type must be one of: full_production, trailer, short_clip, ad"
+            )
+        return v
 
 
 class ProjectRead(ProjectBase):

@@ -703,6 +703,9 @@ export const userService = {
     need?: string;
     lie?: string;
     ghost?: string;
+    accent?: string;
+    voice_gender?: string;
+    voice_characteristics?: string;
   }) {
     return apiClient.post(`/characters/plot/${plotOverviewId}`, {
       ...characterData,
@@ -719,6 +722,9 @@ export const userService = {
     personality?: string;
     character_arc?: string;
     archetypes?: string[];
+    accent?: string;
+    voice_gender?: string;
+    voice_characteristics?: string;
   }) {
     return apiClient.put(`/characters/${characterId}`, updates);
   },
@@ -759,6 +765,9 @@ export const userService = {
     character_details: {
       name: string;
       role: string;
+      accent: string;
+      voice_gender: string;
+      voice_characteristics: string;
       physical_description: string;
       personality: string;
       character_arc: string;

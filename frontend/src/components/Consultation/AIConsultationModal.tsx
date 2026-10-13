@@ -53,6 +53,13 @@ interface ProjectConfig {
   terminology: "Film" | "Episode" | "Part" | "Module";
   universeName?: string;
   selectedStories?: string[];
+  // KAN-147: trailer intent forwarded to /projects/upload (output_type + trailer_config).
+  outputType?: "trailer";
+  trailerConfig?: {
+    target_duration_seconds?: number;
+    tone?: string;
+    style?: string;
+  };
   consultationData?: {
     conversation: Array<{ role: string; content: string }>;
     agreements: {
@@ -94,6 +101,26 @@ interface ConsultationChatResponse {
 
 const USER_MESSAGE_MAX_CHARS = 500;
 const MESSAGE_COOLDOWN_SECONDS = 12;
+
+// KAN-147: trailer-intent wiring mirrors the backend _detect_trailer_intent
+// (backend/app/api/routes/projects/routes.py).
+const TRAILER_CONTENT_TYPES = new Set(["trailer_promo", "trailer", "promo"]);
+const TRAILER_CONFIG_DEFAULTS = {
+  target_duration_seconds: 90,
+  tone: "epic",
+  style: "cinematic",
+};
+
+const buildTrailerConfig = (
+  overrides?: ProjectConfig["trailerConfig"]
+): NonNullable<ProjectConfig["trailerConfig"]> => ({
+  ...TRAILER_CONFIG_DEFAULTS,
+  ...(overrides?.target_duration_seconds !== undefined && {
+    target_duration_seconds: overrides.target_duration_seconds,
+  }),
+  ...(overrides?.tone !== undefined && { tone: overrides.tone }),
+  ...(overrides?.style !== undefined && { style: overrides.style }),
+});
 
 const TIER_MESSAGE_LIMITS: Record<string, number> = {
   free: 15,
@@ -430,6 +457,17 @@ export function AIConsultationModal({
       },
     };
 
+    // KAN-147: forward trailer intent (outputType + trailerConfig) only when the
+    // consultation landed on a trailer content type; other flows unchanged.
+    const trailerIntentFields = TRAILER_CONTENT_TYPES.has(
+      projectConfig.contentType ?? ""
+    )
+      ? {
+          outputType: "trailer" as const,
+          trailerConfig: buildTrailerConfig(projectConfig.trailerConfig),
+        }
+      : {};
+
     if (!projectConfig.projectType || !projectConfig.contentType) {
       onComplete({
         projectType: "entertainment",
@@ -437,6 +475,7 @@ export function AIConsultationModal({
         terminology: "Film",
         universeName: analysis?.title,
         consultationData: conversationData,
+        ...trailerIntentFields,
       });
       return;
     }
@@ -447,6 +486,7 @@ export function AIConsultationModal({
       terminology: projectConfig.terminology || "Film",
       universeName: projectConfig.universeName || analysis?.title,
       consultationData: conversationData,
+      ...trailerIntentFields,
     });
   };
 
