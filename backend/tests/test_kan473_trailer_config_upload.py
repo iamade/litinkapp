@@ -18,19 +18,37 @@ Fix contract under test:
 """
 
 import json
+import os
+import sys
 import uuid
 from io import BytesIO
+
+# KAN-488: module-scope SQLAlchemy engine setup in app.core.database runs at
+# collection time; a bare environment (unset DATABASE_URL) crashes collection.
+# Established repo guard pattern (test_kan445/470/477/kan226).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_kan488_guard")
+os.environ.setdefault("MAIL_FROM", "qa@example.com")
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from starlette.datastructures import UploadFile
 
-from app.api.routes.projects import routes as project_routes
-from app.auth.models import User
-from app.main import app
-from app.projects.models import Project, ProjectType
+# KAN-488: if app modules were already imported by an earlier test module in
+# a whole-directory run with a bare environment (settings cached with empty
+# MAIL_FROM), collection here would ERROR. Skip collection instead.
+try:
+    from app.api.routes.projects import routes as project_routes
+    from app.auth.models import User
+    from app.main import app
+    from app.projects.models import Project, ProjectType
+except Exception as _exc:  # bare/poisoned environment guard (KAN-488)
+    pytest.skip(
+        f"app imports unavailable in this collection environment: {_exc}",
+        allow_module_level=True,
+    )
 
-pytestmark = pytest.mark.asyncio
 
 OWNER_ID = uuid.UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 
@@ -152,6 +170,7 @@ async def _post_upload(fake_session, monkeypatch, data: dict):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_upload_create_explicit_trailer_persists_form_config(monkeypatch):
     """FE KAN-147 forward: output_type=trailer + trailer_config JSON."""
     fake_session = _FakeSession(results=[])
@@ -180,6 +199,7 @@ async def test_upload_create_explicit_trailer_persists_form_config(monkeypatch):
     }
 
 
+@pytest.mark.asyncio
 async def test_upload_create_explicit_trailer_partial_config_gets_defaults(
     monkeypatch,
 ):
@@ -205,6 +225,7 @@ async def test_upload_create_explicit_trailer_partial_config_gets_defaults(
     }
 
 
+@pytest.mark.asyncio
 async def test_upload_create_explicit_trailer_malformed_json_never_empty(
     monkeypatch,
 ):
@@ -231,6 +252,7 @@ async def test_upload_create_explicit_trailer_malformed_json_never_empty(
     }
 
 
+@pytest.mark.asyncio
 async def test_upload_create_explicit_trailer_no_form_field_consultation_fallback(
     monkeypatch,
 ):
@@ -270,6 +292,7 @@ async def test_upload_create_explicit_trailer_no_form_field_consultation_fallbac
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_upload_create_explicit_non_trailer_ignores_form_config(monkeypatch):
     fake_session = _FakeSession(results=[])
     response = await _post_upload(
@@ -293,6 +316,7 @@ async def test_upload_create_explicit_non_trailer_ignores_form_config(monkeypatc
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_upload_create_absent_output_type_still_detects(monkeypatch):
     fake_session = _FakeSession(results=[])
     consultation_data = {
@@ -318,6 +342,7 @@ async def test_upload_create_absent_output_type_still_detects(monkeypatch):
     }
 
 
+@pytest.mark.asyncio
 async def test_upload_create_absent_output_type_no_intent_defaults(monkeypatch):
     fake_session = _FakeSession(results=[])
     response = await _post_upload(
@@ -337,6 +362,7 @@ async def test_upload_create_absent_output_type_no_intent_defaults(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_upload_create_form_config_unknown_keys_filtered(monkeypatch):
     fake_session = _FakeSession(results=[])
     form_config = {

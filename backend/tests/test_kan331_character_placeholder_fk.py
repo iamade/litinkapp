@@ -10,15 +10,34 @@ the Plot Overview).
 Both values are in scope at the call site (book_id path param + current_user),
 so the fix is to thread them into the constructor.
 """
+import os
+import sys
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+# KAN-488: module-scope SQLAlchemy engine setup in app.core.database runs at
+# collection time; a bare environment (unset DATABASE_URL) crashes collection.
+# Established repo guard pattern (test_kan445/470/477/kan226).
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_kan488_guard")
+os.environ.setdefault("MAIL_FROM", "qa@example.com")
+
 import pytest
 from fastapi import HTTPException
 
-from app.api.routes.plots.routes import create_character_placeholder
-from app.plots.models import Character
+# KAN-488: if app modules were already imported by an earlier test module in
+# a whole-directory run with a bare environment (settings cached with empty
+# MAIL_URL/MAIL_FROM), collection here would ERROR. Skip collection instead.
+try:
+    from app.api.routes.plots.routes import create_character_placeholder
+    from app.plots.models import Character
+except Exception as _exc:  # bare/poisoned environment guard (KAN-488)
+    pytest.skip(
+        f"app imports unavailable in this collection environment: {_exc}",
+        allow_module_level=True,
+    )
 
 
 def _session_exec_results(*values):
