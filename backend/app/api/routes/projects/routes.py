@@ -486,19 +486,27 @@ async def get_saved_consultation(
 
     # Query for consultation artifact
     project_uuid = uuid.UUID(project_id) if isinstance(project_id, str) else project_id
-    stmt = select(Artifact).where(
-        Artifact.project_id == project_uuid,
-        Artifact.artifact_type == ArtifactType.DOCUMENT_SUMMARY,
+    # KAN-468: deterministic newest-first ordering; failed consultations
+    # (e.g. stale parse_error artifacts) must never shadow successful runs.
+    stmt = (
+        select(Artifact)
+        .where(
+            Artifact.project_id == project_uuid,
+            Artifact.artifact_type == ArtifactType.DOCUMENT_SUMMARY,
+        )
+        .order_by(Artifact.created_at.desc())
     )
     result = await session.exec(stmt)
     artifacts = result.all()
 
-    # Find the consultation artifact
+    # Find the most recent successful consultation artifact
     consultation_artifact = None
     for artifact in artifacts:
         if (
             artifact.content
             and artifact.content.get("type") == "cinematic_universe_consultation"
+            and artifact.content.get("consultation")
+            and artifact.content.get("status") != "parse_error"
         ):
             consultation_artifact = artifact
             break
