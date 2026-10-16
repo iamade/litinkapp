@@ -11,7 +11,8 @@ Fix: on book_id miss, look up Project by book_id and retry
 
 1. book_id hit -> plot returned, fallback NOT fired;
 2. book_id miss + Project exists -> project-stored plot returned via retry;
-3. book_id miss + no Project -> None result (pre-fix behavior preserved).
+3. a Project owned by another user cannot resolve its plot;
+4. NULL book_id makes no plot/project lookup.
 """
 
 import os
@@ -41,9 +42,10 @@ from app.api.routes.ai.routes import enhance_with_plot_context
 
 pytestmark = pytest.mark.asyncio
 
-USER_ID = "user-1"
-BOOK_ID = "11111111-1111-1111-1111-111111111111"
-PROJECT_ID = "22222222-2222-2222-2222-222222222222"
+USER_ID = "11111111-1111-1111-1111-111111111111"
+OTHER_USER_ID = "33333333-3333-3333-3333-333333333333"
+BOOK_ID = "44444444-4444-4444-4444-444444444444"
+PROJECT_ID = "55555555-5555-5555-5555-555555555555"
 
 
 def _make_plot(plot_id=BOOK_ID):
@@ -61,8 +63,8 @@ def _make_plot(plot_id=BOOK_ID):
     )
 
 
-def _make_project(project_id=PROJECT_ID, book_id=BOOK_ID):
-    return SimpleNamespace(id=project_id, book_id=book_id)
+def _make_project(project_id=PROJECT_ID, book_id=BOOK_ID, user_id=USER_ID):
+    return SimpleNamespace(id=project_id, book_id=book_id, user_id=user_id)
 
 
 def _make_session(project=None):
@@ -124,6 +126,64 @@ class TestEnhanceWithPlotContext:
         assert result["plot_info"]["plot_id"] == PROJECT_ID
         assert "A test logline" in result["enhanced_content"]
         session.exec.assert_awaited_once()
+
+    async def test_project_id_keyed_legacy_plot_returns_full_context(self):
+        """A Creator project ID must resolve its legacy project-keyed plot."""
+        plot = _make_plot(plot_id=PROJECT_ID)
+        session = _make_session(project=_make_project(book_id=None))
+        plot_cls, char_cls, plot_service = _make_services(None)
+        plot_service.get_plot_overview = AsyncMock(side_effect=[None, plot])
+        with patch("app.api.routes.ai.routes.PlotService", plot_cls), patch(
+            "app.api.routes.ai.routes.CharacterService", char_cls
+        ):
+            result = await enhance_with_plot_context(
+                session, user_id=USER_ID, book_id=PROJECT_ID, chapter_content="Chapter text"
+            )
+        assert result["plot_info"] == {
+            "plot_id": PROJECT_ID,
+            "logline": "A test logline",
+            "genre": "Fantasy",
+            "tone": "Epic",
+            "character_count": 0,
+        }
+        for value in ("redemption", "A distant land", "The kingdom"):
+            assert value in result["enhanced_content"]
+        assert plot_service.get_plot_overview.await_args_list[1].kwargs == {
+            "user_id": USER_ID, "book_id": PROJECT_ID
+        }
+
+    async def test_foreign_project_cannot_resolve_its_plot(self):
+        """The fallback filters Project by requester, preventing cross-owner lookup."""
+        # A database result for this request must be None because the fallback
+        # predicate includes Project.user_id == user_id; no foreign plot retry.
+        session = _make_session(project=None)
+        plot_cls, char_cls, plot_service = _make_services(None)
+        with patch("app.api.routes.ai.routes.PlotService", plot_cls), patch(
+            "app.api.routes.ai.routes.CharacterService", char_cls
+        ):
+            result = await enhance_with_plot_context(
+                session, user_id=OTHER_USER_ID, book_id=PROJECT_ID, chapter_content="Chapter text"
+            )
+        assert result == {"enhanced_content": None, "plot_info": None}
+        plot_service.get_plot_overview.assert_awaited_once_with(
+            user_id=OTHER_USER_ID, book_id=PROJECT_ID
+        )
+        statement = session.exec.await_args.args[0]
+        assert "projects.user_id" in str(statement)
+
+    async def test_null_book_id_skips_lookups_without_false_match(self):
+        """NULL must not become SQL IS NULL and match an unrelated legacy plot."""
+        session = _make_session(project=_make_project())
+        plot_cls, char_cls, plot_service = _make_services(_make_plot())
+        with patch("app.api.routes.ai.routes.PlotService", plot_cls), patch(
+            "app.api.routes.ai.routes.CharacterService", char_cls
+        ):
+            result = await enhance_with_plot_context(
+                session, user_id=USER_ID, book_id=None, chapter_content="Chapter text"
+            )
+        assert result == {"enhanced_content": None, "plot_info": None}
+        plot_service.get_plot_overview.assert_not_awaited()
+        session.exec.assert_not_awaited()
 
     async def test_book_id_miss_no_project_returns_none(self):
         """Miss by book_id + no Project: returns None result (pre-fix behavior)."""

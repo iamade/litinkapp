@@ -515,7 +515,7 @@ async def enhance_with_plot_context(
                 user_id=user_id, book_id=book_id
             )
 
-        if not plot_overview:
+        if not plot_overview and book_id is not None:
             print(f"[PlotService] No plot found with book_id={book_id}")
             # Fallback: In Creator mode, plots are stored under project_id, not book_id.
             # If this book_id belongs to a Project, retry the lookup by project_id.
@@ -527,7 +527,8 @@ async def enhance_with_plot_context(
             # the caller passed a Project.id the fallback silently died.
             # Match either interpretation in a single round trip.
             stmt = select(Project).where(
-                or_(Project.id == book_id, Project.book_id == book_id)
+                Project.user_id == user_id,
+                or_(Project.id == book_id, Project.book_id == book_id),
             )
             result = await session.exec(stmt)
             project = result.first()
